@@ -79,8 +79,15 @@ binary). **When you start using a module for real, remove its blank import from
   `anthropic-messages` is ported so far. Remaining AI-layer backlog (see
   `docs/migration-plan.md` §4.9): a provider registry + `openai-completions` (needed
   for opencode/openrouter-style gateways) + `openai-responses`/google/bedrock adapters.
-- **Next:** Phase 3 — built-in tools (`internal/tools`, ports `core/tools/*`): read,
-  bash, edit, write, grep, find, ls; JSON-Schema params via `invopop/jsonschema`.
+  **Phase 3** — built-in tools (`internal/tools`, ports `core/tools/*`): read,
+  write, edit (exact unique-match, go-diff), bash (process group + timeout), grep,
+  find, ls. JSON-Schema params via `invopop/jsonschema`; globstar via `glob.go`
+  (gobwas per segment). A `Registry` exposes them as `ai.Tool` and dispatches calls;
+  wire it to the loop with `agent.ToolFunc(func(ctx, c){ return reg.Execute(ctx, c.Name, c.Args) })`.
+  Deferred: `.gitignore` awareness in grep/find; Windows bash.
+- **Next:** Phase 4 — session persistence (`internal/session`, ports
+  `session-manager.ts`): JSONL append log at `~/.pi/agent/sessions/--<cwd>--/`
+  (see `docs/migration-plan.md` §4.4), kept read/write-compatible with pi.
 
 ## Conventions
 
