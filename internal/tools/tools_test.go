@@ -1,0 +1,183 @@
+package tools
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func run(t *testing.T, tool Tool, args map[string]any) (string, bool) {
+	t.Helper()
+	return tool.Execute(context.Background(), args)
+}
+
+func TestWriteReadEdit(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "note.txt")
+
+	if out, isErr := run(t, writeTool{}, map[string]any{"path": file, "content": "hello\nworld\n"}); isErr {
+		t.Fatalf("write failed: %s", out)
+	}
+
+	out, isErr := run(t, readTool{}, map[string]any{"path": file})
+	if isErr || !strings.Contains(out, "hello") || !strings.Contains(out, "world") {
+		t.Fatalf("read = %q (isErr=%v)", out, isErr)
+	}
+
+	// read with offset/limit (line 2 only)
+	out, isErr = run(t, readTool{}, map[string]any{"path": file, "offset": float64(2), "limit": float64(1)})
+	if isErr || strings.Contains(out, "hello") || !strings.Contains(out, "world") {
+		t.Fatalf("read offset/limit = %q", out)
+	}
+
+	// edit: replace "world" -> "gophers"
+	out, isErr = run(t, editTool{}, map[string]any{
+		"path":  file,
+		"edits": []any{map[string]any{"oldText": "world", "newText": "gophers"}},
+	})
+	if isErr || !strings.Contains(out, "Successfully replaced 1 block") {
+		t.Fatalf("edit = %q (isErr=%v)", out, isErr)
+	}
+	data, _ := os.ReadFile(file)
+	if !strings.Contains(string(data), "gophers") {
+		t.Fatalf("file after edit = %q", string(data))
+	}
+}
+
+func TestEditRejectsNonUnique(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "dup.txt")
+	_ = os.WriteFile(file, []byte("x x x"), 0o644)
+
+	out, isErr := run(t, editTool{}, map[string]any{
+		"path":  file,
+		"edits": []any{map[string]any{"oldText": "x", "newText": "y"}},
+	})
+	if !isErr || !strings.Contains(out, "not unique") {
+		t.Fatalf("expected non-unique error, got %q (isErr=%v)", out, isErr)
+	}
+}
+
+func TestListFindGrep(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.go"), "package a\nfunc Foo() {}\n")
+	mustWrite(t, filepath.Join(dir, "b.txt"), "hello foo\n")
+	mustWrite(t, filepath.Join(dir, "sub", "c.go"), "package sub\n// foo bar\n")
+
+	// ls
+	out, isErr := run(t, listTool{}, map[string]any{"path": dir})
+	if isErr || !strings.Contains(out, "a.go") || !strings.Contains(out, "sub/") {
+		t.Fatalf("ls = %q", out)
+	}
+
+	// find **/*.go -> a.go and sub/c.go
+	out, isErr = run(t, findTool{}, map[string]any{"path": dir, "pattern": "**/*.go"})
+	if isErr || !strings.Contains(out, "a.go") || !strings.Contains(out, "sub/c.go") {
+		t.Fatalf("find = %q", out)
+	}
+	// top-level *.go must not match nested
+	out, _ = run(t, findTool{}, map[string]any{"path": dir, "pattern": "*.go"})
+	if strings.Contains(out, "sub/c.go") {
+		t.Fatalf("*.go should not match nested file, got %q", out)
+	}
+
+	// grep "foo" across all files
+	out, isErr = run(t, grepTool{}, map[string]any{"path": dir, "pattern": "foo", "ignoreCase": true})
+	if isErr || !strings.Contains(out, "a.go:2:") || !strings.Contains(out, "b.txt:1:") {
+		t.Fatalf("grep = %q", out)
+	}
+	// grep with glob filter to .go only
+	out, _ = run(t, grepTool{}, map[string]any{"path": dir, "pattern": "foo", "ignoreCase": true, "glob": "**/*.go"})
+	if strings.Contains(out, "b.txt") {
+		t.Fatalf("grep glob filter leaked non-go file: %q", out)
+	}
+}
+
+func TestBash(t *testing.T) {
+	out, isErr := run(t, bashTool{}, map[string]any{"command": "echo hello-bash"})
+	if isErr || !strings.Contains(out, "hello-bash") {
+		t.Fatalf("bash echo = %q (isErr=%v)", out, isErr)
+	}
+	out, isErr = run(t, bashTool{}, map[string]any{"command": "exit 3"})
+	if !isErr || !strings.Contains(out, "exit code 3") {
+		t.Fatalf("bash exit = %q (isErr=%v)", out, isErr)
+	}
+}
+
+func TestSchemasAndRegistry(t *testing.T) {
+	reg := Default()
+	names := map[string]bool{}
+	for _, tl := range reg.AITools() {
+		names[tl.Name] = true
+		if tl.Parameters["type"] != "object" {
+			t.Errorf("%s schema type = %v, want object", tl.Name, tl.Parameters["type"])
+		}
+		if tl.Description == "" {
+			t.Errorf("%s has empty description", tl.Name)
+		}
+	}
+	for _, want := range []string{"read", "write", "edit", "bash", "grep", "find", "ls"} {
+		if !names[want] {
+			t.Errorf("registry missing tool %q", want)
+		}
+	}
+
+	// read's schema must mark path required.
+	var readSchema map[string]any
+	for _, tl := range reg.AITools() {
+		if tl.Name == "read" {
+			readSchema = tl.Parameters
+		}
+	}
+	req, _ := readSchema["required"].([]any)
+	found := false
+	for _, r := range req {
+		if r == "path" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("read schema required = %v, want it to contain path", req)
+	}
+
+	// dispatch by name
+	out, isErr := reg.Execute(context.Background(), "nope", nil)
+	if !isErr || !strings.Contains(out, "unknown tool") {
+		t.Errorf("unknown tool dispatch = %q", out)
+	}
+}
+
+// TestToolsShowcase runs every tool against a temp workspace and logs the real
+// outputs (serves as living documentation and demo evidence under -v).
+func TestToolsShowcase(t *testing.T) {
+	dir := t.TempDir()
+	reg := Default()
+	show := func(name string, args map[string]any) {
+		out, isErr := reg.Execute(context.Background(), name, args)
+		t.Logf("\n$ tool %s %v  (isError=%v)\n%s", name, args, isErr, out)
+	}
+
+	show("write", map[string]any{"path": filepath.Join(dir, "greeting.txt"), "content": "hello\nworld\n"})
+	show("write", map[string]any{"path": filepath.Join(dir, "src/app.go"), "content": "package app\n\nfunc Greet() string { return \"hi\" }\n"})
+	show("ls", map[string]any{"path": dir})
+	show("find", map[string]any{"path": dir, "pattern": "**/*.go"})
+	show("grep", map[string]any{"path": dir, "pattern": "func", "context": 0})
+	show("read", map[string]any{"path": filepath.Join(dir, "greeting.txt")})
+	show("edit", map[string]any{
+		"path":  filepath.Join(dir, "greeting.txt"),
+		"edits": []any{map[string]any{"oldText": "world", "newText": "gophers"}},
+	})
+	show("bash", map[string]any{"command": "echo tools-work && uname -s"})
+}
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
