@@ -1,16 +1,4 @@
 {
   "name": "pigo",
-  "install": "go mod download && go build ./...",
-  "terminals": [
-    {
-      "name": "pigo-server",
-      "command": "go run ."
-    }
-  ],
-  "ports": [
-    {
-      "name": "web",
-      "port": 8080
-    }
-  ]
+  "install": "bash .cursor/install.sh"
 }

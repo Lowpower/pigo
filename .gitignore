@@ -1,7 +1,12 @@
-# Compiled binary (module name matches directory)
+# Compiled binaries
+/pi
 /pigo
+/bin/
 
 # Go build/test artifacts
 *.exe
 *.out
 *.test
+
+# Local env
+.env
