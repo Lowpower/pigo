@@ -94,10 +94,15 @@ binary). **When you start using a module for real, remove its blank import from
   then append (matches pi). `Manager.AppendMessage(role, payload)` + `Load(path)`.
   Deferred: full pi AgentMessage field-parity for round-tripping pi's own files, and
   buildSessionContext/compaction/branching.
-- **Next:** Phase 5 — TUI completion (`internal/tui`, ports `modes/interactive`):
-  wire the agent loop into the TUI, streaming render (glamour after each turn), token
-  batching (~30fps), autocomplete, themes. Also outstanding: multi-provider adapters
-  (§4.9) to connect a real model.
+  **Phase 5** — interactive TUI wired to the agent loop (`internal/tui`): typing a
+  prompt runs `agent.Run` with `tools.Default()` + `ai.DefaultStreamFn`; the reply
+  streams to screen (plain text live) then renders as markdown via glamour; tool
+  executions show inline; Ctrl+C interrupts a run (ctx cancel) or quits when idle.
+- **Next / remaining:** Phase 5 refinements (autocomplete, themes, ~30fps token
+  batching, feed tool results back into next-turn context faithfully); Phase 6
+  extensions (subprocess RPC, ports `core/extensions` + `packages/protocol`); Phase 7
+  (headless server, sqlite backend, compaction). Provider backlog: `openai-responses`
+  (opencode `gpt-*`), google/bedrock adapters, generic provider registry (§4.9).
 
 ## Conventions
 

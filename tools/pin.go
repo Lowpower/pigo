@@ -10,12 +10,9 @@
 package tools
 
 import (
-	// TUI (glamour not used until Phase 5; bubbletea/bubbles/lipgloss are now
-	// imported for real by internal/tui, cobra/viper by cmd/pi + internal/config)
-	_ "github.com/charmbracelet/glamour"
-
-	// LLM SDKs (official) — not yet used (Phase 1 anthropic adapter uses raw HTTP,
-	// matching pi; these remain pinned for optional future provider adapters)
+	// LLM SDKs (official) — not yet used. The anthropic/openai-completions adapters
+	// use raw HTTP/SSE (matching pi); these remain pinned for optional future
+	// provider adapters (e.g. openai-responses, google genai, bedrock).
 	_ "github.com/anthropics/anthropic-sdk-go"
 	_ "github.com/aws/aws-sdk-go-v2/config"
 	_ "github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -24,5 +21,6 @@ import (
 
 	// sqlite — used by the optional session backend (Phase 7)
 	_ "modernc.org/sqlite"
-	// glob, jsonschema, go-diff are now imported for real by internal/tools.
+	// bubbletea/bubbles/lipgloss/glamour, cobra/viper, glob/jsonschema/go-diff
+	// are now imported for real by the internal packages.
 )

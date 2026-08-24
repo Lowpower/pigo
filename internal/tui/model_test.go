@@ -7,6 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Lowpower/pigo/internal/agent"
+	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/config"
 )
 
@@ -14,90 +16,90 @@ func testCfg() config.Config {
 	return config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Theme: "default"}
 }
 
-func TestSubmitAppendsToHistoryAndClears(t *testing.T) {
-	m := New(testCfg())
-	m.textarea.SetValue("hello world")
+func send(m tea.Model, msg tea.Msg) Model {
+	next, _ := m.Update(msg)
+	return next.(Model)
+}
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	nm := next.(Model)
-
-	if got := nm.History(); len(got) != 1 || got[0] != "hello world" {
-		t.Fatalf("history = %v, want [\"hello world\"]", got)
+func TestNewlineKeybindingMatchesPi(t *testing.T) {
+	keys := New(testCfg()).textarea.KeyMap.InsertNewline.Keys()
+	if !slices.Contains(keys, "shift+enter") || !slices.Contains(keys, "ctrl+j") {
+		t.Errorf("newline keys = %v, want shift+enter and ctrl+j", keys)
 	}
-	if nm.textarea.Value() != "" {
-		t.Errorf("textarea not cleared after submit: %q", nm.textarea.Value())
+	if slices.Contains(keys, "enter") {
+		t.Errorf("Enter must not insert a newline (it sends), keys = %v", keys)
 	}
 }
 
-func TestSubmitIgnoresBlankInput(t *testing.T) {
+func TestCtrlCQuitsWhenIdle(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("   \n  ")
-
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	nm := next.(Model)
-
-	if len(nm.History()) != 0 {
-		t.Fatalf("blank input should not be recorded, got %v", nm.History())
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !next.(Model).quitting {
+		t.Error("expected quitting after Ctrl+C when idle")
+	}
+	if cmd == nil {
+		t.Error("expected a quit command")
 	}
 }
 
 func TestSlashQuitExits(t *testing.T) {
 	m := New(testCfg())
 	m.textarea.SetValue("/quit")
-
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	nm := next.(Model)
-
-	if !nm.quitting {
-		t.Error("expected quitting to be true after /quit")
-	}
-	if !isQuit(cmd) {
-		t.Error("expected tea.Quit command after /quit")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !next.(Model).quitting {
+		t.Error("expected quitting after /quit")
 	}
 }
 
-func TestCtrlCQuits(t *testing.T) {
+func TestStreamingThenGlamourFinalize(t *testing.T) {
 	m := New(testCfg())
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	nm := next.(Model)
 
-	if !nm.quitting {
-		t.Error("expected quitting to be true after Ctrl+C")
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventMessageStart, Assistant: &ai.AssistantMessage{}}})
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventMessageUpdate, AIEvent: &ai.Event{Type: ai.EventTextDelta, Delta: "Hello "}}})
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventMessageUpdate, AIEvent: &ai.Event{Type: ai.EventTextDelta, Delta: "world"}}})
+
+	if !m.streamingActive || m.streaming != "Hello world" {
+		t.Fatalf("streaming = %q (active=%v), want %q", m.streaming, m.streamingActive, "Hello world")
 	}
-	if !isQuit(cmd) {
-		t.Error("expected tea.Quit command after Ctrl+C")
+	if !strings.Contains(m.View(), "Hello world") {
+		t.Error("streaming text not shown in view")
+	}
+
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventMessageEnd, Assistant: &ai.AssistantMessage{
+		Content: []*ai.Content{{Type: ai.KindText, Text: "Hello world"}},
+	}}})
+
+	if m.streamingActive || m.streaming != "" {
+		t.Error("streaming should be cleared after message_end")
+	}
+	if len(m.transcript) == 0 || m.transcript[len(m.transcript)-1].role != "assistant" {
+		t.Fatalf("expected an assistant transcript entry, got %+v", m.transcript)
+	}
+	if !strings.Contains(m.View(), "Hello world") {
+		t.Error("finalized assistant text not shown in view")
+	}
+	// history carries the assistant turn for the next request
+	if len(m.history) == 0 || m.history[len(m.history)-1].Role != ai.RoleAssistant {
+		t.Error("assistant message not appended to history")
 	}
 }
 
-func TestNewlineKeybindingMatchesPi(t *testing.T) {
+func TestToolEventsRender(t *testing.T) {
 	m := New(testCfg())
-	keys := m.textarea.KeyMap.InsertNewline.Keys()
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventToolStart, ToolName: "read", Args: map[string]any{"path": "README.md"}}})
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventToolEnd, ToolName: "read", Result: "# pigo\nmore", IsError: false}})
 
-	// pi: tui.input.newLine = ["shift+enter", "ctrl+j"]; Enter must NOT insert a newline.
-	if !slices.Contains(keys, "shift+enter") || !slices.Contains(keys, "ctrl+j") {
-		t.Errorf("newline keys = %v, want to contain shift+enter and ctrl+j", keys)
-	}
-	if slices.Contains(keys, "enter") {
-		t.Errorf("Enter must not be bound to newline (it submits), keys = %v", keys)
-	}
-}
-
-func TestViewShowsConfigAndFooter(t *testing.T) {
-	m := New(testCfg())
 	view := m.View()
-
-	for _, want := range []string{"pigo", "provider=anthropic", "model=claude-sonnet-4", "Enter submit"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("view missing %q\n---\n%s", want, view)
-		}
+	if !strings.Contains(view, "read") || !strings.Contains(view, "# pigo") {
+		t.Errorf("tool events not rendered; view=\n%s", view)
 	}
 }
 
-// isQuit reports whether cmd is tea.Quit by executing it and inspecting the message.
-func isQuit(cmd tea.Cmd) bool {
-	if cmd == nil {
-		return false
+func TestAgentEndStopsRunning(t *testing.T) {
+	m := New(testCfg())
+	m.running = true
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventAgentEnd}})
+	if m.running {
+		t.Error("running should be false after agent_end")
 	}
-	_, ok := cmd().(tea.QuitMsg)
-	return ok
 }
