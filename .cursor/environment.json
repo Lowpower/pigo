@@ -1,0 +1,4 @@
+{
+  "name": "pigo",
+  "install": "bash .cursor/install.sh"
+}
