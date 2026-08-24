@@ -1,0 +1,7 @@
+# Compiled binary (module name matches directory)
+/pigo
+
+# Go build/test artifacts
+*.exe
+*.out
+*.test
