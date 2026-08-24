@@ -37,7 +37,32 @@
 | glob/路径 | 标准库 + `gobwas/glob` |
 | 分发 | `goreleaser` 单二进制交叉编译 |
 
-依赖策略：**用到再引**，避免 `go mod tidy` 删空依赖。当前已引入 `cobra` + `viper`。
+依赖策略：**整套技术栈版本已固化**。为在写对应代码前锁定版本，用 `tools/pin.go`
+（`//go:build tools` 标签，不参与实际编译）空导入这些模块，使 `go mod tidy` 将其保留为直接依赖。
+每当某包被真实代码用到，即可从 `pin.go` 移除其空导入（真实 import 会继续保留它）。
+`goreleaser` 是构建期 CLI 工具（非 import 依赖），不放进 `go.mod`，分发阶段单独安装。
+
+已锁定的直接依赖（`go.mod`）：
+
+| 模块 | 版本 |
+| --- | --- |
+| `github.com/spf13/cobra` | v1.10.2 |
+| `github.com/spf13/viper` | v1.21.0 |
+| `github.com/charmbracelet/bubbletea` | v1.3.10 |
+| `github.com/charmbracelet/bubbles` | v1.0.0 |
+| `github.com/charmbracelet/lipgloss` | v1.1.1-0.20250404203927-76690c660834 |
+| `github.com/charmbracelet/glamour` | v1.0.0 |
+| `github.com/anthropics/anthropic-sdk-go` | v1.66.0 |
+| `github.com/openai/openai-go` | v1.12.0 |
+| `google.golang.org/genai` | v1.69.0 |
+| `github.com/aws/aws-sdk-go-v2/config` | v1.32.38 |
+| `github.com/aws/aws-sdk-go-v2/service/bedrockruntime` | v1.57.4 |
+| `github.com/invopop/jsonschema` | v0.14.0 |
+| `github.com/sergi/go-diff` | v1.4.0 |
+| `modernc.org/sqlite` | v1.57.0 |
+| `github.com/gobwas/glob` | v0.2.3 |
+
+> 整套栈已用 `go build -tags tools ./...` 在 Go 1.27 下编译通过，确认版本互相兼容。
 
 ## 3. 模块映射（pigo internal/ ← pi 真实路径）
 
