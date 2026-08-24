@@ -85,9 +85,17 @@ binary). **When you start using a module for real, remove its blank import from
   (gobwas per segment). A `Registry` exposes them as `ai.Tool` and dispatches calls;
   wire it to the loop with `agent.ToolFunc(func(ctx, c){ return reg.Execute(ctx, c.Name, c.Args) })`.
   Deferred: `.gitignore` awareness in grep/find; Windows bash.
-- **Next:** Phase 4 — session persistence (`internal/session`, ports
-  `session-manager.ts`): JSONL append log at `~/.pi/agent/sessions/--<cwd>--/`
-  (see `docs/migration-plan.md` §4.4), kept read/write-compatible with pi.
+  **Phase 4** — session persistence (`internal/session`, ports `session-manager.ts`):
+  JSONL append log; dir `~/.pi/agent/sessions/--<cwd with /\: → ->--/`, filename
+  `<ISO with :. → ->_<uuid>.jsonl`, header `version:3`, entries `type/id/parentId/
+  timestamp/message` (parentId tree). Buffer-until-first-assistant then flush-all,
+  then append (matches pi). `Manager.AppendMessage(role, payload)` + `Load(path)`.
+  Deferred: full pi AgentMessage field-parity for round-tripping pi's own files, and
+  buildSessionContext/compaction/branching.
+- **Next:** Phase 5 — TUI completion (`internal/tui`, ports `modes/interactive`):
+  wire the agent loop into the TUI, streaming render (glamour after each turn), token
+  batching (~30fps), autocomplete, themes. Also outstanding: multi-provider adapters
+  (§4.9) to connect a real model.
 
 ## Conventions
 
