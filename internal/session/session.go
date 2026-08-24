@@ -22,6 +22,7 @@ type Header struct {
 	Timestamp     string `json:"timestamp"`
 	Cwd           string `json:"cwd"`
 	ParentSession string `json:"parentSession,omitempty"`
+	Name          string `json:"name,omitempty"`
 }
 
 // Entry is one line of a session file after the header (pi SessionEntryBase +
@@ -87,6 +88,21 @@ func (m *Manager) ID() string { return m.id }
 
 // File returns the session file path.
 func (m *Manager) File() string { return m.file }
+
+func (m *Manager) Name() string { return m.header.Name }
+
+func (m *Manager) SetName(name string) { m.header.Name = name }
+
+// Entries returns a copy of session entries (header excluded).
+func (m *Manager) Entries() []Entry {
+	out := make([]Entry, 0, len(m.entries))
+	for _, e := range m.entries {
+		if e != nil {
+			out = append(out, *e)
+		}
+	}
+	return out
+}
 
 // AppendMessage records a message entry. role must be the message's role
 // ("user", "assistant", or "toolResult") so the flush rule works. message is any

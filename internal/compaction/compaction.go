@@ -23,7 +23,7 @@ func DefaultSettings() Settings {
 // EstimateTokens approximates a message's token count as ceil(chars/4), matching
 // pi's estimateTokens.
 func EstimateTokens(m ai.Message) int {
-	return ceilDiv(len(m.Content), 4)
+	return ceilDiv(len(m.Text()), 4)
 }
 
 // EstimateContextTokens sums the estimate over all messages.

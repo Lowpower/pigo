@@ -41,6 +41,12 @@ type Config struct {
 	Model         string
 	ToolExecution string // Sequential | Parallel (default Parallel)
 	MaxTurns      int    // safety cap (default 16)
+	Thinking      string // pi thinking level; forwarded to the provider
+	// Steering is polled after every turn (pi getSteeringMessages). Returned
+	// user messages are injected before the next LLM call.
+	Steering func() []ai.Message
+	// FollowUp is polled when the model produced no tool calls (pi getFollowUpMessages).
+	FollowUp func() []ai.Message
 }
 
 // Run drives the agent loop and returns a stream of AgentEvents. The loop runs
@@ -65,17 +71,25 @@ func Run(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolExecut
 func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolExecutor, cfg Config, s *Stream) {
 	emit := func(ev Event) bool { return s.push(ctx, ev) }
 
-	// Seed the transcript from the request's messages.
+	// Seed the transcript from the request's messages, preserving assistant
+	// tool-call blocks and toolResult pairing (pi convertToLlm replay).
 	transcript := make([]Msg, 0, len(reqCtx.Messages)+4)
 	for _, m := range reqCtx.Messages {
-		transcript = append(transcript, Msg{Role: m.Role, Text: m.Content})
+		transcript = append(transcript, msgFromAI(m))
 	}
+	pending := drainQueue(cfg.Steering)
 
 	if !emit(Event{Type: EventAgentStart}) {
 		return
 	}
 
 	for turn := 0; turn < cfg.MaxTurns; turn++ {
+		if len(pending) > 0 {
+			for _, m := range pending {
+				transcript = append(transcript, msgFromAI(m))
+			}
+			pending = nil
+		}
 		if !emit(Event{Type: EventTurnStart}) {
 			return
 		}
@@ -95,8 +109,14 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 
 		toolCalls := toToolCalls(message)
 		var toolResults []Msg
-		if len(toolCalls) > 0 && message.StopReason != ai.StopLength {
-			toolResults, ok = executeToolCalls(ctx, toolCalls, exec, cfg, s)
+		// pi: a length stop still materialises tool results as errors so the
+		// next turn can continue; truncated calls are not executed.
+		if len(toolCalls) > 0 {
+			if message.StopReason == ai.StopLength {
+				toolResults, ok = failToolCalls(ctx, toolCalls, s)
+			} else {
+				toolResults, ok = executeToolCalls(ctx, toolCalls, exec, cfg, s)
+			}
 			if !ok {
 				return
 			}
@@ -107,9 +127,12 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 			return
 		}
 
-		// Stop when the model produced no (executable) tool calls this turn.
-		if len(toolResults) == 0 {
-			break
+		pending = drainQueue(cfg.Steering)
+		if len(toolResults) == 0 && len(pending) == 0 {
+			pending = drainQueue(cfg.FollowUp)
+			if len(pending) == 0 {
+				break
+			}
 		}
 	}
 
@@ -120,7 +143,7 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 // events and returning the final assistant message. ok is false if the context
 // was cancelled while emitting.
 func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg Config, s *Stream) (*ai.AssistantMessage, bool) {
-	stream, err := sf(ctx, aiCtx, ai.Options{Model: cfg.Model})
+	stream, err := sf(ctx, aiCtx, ai.Options{Model: cfg.Model, Thinking: cfg.Thinking})
 	if err != nil {
 		msg := &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopError, ErrorMessage: err.Error()}
 		if !s.push(ctx, Event{Type: EventMessageEnd, Assistant: msg}) {
@@ -210,6 +233,44 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 	return results, true
 }
 
+func failToolCalls(ctx context.Context, calls []ToolCall, s *Stream) ([]Msg, bool) {
+	results := make([]Msg, len(calls))
+	for i, c := range calls {
+		if !s.push(ctx, Event{Type: EventToolStart, ToolCallID: c.ID, ToolName: c.Name, Args: c.Args}) {
+			return nil, false
+		}
+		out := fmt.Sprintf("tool call aborted: assistant message truncated (stop reason length)")
+		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: true}
+		if !s.push(ctx, Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: true}) {
+			return nil, false
+		}
+	}
+	return results, true
+}
+
+func drainQueue(fn func() []ai.Message) []ai.Message {
+	if fn == nil {
+		return nil
+	}
+	return fn()
+}
+
+func msgFromAI(m ai.Message) Msg {
+	switch {
+	case m.Assistant != nil || m.Role == RoleAssistant:
+		text := m.Content
+		if m.Assistant != nil {
+			if t := m.Assistant.Text(); t != "" {
+				text = t
+			}
+		}
+		return Msg{Role: RoleAssistant, Text: text, Assistant: m.Assistant}
+	case m.Role == RoleToolResult || m.Role == ai.RoleToolResult || m.ToolCallID != "":
+		return Msg{Role: RoleToolResult, Text: m.Content, ToolCallID: m.ToolCallID, ToolName: m.ToolName, IsError: m.IsError}
+	default:
+		return Msg{Role: RoleUser, Text: m.Content}
+	}
+}
 func toToolCalls(m *ai.AssistantMessage) []ToolCall {
 	var calls []ToolCall
 	for _, c := range m.ToolCalls() {
@@ -219,6 +280,16 @@ func toToolCalls(m *ai.AssistantMessage) []ToolCall {
 }
 
 func toAIMessages(transcript []Msg) []ai.Message {
+	return MessagesFromTranscript(transcript)
+}
+
+// MessagesFromTranscript is the exported form of toAIMessages, used by the TUI
+// to keep on-screen history aligned with the loop transcript.
+
+// MessagesFromTranscript converts the agent transcript into provider-facing
+// ai.Messages, preserving assistant tool-call blocks and toolResult pairing
+// (pi convertToLlm / ToolResultMessage).
+func MessagesFromTranscript(transcript []Msg) []ai.Message {
 	out := make([]ai.Message, 0, len(transcript))
 	for _, m := range transcript {
 		switch m.Role {
@@ -227,9 +298,19 @@ func toAIMessages(transcript []Msg) []ai.Message {
 			if m.Assistant != nil {
 				text = m.Assistant.Text()
 			}
-			out = append(out, ai.Message{Role: ai.RoleAssistant, Content: text})
+			out = append(out, ai.Message{
+				Role:      ai.RoleAssistant,
+				Content:   text,
+				Assistant: m.Assistant,
+			})
 		case RoleToolResult:
-			out = append(out, ai.Message{Role: "tool", Content: fmt.Sprintf("[tool %s] %s", m.ToolName, m.Text)})
+			out = append(out, ai.Message{
+				Role:       ai.RoleToolResult,
+				Content:    m.Text,
+				ToolCallID: m.ToolCallID,
+				ToolName:   m.ToolName,
+				IsError:    m.IsError,
+			})
 		default:
 			out = append(out, ai.Message{Role: ai.RoleUser, Content: m.Text})
 		}

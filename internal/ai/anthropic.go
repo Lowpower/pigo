@@ -132,10 +132,7 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		maxTokens = defaultMaxTokens
 	}
 
-	msgs := make([]map[string]any, 0, len(reqCtx.Messages))
-	for _, m := range reqCtx.Messages {
-		msgs = append(msgs, map[string]any{"role": m.Role, "content": m.Content})
-	}
+	msgs := AnthropicWireMessages(reqCtx.Messages)
 
 	req := map[string]any{
 		"model":      opts.Model,
@@ -157,7 +154,30 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		}
 		req["tools"] = tools
 	}
+	if budget := thinkingBudgetTokens(opts.Thinking); budget > 0 {
+		req["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
+		if maxTokens <= budget {
+			req["max_tokens"] = budget + 4096
+		}
+	}
 	return json.Marshal(req)
+}
+
+func thinkingBudgetTokens(level string) int {
+	switch level {
+	case "minimal":
+		return 1024
+	case "low":
+		return 2048
+	case "medium":
+		return 5120
+	case "high":
+		return 10000
+	case "xhigh", "max":
+		return 31999
+	default:
+		return 0
+	}
 }
 
 // --- SSE core ---

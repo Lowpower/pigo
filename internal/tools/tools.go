@@ -53,6 +53,13 @@ func (r *Registry) AITools() []ai.Tool {
 	return out
 }
 
+// List returns tools in registration order.
+func (r *Registry) List() []Tool {
+	out := make([]Tool, len(r.order))
+	copy(out, r.order)
+	return out
+}
+
 // Execute dispatches a tool call by name. It satisfies the shape expected by an
 // agent ToolExecutor adapter: Execute(ctx, name, args).
 func (r *Registry) Execute(ctx context.Context, name string, args map[string]any) (string, bool) {

@@ -2,16 +2,37 @@ package ai
 
 import "context"
 
-// Role values for messages sent to a provider.
+// Role values for messages sent to a provider. RoleToolResult matches pi's
+// ToolResultMessage.role ("toolResult"); providers map it onto their wire format.
 const (
-	RoleUser      = "user"
-	RoleAssistant = "assistant"
+	RoleUser       = "user"
+	RoleAssistant  = "assistant"
+	RoleToolResult = "toolResult"
+	RoleTool       = "tool"
 )
 
 // Message is a single conversation message in a request Context.
+// Content is the plain-text body for user (and a fallback for others).
+// Assistant, when set, is the full assistant message including tool-call blocks
+// and must be replayed to the provider on subsequent turns (pi convertToLlm).
+// ToolCallID / ToolName / IsError describe a toolResult turn.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string            `json:"role"`
+	Content    string            `json:"content,omitempty"`
+	Assistant  *AssistantMessage `json:"assistant,omitempty"`
+	ToolCallID string            `json:"toolCallId,omitempty"`
+	ToolName   string            `json:"toolName,omitempty"`
+	IsError    bool              `json:"isError,omitempty"`
+}
+
+// Text returns the display/token-estimate text of the message.
+func (m Message) Text() string {
+	if m.Assistant != nil {
+		if t := m.Assistant.Text(); t != "" {
+			return t
+		}
+	}
+	return m.Content
 }
 
 // Tool is a provider-neutral tool definition (JSON Schema parameters).
@@ -33,6 +54,7 @@ type Context struct {
 type Options struct {
 	Model     string
 	MaxTokens int
+	Thinking  string // off|minimal|low|medium|high|xhigh|max (pi thinking level)
 }
 
 // StreamFn is the spine abstraction: given a request context it returns a stream
