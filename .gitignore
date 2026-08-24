@@ -1,0 +1,12 @@
+# Compiled binaries
+/pi
+/pigo
+/bin/
+
+# Go build/test artifacts
+*.exe
+*.out
+*.test
+
+# Local env
+.env
