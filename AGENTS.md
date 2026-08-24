@@ -105,11 +105,17 @@ binary). **When you start using a module for real, remove its blank import from
   tools plug into the agent loop like built-ins:
   `agent.ToolFunc(func(ctx,c){ return host.CallTool(ctx, c.Name, c.Args) })`. Example:
   `examples/extensions/reverse`. Out of scope for v1: self-drawn UI widgets.
-- **Next / remaining:** Phase 7 (headless server via `internal/protocol`, sqlite
-  session backend, compaction); Phase 5 refinements (autocomplete, themes, ~30fps
-  batching, faithful tool-result context); provider backlog (§4.9): `openai-responses`
-  (opencode `gpt-*`), google/bedrock adapters, generic provider registry; wire an
-  `--extension` flag into `cmd/pi` to load extensions at runtime.
+  **Phase 7 (compaction)** — history compaction (`internal/compaction`, ports
+  `compaction.ts`): `ShouldCompact` (contextTokens > window − reserve, defaults
+  reserve 16384 / keepRecent 20000), `FindCutIndex` (keep recent tail), `Summarize`
+  (structured checkpoint prompt via a StreamFn), `Compact` (replace old messages
+  with the summary + recent tail). Token estimate `ceil(chars/4)`.
+- **Next / remaining:** wire compaction into the TUI turn flow (needs a per-model
+  context window — config-driven since we have no model catalog); rest of Phase 7
+  (headless server via `internal/protocol`, sqlite session backend); Phase 5 polish
+  (autocomplete, themes, ~30fps batching, faithful tool-result context); provider
+  backlog §4.9 (`openai-responses` for opencode `gpt-*`, google/bedrock, generic
+  registry); `--extension` flag in `cmd/pi` to load extensions at runtime.
 
 ## Conventions
 
