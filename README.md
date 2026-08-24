@@ -7,6 +7,11 @@ This repository currently contains the **Phase 0 scaffold**: flag parsing (cobra
 configuration loading (viper), and the `internal/` package skeleton. The agent loop,
 provider adapters, tools, and TUI land in later phases.
 
+The full, source-grounded implementation plan is in
+[`docs/migration-plan.md`](docs/migration-plan.md). **Development is grounded in the
+real pi source** (cloned read-only to `~/deps/pi`): read the corresponding pi files
+before porting each module, and treat the source as the authority over any summary.
+
 ## Requirements
 
 - Go 1.27+
