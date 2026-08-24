@@ -2,9 +2,69 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 )
+
+// EmitMessage streams a canned AssistantMessage as a proper event sequence
+// (start, per-block start/delta/end, done or error). It is used by the agent
+// loop's tests to script provider turns (including tool-calling turns) without a
+// live provider.
+func EmitMessage(ctx context.Context, msg *AssistantMessage) *EventStream {
+	s := NewEventStream(16)
+	go func() {
+		defer s.end()
+		if !s.push(ctx, Event{Type: EventStart, Partial: msg}) {
+			return
+		}
+		for i, c := range msg.Content {
+			switch c.Type {
+			case KindText:
+				if !s.push(ctx, Event{Type: EventTextStart, ContentIndex: i, Partial: msg}) {
+					return
+				}
+				if c.Text != "" && !s.push(ctx, Event{Type: EventTextDelta, ContentIndex: i, Delta: c.Text, Partial: msg}) {
+					return
+				}
+				if !s.push(ctx, Event{Type: EventTextEnd, ContentIndex: i, Content: c.Text, Partial: msg}) {
+					return
+				}
+			case KindThinking:
+				if !s.push(ctx, Event{Type: EventThinkingStart, ContentIndex: i, Partial: msg}) {
+					return
+				}
+				if !s.push(ctx, Event{Type: EventThinkingEnd, ContentIndex: i, Content: c.Thinking, Partial: msg}) {
+					return
+				}
+			case KindToolCall:
+				if !s.push(ctx, Event{Type: EventToolCallStart, ContentIndex: i, Partial: msg}) {
+					return
+				}
+				if len(c.Arguments) > 0 {
+					if b, err := json.Marshal(c.Arguments); err == nil {
+						if !s.push(ctx, Event{Type: EventToolCallDelta, ContentIndex: i, Delta: string(b), Partial: msg}) {
+							return
+						}
+					}
+				}
+				if !s.push(ctx, Event{Type: EventToolCallEnd, ContentIndex: i, ToolCall: c, Partial: msg}) {
+					return
+				}
+			}
+		}
+		if msg.StopReason == StopError || msg.StopReason == StopAborted {
+			s.push(ctx, Event{Type: EventError, Reason: msg.StopReason, Message: msg})
+			return
+		}
+		reason := msg.StopReason
+		if reason == "" || reason == StopPending {
+			reason = StopStop
+		}
+		s.push(ctx, Event{Type: EventDone, Reason: reason, Message: msg})
+	}()
+	return s
+}
 
 // ScriptedStreamFn returns a StreamFn that ignores providers and streams a fixed
 // reply, emitting a realistic event sequence (start, text_start, one text_delta

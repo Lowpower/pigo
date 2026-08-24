@@ -69,9 +69,18 @@ binary). **When you start using a module for real, remove its blank import from
   OpenAI/Anthropic-compatible gateway such as an opencode plan endpoint can be used).
   Live streaming needs the key/gateway; all Phase 1 tests are offline (SSE fixture +
   httptest), no key required.
-- **Next:** Phase 2 — agent loop (`internal/agent`, ports `packages/agent/agent-loop.ts`):
-  turn cycle, tool scheduling (sequential/parallel), QueueMode, ctx cancellation, event
-  broadcast.
+  **Phase 2** — agent loop (`internal/agent`, ports `agent-loop.ts`): turn cycle,
+  tool scheduling (sequential/parallel, source-ordered results), ctx cancellation,
+  and the full `AgentEvent` stream (agent/turn/message/tool_execution). The loop is
+  tool-agnostic (takes a `ToolExecutor`); mid-turn steering/follow-up queueing
+  integrates with the TUI later.
+- **Multi-provider (don't forget):** pi's "provider" is a thin registry entry; the
+  real work is a few shared **API adapters** (`packages/ai/src/api/*`). Only
+  `anthropic-messages` is ported so far. Remaining AI-layer backlog (see
+  `docs/migration-plan.md` §4.9): a provider registry + `openai-completions` (needed
+  for opencode/openrouter-style gateways) + `openai-responses`/google/bedrock adapters.
+- **Next:** Phase 3 — built-in tools (`internal/tools`, ports `core/tools/*`): read,
+  bash, edit, write, grep, find, ls; JSON-Schema params via `invopop/jsonschema`.
 
 ## Conventions
 
