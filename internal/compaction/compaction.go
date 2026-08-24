@@ -1,0 +1,145 @@
+package compaction
+
+import (
+	"context"
+	"errors"
+
+	"github.com/Lowpower/pigo/internal/ai"
+)
+
+// Settings controls when and how much to compact (pi CompactionSettings).
+type Settings struct {
+	// ReserveTokens is headroom kept below the context window before compacting.
+	ReserveTokens int
+	// KeepRecentTokens is roughly how many tokens of recent messages to keep verbatim.
+	KeepRecentTokens int
+}
+
+// DefaultSettings mirrors pi's DEFAULT_COMPACTION_SETTINGS.
+func DefaultSettings() Settings {
+	return Settings{ReserveTokens: 16384, KeepRecentTokens: 20000}
+}
+
+// EstimateTokens approximates a message's token count as ceil(chars/4), matching
+// pi's estimateTokens.
+func EstimateTokens(m ai.Message) int {
+	return ceilDiv(len(m.Content), 4)
+}
+
+// EstimateContextTokens sums the estimate over all messages.
+func EstimateContextTokens(msgs []ai.Message) int {
+	total := 0
+	for _, m := range msgs {
+		total += EstimateTokens(m)
+	}
+	return total
+}
+
+// ShouldCompact reports whether the context should be compacted (pi shouldCompact):
+// contextTokens > contextWindow - reserveTokens.
+func ShouldCompact(contextTokens, contextWindow int, s Settings) bool {
+	return contextTokens > contextWindow-s.ReserveTokens
+}
+
+// FindCutIndex returns the index i such that msgs[i:] is kept verbatim (roughly
+// keepRecentTokens worth) and msgs[:i] is summarized. It scans from the end,
+// accumulating tokens, and cuts once the recent tail reaches keepRecentTokens.
+// Returns 0 when the whole conversation fits within keepRecentTokens.
+func FindCutIndex(msgs []ai.Message, keepRecentTokens int) int {
+	acc := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		acc += EstimateTokens(msgs[i])
+		if acc >= keepRecentTokens {
+			return i
+		}
+	}
+	return 0
+}
+
+// SummarizationPrompt is the structured checkpoint prompt (ported from pi's
+// SUMMARIZATION_PROMPT). It is appended as the final user turn.
+const SummarizationPrompt = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
+
+Use this EXACT format:
+
+## Goal
+[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
+
+## Constraints & Preferences
+- [Any constraints, preferences, or requirements mentioned by user]
+- [Or "(none)" if none were mentioned]
+
+## Progress
+### Done
+- [x] [Completed tasks/changes]
+
+### In Progress
+- [ ] [Current work]
+
+### Blocked
+- [Issues preventing progress, if any]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale]
+
+## Next Steps
+1. [Ordered list of what should happen next]
+
+## Critical Context
+- [Any data, examples, or references needed to continue]
+- [Or "(none)" if not applicable]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages.`
+
+// SummaryMarker prefixes the synthetic message that replaces compacted history.
+const SummaryMarker = "[Conversation summary — earlier messages were compacted]"
+
+// Summarize asks the model to summarize the given messages using StreamFn,
+// returning the assistant's text.
+func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message) (string, error) {
+	reqMsgs := make([]ai.Message, 0, len(toSummarize)+1)
+	reqMsgs = append(reqMsgs, toSummarize...)
+	reqMsgs = append(reqMsgs, ai.Message{Role: ai.RoleUser, Content: SummarizationPrompt})
+
+	stream, err := sf(ctx, ai.Context{Messages: reqMsgs}, ai.Options{Model: model})
+	if err != nil {
+		return "", err
+	}
+	_, final := stream.Collect()
+	if final == nil {
+		return "", errors.New("compaction: summarization produced no message")
+	}
+	if final.StopReason == ai.StopError || final.StopReason == ai.StopAborted {
+		return "", errors.New("compaction: summarization failed: " + final.ErrorMessage)
+	}
+	summary := final.Text()
+	if summary == "" {
+		return "", errors.New("compaction: summarization produced empty text")
+	}
+	return summary, nil
+}
+
+// Compact summarizes older messages and returns the compacted message list (a
+// single summary message followed by the recent tail) plus the summary. When
+// nothing needs summarizing it returns the input unchanged with an empty summary.
+func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, s Settings) ([]ai.Message, string, error) {
+	cut := FindCutIndex(msgs, s.KeepRecentTokens)
+	if cut <= 0 {
+		return msgs, "", nil
+	}
+	summary, err := Summarize(ctx, sf, model, msgs[:cut])
+	if err != nil {
+		return msgs, "", err
+	}
+	compacted := make([]ai.Message, 0, len(msgs)-cut+1)
+	compacted = append(compacted, ai.Message{Role: ai.RoleUser, Content: SummaryMarker + "\n\n" + summary})
+	compacted = append(compacted, msgs[cut:]...)
+	return compacted, summary, nil
+}
+
+func ceilDiv(a, b int) int {
+	if a <= 0 {
+		return 0
+	}
+	return (a + b - 1) / b
+}
