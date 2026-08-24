@@ -1,16 +1,19 @@
 // Command pi is the entrypoint for pigo, a Go reimplementation of the pi coding agent.
 //
-// This is the Phase 0 scaffold: it wires up flag parsing (cobra) and configuration
-// loading (viper via internal/config). The interactive TUI and agent loop land in
-// later phases; see README.md for the migration plan.
+// It wires up flag parsing (cobra) and configuration loading (viper via
+// internal/config). Interactive mode launches the Phase 0 TUI; print mode streams
+// a model reply via a StreamFn (internal/ai). See README.md for the migration plan.
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/tui"
 )
@@ -56,7 +59,7 @@ func newRootCmd() *cobra.Command {
 				mode = "print"
 			}
 
-			return run(cmd, mode, prompt, cfg)
+			return run(cmd.Context(), cmd.OutOrStdout(), mode, prompt, cfg)
 		},
 	}
 
@@ -68,18 +71,48 @@ func newRootCmd() *cobra.Command {
 	return cmd
 }
 
-func run(cmd *cobra.Command, mode, prompt string, cfg config.Config) error {
-	out := cmd.OutOrStdout()
+func run(ctx context.Context, out io.Writer, mode, prompt string, cfg config.Config) error {
 	switch mode {
 	case "print":
-		fmt.Fprintf(out, "provider=%s model=%s theme=%s\n", cfg.Provider, cfg.Model, cfg.Theme)
-		if prompt != "" {
-			fmt.Fprintf(out, "prompt=%q\n", prompt)
+		if prompt == "" {
+			fmt.Fprintf(out, "provider=%s model=%s theme=%s\n", cfg.Provider, cfg.Model, cfg.Theme)
+			return nil
 		}
-		return nil
+		return streamPrompt(ctx, out, cfg, prompt)
 	case "interactive":
 		return tui.Run(cfg)
 	default:
 		return fmt.Errorf("unknown --mode %q (want: interactive|print)", mode)
 	}
+}
+
+// streamPrompt sends the prompt through a StreamFn and streams the reply's text
+// to out as it arrives (send → stream to screen). Without ANTHROPIC_API_KEY it
+// uses a mock provider so the pipeline still runs offline.
+func streamPrompt(ctx context.Context, out io.Writer, cfg config.Config, prompt string) error {
+	sf, live := ai.DefaultStreamFn()
+	provider := "mock"
+	if live {
+		provider = cfg.Provider
+	}
+	fmt.Fprintf(out, "[pigo] streaming via %s (model=%s)\n\n", provider, cfg.Model)
+
+	stream, err := sf(ctx, ai.Context{
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: prompt}},
+	}, ai.Options{Model: cfg.Model})
+	if err != nil {
+		return err
+	}
+
+	for ev := range stream.Events() {
+		switch ev.Type {
+		case ai.EventTextDelta:
+			fmt.Fprint(out, ev.Delta)
+		case ai.EventError:
+			fmt.Fprintf(out, "\n[error] %s\n", ev.Message.ErrorMessage)
+			return nil
+		}
+	}
+	fmt.Fprintln(out)
+	return nil
 }

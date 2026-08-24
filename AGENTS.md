@@ -59,11 +59,19 @@ binary). **When you start using a module for real, remove its blank import from
 
 - **Done:** Go 1.27 Cloud Agent environment; dependency stack pinned; source-grounded
   migration plan; **Phase 0** — minimal interactive TUI editor (`internal/tui`,
-  bubbletea) with pi-aligned keybindings (Enter submit, Shift+Enter/Ctrl+J newline,
-  Ctrl+C quit), input echoed (no agent/LLM yet).
-- **Next:** Phase 1 (AI-layer spine) — `AssistantMessageEvent` model + `StreamFn` +
-  offline partial-json parser with golden tests, then wire Anthropic (live streaming
-  needs `ANTHROPIC_API_KEY` as a secret; the offline parts do not).
+  bubbletea) with pi-aligned keybindings; **Phase 1** — AI-layer spine in
+  `internal/ai`: `AssistantMessageEvent` model (`event.go`/`message.go`), `StreamFn` +
+  `EventStream` (`stream.go`), partial-json parser (`jsonparse.go`, ports
+  `utils/json-parse.ts`), Anthropic Messages **SSE→event adapter** (`anthropic.go`,
+  ports `api/anthropic-messages.ts`, raw HTTP/SSE like pi, base-URL/key configurable),
+  and a mock provider (`mock.go`). `cmd/pi -p` streams send→screen (mock when no key).
+- **Anthropic auth:** `ANTHROPIC_API_KEY` + optional `ANTHROPIC_BASE_URL` (so an
+  OpenAI/Anthropic-compatible gateway such as an opencode plan endpoint can be used).
+  Live streaming needs the key/gateway; all Phase 1 tests are offline (SSE fixture +
+  httptest), no key required.
+- **Next:** Phase 2 — agent loop (`internal/agent`, ports `packages/agent/agent-loop.ts`):
+  turn cycle, tool scheduling (sequential/parallel), QueueMode, ctx cancellation, event
+  broadcast.
 
 ## Conventions
 
