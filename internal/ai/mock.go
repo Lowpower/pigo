@@ -140,11 +140,16 @@ func EchoStreamFn() StreamFn {
 	}
 }
 
-// DefaultStreamFn returns the Anthropic StreamFn when ANTHROPIC_API_KEY is set,
-// otherwise the mock EchoStreamFn. live reports whether a real provider is used.
-func DefaultStreamFn() (fn StreamFn, live bool) {
-	if c, ok := NewAnthropicFromEnv(); ok {
-		return c.StreamFn(), true
+// DefaultStreamFn selects a provider from the environment and returns it with a
+// display name. Priority: OpenCode (OPENCODE_API_KEY) -> Anthropic
+// (ANTHROPIC_API_KEY) -> the offline mock. The name is "mock" when no live
+// provider is configured.
+func DefaultStreamFn() (fn StreamFn, name string) {
+	if f, ok := NewOpenCodeFromEnv(); ok {
+		return f, "opencode"
 	}
-	return EchoStreamFn(), false
+	if c, ok := NewAnthropicFromEnv(); ok {
+		return c.StreamFn(), "anthropic"
+	}
+	return EchoStreamFn(), "mock"
 }

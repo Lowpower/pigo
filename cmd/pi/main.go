@@ -90,11 +90,7 @@ func run(ctx context.Context, out io.Writer, mode, prompt string, cfg config.Con
 // to out as it arrives (send → stream to screen). Without ANTHROPIC_API_KEY it
 // uses a mock provider so the pipeline still runs offline.
 func streamPrompt(ctx context.Context, out io.Writer, cfg config.Config, prompt string) error {
-	sf, live := ai.DefaultStreamFn()
-	provider := "mock"
-	if live {
-		provider = cfg.Provider
-	}
+	sf, provider := ai.DefaultStreamFn()
 	fmt.Fprintf(out, "[pigo] streaming via %s (model=%s)\n\n", provider, cfg.Model)
 
 	stream, err := sf(ctx, ai.Context{

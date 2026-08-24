@@ -154,10 +154,14 @@ Go 侧需自实现等价的“不完整 JSON 解析 + 修复”，黄金测试�
 
 - **API 适配器（要实现的核心，按需增量）**：`anthropic-messages`（✅ Phase 1 已实现）、
   `openai-completions`、`openai-responses`、`google-generative-ai`、`bedrock-converse-stream` …
-- **provider 注册层（待实现）**：对照 `models.ts` 的 `createProvider`，pigo 侧需要
-  `Provider{ id, 鉴权(env), baseURL, api→adapter 映射 }` + `Models.streamSimple()` 按 `model.api` 分发。
-  当前 `internal/ai` 只有直连的 `AnthropicClient`（`ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` 可配），
-  还没有通用注册层。
+- **已实现的适配器/路由**：`anthropic-messages`（x-api-key）+ `openai-completions`（Bearer，
+  `internal/ai/openai.go`）+ 一个 **opencode provider**（`internal/ai/opencode.go`）：读
+  `OPENCODE_API_KEY` + `OPENCODE_BASE_URL`（默认 OpenCode Zen），按模型 id 路由
+  （`claude-*` → `/v1/messages` x-api-key；其余 → `/v1/chat/completions` Bearer）。
+  `DefaultStreamFn` 优先级：opencode → anthropic → mock。
+- **通用 provider 注册层（仍待实现）**：对照 `models.ts` 的 `createProvider`，理想是
+  `Provider{ id, 鉴权(env), baseURL, api→adapter 映射 }` + 按 `model.api` 分发。目前是按模型 id 前缀
+  的轻量路由（够用），尚无对照模型目录的通用注册层。
 - **opencode（用户的套餐，`providers/opencode-go.ts`）**：`id: "opencode-go"`，鉴权
   `OPENCODE_API_KEY`，同时挂了 **`anthropic-messages` + `openai-completions` + `openai-responses`** 三套；
   具体每个模型走哪套 / base URL 写在 `providers/data/opencode-go.json`（该目录被 pi `.gitignore`，
@@ -165,12 +169,14 @@ Go 侧需自实现等价的“不完整 JSON 解析 + 修复”，黄金测试�
   `openai-completions` 适配器（若其模型走 openai 兼容端点）。
 
 **待办（backlog，勿遗忘）**：
-1. provider 注册层（`internal/ai`，镜像 `createProvider`/`models.ts` 的 `api` 分发）。
-2. `openai-completions` 适配器（opencode/openrouter/groq/together 等一大批网关复用）。
-3. `openai-responses`、`google-generative-ai`、`bedrock-converse-stream` 适配器（按需）。
-4. 正式的 `opencode` provider 条目（读 `OPENCODE_API_KEY` + 其 base URL）。
+1. ~~`openai-completions` 适配器~~ ✅ 已完成（`internal/ai/openai.go`）。
+2. ~~`opencode` provider（读 `OPENCODE_API_KEY` + base URL）~~ ✅ 已完成（`internal/ai/opencode.go`）。
+3. `openai-responses` 适配器（opencode 的 `gpt-*` 模型走 `/v1/responses`，目前未支持）。
+4. `google-generative-ai`、`bedrock-converse-stream` 适配器（按需）。
+5. 通用 provider 注册层 + 模型目录（对照 `models.ts`；当前是按模型 id 前缀的轻量路由）。
 
-这些都属于 **Phase 1（AI 层）的增量收尾**，不阻塞后续阶段；在需要接非 Anthropic 端点时优先补 1+2。
+这些都属于 **Phase 1（AI 层）的增量收尾**，不阻塞后续阶段。opencode 已可用（Claude 走 messages、
+其余走 chat/completions）；只有需要 opencode 的 `gpt-*`（responses API）时才需补第 3 项。
 
 ### 4.10 CLI flag（真实清单，远多于 `-p/--mode`）
 入口 `packages/coding-agent/src/cli.ts → main.ts`，flag 在 `cli/args.ts`：

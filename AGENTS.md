@@ -74,11 +74,13 @@ binary). **When you start using a module for real, remove its blank import from
   and the full `AgentEvent` stream (agent/turn/message/tool_execution). The loop is
   tool-agnostic (takes a `ToolExecutor`); mid-turn steering/follow-up queueing
   integrates with the TUI later.
-- **Multi-provider (don't forget):** pi's "provider" is a thin registry entry; the
-  real work is a few shared **API adapters** (`packages/ai/src/api/*`). Only
-  `anthropic-messages` is ported so far. Remaining AI-layer backlog (see
-  `docs/migration-plan.md` §4.9): a provider registry + `openai-completions` (needed
-  for opencode/openrouter-style gateways) + `openai-responses`/google/bedrock adapters.
+- **Providers:** `anthropic-messages` (x-api-key) + `openai-completions` (Bearer,
+  `internal/ai/openai.go`) + an **opencode** provider (`internal/ai/opencode.go`,
+  reads `OPENCODE_API_KEY`/`OPENCODE_BASE_URL`, routes `claude-*` → `/v1/messages`,
+  else → `/v1/chat/completions`). `DefaultStreamFn`: opencode → anthropic → mock. To
+  use a real model, add `OPENCODE_API_KEY` (and optionally `OPENCODE_BASE_URL`) as a
+  secret. Backlog (`docs/migration-plan.md` §4.9): `openai-responses` (opencode `gpt-*`),
+  google/bedrock adapters, a generic provider registry.
   **Phase 3** — built-in tools (`internal/tools`, ports `core/tools/*`): read,
   write, edit (exact unique-match, go-diff), bash (process group + timeout), grep,
   find, ls. JSON-Schema params via `invopop/jsonschema`; globstar via `glob.go`
