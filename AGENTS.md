@@ -98,11 +98,18 @@ binary). **When you start using a module for real, remove its blank import from
   prompt runs `agent.Run` with `tools.Default()` + `ai.DefaultStreamFn`; the reply
   streams to screen (plain text live) then renders as markdown via glamour; tool
   executions show inline; Ctrl+C interrupts a run (ctx cancel) or quits when idle.
-- **Next / remaining:** Phase 5 refinements (autocomplete, themes, ~30fps token
-  batching, feed tool results back into next-turn context faithfully); Phase 6
-  extensions (subprocess RPC, ports `core/extensions` + `packages/protocol`); Phase 7
-  (headless server, sqlite backend, compaction). Provider backlog: `openai-responses`
-  (opencode `gpt-*`), google/bedrock adapters, generic provider registry (§4.9).
+  **Phase 6** — extension system as subprocess RPC (`internal/protocol` +
+  `internal/ext`): frames are `[u32 BE length][JSON]` (pi framing, JSON codec for v1);
+  `ext.Host` spawns an extension, does the handshake, collects `register_tool`, and
+  dispatches `tool_call`/events; `ext.Serve` is the extension-author SDK. Extension
+  tools plug into the agent loop like built-ins:
+  `agent.ToolFunc(func(ctx,c){ return host.CallTool(ctx, c.Name, c.Args) })`. Example:
+  `examples/extensions/reverse`. Out of scope for v1: self-drawn UI widgets.
+- **Next / remaining:** Phase 7 (headless server via `internal/protocol`, sqlite
+  session backend, compaction); Phase 5 refinements (autocomplete, themes, ~30fps
+  batching, faithful tool-result context); provider backlog (§4.9): `openai-responses`
+  (opencode `gpt-*`), google/bedrock adapters, generic provider registry; wire an
+  `--extension` flag into `cmd/pi` to load extensions at runtime.
 
 ## Conventions
 

@@ -1,6 +1,8 @@
-// Package protocol defines the cross-process wire format (request/response/event
-// frames) shared by the extension host and the headless server. Message shapes
-// mirror pi's protocol so definitions can be ported directly.
+// Package protocol defines the cross-process wire format used by the extension
+// host (internal/ext) and, later, the headless server. Frames follow pi's
+// framing (packages/protocol/framing.ts): an unsigned 32-bit big-endian length
+// prefix followed by the payload, capped at 16 MiB.
 //
-// Port of pi's packages/protocol.
+// pi encodes the payload as CBOR; pigo v1 uses JSON (no extra dependency, easy to
+// debug). The framing is identical, so the codec can be swapped later.
 package protocol
