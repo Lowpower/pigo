@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/tui"
 )
 
 // version is overridden at release time via -ldflags "-X main.version=...".
@@ -77,9 +78,7 @@ func run(cmd *cobra.Command, mode, prompt string, cfg config.Config) error {
 		}
 		return nil
 	case "interactive":
-		fmt.Fprintln(out, "pigo interactive TUI is not implemented yet (Phase 0 scaffold).")
-		fmt.Fprintf(out, "Loaded config: provider=%s model=%s theme=%s\n", cfg.Provider, cfg.Model, cfg.Theme)
-		return nil
+		return tui.Run(cfg)
 	default:
 		return fmt.Errorf("unknown --mode %q (want: interactive|print)", mode)
 	}

@@ -10,15 +10,9 @@
 package tools
 
 import (
-	// CLI / config (already used by cmd/pi and internal/config)
-	_ "github.com/spf13/cobra"
-	_ "github.com/spf13/viper"
-
-	// TUI
-	_ "github.com/charmbracelet/bubbles/textarea"
-	_ "github.com/charmbracelet/bubbletea"
+	// TUI (glamour not used until Phase 5; bubbletea/bubbles/lipgloss are now
+	// imported for real by internal/tui, cobra/viper by cmd/pi + internal/config)
 	_ "github.com/charmbracelet/glamour"
-	_ "github.com/charmbracelet/lipgloss"
 
 	// LLM SDKs (official)
 	_ "github.com/anthropics/anthropic-sdk-go"
