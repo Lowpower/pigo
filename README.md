@@ -3,20 +3,10 @@
 A Go reimplementation of the [pi](https://github.com/earendil-works/pi) coding agent
 (agent loop, streaming LLM, built-in tools, TUI, session persistence, extensions).
 
-The executable backbone is in place: an agent loop (`internal/agent`) driving a
-streaming provider (`internal/ai`; Anthropic + OpenAI-compatible + OpenCode routing),
-built-in tools (`internal/tools`), an interactive TUI (`internal/tui`), JSONL session
-persistence (`internal/session`), a subprocess-RPC extension system
-(`internal/protocol` + `internal/ext`), and history compaction (`internal/compaction`).
-Slash commands, skills, and themes are not yet implemented — see
-[`docs/status.md`](docs/status.md) for the full implemented-vs-remaining breakdown.
-
-The full, source-grounded implementation plan is in
-[`docs/migration-plan.md`](docs/migration-plan.md), and the current
-implemented-vs-remaining status is in [`docs/status.md`](docs/status.md).
-**Development is grounded in the real pi source** (cloned read-only to `~/deps/pi`):
-read the corresponding pi files before porting each module, and treat the source as
-the authority over any summary.
+**pi’s source is the behaviour reference.** pi keeps evolving; when adding or
+changing a feature, read the corresponding files under `~/deps/pi` (or a fresh
+clone of earendil-works/pi) and match that behaviour. Remaining work is tracked
+as GitHub issues, not a phased migration plan.
 
 ## Requirements
 
@@ -24,11 +14,11 @@ the authority over any summary.
 
 ## Toolchain
 
-The Cloud Agent environment installs everything automatically via
+The Cloud Agent environment installs everything via
 [`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain, `golangci-lint`,
-and a read-only clone of the `pi` reference repo at `~/deps/pi`.
+and a read-only clone of pi at `~/deps/pi`.
 
-To set up locally instead:
+To set up locally:
 
 ```bash
 # Go 1.27 (https://go.dev/dl/) and golangci-lint on your PATH, then:
@@ -46,34 +36,53 @@ go test ./...                  # run tests
 golangci-lint run              # lint
 ```
 
-### Flags
+### Flags (aligned with pi `cli/args.ts`)
 
-| Flag              | Description                                   |
-| ----------------- | --------------------------------------------- |
-| `-p`, `--prompt`  | Run a single prompt non-interactively         |
-| `--mode`          | `interactive` (default) or `print`            |
-| `--config-dir`    | Config directory (default `~/.pi`)            |
-| `--version`       | Print version and exit                        |
+| Flag | Description |
+| --- | --- |
+| `-p`, `--print` | Non-interactive: process prompt and exit |
+| `--mode` | `text` / `json` / `rpc` (default: TTY → interactive, else text) |
+| `--continue`, `-c` / `--resume`, `-r` / `--session` | Session resume |
+| `--fork <path\|id>` | Fork a session into a new file |
+| `--no-session` | Do not persist |
+| `--name`, `-n` | Session display name |
+| `--no-tools`, `-nt` / `--tools`, `-t` / `--exclude-tools`, `-xt` | Tool filters |
+| `--no-skills`, `-ns` / `--skill` | Skills |
+| `--no-context-files`, `-nc` | Skip AGENTS.md / CLAUDE.md |
+| `--model` | `provider/id` and optional `:<thinking>` |
+| `--models` | Comma-separated patterns for Ctrl+P cycling |
+| `--thinking` | `off\|minimal\|low\|medium\|high\|xhigh\|max` |
+| `--export <session.jsonl> [out.html]` | Export session to HTML |
+| `--list-models` | List known models |
+| `auth login\|logout\|print-api-key\|check` | API-key credentials |
 
-Configuration is read from `settings.json` in the config directory and can be
-overridden with `PIGO_`-prefixed environment variables (e.g. `PIGO_PROVIDER`,
-`PIGO_MODEL`, `PIGO_THEME`).
+Positional `@file` arguments are inlined as `<file name="...">` blocks (text only).
+
+Configuration is read from `~/.pi/agent/settings.json` (override with
+`PI_CODING_AGENT_DIR`) and can also be overridden with `PIGO_`-prefixed environment
+variables.
 
 ## Layout
 
 ```
 cmd/pi/            # entrypoint (cobra), flags aligned with pi
 internal/
-├── ai/            # StreamFn abstraction + provider adapters   (Phase 1)
-├── agent/         # agent loop, tool scheduling, cancellation  (Phase 2)
-├── tools/         # read bash edit write grep find ls          (Phase 3)
-├── session/       # JSONL append-only session log              (Phase 4)
+├── ai/            # StreamFn + provider adapters
+├── agent/         # agent loop, tool scheduling, cancellation
+├── tools/         # read bash edit write grep find ls
+├── session/       # JSONL + tree + HTML export
 ├── compaction/    # history compaction
-├── tui/           # bubbletea TUI                              (Phase 5)
-├── ext/           # extension system (subprocess RPC)          (Phase 6)
+├── tui/           # bubbletea TUI
+├── slash/         # built-in slash commands
+├── skills/        # SKILL.md discovery
+├── prompt/        # system prompt + prompt templates
+├── theme/         # TUI themes
+├── models/        # catalog + cycling
+├── auth/          # auth.json
+├── ext/           # extension system (subprocess RPC)
 ├── protocol/      # cross-process wire format
-├── server/        # headless server/RPC mode                  (Phase 7)
-└── config/        # settings/auth storage (viper, ~/.pi)
+├── runtime/       # shared engine (print/json/rpc/TUI)
+└── config/        # settings.json (~/.pi/agent)
 ```
 
 ## Reference

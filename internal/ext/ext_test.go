@@ -83,9 +83,9 @@ func TestHostClosedAfterExit(t *testing.T) {
 	}
 }
 
-// TestAgentLoopWithExtensionTool ties Phase 2 (agent loop) to Phase 6: a scripted
-// provider calls the extension's `reverse` tool, the host forwards it to the
-// subprocess, and the result flows back through the loop.
+// TestAgentLoopWithExtensionTool: a scripted provider calls the extension's
+// `reverse` tool, the host forwards it to the subprocess, and the result flows
+// back through the loop.
 func TestAgentLoopWithExtensionTool(t *testing.T) {
 	h := spawnReverseExt(t)
 	defer func() { _ = h.Close() }()

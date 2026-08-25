@@ -22,6 +22,7 @@ type Header struct {
 	Timestamp     string `json:"timestamp"`
 	Cwd           string `json:"cwd"`
 	ParentSession string `json:"parentSession,omitempty"`
+	Name          string `json:"name,omitempty"`
 }
 
 // Entry is one line of a session file after the header (pi SessionEntryBase +
@@ -51,6 +52,7 @@ type Manager struct {
 	entries  []*Entry
 	flushed  bool
 	persist  bool
+	leafID   string
 }
 
 // DefaultAgentDir returns pi's config root: ~/.pi/agent (override-free).
@@ -88,6 +90,24 @@ func (m *Manager) ID() string { return m.id }
 // File returns the session file path.
 func (m *Manager) File() string { return m.file }
 
+func (m *Manager) Name() string { return m.header.Name }
+
+func (m *Manager) SetName(name string) { m.header.Name = name }
+
+// LeafID is the current branch tip (pi SessionManager.getLeafId).
+func (m *Manager) LeafID() string { return m.leafID }
+
+// Entries returns a copy of session entries (header excluded).
+func (m *Manager) Entries() []Entry {
+	out := make([]Entry, 0, len(m.entries))
+	for _, e := range m.entries {
+		if e != nil {
+			out = append(out, *e)
+		}
+	}
+	return out
+}
+
 // AppendMessage records a message entry. role must be the message's role
 // ("user", "assistant", or "toolResult") so the flush rule works. message is any
 // JSON-serializable payload (its shape is written verbatim under "message").
@@ -103,11 +123,12 @@ func (m *Manager) AppendMessage(role string, message any) (*Entry, error) {
 		Message:   raw,
 		role:      role,
 	}
-	if n := len(m.entries); n > 0 {
-		prev := m.entries[n-1].ID
+	if m.leafID != "" {
+		prev := m.leafID
 		e.ParentID = &prev
 	}
 	m.entries = append(m.entries, e)
+	m.leafID = e.ID
 	if err := m.persistEntry(e); err != nil {
 		return nil, err
 	}

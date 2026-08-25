@@ -236,3 +236,154 @@ func TestLoopContextCancellation(t *testing.T) {
 		t.Fatal("expected at least one event before cancellation")
 	}
 }
+
+func TestLoopReplaysToolResultsWithIDs(t *testing.T) {
+	var second []ai.Message
+	var i int32
+	provider := func(ctx context.Context, req ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		n := int(atomic.AddInt32(&i, 1))
+		if n == 2 {
+			second = append([]ai.Message(nil), req.Messages...)
+		}
+		if n == 1 {
+			return ai.EmitMessage(ctx, toolCallMessage("tu_1", "read", map[string]any{"path": "README.md"})), nil
+		}
+		return ai.EmitMessage(ctx, textMessage("done")), nil
+	}
+	exec := ToolFunc(func(_ context.Context, _ ToolCall) (string, bool) { return "file body", false })
+	Run(context.Background(), provider, ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: "read it"}}}, exec, Config{Model: "test"}).Collect()
+
+	if len(second) < 3 {
+		t.Fatalf("second-turn messages = %d, want >= 3 (user, assistant, toolResult)", len(second))
+	}
+	var asst, tool ai.Message
+	for _, m := range second {
+		if m.Assistant != nil {
+			asst = m
+		}
+		if m.Role == ai.RoleToolResult {
+			tool = m
+		}
+	}
+	if asst.Assistant == nil || len(asst.Assistant.ToolCalls()) != 1 || asst.Assistant.ToolCalls()[0].ToolID != "tu_1" {
+		t.Fatalf("assistant replay missing tool call id: %+v", asst.Assistant)
+	}
+	if tool.ToolCallID != "tu_1" || tool.Content != "file body" {
+		t.Fatalf("toolResult = role=%s id=%s content=%q", tool.Role, tool.ToolCallID, tool.Content)
+	}
+	wire := ai.AnthropicWireMessages(second)
+	found := false
+	for _, w := range wire {
+		blocks, _ := w["content"].([]map[string]any)
+		for _, b := range blocks {
+			if b["type"] == "tool_result" && b["tool_use_id"] == "tu_1" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("Anthropic wire form lost tool_use_id pairing: %#v", wire)
+	}
+}
+
+func TestLoopSeedsAssistantToolBlocksOnNewRun(t *testing.T) {
+	exec := ToolFunc(func(_ context.Context, _ ToolCall) (string, bool) { return "file body", false })
+	first := Run(context.Background(), scriptedProvider(
+		toolCallMessage("tu_seed", "read", map[string]any{"path": "README.md"}),
+		textMessage("done"),
+	), ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: "read it"}}}, exec, Config{Model: "test"}).Collect()
+	var transcript []Msg
+	for _, ev := range first {
+		if ev.Type == EventAgentEnd {
+			transcript = ev.Messages
+		}
+	}
+	seed := MessagesFromTranscript(transcript)
+
+	var seen []ai.Message
+	var n int32
+	provider := func(ctx context.Context, req ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		if atomic.AddInt32(&n, 1) == 1 {
+			seen = append([]ai.Message(nil), req.Messages...)
+		}
+		return ai.EmitMessage(ctx, textMessage("ok")), nil
+	}
+	next := append(seed, ai.Message{Role: ai.RoleUser, Content: "continue"})
+	Run(context.Background(), provider, ai.Context{Messages: next}, exec, Config{Model: "test"}).Collect()
+
+	var asst, tool ai.Message
+	for _, m := range seen {
+		if m.Assistant != nil && len(m.Assistant.ToolCalls()) > 0 {
+			asst = m
+		}
+		if m.Role == ai.RoleToolResult {
+			tool = m
+		}
+	}
+	if asst.Assistant == nil || len(asst.Assistant.ToolCalls()) != 1 || asst.Assistant.ToolCalls()[0].ToolID != "tu_seed" {
+		t.Fatalf("seeded assistant lost tool call: %+v", asst.Assistant)
+	}
+	if tool.ToolCallID != "tu_seed" {
+		t.Fatalf("seeded toolResult id = %q", tool.ToolCallID)
+	}
+}
+
+func TestLoopLengthStopDoesNotExecuteTools(t *testing.T) {
+	called := int32(0)
+	exec := ToolFunc(func(_ context.Context, _ ToolCall) (string, bool) {
+		atomic.AddInt32(&called, 1)
+		return "should not run", false
+	})
+	truncated := &ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		StopReason: ai.StopLength,
+		Content:    []*ai.Content{{Type: ai.KindToolCall, ToolID: "tu_x", ToolName: "bash", Arguments: map[string]any{"command": "rm -rf /"}}},
+	}
+	events := Run(context.Background(), scriptedProvider(truncated, textMessage("recovered")), ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: "go"}}}, exec, Config{Model: "test"}).Collect()
+	if atomic.LoadInt32(&called) != 0 {
+		t.Fatal("truncated tool call was executed")
+	}
+	var sawErr bool
+	for _, ev := range events {
+		if ev.Type == EventToolEnd && ev.IsError {
+			sawErr = true
+		}
+	}
+	if !sawErr {
+		t.Fatal("expected error tool_end for truncated call")
+	}
+}
+
+func TestLoopInjectsSteeringBeforeNextLLMCall(t *testing.T) {
+	var mu sync.Mutex
+	var second []ai.Message
+	var n int32
+	provider := func(ctx context.Context, req ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		i := atomic.AddInt32(&n, 1)
+		if i == 2 {
+			mu.Lock()
+			second = append([]ai.Message(nil), req.Messages...)
+			mu.Unlock()
+			return ai.EmitMessage(ctx, textMessage("after steer")), nil
+		}
+		return ai.EmitMessage(ctx, toolCallMessage("t1", "read", map[string]any{"path": "x"})), nil
+	}
+	exec := ToolFunc(func(_ context.Context, _ ToolCall) (string, bool) { return "ok", false })
+	steered := int32(0)
+	cfg := Config{Model: "test", Steering: func() []ai.Message {
+		if atomic.AddInt32(&steered, 1) == 1 {
+			return nil // after first turn setup
+		}
+		return []ai.Message{{Role: ai.RoleUser, Content: "steer now"}}
+	}}
+	Run(context.Background(), provider, ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: "go"}}}, exec, cfg).Collect()
+	found := false
+	for _, m := range second {
+		if m.Role == ai.RoleUser && m.Content == "steer now" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("steering message missing from second LLM call: %+v", second)
+	}
+}

@@ -1,7 +1,7 @@
 //go:build tools
 
-// Package tools pins the planned dependency stack (see docs/migration-plan.md §2)
-// so the versions are locked in go.mod/go.sum before the corresponding code exists.
+// Package tools pins optional dependencies in go.mod/go.sum before they are
+// imported by production packages.
 //
 // It is never compiled into the binary: the "tools" build tag excludes it from
 // normal builds. It exists only so `go mod tidy` keeps these modules as direct
@@ -19,7 +19,7 @@ import (
 	_ "github.com/openai/openai-go"
 	_ "google.golang.org/genai"
 
-	// sqlite — used by the optional session backend (Phase 7)
+	// sqlite — optional session backend (not wired yet)
 	_ "modernc.org/sqlite"
 	// bubbletea/bubbles/lipgloss/glamour, cobra/viper, glob/jsonschema/go-diff
 	// are now imported for real by the internal packages.

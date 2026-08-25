@@ -13,8 +13,8 @@ import (
 
 const grepDefaultLimit = 100
 
-// grepTool searches file contents for a pattern. Ports pi's grep.ts (without the
-// .gitignore integration, which is deferred per the migration plan).
+// grepTool searches file contents for a pattern. Ports pi's grep.ts (without
+// .gitignore integration).
 type grepTool struct{}
 
 type grepParams struct {

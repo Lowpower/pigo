@@ -8,6 +8,5 @@
 // exactly like built-in tools.
 //
 // Reimagines pi's core/extensions as out-of-process RPC (Go cannot hot-load code
-// the way pi's in-process jiti loader does). Deliberately out of scope for v1:
-// custom self-drawn UI widgets (ctx.ui.custom).
+// the way pi's in-process jiti loader does).
 package ext

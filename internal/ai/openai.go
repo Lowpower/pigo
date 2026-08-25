@@ -83,13 +83,7 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 	if reqCtx.System != "" {
 		msgs = append(msgs, map[string]any{"role": "system", "content": reqCtx.System})
 	}
-	for _, m := range reqCtx.Messages {
-		role := m.Role
-		if role == "tool" || role == roleToolResult {
-			role = "user" // simplified: tool results replayed as user text
-		}
-		msgs = append(msgs, map[string]any{"role": role, "content": m.Content})
-	}
+	msgs = append(msgs, OpenAIWireMessages(reqCtx.Messages)...)
 
 	req := map[string]any{
 		"model":          opts.Model,
@@ -112,8 +106,6 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 	}
 	return json.Marshal(req)
 }
-
-const roleToolResult = "toolResult"
 
 type oaiChunk struct {
 	Choices []struct {

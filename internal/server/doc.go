@@ -1,4 +1,3 @@
-// Package server implements the headless server/RPC mode.
-//
-// Port of pi's packages/server + client. Deferred to Phase 7.
+// Package server is reserved for a dedicated headless HTTP server.
+// Interactive, print, json, and rpc modes currently live in cmd/pi + internal/runtime.
 package server
