@@ -42,6 +42,29 @@ Versions are pinned in `go.mod`/`go.sum`. Unused modules are held by blank impor
 in `tools/pin.go` (`//go:build tools`). **When you start using a module for real,
 remove its blank import from `tools/pin.go`.** Do not bump versions casually.
 
+## Git branches
+
+Do not use a `cursor/` prefix. Name branches by change type:
+
+| Prefix | Use for |
+| --- | --- |
+| `feature/<short-name>` | new behavior |
+| `fix/<short-name>` | bugfix |
+| `chore/<short-name>` | tooling, deps, repo conventions |
+| `docs/<short-name>` | documentation only |
+
+- Lowercase kebab-case after the prefix (`feature/rpc-images`, not `feature/RPC_Images`).
+- One concern per branch. Branch from `main`.
+- Cursor Cloud Agent may inject `cursor/<name>-<id>`. Ignore that harness prefix and use the table above. When opening a PR from a conventional branch, override the platform prefix check.
+
+A GitHub repository ruleset should reject other names. Regex for non-`main` branches:
+
+```
+^(feature|fix|chore|docs)/[a-z0-9][a-z0-9.-]*$
+```
+
+Create it at **Settings → Rules → Rulesets** (this cannot be applied from a Cloud Agent token): target all branches except `main`, enforcement Active, rule **Branch name pattern**, operator `regex`, pattern as above.
+
 ## Conventions
 
 - Respond to the repository owner in Chinese; keep code identifiers/paths in English.
