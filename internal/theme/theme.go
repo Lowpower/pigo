@@ -24,7 +24,7 @@ var builtins = []Theme{
 	{Name: "light", User: "22", Assistant: "235", Tool: "130", Error: "160", Muted: "240", Accent: "162"},
 }
 
-// Load returns the named theme, searching agentDir/themes and cwd/.pi/themes.
+// Load returns the named theme, searching agentDir/themes and cwd/.pigo/themes.
 func Load(name, cwd, agentDir string) Theme {
 	if name == "" {
 		name = "dark"
@@ -37,7 +37,7 @@ func Load(name, cwd, agentDir string) Theme {
 			name = "dark"
 		}
 	}
-	for _, dir := range []string{filepath.Join(agentDir, "themes"), filepath.Join(cwd, ".pi", "themes")} {
+	for _, dir := range []string{filepath.Join(agentDir, "themes"), filepath.Join(cwd, ".pigo", "themes")} {
 		if t, ok := loadFile(filepath.Join(dir, name+".json")); ok {
 			return t
 		}
@@ -89,7 +89,7 @@ func Names(cwd, agentDir string) []string {
 	for _, t := range builtins {
 		add(t.Name)
 	}
-	for _, dir := range []string{filepath.Join(agentDir, "themes"), filepath.Join(cwd, ".pi", "themes")} {
+	for _, dir := range []string{filepath.Join(agentDir, "themes"), filepath.Join(cwd, ".pigo", "themes")} {
 		ents, err := os.ReadDir(dir)
 		if err != nil {
 			continue

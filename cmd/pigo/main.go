@@ -69,7 +69,7 @@ func newRootCmd() *cobra.Command {
 	var f cliFlags
 
 	cmd := &cobra.Command{
-		Use:          "pi [prompt...]",
+		Use:          "pigo [prompt...]",
 		Short:        "pigo — a coding agent",
 		SilenceUsage: true,
 		Args:         cobra.ArbitraryArgs,
@@ -81,7 +81,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&f.print, "print", "p", false, "run non-interactively")
 	cmd.Flags().StringVar(&f.mode, "mode", "", "output mode: text|json|rpc (default: interactive TTY, else text)")
 	cmd.Flags().StringVar(&f.prompt, "prompt", "", "prompt text (alias of positional args)")
-	cmd.Flags().StringVar(&f.configDir, "config-dir", "", "agent dir (default ~/.pi/agent; env PI_CODING_AGENT_DIR)")
+	cmd.Flags().StringVar(&f.configDir, "config-dir", "", "agent dir (default ~/.pigo/agent; env PIGO_CODING_AGENT_DIR)")
 	cmd.Flags().BoolVarP(&f.continueSession, "continue", "c", false, "continue the most recent session in this directory")
 	cmd.Flags().BoolVarP(&f.resume, "resume", "r", false, "resume a session (most recent if --session omitted)")
 	cmd.Flags().StringVar(&f.sessionPath, "session", "", "session file path or id")
@@ -102,7 +102,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name")
 	cmd.Flags().BoolVar(&f.listModels, "list-models", false, "list known models and exit")
 	cmd.Flags().StringVar(&f.listModelsQuery, "list-models-query", "", "filter --list-models")
-	cmd.Flags().BoolVar(&f.offline, "offline", false, "skip network at startup (sets PI_OFFLINE=1)")
+	cmd.Flags().BoolVar(&f.offline, "offline", false, "skip network at startup (sets PIGO_OFFLINE=1)")
 	cmd.Flags().StringVar(&f.export, "export", "", "export a session JSONL to HTML and exit")
 	cmd.Flags().StringVar(&f.fork, "fork", "", "fork session file or id into a new session")
 	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "resume session by id prefix")
@@ -124,7 +124,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		return nil
 	}
 	if f.offline {
-		_ = os.Setenv("PI_OFFLINE", "1")
+		_ = os.Setenv("PIGO_OFFLINE", "1")
 	}
 	agentDir := f.configDir
 	if agentDir == "" {

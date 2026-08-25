@@ -54,13 +54,13 @@ type Manager struct {
 	leafID   string
 }
 
-// DefaultAgentDir returns the config root: ~/.pi/agent (override-free).
+// DefaultAgentDir returns the config root: ~/.pigo/agent (override-free).
 func DefaultAgentDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".pi", "agent")
+		return filepath.Join(".pigo", "agent")
 	}
-	return filepath.Join(home, ".pi", "agent")
+	return filepath.Join(home, ".pigo", "agent")
 }
 
 // New starts a session for cwd, storing files under agentDir/sessions/--<cwd>--/.

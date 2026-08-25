@@ -23,7 +23,7 @@ func Discover(cwd, agentDir string, extra []string, includeDefaults bool) ([]Ski
 	if includeDefaults {
 		dirs = append(dirs,
 			dirSrc{filepath.Join(agentDir, "skills"), "user"},
-			dirSrc{filepath.Join(cwd, ".pi", "skills"), "project"},
+			dirSrc{filepath.Join(cwd, ".pigo", "skills"), "project"},
 		)
 	}
 	for _, p := range extra {

@@ -86,7 +86,7 @@ func loadContextFiles(cwd string) string {
 	var chunks []string
 	dir := cwd
 	for i := 0; i < 12; i++ {
-		for _, name := range []string{"AGENTS.md", "CLAUDE.md", filepath.Join(".pi", "AGENTS.md")} {
+		for _, name := range []string{"AGENTS.md", "CLAUDE.md", filepath.Join(".pigo", "AGENTS.md")} {
 			p := filepath.Join(dir, name)
 			b, err := os.ReadFile(p)
 			if err != nil {

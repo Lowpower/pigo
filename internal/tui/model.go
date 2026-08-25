@@ -477,7 +477,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		return note("session name = " + m.engine.Opts.Session.Name())
 	case "login":
-		return note("OAuth login is not available in pigo; run: pi auth login <provider>")
+		return note("OAuth login is not available in pigo; run: pigo auth login <provider>")
 	case "logout":
 		prov := cmd.Rest
 		if prov == "" {

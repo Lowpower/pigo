@@ -26,9 +26,9 @@ go mod download
 
 ```bash
 go build ./...                 # build everything
-go run ./cmd/pi --version      # print version
-go run ./cmd/pi --help         # usage
-go run ./cmd/pi -p "hello"     # single non-interactive prompt (print mode)
+go run ./cmd/pigo --version      # print version
+go run ./cmd/pigo --help         # usage
+go run ./cmd/pigo -p "hello"     # single non-interactive prompt (print mode)
 go test ./...                  # run tests
 golangci-lint run              # lint
 ```
@@ -55,14 +55,14 @@ golangci-lint run              # lint
 
 Positional `@file` arguments are inlined as `<file name="...">` blocks (text only).
 
-Configuration is read from `~/.pi/agent/settings.json` (override with
-`PI_CODING_AGENT_DIR`) and can also be overridden with `PIGO_`-prefixed environment
+Configuration is read from `~/.pigo/agent/settings.json` (override with
+`PIGO_CODING_AGENT_DIR`) and can also be overridden with `PIGO_`-prefixed environment
 variables.
 
 ## Layout
 
 ```
-cmd/pi/            # entrypoint (cobra)
+cmd/pigo/          # entrypoint (cobra)
 internal/
 ├── ai/            # StreamFn + provider adapters
 ├── agent/         # agent loop, tool scheduling, cancellation
@@ -79,5 +79,5 @@ internal/
 ├── ext/           # extension system (subprocess RPC)
 ├── protocol/      # cross-process wire format
 ├── runtime/       # shared engine (print/json/rpc/TUI)
-└── config/        # settings.json (~/.pi/agent)
+└── config/        # settings.json (~/.pigo/agent)
 ```

@@ -26,8 +26,8 @@ go test ./...
 golangci-lint run ./...
 go build -tags tools ./...  # compile the full pinned dependency stack
 
-go run ./cmd/pi           # interactive TUI (needs a TTY)
-go run ./cmd/pi -p "hi"   # single non-interactive prompt
+go run ./cmd/pigo           # interactive TUI (needs a TTY)
+go run ./cmd/pigo -p "hi"   # single non-interactive prompt
 ```
 
 ## Dependencies
@@ -63,4 +63,4 @@ Create it at **Settings → Rules → Rulesets** (this cannot be applied from a 
 
 - Respond to the repository owner in Chinese; keep code identifiers/paths in English.
 - Prefer simple solutions; do not add scope that was not requested.
-- Keep on-disk formats (session JSONL, `~/.pi/agent`) stable.
+- Keep on-disk formats (session JSONL, `~/.pigo/agent`) stable.
