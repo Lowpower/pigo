@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/models"
@@ -20,12 +21,13 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 	dec := json.NewDecoder(in)
 	enc := json.NewEncoder(out)
 	var (
-		encMu   sync.Mutex
-		stateMu sync.Mutex
-		wg      sync.WaitGroup
-		history = e.History()
-		cancel  context.CancelFunc
-		running bool
+		encMu       sync.Mutex
+		stateMu     sync.Mutex
+		wg          sync.WaitGroup
+		history     = e.History()
+		cancel      context.CancelFunc
+		running     bool
+		bashCancels []context.CancelFunc
 	)
 	emit := func(v any) {
 		encMu.Lock()
@@ -223,8 +225,48 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			reply(id, "set_auto_compaction", true, nil, "")
 		case "bash":
 			cmdStr, _ := raw["command"].(string)
-			result, isErr := e.Tools.Execute(ctx, "bash", map[string]any{"command": cmdStr})
-			reply(id, "bash", !isErr, map[string]any{"output": result, "isError": isErr}, "")
+			exclude, _ := raw["excludeFromContext"].(bool)
+			bctx, bcancel := context.WithCancel(ctx)
+			stateMu.Lock()
+			bashCancels = append(bashCancels, bcancel)
+			stateMu.Unlock()
+			wg.Add(1)
+			go func(id any, cmdStr string, exclude bool, bctx context.Context, bcancel context.CancelFunc) {
+				defer wg.Done()
+				defer bcancel()
+				result := executeRPCBash(bctx, e.Opts.Cwd, cmdStr, func(delta string) {
+					emit(map[string]any{"type": "bash_execution_update", "id": id, "delta": delta})
+				})
+				payload := map[string]any{
+					"role":      "bashExecution",
+					"command":   cmdStr,
+					"output":    result.Output,
+					"cancelled": result.Cancelled,
+					"truncated": result.Truncated,
+					"timestamp": time.Now().UnixMilli(),
+				}
+				if result.ExitCode != nil {
+					payload["exitCode"] = *result.ExitCode
+				}
+				if result.FullOutputPath != "" {
+					payload["fullOutputPath"] = result.FullOutputPath
+				}
+				if exclude {
+					payload["excludeFromContext"] = true
+				}
+				if e.Opts.Session != nil {
+					if entry, err := e.Opts.Session.AppendMessage("bashExecution", payload); err == nil && entry != nil {
+						emit(map[string]any{"type": "entry_appended", "entry": entry})
+					}
+				}
+				if !exclude {
+					text := session.BashContextText(cmdStr, result.Output, result.Cancelled, result.ExitCode, result.Truncated, result.FullOutputPath)
+					stateMu.Lock()
+					history = append(history, ai.Message{Role: ai.RoleUser, Content: text})
+					stateMu.Unlock()
+				}
+				reply(id, "bash", true, result.asData(), "")
+			}(id, cmdStr, exclude, bctx, bcancel)
 		case "get_messages":
 			stateMu.Lock()
 			hist := history
@@ -377,7 +419,15 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			nmsg := len(history)
 			stateMu.Unlock()
 			reply(id, "get_session_stats", true, map[string]any{"entries": n, "messages": nmsg}, "")
-		case "set_auto_retry", "abort_retry", "abort_bash":
+		case "abort_bash":
+			stateMu.Lock()
+			cancels := append([]context.CancelFunc(nil), bashCancels...)
+			stateMu.Unlock()
+			for _, c := range cancels {
+				c()
+			}
+			reply(id, "abort_bash", true, nil, "")
+		case "set_auto_retry", "abort_retry":
 			reply(id, typ, false, nil, "unsupported rpc command: "+typ)
 		default:
 			emit(map[string]any{"type": "error", "id": id, "message": "unsupported rpc command: " + typ})

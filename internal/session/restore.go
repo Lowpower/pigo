@@ -31,6 +31,25 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 			}
 			content, _ := payload["content"].(string)
 			out = append(out, ai.Message{Role: ai.RoleAssistant, Content: content})
+		case "bashExecution":
+			exclude, _ := payload["excludeFromContext"].(bool)
+			if exclude {
+				continue
+			}
+			command, _ := payload["command"].(string)
+			content, _ := payload["output"].(string)
+			cancelled, _ := payload["cancelled"].(bool)
+			truncated, _ := payload["truncated"].(bool)
+			fullPath, _ := payload["fullOutputPath"].(string)
+			var exitCode *int
+			switch v := payload["exitCode"].(type) {
+			case float64:
+				n := int(v)
+				exitCode = &n
+			case int:
+				exitCode = &v
+			}
+			out = append(out, ai.Message{Role: ai.RoleUser, Content: BashContextText(command, content, cancelled, exitCode, truncated, fullPath)})
 		case "toolResult", "tool":
 			content, _ := payload["content"].(string)
 			id, _ := payload["toolCallId"].(string)
