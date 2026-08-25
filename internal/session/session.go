@@ -11,10 +11,10 @@ import (
 	"time"
 )
 
-// CurrentVersion is the session file schema version (pi CURRENT_SESSION_VERSION).
+// CurrentVersion is the session file schema version.
 const CurrentVersion = 3
 
-// Header is the first line of a session file (pi SessionHeader).
+// Header is the first line of a session file.
 type Header struct {
 	Type          string `json:"type"` // always "session"
 	Version       int    `json:"version"`
@@ -25,8 +25,8 @@ type Header struct {
 	Name          string `json:"name,omitempty"`
 }
 
-// Entry is one line of a session file after the header (pi SessionEntryBase +
-// the message payload). parentId is null for the first entry, forming a tree.
+// Entry is one line of a session file after the header. parentId is null for
+// the first entry, forming a tree.
 type Entry struct {
 	Type      string          `json:"type"`
 	ID        string          `json:"id"`
@@ -38,10 +38,9 @@ type Entry struct {
 	role string
 }
 
-// Manager creates and appends to a single session file. It mirrors pi's
-// SessionManager persistence: entries are buffered until the first assistant
-// message exists, then the whole file is written and subsequent entries are
-// appended.
+// Manager creates and appends to a single session file. Entries are buffered
+// until the first assistant message exists, then the whole file is written and
+// subsequent entries are appended.
 type Manager struct {
 	agentDir string
 	cwd      string
@@ -55,7 +54,7 @@ type Manager struct {
 	leafID   string
 }
 
-// DefaultAgentDir returns pi's config root: ~/.pi/agent (override-free).
+// DefaultAgentDir returns the config root: ~/.pi/agent (override-free).
 func DefaultAgentDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -94,7 +93,7 @@ func (m *Manager) Name() string { return m.header.Name }
 
 func (m *Manager) SetName(name string) { m.header.Name = name }
 
-// LeafID is the current branch tip (pi SessionManager.getLeafId).
+// LeafID is the current branch tip.
 func (m *Manager) LeafID() string { return m.leafID }
 
 // Entries returns a copy of session entries (header excluded).
@@ -213,8 +212,8 @@ func Load(path string) (Header, []Entry, error) {
 	return header, entries, scanner.Err()
 }
 
-// sessionDir encodes cwd into a directory name under agentDir/sessions/, matching
-// pi's getDefaultSessionDirPath: strip a leading separator, then replace / \ : with -.
+// sessionDir encodes cwd into a directory name under agentDir/sessions/:
+// strip a leading separator, then replace / \ : with -.
 func sessionDir(agentDir, resolvedCwd string) string {
 	trimmed := strings.TrimLeft(resolvedCwd, `/\`)
 	safe := strings.NewReplacer("/", "-", `\`, "-", ":", "-").Replace(trimmed)
@@ -227,7 +226,7 @@ func isoNow() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 }
 
-// fileTimestamp replaces ':' and '.' with '-' (pi's fileTimestamp).
+// fileTimestamp replaces ':' and '.' with '-'.
 func fileTimestamp(ts string) string {
 	return strings.NewReplacer(":", "-", ".", "-").Replace(ts)
 }

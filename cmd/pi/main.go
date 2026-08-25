@@ -22,7 +22,7 @@ import (
 var version = "0.0.1-dev"
 
 func main() {
-	os.Args = append([]string{os.Args[0]}, expandPiAliases(os.Args[1:])...)
+	os.Args = append([]string{os.Args[0]}, expandShortFlags(os.Args[1:])...)
 	if err := newRootCmd().Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -70,7 +70,7 @@ func newRootCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:          "pi [prompt...]",
-		Short:        "pigo — a Go reimplementation of the pi coding agent",
+		Short:        "pigo — a coding agent",
 		SilenceUsage: true,
 		Args:         cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,7 +78,7 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&f.print, "print", "p", false, "run non-interactively (pi --print)")
+	cmd.Flags().BoolVarP(&f.print, "print", "p", false, "run non-interactively")
 	cmd.Flags().StringVar(&f.mode, "mode", "", "output mode: text|json|rpc (default: interactive TTY, else text)")
 	cmd.Flags().StringVar(&f.prompt, "prompt", "", "prompt text (alias of positional args)")
 	cmd.Flags().StringVar(&f.configDir, "config-dir", "", "agent dir (default ~/.pi/agent; env PI_CODING_AGENT_DIR)")
@@ -360,7 +360,7 @@ func newAuthCmd() *cobra.Command {
 	}
 	printKey := &cobra.Command{
 		Use:   "print-api-key",
-		Short: "print a stored API key (pi auth print-api-key)",
+		Short: "print a stored API key",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			provider, _ := cmd.Flags().GetString("provider")
 			model, _ := cmd.Flags().GetString("model")

@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestExpandPiAliases(t *testing.T) {
-	got := expandPiAliases([]string{"-nt", "-ns", "-nc", "-p", "hi", "--", "-nt"})
+func TestExpandShortFlags(t *testing.T) {
+	got := expandShortFlags([]string{"-nt", "-ns", "-nc", "-p", "hi", "--", "-nt"})
 	want := []string{"--no-tools", "--no-skills", "--no-context-files", "-p", "hi", "--", "-nt"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("got %v want %v", got, want)

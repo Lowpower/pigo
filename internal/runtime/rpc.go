@@ -12,7 +12,7 @@ import (
 	"github.com/Lowpower/pigo/internal/slash"
 )
 
-// ServeRPC is a JSONL stdin/stdout subset of pi --mode rpc.
+// ServeRPC is a JSONL stdin/stdout RPC mode.
 func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) error {
 	dec := json.NewDecoder(in)
 	enc := json.NewEncoder(out)

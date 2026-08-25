@@ -161,8 +161,8 @@ func (e *Engine) drainFollow() []ai.Message {
 	return drainQueue(&e.follow, e.Opts.Config.FollowUpMode)
 }
 
-// drainQueue matches pi PendingMessageQueue.drain: "all" empties the queue;
-// "one-at-a-time" (default) returns only the oldest message.
+// drainQueue: "all" empties the queue; "one-at-a-time" (default) returns only
+// the oldest message.
 func drainQueue(q *[]ai.Message, mode string) []ai.Message {
 	if q == nil || len(*q) == 0 {
 		return nil
@@ -235,7 +235,7 @@ func (e *Engine) Executor() agent.ToolExecutor {
 	})
 }
 
-// MaybeCompact runs compaction when the estimate exceeds the window (pi auto-compact).
+// MaybeCompact runs compaction when the estimate exceeds the window.
 func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Message, string, error) {
 	if !e.Opts.Config.CompactionEnabled() {
 		return msgs, "", nil
@@ -302,7 +302,7 @@ func (e *Engine) History() []ai.Message {
 	return msgs
 }
 
-// Reload rediscovers skills and rebuilds the system prompt (pi /reload).
+// Reload rediscovers skills and rebuilds the system prompt (/reload).
 func (e *Engine) Reload() {
 	if e.Opts.NoSkills {
 		e.Skills = nil
@@ -345,7 +345,7 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 	e.persisted = len(msgs)
 }
 
-// CycleModel steps through --models or the catalog (pi cycle_model / ctrl+p).
+// CycleModel steps through --models or the catalog (ctrl+p).
 func (e *Engine) CycleModel(backward bool) (models.Spec, bool) {
 	next, ok := models.Cycle(e.Opts.Config.ResolvedProvider(), e.Opts.Config.ResolvedModel(), e.Scoped, backward)
 	if !ok {
@@ -355,7 +355,7 @@ func (e *Engine) CycleModel(backward bool) (models.Spec, bool) {
 	return next, true
 }
 
-// CycleThinking steps thinking levels (pi cycle_thinking_level / shift+tab).
+// CycleThinking steps thinking levels (shift+tab).
 func (e *Engine) CycleThinking() string {
 	next := models.NextThinkingLevel(e.Opts.Config.Thinking)
 	e.Opts.Config.Thinking = next
@@ -378,7 +378,7 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 	}
 }
 
-// PrintText streams a prompt to out as plain text (pi --mode text / --print).
+// PrintText streams a prompt to out as plain text (--mode text / --print).
 func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
 	stream := e.RunPrompt(ctx, history, user)
 	var last []agent.Msg
@@ -399,7 +399,7 @@ func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Mess
 	return nil
 }
 
-// PrintJSON writes NDJSON agent events (pi --mode json).
+// PrintJSON writes NDJSON agent events (--mode json).
 func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
 	stream := e.RunPrompt(ctx, history, user)
 	enc := json.NewEncoder(out)

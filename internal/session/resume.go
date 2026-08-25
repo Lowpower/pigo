@@ -38,7 +38,7 @@ func Open(path string) (*Manager, error) {
 }
 
 // ContinueRecent opens the most recently modified session for cwd, or starts a
-// new one if none exist (pi --continue).
+// new one if none exist (--continue).
 func ContinueRecent(cwd, agentDir string) (*Manager, error) {
 	paths, err := listSessionFiles(cwd, agentDir)
 	if err != nil {
@@ -92,8 +92,8 @@ func listSessionFiles(cwd, agentDir string) ([]string, error) {
 	return out, nil
 }
 
-// Fork duplicates the current branch into a new session file (pi /clone:
-// createBranchedSession at the current leaf). parentSession is the source path.
+// Fork duplicates the current branch into a new session file (/clone:
+// CreateBranchedSession at the current leaf). parentSession is the source path.
 func (m *Manager) Fork(cwd, agentDir string) (*Manager, error) {
 	leaf := m.leafID
 	if leaf == "" && len(m.entries) > 0 {
@@ -107,7 +107,7 @@ func (m *Manager) Fork(cwd, agentDir string) (*Manager, error) {
 	return m.CreateBranchedSession(leaf, cwd, agentDir)
 }
 
-// AppendCompaction records a compaction summary entry (pi session entry type).
+// AppendCompaction records a compaction summary entry.
 func (m *Manager) AppendCompaction(summary string) (*Entry, error) {
 	raw, err := json.Marshal(map[string]any{
 		"type":      "compaction",

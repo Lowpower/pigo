@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Idempotent Cloud Agent setup for pigo (a Go reimplementation of the pi coding agent).
-# Installs the Go 1.27 toolchain and golangci-lint, clones the read-only pi reference
-# repo beside the project, then refreshes module deps and builds.
+# Idempotent Cloud Agent setup for pigo.
+# Installs the Go 1.27 toolchain and golangci-lint, then refreshes module deps and builds.
 set -euo pipefail
 
 GO_VERSION="1.27.0"
@@ -31,17 +30,6 @@ if ! command -v golangci-lint >/dev/null 2>&1; then
     | sudo sh -s -- -b /usr/local/bin
 fi
 echo "Using $(golangci-lint version 2>/dev/null || echo 'golangci-lint (version unavailable)')"
-
-# --- pi reference repo (read-only, kept beside the project, never imported) ---
-PI_REF_DIR="${HOME}/deps/pi"
-if [ ! -d "${PI_REF_DIR}/.git" ]; then
-  echo "Cloning pi reference repo into ${PI_REF_DIR}..."
-  mkdir -p "$(dirname "${PI_REF_DIR}")"
-  git clone --depth 1 https://github.com/earendil-works/pi.git "${PI_REF_DIR}" \
-    || echo "warning: could not clone pi reference repo (continuing without it)"
-else
-  echo "pi reference repo already present at ${PI_REF_DIR}"
-fi
 
 # --- project dependencies & build ---
 go mod download

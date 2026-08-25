@@ -10,7 +10,7 @@ import (
 	"github.com/Lowpower/pigo/internal/skills"
 )
 
-// Options controls system prompt construction (pi core/system-prompt.ts).
+// Options controls system prompt construction.
 type Options struct {
 	Cwd              string
 	Custom           string
@@ -27,7 +27,7 @@ func Build(opts Options) string {
 	if opts.Custom != "" {
 		b.WriteString(opts.Custom)
 	} else {
-		b.WriteString("You are an expert coding assistant in pigo, a Go reimplementation of the pi coding agent.\n")
+		b.WriteString("You are an expert coding assistant in pigo.\n")
 		b.WriteString("Be concise. Prefer editing existing files over writing new ones. Use tools to inspect the repo before proposing changes.\n")
 		if opts.IncludeToolHints && len(opts.Tools) > 0 {
 			b.WriteString("\nAvailable tools:\n")

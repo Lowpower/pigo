@@ -8,9 +8,8 @@ import (
 	"strings"
 )
 
-// ExportHTML writes a self-contained HTML dump of the session (pi --export /
-// /export when the path ends in .html). It does not yet use pi's themed
-// export-html template/CSS/JS.
+// ExportHTML writes a self-contained HTML dump of the session (--export /
+// /export when the path ends in .html).
 func ExportHTML(m *Manager, outputPath string) (string, error) {
 	if m == nil {
 		return "", os.ErrInvalid

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Theme is a named colour set for the TUI (pi modes/interactive/theme).
+// Theme is a named colour set for the TUI.
 type Theme struct {
 	Name      string `json:"name"`
 	User      string `json:"user"`

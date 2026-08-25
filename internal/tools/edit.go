@@ -10,9 +10,9 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
-// editTool performs exact-text replacements in a file. Ports pi's edit.ts: each
-// edit's oldText must match a unique, non-overlapping region of the original
-// file, and all edits are applied against the original (not incrementally).
+// editTool performs exact-text replacements in a file: each edit's oldText must
+// match a unique, non-overlapping region of the original file, and all edits are
+// applied against the original (not incrementally).
 type editTool struct{}
 
 type editReplace struct {

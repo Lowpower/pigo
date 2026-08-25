@@ -1,10 +1,9 @@
 package ai
 
-// EventType enumerates the AssistantMessageEvent variants (pi types.ts ~L535).
-// Names are snake_case to match pi exactly.
+// EventType enumerates the AssistantMessageEvent variants.
 type EventType string
 
-// AssistantMessageEvent variant tags (pi types.ts ~L535).
+// AssistantMessageEvent variant tags.
 const (
 	EventStart         EventType = "start"
 	EventTextStart     EventType = "text_start"
@@ -22,7 +21,7 @@ const (
 
 // Event is a single streamed AssistantMessageEvent. It is a flat tagged union:
 // Type selects which fields are meaningful. Every partial-carrying event includes
-// ContentIndex and Partial (a pointer to the evolving message, as in pi).
+// ContentIndex and Partial (a pointer to the evolving message).
 type Event struct {
 	Type EventType
 

@@ -9,7 +9,7 @@ import (
 
 const readDefaultMaxLines = 2000
 
-// readTool returns the contents of a text file. Ports pi's read.ts (text path).
+// readTool returns the contents of a text file.
 type readTool struct{}
 
 type readParams struct {

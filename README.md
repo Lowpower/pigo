@@ -1,12 +1,8 @@
 # pigo
 
-A Go reimplementation of the [pi](https://github.com/earendil-works/pi) coding agent
-(agent loop, streaming LLM, built-in tools, TUI, session persistence, extensions).
-
-**pi’s source is the behaviour reference.** pi keeps evolving; when adding or
-changing a feature, read the corresponding files under `~/deps/pi` (or a fresh
-clone of earendil-works/pi) and match that behaviour. Remaining work is tracked
-as GitHub issues, not a phased migration plan.
+A CLI/TUI coding agent written in Go (agent loop, streaming LLM, built-in tools,
+TUI, session persistence, extensions). Remaining work is tracked as GitHub
+issues, not a phased migration plan.
 
 ## Requirements
 
@@ -15,8 +11,8 @@ as GitHub issues, not a phased migration plan.
 ## Toolchain
 
 The Cloud Agent environment installs everything via
-[`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain, `golangci-lint`,
-and a read-only clone of pi at `~/deps/pi`.
+[`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain and
+`golangci-lint`.
 
 To set up locally:
 
@@ -36,7 +32,7 @@ go test ./...                  # run tests
 golangci-lint run              # lint
 ```
 
-### Flags (aligned with pi `cli/args.ts`)
+### Flags
 
 | Flag | Description |
 | --- | --- |
@@ -65,7 +61,7 @@ variables.
 ## Layout
 
 ```
-cmd/pi/            # entrypoint (cobra), flags aligned with pi
+cmd/pi/            # entrypoint (cobra)
 internal/
 ├── ai/            # StreamFn + provider adapters
 ├── agent/         # agent loop, tool scheduling, cancellation
@@ -84,8 +80,3 @@ internal/
 ├── runtime/       # shared engine (print/json/rpc/TUI)
 └── config/        # settings.json (~/.pi/agent)
 ```
-
-## Reference
-
-The original TypeScript implementation is cloned read-only to `~/deps/pi` in the
-Cloud Agent environment. It is a reference only and is never imported by `pigo`.

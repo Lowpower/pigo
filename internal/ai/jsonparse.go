@@ -6,9 +6,8 @@ import (
 	"strings"
 )
 
-// This file ports pi's packages/ai/src/utils/json-parse.ts. It is used to parse
-// the (possibly incomplete) JSON that arrives as streamed tool-call argument
-// deltas, always yielding a valid object.
+// This file parses the (possibly incomplete) JSON that arrives as streamed
+// tool-call argument deltas, always yielding a valid object.
 
 var validJSONEscapes = map[byte]bool{
 	'"': true, '\\': true, '/': true, 'b': true, 'f': true,
@@ -35,7 +34,7 @@ func escapeControlChar(c byte) string {
 }
 
 // repairJSON escapes raw control characters inside strings and doubles
-// backslashes before invalid escape characters (direct port of repairJson).
+// backslashes before invalid escape characters.
 func repairJSON(s string) string {
 	var b strings.Builder
 	inString := false
@@ -107,7 +106,7 @@ func isHex4(s string) bool {
 }
 
 // parseJSONWithRepair parses json, retrying once with control-character/escape
-// repair on failure (port of parseJsonWithRepair).
+// repair on failure.
 func parseJSONWithRepair(s string, out any) error {
 	if err := json.Unmarshal([]byte(s), out); err == nil {
 		return nil
@@ -120,10 +119,10 @@ func parseJSONWithRepair(s string, out any) error {
 }
 
 // parseStreamingJSON parses potentially-incomplete streamed JSON, always
-// returning a valid object (empty on total failure). Port of parseStreamingJson;
-// Go has no partial-json dependency, so completion of open strings/containers is
-// implemented here (completePartialJSON) with a trailing-token trim so a value
-// like {"path":"src/fo is completed to {"path":"src/fo"}.
+// returning a valid object (empty on total failure). Completion of open
+// strings/containers is implemented here (completePartialJSON) with a
+// trailing-token trim so a value like {"path":"src/fo is completed to
+// {"path":"src/fo"}.
 func parseStreamingJSON(partial string) map[string]any {
 	if strings.TrimSpace(partial) == "" {
 		return map[string]any{}

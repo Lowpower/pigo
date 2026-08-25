@@ -7,7 +7,7 @@ import (
 	"io"
 )
 
-// MaxFrameLen is the maximum size of one framed payload (pi DEFAULT_MAX_FRAME_LENGTH).
+// MaxFrameLen is the maximum size of one framed payload.
 const MaxFrameLen = 16 * 1024 * 1024
 
 // Message type tags for the extension RPC (handshake, registration, tool

@@ -10,8 +10,7 @@ import (
 
 const findDefaultLimit = 1000
 
-// findTool searches for files by glob pattern. Ports pi's find.ts (without
-// .gitignore integration).
+// findTool searches for files by glob pattern (without .gitignore integration).
 type findTool struct{}
 
 type findParams struct {

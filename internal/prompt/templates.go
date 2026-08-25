@@ -10,8 +10,7 @@ import (
 	"github.com/Lowpower/pigo/internal/skills"
 )
 
-// Template is a markdown prompt template loaded as a slash command
-// (pi core/prompt-templates.ts).
+// Template is a markdown prompt template loaded as a slash command.
 type Template struct {
 	Name         string
 	Description  string
@@ -140,7 +139,7 @@ func ParseCommandArgs(s string) []string {
 
 var substRe = regexp.MustCompile(`\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)`)
 
-// SubstituteArgs expands $1 / $@ / ${1:-default} / ${@:N} / ${@:N:L} (pi substituteArgs).
+// SubstituteArgs expands $1 / $@ / ${1:-default} / ${@:N} / ${@:N:L}.
 func SubstituteArgs(content string, args []string) string {
 	all := strings.Join(args, " ")
 	return substRe.ReplaceAllStringFunc(content, func(match string) string {
