@@ -16,6 +16,7 @@ import (
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/session"
+	"github.com/Lowpower/pigo/internal/trust"
 	"github.com/Lowpower/pigo/internal/tui"
 )
 
@@ -98,7 +99,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&f.tools, "tools", "t", "", "comma-separated tool allowlist")
 	cmd.Flags().StringVar(&f.excludeTools, "exclude-tools", "", "comma-separated tool denylist")
 	cmd.Flags().StringArrayVarP(&f.extension, "extension", "e", nil, "extension command to spawn (repeatable)")
-	cmd.Flags().BoolVar(&f.noExtensions, "no-extensions", false, "do not load extensions")
+	cmd.Flags().BoolVar(&f.noExtensions, "no-extensions", false, "skip extension auto-discovery (explicit -e still loads)")
 	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name")
 	cmd.Flags().BoolVar(&f.listModels, "list-models", false, "list known models and exit")
 	cmd.Flags().StringVar(&f.listModelsQuery, "list-models-query", "", "filter --list-models")
@@ -115,6 +116,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
 	cmd.AddCommand(newAuthCmd(), newConfigCmd())
+	addPackageCommands(cmd)
 	return cmd
 }
 
@@ -157,10 +159,6 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			_ = os.Setenv("ANTHROPIC_API_KEY", f.apiKey)
 		}
 	}
-	if f.noBuiltinTools {
-		f.noTools = true
-	}
-
 	if f.listModels {
 		q := f.listModelsQuery
 		if q == "" && len(args) > 0 {
@@ -254,8 +252,10 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 
 	exts := f.extension
-	if f.noExtensions {
-		exts = nil
+	trusted := false
+	if !f.noExtensions && !f.noTools {
+		st := trust.Open(agentDir)
+		trusted = trust.Resolve(st, cwd, nil)
 	}
 
 	eng, err := runtime.New(cmd.Context(), runtime.Options{
@@ -269,9 +269,12 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		NoSkills:       f.noSkills,
 		SkillPaths:     f.skills,
 		NoTools:        f.noTools,
+		NoBuiltinTools: f.noBuiltinTools,
 		ToolAllow:      splitCSV(f.tools),
 		ToolDeny:       splitCSV(f.excludeTools),
-		Extensions:     exts,
+		CLIExtensions:  exts,
+		NoExtensions:   f.noExtensions,
+		ProjectTrusted: trusted,
 		ContextWindow:  cfg.ContextWindow,
 		NoPromptTpls:   f.noPromptTpls,
 		PromptPaths:    f.promptTemplates,
