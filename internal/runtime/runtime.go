@@ -62,6 +62,8 @@ type Engine struct {
 	mu     sync.Mutex
 	steer  []ai.Message
 	follow []ai.Message
+
+	onSessionEvent func(any)
 }
 
 // New applies auth, discovers skills, loads tools/extensions, and builds the prompt.
@@ -129,6 +131,32 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	return e, nil
 }
 
+func (e *Engine) emitSession(v any) {
+	if e.onSessionEvent != nil {
+		e.onSessionEvent(v)
+	}
+}
+
+func (e *Engine) queueTexts() (steering, follow []string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	steering = make([]string, 0, len(e.steer))
+	for _, m := range e.steer {
+		steering = append(steering, m.Content)
+	}
+	follow = make([]string, 0, len(e.follow))
+	for _, m := range e.follow {
+		follow = append(follow, m.Content)
+	}
+	return steering, follow
+}
+
+func (e *Engine) emitQueueUpdate() {
+	s, f := e.queueTexts()
+	e.emitSession(map[string]any{"type": "queue_update", "steering": s, "followUp": f})
+}
+
+// PushSteer queues a user message for the in-flight turn (pi steer).
 func (e *Engine) PushSteer(text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -137,8 +165,10 @@ func (e *Engine) PushSteer(text string) {
 	e.mu.Lock()
 	e.steer = append(e.steer, ai.Message{Role: ai.RoleUser, Content: text})
 	e.mu.Unlock()
+	e.emitQueueUpdate()
 }
 
+// PushFollow queues a user message for after the current turn (pi followUp).
 func (e *Engine) PushFollow(text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -147,18 +177,27 @@ func (e *Engine) PushFollow(text string) {
 	e.mu.Lock()
 	e.follow = append(e.follow, ai.Message{Role: ai.RoleUser, Content: text})
 	e.mu.Unlock()
+	e.emitQueueUpdate()
 }
 
 func (e *Engine) drainSteer() []ai.Message {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	return drainQueue(&e.steer, e.Opts.Config.SteeringMode)
+	out := drainQueue(&e.steer, e.Opts.Config.SteeringMode)
+	e.mu.Unlock()
+	if len(out) > 0 {
+		e.emitQueueUpdate()
+	}
+	return out
 }
 
 func (e *Engine) drainFollow() []ai.Message {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	return drainQueue(&e.follow, e.Opts.Config.FollowUpMode)
+	out := drainQueue(&e.follow, e.Opts.Config.FollowUpMode)
+	e.mu.Unlock()
+	if len(out) > 0 {
+		e.emitQueueUpdate()
+	}
+	return out
 }
 
 // drainQueue matches pi PendingMessageQueue.drain: "all" empties the queue;
@@ -231,6 +270,9 @@ func (e *Engine) Close() {
 // Executor returns the tool executor for the agent loop.
 func (e *Engine) Executor() agent.ToolExecutor {
 	return agent.ToolFunc(func(ctx context.Context, c agent.ToolCall) (string, bool) {
+		if e.Tools == nil {
+			return "", true
+		}
 		return e.Tools.Execute(ctx, c.Name, c.Args)
 	})
 }
@@ -257,29 +299,45 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 	if !compaction.ShouldCompact(compaction.EstimateContextTokens(msgs), window, s) {
 		return msgs, "", nil
 	}
+	e.emitSession(map[string]any{"type": "compaction_start", "reason": "threshold"})
 	out, summary, err := compaction.Compact(ctx, e.Stream, e.Opts.Config.ResolvedModel(), msgs, s)
 	if err != nil {
+		e.emitSession(map[string]any{
+			"type": "compaction_end", "reason": "threshold",
+			"result": nil, "aborted": false, "willRetry": false, "errorMessage": err.Error(),
+		})
 		return msgs, "", err
 	}
 	if summary != "" && e.Opts.Session != nil {
-		_, _ = e.Opts.Session.AppendCompaction(summary)
+		if entry, err := e.Opts.Session.AppendCompaction(summary); err == nil && entry != nil {
+			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
+		}
 	}
+	e.emitSession(map[string]any{
+		"type": "compaction_end", "reason": "threshold",
+		"result": map[string]any{"summary": summary}, "aborted": false, "willRetry": false,
+	})
 	return out, summary, nil
 }
 
 // RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
 func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string) *agent.Stream {
-	history = append(append([]ai.Message(nil), history...), ai.Message{Role: ai.RoleUser, Content: user})
+	userMsg := ai.Message{Role: ai.RoleUser, Content: user}
+	history = append(append([]ai.Message(nil), history...), userMsg)
 	compacted, _, err := e.MaybeCompact(ctx, history)
 	if err == nil {
 		history = compacted
 	}
-	req := ai.Context{System: e.System, Messages: history, Tools: e.Tools.AITools()}
+	req := ai.Context{System: e.System, Messages: history}
+	if e.Tools != nil {
+		req.Tools = e.Tools.AITools()
+	}
 	return agent.Run(ctx, e.Stream, req, e.Executor(), agent.Config{
-		Model:    e.Opts.Config.ResolvedModel(),
-		Thinking: e.Opts.Config.Thinking,
-		Steering: e.Steering,
-		FollowUp: e.FollowUp,
+		Model:           e.Opts.Config.ResolvedModel(),
+		Thinking:        e.Opts.Config.Thinking,
+		Steering:        e.Steering,
+		FollowUp:        e.FollowUp,
+		NewUserMessages: []ai.Message{userMsg},
 	})
 }
 
@@ -330,16 +388,23 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 		e.persisted = 0
 	}
 	for _, msg := range msgs[e.persisted:] {
+		var (
+			entry *session.Entry
+			err   error
+		)
 		switch msg.Role {
 		case agent.RoleAssistant:
-			_, _ = e.Opts.Session.AppendMessage("assistant", msg.Assistant)
+			entry, err = e.Opts.Session.AppendMessage("assistant", msg.Assistant)
 		case agent.RoleToolResult:
-			_, _ = e.Opts.Session.AppendMessage("toolResult", map[string]any{
+			entry, err = e.Opts.Session.AppendMessage("toolResult", map[string]any{
 				"role": "toolResult", "toolName": msg.ToolName, "toolCallId": msg.ToolCallID,
 				"content": msg.Text, "isError": msg.IsError,
 			})
 		default:
-			_, _ = e.Opts.Session.AppendMessage("user", map[string]any{"role": "user", "content": msg.Text})
+			entry, err = e.Opts.Session.AppendMessage("user", map[string]any{"role": "user", "content": msg.Text})
+		}
+		if err == nil && entry != nil {
+			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 		}
 	}
 	e.persisted = len(msgs)
@@ -399,27 +464,26 @@ func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Mess
 	return nil
 }
 
-// PrintJSON writes NDJSON agent events (pi --mode json).
+// PrintJSON writes NDJSON agent events using pi's toJsonEvent shape.
 func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
-	stream := e.RunPrompt(ctx, history, user)
 	enc := json.NewEncoder(out)
+	write := e.onSessionEvent
+	if write == nil {
+		write = func(v any) { _ = enc.Encode(v) }
+	}
+	stream := e.RunPrompt(ctx, history, user)
 	var last []agent.Msg
 	for ev := range stream.Events() {
-		payload := map[string]any{"type": string(ev.Type)}
-		if ev.Assistant != nil {
-			payload["text"] = ev.Assistant.Text()
+		payload, err := agent.ToJSON(ev)
+		if err != nil {
+			return err
 		}
-		if ev.ToolName != "" {
-			payload["tool"] = ev.ToolName
-		}
-		if ev.Result != "" {
-			payload["result"] = ev.Result
-		}
+		write(payload)
 		if ev.Type == agent.EventAgentEnd {
 			last = ev.Messages
 		}
-		_ = enc.Encode(payload)
 	}
 	e.PersistTranscript(last)
+	write(map[string]any{"type": "agent_settled"})
 	return nil
 }

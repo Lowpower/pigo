@@ -47,6 +47,9 @@ type Config struct {
 	Steering func() []ai.Message
 	// FollowUp is polled when the model produced no tool calls (pi getFollowUpMessages).
 	FollowUp func() []ai.Message
+	// NewUserMessages are emitted as message_start/end after the first turn_start
+	// (pi agentLoop prompts). Historical context messages are not re-emitted.
+	NewUserMessages []ai.Message
 }
 
 // Run drives the agent loop and returns a stream of AgentEvents. The loop runs
@@ -83,15 +86,34 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 		return
 	}
 
+	firstTurn := true
 	for turn := 0; turn < cfg.MaxTurns; turn++ {
-		if len(pending) > 0 {
-			for _, m := range pending {
-				transcript = append(transcript, msgFromAI(m))
-			}
-			pending = nil
-		}
 		if !emit(Event{Type: EventTurnStart}) {
 			return
+		}
+		if firstTurn {
+			for _, m := range cfg.NewUserMessages {
+				msg := msgFromAI(m)
+				if !emit(Event{Type: EventMessageStart, Msg: &msg}) {
+					return
+				}
+				if !emit(Event{Type: EventMessageEnd, Msg: &msg}) {
+					return
+				}
+			}
+			firstTurn = false
+		}
+		if len(pending) > 0 {
+			for _, m := range pending {
+				msg := msgFromAI(m)
+				if !emit(Event{Type: EventMessageStart, Msg: &msg}) {
+					return
+				}
+				if !emit(Event{Type: EventMessageEnd, Msg: &msg}) {
+					return
+				}
+				transcript = append(transcript, msg)
+			}
 		}
 
 		aiCtx := ai.Context{System: reqCtx.System, Messages: toAIMessages(transcript), Tools: reqCtx.Tools}
@@ -121,6 +143,15 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 				return
 			}
 			transcript = append(transcript, toolResults...)
+			for i := range toolResults {
+				m := toolResults[i]
+				if !emit(Event{Type: EventMessageStart, Msg: &m}) {
+					return
+				}
+				if !emit(Event{Type: EventMessageEnd, Msg: &m}) {
+					return
+				}
+			}
 		}
 
 		if !emit(Event{Type: EventTurnEnd, Assistant: message, ToolResults: toolResults}) {

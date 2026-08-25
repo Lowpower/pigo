@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
@@ -89,6 +91,208 @@ func TestRPCSetModelAndPrompt(t *testing.T) {
 		t.Fatalf("missing ready event in %s", out.String())
 	}
 	_ = sawAgent
+}
+
+func decodeRPCRows(t *testing.T, raw string) []map[string]any {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(raw))
+	var rows []map[string]any
+	for {
+		var row map[string]any
+		if err := dec.Decode(&row); err != nil {
+			break
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func rpcRowsOfType(rows []map[string]any, typ string) []map[string]any {
+	var out []map[string]any
+	for _, r := range rows {
+		if r["type"] == typ {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func TestRPCPromptEventStreamMatchesJSONEvent(t *testing.T) {
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+
+	in := strings.NewReader(`{"type":"prompt","message":"hi"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	rows := decodeRPCRows(t, out.String())
+	if len(rpcRowsOfType(rows, "agent_settled")) != 1 {
+		t.Fatalf("missing agent_settled in %s", out.String())
+	}
+	ends := rpcRowsOfType(rows, "agent_end")
+	if len(ends) != 1 {
+		t.Fatalf("agent_end count = %d in %s", len(ends), out.String())
+	}
+	if ends[0]["willRetry"] != false {
+		t.Fatalf("willRetry = %v", ends[0]["willRetry"])
+	}
+	updates := rpcRowsOfType(rows, "message_update")
+	if len(updates) == 0 {
+		t.Fatalf("no message_update in %s", out.String())
+	}
+	for _, u := range updates {
+		if _, ok := u["text"]; ok {
+			t.Fatalf("message_update still has shortcut text: %v", u)
+		}
+		if _, ok := u["message"]; ok {
+			t.Fatalf("message_update still has cumulative message: %v", u)
+		}
+		if u["usage"] == nil || u["assistantMessageEvent"] == nil {
+			t.Fatalf("message_update missing usage/assistantMessageEvent: %v", u)
+		}
+	}
+	starts := rpcRowsOfType(rows, "message_start")
+	var sawUser bool
+	for _, s := range starts {
+		msg, _ := s["message"].(map[string]any)
+		if msg["role"] == "user" {
+			sawUser = true
+			if msg["content"] != "hi" {
+				t.Fatalf("user message = %v", msg)
+			}
+		}
+	}
+	if !sawUser {
+		t.Fatalf("missing user message_start in %s", out.String())
+	}
+}
+
+func TestRPCPromptWhileStreamingRequiresBehavior(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	e := &Engine{
+		Stream: func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return textReply("aborted")(ctx, req, opts)
+			}
+			return textReply("pong")(ctx, req, opts)
+		},
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+
+	pr, pw := io.Pipe()
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- e.ServeRPC(context.Background(), pr, &out) }()
+
+	enc := json.NewEncoder(pw)
+	if err := enc.Encode(map[string]any{"type": "prompt", "message": "first", "id": "p1"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider was not called")
+	}
+	if err := enc.Encode(map[string]any{"type": "prompt", "message": "second", "id": "p2"}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := enc.Encode(map[string]any{"type": "quit"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = pw.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeRPC did not return")
+	}
+
+	rows := decodeRPCRows(t, out.String())
+	var sawReject bool
+	for _, r := range rows {
+		if r["type"] == "response" && r["command"] == "prompt" && r["id"] == "p2" {
+			sawReject = true
+			if r["success"] != false {
+				t.Fatalf("second prompt success = %v, want false: %v", r["success"], r)
+			}
+			errStr, _ := r["error"].(string)
+			if !strings.Contains(errStr, "streamingBehavior") {
+				t.Fatalf("error = %q", errStr)
+			}
+		}
+	}
+	if !sawReject {
+		t.Fatalf("missing rejected second prompt in %s", out.String())
+	}
+}
+
+func TestRPCSteerEmitsQueueUpdate(t *testing.T) {
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+
+	in := strings.NewReader(`{"type":"steer","message":"nudge"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	rows := decodeRPCRows(t, out.String())
+	updates := rpcRowsOfType(rows, "queue_update")
+	if len(updates) == 0 {
+		t.Fatalf("missing queue_update in %s", out.String())
+	}
+	steering, _ := updates[0]["steering"].([]any)
+	if len(steering) != 1 || steering[0] != "nudge" {
+		t.Fatalf("steering = %v", updates[0]["steering"])
+	}
+}
+
+func TestRPCThinkingLevelEmitsChanged(t *testing.T) {
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Thinking: "off"}},
+	}
+	in := strings.NewReader(`{"type":"set_thinking_level","level":"low"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	rows := decodeRPCRows(t, out.String())
+	changed := rpcRowsOfType(rows, "thinking_level_changed")
+	if len(changed) != 1 || changed[0]["level"] != "low" {
+		t.Fatalf("thinking_level_changed = %v in %s", changed, out.String())
+	}
 }
 
 func TestDrainQueueOneAtATimeVsAll(t *testing.T) {
