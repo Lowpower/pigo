@@ -90,3 +90,91 @@ func TestRPCSetModelAndPrompt(t *testing.T) {
 	}
 	_ = sawAgent
 }
+
+func TestDrainQueueOneAtATimeVsAll(t *testing.T) {
+	q := []ai.Message{
+		{Role: ai.RoleUser, Content: "a"},
+		{Role: ai.RoleUser, Content: "b"},
+	}
+	got := drainQueue(&q, "one-at-a-time")
+	if len(got) != 1 || got[0].Content != "a" || len(q) != 1 || q[0].Content != "b" {
+		t.Fatalf("one-at-a-time got=%+v remain=%+v", got, q)
+	}
+	q = []ai.Message{
+		{Role: ai.RoleUser, Content: "a"},
+		{Role: ai.RoleUser, Content: "b"},
+	}
+	got = drainQueue(&q, "all")
+	if len(got) != 2 || q != nil && len(q) != 0 {
+		t.Fatalf("all got=%+v remain=%+v", got, q)
+	}
+	got = drainQueue(&q, "")
+	if got != nil {
+		t.Fatalf("empty = %+v", got)
+	}
+}
+
+func TestRPCGetTreeAndCycleThinking(t *testing.T) {
+	dir := t.TempDir()
+	cwd := t.TempDir()
+	sess := session.New(cwd, dir)
+	if _, err := sess.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"}); err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts: Options{
+			Config:   config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Thinking: "off"},
+			Session:  sess,
+			Cwd:      cwd,
+			AgentDir: dir,
+		},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	e.AdoptSession(sess)
+
+	in := strings.NewReader(`{"type":"get_tree"}
+{"type":"get_entries"}
+{"type":"cycle_thinking_level"}
+{"type":"cycle_model"}
+{"type":"get_fork_messages"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	if e.Opts.Config.Thinking != "minimal" {
+		t.Fatalf("thinking = %s want minimal", e.Opts.Config.Thinking)
+	}
+	s := out.String()
+	if !strings.Contains(s, `"command":"get_tree"`) || !strings.Contains(s, `"success":true`) {
+		t.Fatalf("missing get_tree response:\n%s", s)
+	}
+	if !strings.Contains(s, `"command":"get_entries"`) {
+		t.Fatalf("missing get_entries:\n%s", s)
+	}
+	if !strings.Contains(s, `"command":"get_fork_messages"`) {
+		t.Fatalf("missing get_fork_messages:\n%s", s)
+	}
+}
+
+func TestEnginePushSteerOneAtATime(t *testing.T) {
+	e := &Engine{Opts: Options{Config: config.Config{SteeringMode: "one-at-a-time"}}}
+	e.PushSteer("first")
+	e.PushSteer("second")
+	got := e.drainSteer()
+	if len(got) != 1 || got[0].Content != "first" {
+		t.Fatalf("%+v", got)
+	}
+	got = e.drainSteer()
+	if len(got) != 1 || got[0].Content != "second" {
+		t.Fatalf("%+v", got)
+	}
+}

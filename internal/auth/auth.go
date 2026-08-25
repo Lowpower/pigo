@@ -70,6 +70,34 @@ func Delete(agentDir, provider string) error {
 	return Save(agentDir, f)
 }
 
+// Get returns a stored credential for provider.
+func Get(agentDir, provider string) (Credential, bool) {
+	f, err := Load(agentDir)
+	if err != nil {
+		return Credential{}, false
+	}
+	c, ok := f.Providers[provider]
+	return c, ok
+}
+
+// APIKey returns a stored API key, falling back to the usual env vars.
+func APIKey(agentDir, provider string) string {
+	if c, ok := Get(agentDir, provider); ok && c.Key != "" {
+		return c.Key
+	}
+	switch provider {
+	case "openai":
+		return os.Getenv("OPENAI_API_KEY")
+	case "opencode":
+		return os.Getenv("OPENCODE_API_KEY")
+	default:
+		if k := os.Getenv("ANTHROPIC_API_KEY"); k != "" {
+			return k
+		}
+		return os.Getenv("ANTHROPIC_AUTH_TOKEN")
+	}
+}
+
 // ApplyEnv sets provider env vars from auth.json when they are not already set.
 func ApplyEnv(agentDir string) {
 	f, err := Load(agentDir)

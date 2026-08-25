@@ -17,7 +17,10 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/models"
+	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/runtime"
+	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/skills"
 	"github.com/Lowpower/pigo/internal/slash"
 	"github.com/Lowpower/pigo/internal/theme"
@@ -132,8 +135,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.quitting = true
 			return m, tea.Quit
+		case "ctrl+d":
+			if strings.TrimSpace(m.textarea.Value()) == "" {
+				m.quitting = true
+				return m, tea.Quit
+			}
+		case "esc", "escape":
+			if m.running && m.cancel != nil {
+				m.cancel()
+				return m, nil
+			}
 		case "enter":
 			return m.submit()
+		case "alt+enter":
+			return m.queueFollowUp()
+		case "ctrl+p":
+			return m.cycleModel(false)
+		case "ctrl+shift+p", "shift+ctrl+p":
+			return m.cycleModel(true)
+		case "shift+tab":
+			return m.cycleThinking()
 		}
 
 	case agentEventMsg:
@@ -157,6 +178,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	return m, cmd
+}
+
+func (m Model) queueFollowUp() (tea.Model, tea.Cmd) {
+	text := strings.TrimSpace(m.textarea.Value())
+	if text == "" {
+		return m, nil
+	}
+	m.textarea.Reset()
+	if !m.running {
+		return m.startTurn(text)
+	}
+	if m.engine != nil {
+		m.engine.PushFollow(text)
+	} else {
+		m.queued = append(m.queued, text)
+	}
+	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("follow-up: " + text)})
+	return m, nil
+}
+
+func (m Model) cycleModel(backward bool) (tea.Model, tea.Cmd) {
+	note := func(s string) (tea.Model, tea.Cmd) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		return m, nil
+	}
+	if m.engine == nil {
+		return note("no engine to cycle models")
+	}
+	next, ok := m.engine.CycleModel(backward)
+	if !ok {
+		return note("only one model available")
+	}
+	m.cfg = m.engine.Opts.Config
+	m.provider = m.engine.Provider
+	return note("model = " + next.Provider + "/" + next.ID)
+}
+
+func (m Model) cycleThinking() (tea.Model, tea.Cmd) {
+	if m.engine != nil {
+		level := m.engine.CycleThinking()
+		m.cfg = m.engine.Opts.Config
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("thinking = " + level)})
+		return m, nil
+	}
+	m.cfg.Thinking = models.NextThinkingLevel(m.cfg.Thinking)
+	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("thinking = " + m.cfg.Thinking)})
+	return m, nil
 }
 
 func (m Model) submit() (tea.Model, tea.Cmd) {
@@ -193,8 +261,10 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 	case "quit":
 		m.quitting = true
 		return m, tea.Quit
-	case "help", "hotkeys":
+	case "help":
 		return note(slash.HelpText())
+	case "hotkeys":
+		return note(slash.HotkeysText())
 	case "clear":
 		m.transcript = nil
 		return m, nil
@@ -205,14 +275,29 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		return note("no session (started with --no-session)")
 	case "model":
 		if cmd.Rest != "" {
-			m.cfg.Model = cmd.Rest
-			m.cfg.DefaultModel = cmd.Rest
+			prov, id, thinking := models.ParseSpec(cmd.Rest)
+			if m.engine != nil {
+				m.engine.ApplyModel(prov, id, thinking)
+				m.cfg = m.engine.Opts.Config
+				m.provider = m.engine.Provider
+			} else {
+				if prov != "" {
+					m.cfg.Provider, m.cfg.DefaultProvider = prov, prov
+				}
+				m.cfg.Model, m.cfg.DefaultModel = id, id
+				if thinking != "" {
+					m.cfg.Thinking = thinking
+				}
+			}
 		}
-		return note("model = " + m.cfg.ResolvedModel())
+		return note("model = " + m.cfg.ResolvedProvider() + "/" + m.cfg.ResolvedModel())
 	case "provider":
 		if cmd.Rest != "" {
 			m.cfg.Provider = cmd.Rest
 			m.cfg.DefaultProvider = cmd.Rest
+			if m.engine != nil {
+				m.engine.ApplyModel(cmd.Rest, "", "")
+			}
 		}
 		return note("provider = " + m.cfg.ResolvedProvider())
 	case "theme":
@@ -224,6 +309,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 	case "thinking":
 		if cmd.Rest != "" {
 			m.cfg.Thinking = cmd.Rest
+			if m.engine != nil {
+				m.engine.Opts.Config.Thinking = cmd.Rest
+			}
 		}
 		return note("thinking = " + m.cfg.Thinking)
 	case "tools":
@@ -248,7 +336,12 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 	case "new":
 		m.history = nil
 		m.transcript = nil
-		return note("started a new in-memory turn log (session file unchanged)")
+		if m.engine != nil {
+			cwd, _ := os.Getwd()
+			s := session.New(cwd, m.engine.Opts.AgentDir)
+			m.engine.AdoptSession(s)
+		}
+		return note("started a new session")
 	case "compact":
 		if m.engine == nil {
 			return note("compaction requires a runtime engine")
@@ -268,18 +361,113 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if m.engine == nil || m.engine.Opts.Session == nil {
 			return note("no session to export")
 		}
-		return note("session file: " + m.engine.Opts.Session.File())
+		dest := strings.TrimSpace(cmd.Rest)
+		if dest == "" || strings.HasSuffix(strings.ToLower(dest), ".html") {
+			path, err := session.ExportHTML(m.engine.Opts.Session, dest)
+			if err != nil {
+				return note("export error: " + err.Error())
+			}
+			return note("exported html: " + path)
+		}
+		b, err := os.ReadFile(m.engine.Opts.Session.File())
+		if err != nil {
+			return note("export error: " + err.Error())
+		}
+		if err := os.WriteFile(dest, b, 0o644); err != nil {
+			return note("export error: " + err.Error())
+		}
+		return note("exported jsonl: " + dest)
+	case "clone":
+		if m.engine == nil || m.engine.Opts.Session == nil {
+			return note("no session to clone")
+		}
+		cwd, _ := os.Getwd()
+		child, err := m.engine.Opts.Session.Fork(cwd, m.engine.Opts.AgentDir)
+		if err != nil {
+			return note("clone error: " + err.Error())
+		}
+		m.engine.AdoptSession(child)
+		m.history = m.engine.History()
+		return note("cloned session " + child.ID() + "\n" + child.File())
 	case "fork":
 		if m.engine == nil || m.engine.Opts.Session == nil {
 			return note("no session to fork")
 		}
 		cwd, _ := os.Getwd()
-		child, err := m.engine.Opts.Session.Fork(cwd, m.engine.Opts.AgentDir)
+		if cmd.Rest == "" {
+			msgs := m.engine.Opts.Session.UserMessagesForForking()
+			if len(msgs) == 0 {
+				return note("no user messages to fork from")
+			}
+			var b strings.Builder
+			b.WriteString("user messages ( /fork <entryId> ):\n")
+			for _, row := range msgs {
+				fmt.Fprintf(&b, "  %s  %s\n", row["entryId"][:min(8, len(row["entryId"]))], strings.ReplaceAll(row["text"], "\n", " "))
+			}
+			return note(b.String())
+		}
+		child, text, err := m.engine.Opts.Session.ForkFrom(cmd.Rest, cwd, m.engine.Opts.AgentDir, "before")
 		if err != nil {
 			return note("fork error: " + err.Error())
 		}
 		m.engine.AdoptSession(child)
+		m.history = m.engine.History()
+		if text != "" {
+			m.textarea.SetValue(text)
+		}
 		return note("forked session " + child.ID() + "\n" + child.File())
+	case "tree":
+		if m.engine == nil || m.engine.Opts.Session == nil {
+			return note("no session")
+		}
+		return note(m.engine.Opts.Session.FormatTree())
+	case "resume":
+		if m.engine == nil {
+			return note("no engine")
+		}
+		cwd, _ := os.Getwd()
+		if cmd.Rest == "" {
+			list, err := session.Summaries(cwd, m.engine.Opts.AgentDir)
+			if err != nil {
+				return note("resume error: " + err.Error())
+			}
+			if len(list) == 0 {
+				return note("no sessions in this directory")
+			}
+			var b strings.Builder
+			b.WriteString("sessions ( /resume <id> ):\n")
+			for _, s := range list {
+				name := s.Name
+				if name == "" {
+					name = s.ID[:min(8, len(s.ID))]
+				}
+				fmt.Fprintf(&b, "  %s  %s\n", name, s.FirstMessage)
+			}
+			return note(b.String())
+		}
+		opened, err := session.FindByID(cwd, m.engine.Opts.AgentDir, cmd.Rest)
+		if err != nil {
+			opened, err = session.Open(cmd.Rest)
+		}
+		if err != nil {
+			return note("resume error: " + err.Error())
+		}
+		m.engine.AdoptSession(opened)
+		m.history = m.engine.History()
+		return note("resumed " + opened.ID() + "\n" + opened.File())
+	case "import":
+		if cmd.Rest == "" {
+			return note("usage: /import <path.jsonl>")
+		}
+		opened, err := session.Open(cmd.Rest)
+		if err != nil {
+			return note("import error: " + err.Error())
+		}
+		if m.engine != nil {
+			m.engine.AdoptSession(opened)
+			m.history = m.engine.History()
+		}
+		return note("imported " + opened.ID() + "\n" + opened.File())
 	case "name":
 		if m.engine == nil || m.engine.Opts.Session == nil {
 			return note("no session")
@@ -329,6 +517,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		return m.startTurn(body)
 	default:
 		if m.engine != nil {
+			if expanded, ok := prompt.ExpandTemplate("/"+cmd.Name+" "+cmd.Rest, m.engine.Templates); ok {
+				return m.startTurn(expanded)
+			}
 			if body, ok := skills.ExpandCommand(m.engine.Skills, cmd.Name, cmd.Rest); ok {
 				return m.startTurn(body)
 			}
@@ -460,7 +651,7 @@ func (m Model) View() string {
 
 	b.WriteString(m.textarea.View())
 	b.WriteString("\n")
-	b.WriteString(m.footerStyle.Render("Enter send · Shift+Enter/Ctrl+J newline · /help · /quit or Ctrl+C exit"))
+	b.WriteString(m.footerStyle.Render("Enter send · Alt+Enter follow-up · Shift+Tab thinking · Ctrl+P model · /help · Ctrl+C exit"))
 	return b.String()
 }
 

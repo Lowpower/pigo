@@ -1,57 +1,35 @@
 # pigo 实现状态
 
-本文件记录 pigo（用 Go 复刻 [pi](https://github.com/earendil-works/pi)）当前**已实现**与**尚未实现**的内容，对照 [`docs/migration-plan.md`](migration-plan.md) 的分层。所有已实现模块均以 pi 真实源码为准直译，且带离线测试。
+本文件记录 pigo（用 Go 复刻 [pi](https://github.com/earendil-works/pi)）当前**已实现**与**尚未实现**的内容。权威缺口清单是 [`docs/parity-gaps.md`](parity-gaps.md)。所有已实现模块均以 pi 真实源码为准，且带离线测试。
 
-> 一句话：**P0–P7 的执行骨干已全部落地并端到端串通**（TUI → agent 循环 → provider → 工具 → 会话 → 扩展；compaction 库）。配好 `OPENCODE_API_KEY` 即可连真模型日常使用。方案「必须」层还差 **slash 命令 / skills / themes** 三块面向用户的功能。
+> 一句话：**执行骨干与面向用户的 slash / skills / themes / templates / RPC 子集已落地。** 配好 API key（或 `OPENCODE_API_KEY`）即可连真模型。剩余项是 OAuth、npm 包管理、额外 provider、交互式 tree/model picker、sqlite、主题化 HTML/gist。
 
 ## 已实现
 
 | 模块 | 包 | 对应 pi 来源 | 说明 |
 | --- | --- | --- | --- |
-| Cloud Agent 环境 | `.cursor/` | — | Go 1.27 安装脚本 + golangci-lint + pi 参考仓库克隆（幂等） |
-| 依赖固化 | `tools/pin.go` | — | 整套技术栈锁定版本（`go build -tags tools ./...` 全栈编过） |
-| AI 流式脊柱 | `internal/ai` | `packages/ai` | `AssistantMessageEvent` 事件模型、`StreamFn` + ctx 感知 `EventStream`、partial-json 解析 |
-| Anthropic 适配器 | `internal/ai/anthropic.go` | `api/anthropic-messages.ts` | 原生 HTTP/SSE → 事件；`ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` 可配 |
-| OpenAI 适配器 | `internal/ai/openai.go` | `api/openai-completions.ts` | Chat Completions SSE → 事件（Bearer） |
-| OpenCode provider | `internal/ai/opencode.go` | `providers/opencode*.ts` | 读 `OPENCODE_API_KEY`/`OPENCODE_BASE_URL`，按模型路由（`claude-*`→messages，其余→chat/completions） |
-| agent 循环 | `internal/agent` | `agent-loop.ts` | 回合循环、工具调度（sequential/parallel、源序）、ctx 取消、`AgentEvent` 流 |
-| 七个内置工具 | `internal/tools` | `core/tools/*` | read/write/edit(go-diff)/bash(进程组+超时)/grep/find/ls；JSON-Schema 由 `invopop/jsonschema` 生成；globstar 匹配 |
-| 会话持久化 | `internal/session` | `session-manager.ts` | pi 兼容 JSONL：`--<cwd>--/` 目录、`<ISO>_<uuid>.jsonl`、`version:3`、`parentId` 树、缓冲到 assistant 再落盘 |
-| 交互式 TUI | `internal/tui` | `tui` + `modes/interactive` | bubbletea 编辑框接 agent 循环；回复流式上屏，回合结束整块过 glamour；工具执行内联；Ctrl+C 中断 |
-| 扩展系统（子进程 RPC） | `internal/protocol` + `internal/ext` | `packages/protocol` + `core/extensions` | `[u32 大端长度][JSON]` 帧；`Host` spawn/握手/分发；`Serve` SDK；示例 `examples/extensions/reverse` |
-| 会话压缩 | `internal/compaction` | `core/compaction` | `ShouldCompact`/`FindCutIndex`/`Summarize`/`Compact`；`ceil(chars/4)` 估算 |
+| AI 流式脊柱 | `internal/ai` | `packages/ai` | Anthropic Messages + OpenAI Completions + OpenCode 路由；tool_use/tool_result 保真 |
+| agent 循环 | `internal/agent` | `agent.ts` / agent-loop | 回合循环、并行工具、length-stop 失败截断 tool、steering/follow-up |
+| 队列模式 | `internal/runtime` | `PendingMessageQueue.drain` | 默认 `one-at-a-time`，可设 `all` |
+| 七个内置工具 | `internal/tools` | `core/tools/*` | read/write/edit/bash/grep/find/ls |
+| 会话 | `internal/session` | `session-manager.ts` | JSONL v3、parentId 树、fork/clone、HTML 导出、resume/import |
+| 交互式 TUI | `internal/tui` | `modes/interactive` | bubbletea；slash；Ctrl+P 切模型；Shift+Tab 切 thinking；Alt+Enter follow-up |
+| slash / skills / templates / themes | `internal/slash` 等 | `slash-commands.ts`, `skills.ts`, `prompt-templates.ts` | `/help` 列出命令；未知 `/name` 走 skill 或 prompt template |
+| 扩展 | `internal/ext` + `internal/protocol` | protocol + extensions | 子进程 RPC |
+| 压缩 | `internal/compaction` | `core/compaction` | 回合前自动触发 |
+| CLI / RPC | `cmd/pi`, `internal/runtime` | `cli/args.ts`, `rpc-types.ts` | `--mode text\|json\|rpc`；pi 两字母别名；`@file` |
 
-**测试**：每个包都有离线单测；多处端到端集成——agent + 真实工具 + 会话往返；TUI 经本地 OpenCode 网关跑通（录像）；agent 循环 + 真实扩展子进程（`reverse`：`pigo`→`ogip`）；压缩往返。`go build`/`vet`/`test`/`golangci-lint` 全绿（Go 1.27）。
+**测试**：`go test ./...` 离线全绿。`golangci-lint run ./...` 应无新问题。
 
 ## 尚未实现
 
-### 方案「必须」层缺口（面向用户的功能）
-- **slash 命令系统**：目前只有 TUI 里硬编码的 `/quit`、`/exit`；无 `/model`、`/settings`、`/compact`、扩展命令等。对应 pi `core/slash-commands.ts`。
-- **skills（markdown）**：无 `SKILL.md` 加载/发现/注入。对应 pi `core/skills.ts`。
-- **themes（主题）**：仅 glamour 自动配色；无主题数据文件/切换。对应 pi `modes/interactive/theme`。
-
-### 集成 / 收尾缺口
-- **compaction 接进 TUI 回合**：库已就绪，但尚未在每回合前按模型 context window 自动触发（缺模型目录，需用 config 配默认值）。
-- **`--extension` 运行时加载**：`cmd/pi` 尚未接扩展加载 flag（`internal/ext` 已可用）。
-- **agent tool 结果回填上下文**：当前把 tool result 当 user 文本重放（简化），非完全保真于 pi 的 tool_result 消息形状。
-
-### 保真修正（见 migration-plan.md §8）
-- **config 路径/键名**：当前 `internal/config` 用 `~/.pi` + `provider/model`；pi 真相是 `~/.pi/agent/settings.json` + `defaultProvider/defaultModel`。
-- **CLI flag**：当前 `--mode interactive|print`；pi 是 `--mode text|json|rpc` 且 flag 更多。
-
-### 后置（方案 Phase 7 / §4.9）
-- **headless server / RPC 模式**：`internal/server` 仍是空壳（`internal/protocol` 已就绪，成本低）。
-- **sqlite 会话后端**：未写（`modernc.org/sqlite` 依赖已固化）。
-- **provider 长尾**：`openai-responses`（OpenCode 的 `gpt-*` 走 `/v1/responses`）、`google-generative-ai`、`bedrock-converse-stream`、以及对照模型目录的**通用 provider 注册层**。
-- **TUI 打磨**：自动补全、~30fps token 批量刷新。
-- **遥测**：方案明确不做。
+见 [`docs/parity-gaps.md`](parity-gaps.md) 的 10 个可粘贴 GitHub issue（OAuth、npm、额外 provider、交互式 tree navigator、TUI chrome 长尾、sqlite、主题化 HTML/gist、trust/sandbox/Windows/图片、`/scoped-models` 编辑器、剩余 RPC）。
 
 ## 快速上手
 
 ```bash
-go run ./cmd/pi                 # 交互式 TUI（无 key 时用内置 mock provider）
-go run ./cmd/pi -p "hello"      # 单次非交互，流式输出
+go run ./cmd/pi                 # 交互式 TUI
+go run ./cmd/pi -p "hello"      # 单次非交互
+go run ./cmd/pi --mode rpc      # JSONL RPC
 go test ./... && golangci-lint run ./...
 ```
-
-接真模型：把 `OPENCODE_API_KEY`（需要时加 `OPENCODE_BASE_URL`）配成环境变量/密钥即可。

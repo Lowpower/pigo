@@ -7,44 +7,45 @@ pigo aims to match pi's **user-visible behaviour and control flow**, not its Typ
 ## Done in this branch (vs previous main)
 
 - Provider-facing **tool_use / tool_result pairing** (Anthropic + OpenAI Chat Completions)
-- Agent loop replays assistant **tool-call blocks**, not flattened text
-- `--print` / `--mode text|json|rpc` go through the **agent loop + tools**
-- Config dir `~/.pi/agent/settings.json` with pi key names (`defaultProvider` / `defaultModel`)
-- Session `--continue` / `--resume` / `--session` / `--no-session`
-- Slash commands (subset with working handlers; rest listed in `/help`)
-- Skills discovery (`SKILL.md`) + system-prompt injection
-- Themes (built-in dark/light/default + `~/.pi/agent/themes`)
-- Compaction wired before turns
-- `--extension` subprocess loading
-- `auth login|logout`, `config`, `--list-models`
-- Tool allow/deny, `--no-tools`, `--no-skills`, `--system-prompt`, `--append-system-prompt`, `--no-context-files`
-- Agent loop **replays assistant+toolResult pairing** across `Run` calls (not only inside one Run)
-- Length-stop **fails** truncated tool calls instead of executing them (pi `failToolCallsFromTruncatedMessage`)
-- Steering / follow-up injection inside the agent loop (`Config.Steering` / `Config.FollowUp`)
-- Session resume rebuilds provider `ai.Message`s; persist skips already-written prefix
-- `--continue`/`--resume` history is passed into print/json/TUI, not a blank transcript
-- Anthropic `thinking` budget forwarded from `settings.thinking` / `--thinking`
-- RPC subset: `prompt` (with steer/followUp while running), `steer`, `follow_up`, `abort`, `quit`, `new_session`, `get_state`, `set_model`, `get_available_models`, `set_thinking_level`, `compact`, `bash`, `get_messages`, `switch_session`, `clone`, `set_session_name`, `get_commands`
-- Slash: `/fork`, `/name`, `/logout`, `/reload`, `/copy` (OSC-52), `/skill` + unknown `/name` skill expand
-- CLI: `--fork`, `--session-id`, `--name`, `--api-key`, `--no-builtin-tools`
+- Agent loop replays assistant **tool-call blocks**; length-stop **fails** truncated tools
+- Steering / follow-up injection; **QueueMode `one-at-a-time` (default) vs `all`**
+- `--print` / `--mode text|json|rpc` through the agent loop + tools
+- Config dir `~/.pi/agent/settings.json` with pi key names
+- Session `--continue` / `--resume` / `--session` / `--no-session` / `--fork <path|id>` / `--session-id` / `--name`
+- Session **parentId tree** (`GetTree`, `/tree` text dump, RPC `get_tree` / `get_entries` / `get_fork_messages`)
+- Slash commands with working handlers (pi `BUILTIN_SLASH_COMMANDS` plus `/help`)
+- Skills (`SKILL.md`) and **prompt templates** (`prompts/*.md`, `$1` / `$@` substitution)
+- Themes, compaction, `--extension`, `auth login|logout|print-api-key|check`
+- CLI aliases from `cli/args.ts` (`-nt`/`-ns`/`-nc`/`-ne`/`-xt`/`-nbt`/`-np`), `@file` inlining, `--model provider/id[:thinking]`, `--models` cycling
+- TUI keybindings: Enter steer, Alt+Enter follow-up, Escape interrupt, Ctrl+D exit, Ctrl+P / Shift+Ctrl+P cycle model, Shift+Tab cycle thinking
+- HTML export (`--export`, `/export`, RPC `export_html`) — self-contained dump, not pi's themed template
+- RPC envelope `{type:response, command, success, data}` plus `cycle_model`, `cycle_thinking_level`, `fork` by `entryId`, `clone`, `export_html`
 
 ## Issues to file
 
-### 1. Remaining pi `--mode rpc` commands
+### 1. Remaining pi `--mode rpc` commands that need extra runtime
 
-**Problem:** pigo now covers the headless prompt/session/model/thinking/compact/bash/clone subset. Still missing pi commands that need UI or extra transports: `images` on prompt, `cycle_model`, `cycle_thinking_level`, `abort_retry`, `abort_bash`, `export_html`, `get_tree`, `get_fork_messages`, `get_entries`, extension `select`/`confirm`/`input`.
+**Problem:** still missing `images` on prompt/steer/follow_up, `abort_retry`, `abort_bash`, auto-retry, and extension `select`/`confirm`/`input` UI over RPC.
 
-**Why not here:** those need widget protocol + HTML renderer + retry/bash-session process tracking.
+**Why not here:** needs in-flight bash process tracking, retry state, image content blocks, and a widget protocol.
 
 **Proposal:** port remaining commands from `packages/coding-agent/src/modes/rpc/` with golden JSON fixtures.
 
-### 2. OAuth login (`/login`, `pi auth` device/browser flows)
+**Source:** `packages/coding-agent/src/modes/rpc/rpc-types.ts`
 
-**Problem:** pigo stores API keys in `auth.json`. pi supports OAuth for several providers (Claude, ChatGPT, Google, GitHub).
+---
+
+### 2. OAuth login (`/login`, `pi auth` device/browser flows, `print-bearer-token`)
+
+**Problem:** pigo stores API keys in `auth.json` and can print/check them. pi supports OAuth for Claude, ChatGPT, Google, GitHub, including refresh and bearer-token export.
 
 **Why not here:** needs browser redirect, token refresh, and provider-specific apps we do not ship.
 
 **Proposal:** implement one provider (Anthropic) as a template, then the rest.
+
+**Source:** `packages/coding-agent/src/cli/auth-command.ts`, provider OAuth modules under `packages/ai`
+
+---
 
 ### 3. npm package manager (`pi install|remove|update|list`)
 
@@ -54,25 +55,45 @@ pigo aims to match pi's **user-visible behaviour and control flow**, not its Typ
 
 **Proposal:** either shell out to `npm` with pi's package layout, or document a Go-native alternative and treat npm as out of scope.
 
+**Source:** `packages/coding-agent/src/cli/` install/remove/update/list commands
+
+---
+
 ### 4. Provider adapters: `openai-responses`, Google, Bedrock, generic registry
 
-**Problem:** pigo has Anthropic Messages, OpenAI Completions, and OpenCode routing. pi's model catalog also uses Responses API, Gemini, Bedrock Converse, Mistral, etc.
+**Problem:** pigo has Anthropic Messages, OpenAI Completions, and OpenCode routing. pi's model catalog also uses Responses API, Gemini, Bedrock Converse, Mistral, etc. SDKs are already pinned in `go.mod`.
+
+**Why not here:** each adapter is a large, independently testable port with live-API fixtures.
 
 **Proposal:** add a `Provider{id, auth, api}` registry (migration-plan §4.9) and port adapters incrementally.
 
-### 5. Session tree UX (`/tree`, `/fork` UI, branch summaries, labels)
+**Source:** `packages/ai/src/api/*`, `packages/ai/src/providers/*`
 
-**Problem:** JSONL has `parentId` / `parentSession` and `/fork` plus `--fork` now create a child session. There is still no interactive tree navigator, labelled branches, or abandoned-path summaries.
+---
 
-**Proposal:** TUI list selector over `parentId` plus `AppendCompaction` for branch summaries.
+### 5. Interactive session-tree navigator (labels, fold, branch summaries)
 
-### 6. TUI chrome parity (model picker, theme picker, mermaid, images, keybindings)
+**Problem:** JSONL has `parentId` / `parentSession`; `/tree` prints a text dump and RPC `get_tree` returns the forest. There is still no interactive TUI navigator, labelled branches, or abandoned-path summaries.
 
-**Problem:** pigo's TUI is bubbletea+textarea. pi's interactive-mode is 6k+ lines of widgets, keybindings (`ctrl+p` model cycle, `alt+enter` follow-up, image paste, mermaid, etc.).
+**Why not here:** this is widget UX (`tree-selector.ts`), not the tree data model.
+
+**Proposal:** TUI list selector over `GetTree()` plus `AppendCompaction` for branch summaries.
+
+**Source:** `packages/coding-agent/src/modes/interactive/components/tree-selector.ts`
+
+---
+
+### 6. TUI chrome that is widget-not-behaviour (model picker UI, mermaid, images)
+
+**Problem:** keybindings that map to existing actions are in. Still missing: model-selector overlay (`ctrl+l`), image paste, mermaid, external editor, alt-screen search.
 
 **Note:** migration plan explicitly does **not** clone `pi-tui`. Parity here means *behaviours*, not widgets.
 
-**Proposal:** implement keybinding map from `keybindings.ts` one action at a time. Enter-while-running now steers; leftover queued lines run as follow-up when the turn ends. Still missing `alt+enter` follow-up-while-streaming, `ctrl+p` model cycle, image paste, mermaid.
+**Proposal:** implement remaining actions from `keybindings.ts` one at a time when the supporting feature exists.
+
+**Source:** `packages/coding-agent/src/core/keybindings.ts`
+
+---
 
 ### 7. sqlite session backend
 
@@ -80,20 +101,34 @@ pigo aims to match pi's **user-visible behaviour and control flow**, not its Typ
 
 **Proposal:** implement after JSONL resume/fork UX exists, behind a setting.
 
-### 8. HTML export / gist share / changelog viewer
+**Source:** `packages/session-backends/sqlite-node`
 
-**Problem:** `/export` currently prints the JSONL path; `/share` and `/changelog` are stubs.
+---
 
-**Proposal:** port `export-html` and gist upload; changelog can read GitHub releases.
+### 8. Themed HTML export / gist share / changelog viewer
+
+**Problem:** `/export` and `--export` now write a self-contained HTML dump. pi's exporter uses `export-html/template.{html,css,js}` plus highlight.js/marked. `/share` (secret gist) and `/changelog` are stubs.
+
+**Proposal:** port the template assets; gist upload; changelog can read GitHub releases.
+
+**Source:** `packages/coding-agent/src/core/export-html/`
+
+---
 
 ### 9. Project trust, sandbox, Windows bash, image tool results
 
-**Problem:** pi has project-trust prompts, containerization docs, Windows shells, and `ImageContent` on tool results. pigo tools are Unix text-only.
+**Problem:** pi has project-trust prompts, containerization docs, Windows shells, and `ImageContent` on tool results. pigo tools are Unix text-only. `@file` inlines text; image `@file` attachments are not sent to the model.
 
 **Proposal:** separate issues per platform/capability.
 
-### 10. QueueMode `all` vs `one-at-a-time`
+**Source:** `packages/coding-agent/src/core/tools/*`, `cli/file-processor.ts`
 
-**Problem:** the loop now polls `Steering` / `FollowUp` after each turn (pi `getSteeringMessages` / `getFollowUpMessages`). Drain currently returns the whole queue (pi `all`). `one-at-a-time` and in-stream steering (inject before tool results finish) are not modelled.
+---
 
-**Proposal:** honor `steeringMode` / `followUpMode` from settings when draining the engine queues.
+### 10. `/scoped-models` interactive editor
+
+**Problem:** `--models` already scopes Ctrl+P cycling. pi's `/scoped-models` opens a TUI to enable/disable/reorder that list and persist it to settings.
+
+**Proposal:** settings.json `enabledModels` plus a simple slash editor, or keep CLI-only.
+
+**Source:** `packages/coding-agent/src/modes/interactive/components/settings-selector.ts`

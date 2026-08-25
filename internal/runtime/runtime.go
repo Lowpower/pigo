@@ -15,6 +15,7 @@ import (
 	"github.com/Lowpower/pigo/internal/compaction"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
+	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/skills"
@@ -37,17 +38,22 @@ type Options struct {
 	ToolDeny       []string
 	Extensions     []string // argv[0] of each extension binary
 	ContextWindow  int
+	NoPromptTpls   bool
+	PromptPaths    []string
+	Models         []string // --models cycling list
 }
 
 // Engine is a configured agent runner.
 type Engine struct {
-	Opts     Options
-	Stream   ai.StreamFn
-	Provider string
-	Tools    *tools.Registry
-	Hosts    []*ext.Host
-	Skills   []skills.Skill
-	System   string
+	Opts      Options
+	Stream    ai.StreamFn
+	Provider  string
+	Tools     *tools.Registry
+	Hosts     []*ext.Host
+	Skills    []skills.Skill
+	Templates []prompt.Template
+	Scoped    []models.Spec
+	System    string
 
 	Steering  func() []ai.Message
 	FollowUp  func() []ai.Message
@@ -108,13 +114,15 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	})
 
 	e := &Engine{
-		Opts:     opts,
-		Stream:   sf,
-		Provider: provider,
-		Tools:    reg,
-		Hosts:    hosts,
-		Skills:   sk,
-		System:   sys,
+		Opts:      opts,
+		Stream:    sf,
+		Provider:  provider,
+		Tools:     reg,
+		Hosts:     hosts,
+		Skills:    sk,
+		Templates: prompt.DiscoverTemplates(opts.Cwd, opts.AgentDir, opts.PromptPaths, !opts.NoPromptTpls),
+		Scoped:    models.ResolvePatterns(opts.Models),
+		System:    sys,
 	}
 	e.Steering = e.drainSteer
 	e.FollowUp = e.drainFollow
@@ -144,16 +152,28 @@ func (e *Engine) PushFollow(text string) {
 func (e *Engine) drainSteer() []ai.Message {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := e.steer
-	e.steer = nil
-	return out
+	return drainQueue(&e.steer, e.Opts.Config.SteeringMode)
 }
 
 func (e *Engine) drainFollow() []ai.Message {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := e.follow
-	e.follow = nil
+	return drainQueue(&e.follow, e.Opts.Config.FollowUpMode)
+}
+
+// drainQueue matches pi PendingMessageQueue.drain: "all" empties the queue;
+// "one-at-a-time" (default) returns only the oldest message.
+func drainQueue(q *[]ai.Message, mode string) []ai.Message {
+	if q == nil || len(*q) == 0 {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(mode), "all") {
+		out := *q
+		*q = nil
+		return out
+	}
+	out := []ai.Message{(*q)[0]}
+	*q = (*q)[1:]
 	return out
 }
 
@@ -289,6 +309,7 @@ func (e *Engine) Reload() {
 	} else {
 		e.Skills, _ = skills.Discover(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SkillPaths, true)
 	}
+	e.Templates = prompt.DiscoverTemplates(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.PromptPaths, !e.Opts.NoPromptTpls)
 	e.System = prompt.Build(prompt.Options{
 		Cwd:              e.Opts.Cwd,
 		Custom:           e.Opts.SystemPrompt,
@@ -322,6 +343,39 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 		}
 	}
 	e.persisted = len(msgs)
+}
+
+// CycleModel steps through --models or the catalog (pi cycle_model / ctrl+p).
+func (e *Engine) CycleModel(backward bool) (models.Spec, bool) {
+	next, ok := models.Cycle(e.Opts.Config.ResolvedProvider(), e.Opts.Config.ResolvedModel(), e.Scoped, backward)
+	if !ok {
+		return models.Spec{}, false
+	}
+	e.ApplyModel(next.Provider, next.ID, next.Thinking)
+	return next, true
+}
+
+// CycleThinking steps thinking levels (pi cycle_thinking_level / shift+tab).
+func (e *Engine) CycleThinking() string {
+	next := models.NextThinkingLevel(e.Opts.Config.Thinking)
+	e.Opts.Config.Thinking = next
+	return next
+}
+
+// ApplyModel sets provider/model and optional thinking override.
+func (e *Engine) ApplyModel(provider, id, thinking string) {
+	if provider != "" {
+		e.Provider = provider
+		e.Opts.Config.Provider = provider
+		e.Opts.Config.DefaultProvider = provider
+	}
+	if id != "" {
+		e.Opts.Config.Model = id
+		e.Opts.Config.DefaultModel = id
+	}
+	if thinking != "" {
+		e.Opts.Config.Thinking = thinking
+	}
 }
 
 // PrintText streams a prompt to out as plain text (pi --mode text / --print).

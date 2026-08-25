@@ -28,3 +28,14 @@ func TestParseNonSlash(t *testing.T) {
 		t.Fatal("// should not parse as slash")
 	}
 }
+
+func TestParseCloneAndTree(t *testing.T) {
+	c, ok := Parse("/clone")
+	if !ok || c.Name != "clone" {
+		t.Fatalf("clone: %+v ok=%v", c, ok)
+	}
+	c, ok = Parse("/tree")
+	if !ok || c.Name != "tree" {
+		t.Fatalf("tree: %+v ok=%v", c, ok)
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,7 @@ import (
 var version = "0.0.1-dev"
 
 func main() {
+	os.Args = append([]string{os.Args[0]}, expandPiAliases(os.Args[1:])...)
 	if err := newRootCmd().Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -53,11 +55,14 @@ type cliFlags struct {
 	listModelsQuery string
 	offline         bool
 	export          string
-	fork            bool
+	fork            string
 	sessionID       string
 	name            string
 	apiKey          string
 	noBuiltinTools  bool
+	modelsFlag      string
+	promptTemplates []string
+	noPromptTpls    bool
 }
 
 func newRootCmd() *cobra.Command {
@@ -86,10 +91,10 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.thinking, "thinking", "", "thinking level: off|minimal|low|medium|high|xhigh|max")
 	cmd.Flags().StringVar(&f.systemPrompt, "system-prompt", "", "replace the default system prompt")
 	cmd.Flags().StringArrayVar(&f.appendSystem, "append-system-prompt", nil, "append text to the system prompt (repeatable)")
-	cmd.Flags().BoolVarP(&f.noContextFiles, "no-context-files", "C", false, "skip AGENTS.md / CLAUDE.md")
+	cmd.Flags().BoolVarP(&f.noContextFiles, "no-context-files", "", false, "skip AGENTS.md / CLAUDE.md")
 	cmd.Flags().BoolVar(&f.noSkills, "no-skills", false, "disable skill discovery")
 	cmd.Flags().StringArrayVar(&f.skills, "skill", nil, "extra skill path (repeatable)")
-	cmd.Flags().BoolVarP(&f.noTools, "no-tools", "n", false, "disable all tools")
+	cmd.Flags().BoolVar(&f.noTools, "no-tools", false, "disable all tools")
 	cmd.Flags().StringVarP(&f.tools, "tools", "t", "", "comma-separated tool allowlist")
 	cmd.Flags().StringVar(&f.excludeTools, "exclude-tools", "", "comma-separated tool denylist")
 	cmd.Flags().StringArrayVarP(&f.extension, "extension", "e", nil, "extension command to spawn (repeatable)")
@@ -98,12 +103,15 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&f.listModels, "list-models", false, "list known models and exit")
 	cmd.Flags().StringVar(&f.listModelsQuery, "list-models-query", "", "filter --list-models")
 	cmd.Flags().BoolVar(&f.offline, "offline", false, "skip network at startup (sets PI_OFFLINE=1)")
-	cmd.Flags().StringVar(&f.export, "export", "", "copy a session jsonl to this path and exit")
-	cmd.Flags().BoolVar(&f.fork, "fork", false, "fork the resumed session into a new file")
+	cmd.Flags().StringVar(&f.export, "export", "", "export a session JSONL to HTML and exit")
+	cmd.Flags().StringVar(&f.fork, "fork", "", "fork session file or id into a new session")
 	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "resume session by id prefix")
 	cmd.Flags().StringVarP(&f.name, "name", "n", "", "set session display name")
 	cmd.Flags().StringVar(&f.apiKey, "api-key", "", "API key for this process (does not persist)")
 	cmd.Flags().BoolVar(&f.noBuiltinTools, "no-builtin-tools", false, "disable built-in tools (extensions still load)")
+	cmd.Flags().StringVar(&f.modelsFlag, "models", "", "comma-separated model patterns for Ctrl+P cycling")
+	cmd.Flags().StringArrayVar(&f.promptTemplates, "prompt-template", nil, "load a prompt template file or directory")
+	cmd.Flags().BoolVar(&f.noPromptTpls, "no-prompt-templates", false, "disable prompt template discovery")
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
 	cmd.AddCommand(newAuthCmd(), newConfigCmd())
@@ -130,7 +138,8 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		cfg.Provider, cfg.DefaultProvider = f.provider, f.provider
 	}
 	if f.model != "" {
-		cfg.Model, cfg.DefaultModel = f.model, f.model
+		applyModelSpec(&cfg.DefaultProvider, &cfg.DefaultModel, &cfg.Thinking, f.model)
+		cfg.Provider, cfg.Model = cfg.DefaultProvider, cfg.DefaultModel
 	}
 	if f.thinking != "" {
 		cfg.Thinking = f.thinking
@@ -165,24 +174,33 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 
 	cwd, _ := os.Getwd()
 	if f.export != "" {
-		src := f.sessionPath
-		if src == "" {
-			m, err := session.ContinueRecent(cwd, agentDir)
-			if err != nil {
-				return err
-			}
-			src = m.File()
+		outPath := ""
+		if len(args) > 0 {
+			outPath = args[0]
 		}
-		b, err := os.ReadFile(src)
+		path, err := session.ExportHTMLFile(f.export, outPath)
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(f.export, b, 0o644)
+		fmt.Fprintf(cmd.OutOrStdout(), "Exported to: %s\n", path)
+		return nil
 	}
 
-	prompt := strings.TrimSpace(strings.Join(args, " "))
+	msgs, files := splitPromptArgs(args)
+	prompt := strings.TrimSpace(strings.Join(msgs, " "))
 	if f.prompt != "" {
 		prompt = f.prompt
+	}
+	if len(files) > 0 {
+		inline, err := inlineFiles(cwd, files)
+		if err != nil {
+			return err
+		}
+		if prompt == "" {
+			prompt = inline
+		} else {
+			prompt = inline + "\n" + prompt
+		}
 	}
 
 	mode := f.mode
@@ -197,6 +215,18 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	var sess *session.Manager
 	if !f.noSession {
 		switch {
+		case f.fork != "":
+			src, err2 := session.FindByID(cwd, agentDir, f.fork)
+			if err2 != nil {
+				src, err2 = session.Open(f.fork)
+			}
+			if err2 != nil {
+				return fmt.Errorf("fork: %w", err2)
+			}
+			sess, err = src.Fork(cwd, agentDir)
+			if err != nil {
+				return fmt.Errorf("fork session: %w", err)
+			}
 		case f.sessionPath != "":
 			sess, err = session.Open(f.sessionPath)
 			if err != nil {
@@ -217,12 +247,6 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			}
 		default:
 			sess = session.New(cwd, agentDir)
-		}
-		if f.fork && sess != nil {
-			sess, err = sess.Fork(cwd, agentDir)
-			if err != nil {
-				return fmt.Errorf("fork session: %w", err)
-			}
 		}
 		if f.name != "" && sess != nil {
 			sess.SetName(f.name)
@@ -249,6 +273,9 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		ToolDeny:       splitCSV(f.excludeTools),
 		Extensions:     exts,
 		ContextWindow:  cfg.ContextWindow,
+		NoPromptTpls:   f.noPromptTpls,
+		PromptPaths:    f.promptTemplates,
+		Models:         splitCSV(f.modelsFlag),
 	})
 	if err != nil {
 		return err
@@ -331,7 +358,81 @@ func newAuthCmd() *cobra.Command {
 			return auth.Delete(config.DefaultConfigDir(), args[0])
 		},
 	}
-	cmd.AddCommand(login, logout)
+	printKey := &cobra.Command{
+		Use:   "print-api-key",
+		Short: "print a stored API key (pi auth print-api-key)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			provider, _ := cmd.Flags().GetString("provider")
+			model, _ := cmd.Flags().GetString("model")
+			if provider == "" && model != "" {
+				p, _, _ := models.ParseSpec(model)
+				provider = p
+			}
+			if provider == "" {
+				return fmt.Errorf("Credential printing requires --provider <provider> or --model <model>")
+			}
+			key := auth.APIKey(config.DefaultConfigDir(), provider)
+			if key == "" {
+				return fmt.Errorf("no API key stored for %s", provider)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), key)
+			return nil
+		},
+	}
+	printKey.Flags().String("provider", "", "provider id")
+	printKey.Flags().String("model", "", "model spec (provider inferred)")
+	printBearer := &cobra.Command{
+		Use:   "print-bearer-token",
+		Short: "print an OAuth bearer token (not implemented; see docs/parity-gaps.md)",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return fmt.Errorf("OAuth bearer tokens are not implemented in pigo (see docs/parity-gaps.md)")
+		},
+	}
+	check := &cobra.Command{
+		Use:   "check",
+		Short: "check whether a provider has an API key (OAuth refresh is not implemented)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			provider, _ := cmd.Flags().GetString("provider")
+			model, _ := cmd.Flags().GetString("model")
+			asJSON, _ := cmd.Flags().GetBool("json")
+			showCreds, _ := cmd.Flags().GetBool("credentials")
+			if provider == "" && model != "" {
+				p, _, _ := models.ParseSpec(model)
+				provider = p
+			}
+			if provider == "" {
+				return fmt.Errorf("Auth checks require --provider <provider> or --model <model>")
+			}
+			key := auth.APIKey(config.DefaultConfigDir(), provider)
+			ok := key != ""
+			if asJSON {
+				payload := map[string]any{"provider": provider, "ok": ok, "type": "api_key"}
+				if showCreds && ok {
+					payload["credentials"] = key
+				}
+				b, _ := json.Marshal(payload)
+				fmt.Fprintln(cmd.OutOrStdout(), string(b))
+				if !ok {
+					return fmt.Errorf("no API key for %s", provider)
+				}
+				return nil
+			}
+			if !ok {
+				return fmt.Errorf("no API key for %s", provider)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: ok (api_key)\n", provider)
+			if showCreds {
+				fmt.Fprintln(cmd.OutOrStdout(), key)
+			}
+			return nil
+		},
+	}
+	check.Flags().String("provider", "", "provider id")
+	check.Flags().String("model", "", "model spec")
+	check.Flags().Bool("json", false, "JSON output")
+	check.Flags().Bool("credentials", false, "include the credential")
+	check.Flags().Bool("no-refresh", false, "ignored (OAuth refresh is not implemented)")
+	cmd.AddCommand(login, logout, printKey, printBearer, check)
 	return cmd
 }
 

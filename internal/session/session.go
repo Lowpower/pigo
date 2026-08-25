@@ -52,6 +52,7 @@ type Manager struct {
 	entries  []*Entry
 	flushed  bool
 	persist  bool
+	leafID   string
 }
 
 // DefaultAgentDir returns pi's config root: ~/.pi/agent (override-free).
@@ -93,6 +94,9 @@ func (m *Manager) Name() string { return m.header.Name }
 
 func (m *Manager) SetName(name string) { m.header.Name = name }
 
+// LeafID is the current branch tip (pi SessionManager.getLeafId).
+func (m *Manager) LeafID() string { return m.leafID }
+
 // Entries returns a copy of session entries (header excluded).
 func (m *Manager) Entries() []Entry {
 	out := make([]Entry, 0, len(m.entries))
@@ -119,11 +123,12 @@ func (m *Manager) AppendMessage(role string, message any) (*Entry, error) {
 		Message:   raw,
 		role:      role,
 	}
-	if n := len(m.entries); n > 0 {
-		prev := m.entries[n-1].ID
+	if m.leafID != "" {
+		prev := m.leafID
 		e.ParentID = &prev
 	}
 	m.entries = append(m.entries, e)
+	m.leafID = e.ID
 	if err := m.persistEntry(e); err != nil {
 		return nil, err
 	}

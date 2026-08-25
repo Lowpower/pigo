@@ -19,6 +19,10 @@ func Open(path string) (*Manager, error) {
 		e := entries[i]
 		copied[i] = &e
 	}
+	leaf := ""
+	if n := len(copied); n > 0 {
+		leaf = copied[n-1].ID
+	}
 	return &Manager{
 		agentDir: filepath.Dir(filepath.Dir(filepath.Dir(path))),
 		cwd:      header.Cwd,
@@ -29,6 +33,7 @@ func Open(path string) (*Manager, error) {
 		entries:  copied,
 		flushed:  true,
 		persist:  true,
+		leafID:   leaf,
 	}, nil
 }
 
@@ -87,20 +92,19 @@ func listSessionFiles(cwd, agentDir string) ([]string, error) {
 	return out, nil
 }
 
-// Fork starts a new session file whose parentSession is m (pi /fork).
+// Fork duplicates the current branch into a new session file (pi /clone:
+// createBranchedSession at the current leaf). parentSession is the source path.
 func (m *Manager) Fork(cwd, agentDir string) (*Manager, error) {
-	child := New(cwd, agentDir)
-	child.header.ParentSession = m.id
-	for _, e := range m.entries {
-		var payload any
-		if len(e.Message) > 0 {
-			_ = json.Unmarshal(e.Message, &payload)
-		}
-		if _, err := child.AppendMessage(e.role, payload); err != nil {
-			return nil, err
-		}
+	leaf := m.leafID
+	if leaf == "" && len(m.entries) > 0 {
+		leaf = m.entries[len(m.entries)-1].ID
 	}
-	return child, nil
+	if leaf == "" {
+		child := New(cwd, agentDir)
+		child.header.ParentSession = m.file
+		return child, nil
+	}
+	return m.CreateBranchedSession(leaf, cwd, agentDir)
 }
 
 // AppendCompaction records a compaction summary entry (pi session entry type).
@@ -114,11 +118,12 @@ func (m *Manager) AppendCompaction(summary string) (*Entry, error) {
 		return nil, err
 	}
 	e := &Entry{Type: "compaction", ID: newUUID(), Timestamp: isoNow(), Message: raw, role: "assistant"}
-	if n := len(m.entries); n > 0 {
-		prev := m.entries[n-1].ID
+	if m.leafID != "" {
+		prev := m.leafID
 		e.ParentID = &prev
 	}
 	m.entries = append(m.entries, e)
+	m.leafID = e.ID
 	if err := m.persistEntry(e); err != nil {
 		return nil, err
 	}

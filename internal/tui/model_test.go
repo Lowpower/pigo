@@ -103,3 +103,33 @@ func TestAgentEndStopsRunning(t *testing.T) {
 		t.Error("running should be false after agent_end")
 	}
 }
+
+func TestCycleThinkingKey(t *testing.T) {
+	m := New(testCfg())
+	m.cfg.Thinking = "off"
+	m = send(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.cfg.Thinking != "minimal" {
+		t.Fatalf("thinking = %s", m.cfg.Thinking)
+	}
+}
+
+func TestAltEnterQueuesFollowUpWhileRunning(t *testing.T) {
+	m := New(testCfg())
+	m.running = true
+	m.textarea.SetValue("later")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	if len(m.queued) != 1 || m.queued[0] != "later" {
+		t.Fatalf("queued = %v (engine-less follow-up should use m.queued)", m.queued)
+	}
+}
+
+func TestCtrlDQuitsWhenEmpty(t *testing.T) {
+	m := New(testCfg())
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if !next.(Model).quitting {
+		t.Fatal("expected quit")
+	}
+	if cmd == nil {
+		t.Fatal("expected quit cmd")
+	}
+}

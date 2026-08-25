@@ -97,7 +97,7 @@ func loadFile(path, source string) (Skill, bool, error) {
 	if err != nil {
 		return Skill{}, false, err
 	}
-	fm, body := splitFrontmatter(string(b))
+	fm, body := ParseFrontmatter(string(b))
 	desc := fm["description"]
 	if desc == "" {
 		return Skill{}, false, nil
@@ -139,7 +139,8 @@ func validName(name string) bool {
 	return true
 }
 
-func splitFrontmatter(s string) (map[string]string, string) {
+// ParseFrontmatter splits optional YAML --- frontmatter from a markdown body.
+func ParseFrontmatter(s string) (map[string]string, string) {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	if !strings.HasPrefix(s, "---\n") {
 		return map[string]string{}, s
