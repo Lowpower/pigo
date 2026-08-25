@@ -66,7 +66,7 @@ type Event struct {
 	ToolResults []Msg
 	// agent_end: the full transcript.
 	Messages []Msg
-	// agent_end: whether the session will auto-retry (always false until retry lands).
+	// agent_end: whether the session will auto-retry the last assistant error.
 	WillRetry bool
 
 	// message_start / message_end for user and toolResult (assistant still uses Assistant).

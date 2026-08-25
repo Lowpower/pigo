@@ -23,8 +23,16 @@ type Config struct {
 	CompactionOn     *bool  `mapstructure:"compactionEnabled"`
 	ReserveTokens    int    `mapstructure:"compactionReserveTokens"`
 	KeepRecentTokens int    `mapstructure:"compactionKeepRecentTokens"`
-	SteeringMode     string `mapstructure:"steeringMode"`
-	FollowUpMode     string `mapstructure:"followUpMode"`
+	SteeringMode     string        `mapstructure:"steeringMode"`
+	FollowUpMode     string        `mapstructure:"followUpMode"`
+	Retry            RetrySettings `mapstructure:"retry"`
+}
+
+// RetrySettings is pi settings.retry (enabled default true, maxRetries 3, baseDelayMs 2000).
+type RetrySettings struct {
+	Enabled     *bool `mapstructure:"enabled" json:"enabled,omitempty"`
+	MaxRetries  *int  `mapstructure:"maxRetries" json:"maxRetries,omitempty"`
+	BaseDelayMs *int  `mapstructure:"baseDelayMs" json:"baseDelayMs,omitempty"`
 }
 
 // CompactionEnabled reports whether auto-compaction is on (default true, like pi).
@@ -33,6 +41,30 @@ func (c Config) CompactionEnabled() bool {
 		return true
 	}
 	return *c.CompactionOn
+}
+
+// RetryEnabled reports whether auto-retry is on (default true, like pi).
+func (c Config) RetryEnabled() bool {
+	if c.Retry.Enabled == nil {
+		return true
+	}
+	return *c.Retry.Enabled
+}
+
+// RetryMaxRetries is the retry budget (default 3). 0 means no retries.
+func (c Config) RetryMaxRetries() int {
+	if c.Retry.MaxRetries == nil {
+		return 3
+	}
+	return *c.Retry.MaxRetries
+}
+
+// RetryBaseDelayMs is the exponential backoff base (default 2000).
+func (c Config) RetryBaseDelayMs() int {
+	if c.Retry.BaseDelayMs == nil {
+		return 2000
+	}
+	return *c.Retry.BaseDelayMs
 }
 
 // ResolvedProvider returns defaultProvider, falling back to provider.
@@ -119,6 +151,11 @@ func Save(configDir string, cfg Config) error {
 		"compactionKeepRecentTokens": cfg.KeepRecentTokens,
 		"steeringMode":               cfg.SteeringMode,
 		"followUpMode":               cfg.FollowUpMode,
+		"retry": map[string]any{
+			"enabled":     cfg.RetryEnabled(),
+			"maxRetries":  cfg.RetryMaxRetries(),
+			"baseDelayMs": cfg.RetryBaseDelayMs(),
+		},
 	}
 	b, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
