@@ -64,6 +64,7 @@ type Engine struct {
 	follow []ai.Message
 
 	onSessionEvent func(any)
+	uiHandler      uiHandlerFunc
 }
 
 // New applies auth, discovers skills, loads tools/extensions, and builds the prompt.

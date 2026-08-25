@@ -25,6 +25,8 @@ const (
 	TypeEvent           = "event"            // host -> ext: { Event, Payload }
 	TypeNotify          = "notify"           // ext -> host: { Text, Level }
 	TypeStatusItem      = "status_line_item" // ext -> host: { Text }
+	TypeUIRequest       = "ui_request"       // ext -> host: { ID, Name=method, Args }
+	TypeUIResult        = "ui_result"        // host -> ext: { ID, Args }
 	TypePing            = "ping"             // host -> ext
 	TypePong            = "pong"             // ext -> host
 	TypeShutdown        = "shutdown"         // host -> ext: terminate gracefully

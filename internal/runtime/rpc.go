@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/models"
@@ -27,11 +28,27 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 		cancel  context.CancelFunc
 		running bool
 	)
+	done := make(chan struct{})
+	defer close(done)
 	emit := func(v any) {
 		encMu.Lock()
 		defer encMu.Unlock()
 		_ = enc.Encode(v)
 	}
+	setUI, onUIResponse, closeUI := newUIBridge(emit, done)
+	setUI(e)
+	for _, h := range e.Hosts {
+		if h == nil {
+			continue
+		}
+		h.SetUI(func(method string, args map[string]any, timeout time.Duration) map[string]any {
+			return e.RequestExtensionUI(method, args, timeout)
+		})
+	}
+	defer func() {
+		e.setUIHandler(nil)
+		closeUI()
+	}()
 	e.onSessionEvent = emit
 	defer func() { e.onSessionEvent = nil }()
 	emit(map[string]any{"type": "ready", "provider": e.Provider, "model": e.Opts.Config.ResolvedModel()})
@@ -62,6 +79,11 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 		typ, _ := raw["type"].(string)
 		id := raw["id"]
 		msg, _ := raw["message"].(string)
+
+		if typ == "extension_ui_response" {
+			onUIResponse(raw)
+			continue
+		}
 
 		switch typ {
 		case "quit", "shutdown":
