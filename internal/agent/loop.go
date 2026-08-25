@@ -8,7 +8,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 )
 
-// Tool execution modes (pi AgentLoopConfig.toolExecution).
+// Tool execution modes.
 const (
 	Sequential = "sequential"
 	Parallel   = "parallel"
@@ -41,21 +41,21 @@ type Config struct {
 	Model         string
 	ToolExecution string // Sequential | Parallel (default Parallel)
 	MaxTurns      int    // safety cap (default 16)
-	Thinking      string // pi thinking level; forwarded to the provider
-	// Steering is polled after every turn (pi getSteeringMessages). Returned
-	// user messages are injected before the next LLM call.
+	Thinking      string // thinking level; forwarded to the provider
+	// Steering is polled after every turn. Returned user messages are injected
+	// before the next LLM call.
 	Steering func() []ai.Message
-	// FollowUp is polled when the model produced no tool calls (pi getFollowUpMessages).
+	// FollowUp is polled when the model produced no tool calls.
 	FollowUp func() []ai.Message
-	// NewUserMessages are emitted as message_start/end after the first turn_start
-	// (pi agentLoop prompts). Historical context messages are not re-emitted.
+	// NewUserMessages are emitted as message_start/end after the first turn_start.
+	// Historical context messages are not re-emitted.
 	NewUserMessages []ai.Message
 }
 
 // Run drives the agent loop and returns a stream of AgentEvents. The loop runs
-// turns until the model stops requesting tools (or MaxTurns is reached), matching
-// pi's runLoop turn cycle. reqCtx.Messages seed the transcript; exec runs tool
-// calls (may be nil if no tools are offered).
+// turns until the model stops requesting tools (or MaxTurns is reached).
+// reqCtx.Messages seed the transcript; exec runs tool calls (may be nil if no
+// tools are offered).
 func Run(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolExecutor, cfg Config) *Stream {
 	if cfg.MaxTurns <= 0 {
 		cfg.MaxTurns = 16
@@ -75,7 +75,7 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 	emit := func(ev Event) bool { return s.push(ctx, ev) }
 
 	// Seed the transcript from the request's messages, preserving assistant
-	// tool-call blocks and toolResult pairing (pi convertToLlm replay).
+	// tool-call blocks and toolResult pairing.
 	transcript := make([]Msg, 0, len(reqCtx.Messages)+4)
 	for _, m := range reqCtx.Messages {
 		transcript = append(transcript, msgFromAI(m))
@@ -131,7 +131,7 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 
 		toolCalls := toToolCalls(message)
 		var toolResults []Msg
-		// pi: a length stop still materialises tool results as errors so the
+		// A length stop still materialises tool results as errors so the
 		// next turn can continue; truncated calls are not executed.
 		if len(toolCalls) > 0 {
 			if message.StopReason == ai.StopLength {
@@ -215,7 +215,7 @@ func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg 
 
 // executeToolCalls runs the tool calls sequentially or in parallel. Tool-result
 // messages are returned in the model's source order regardless of completion
-// order (matching pi). ok is false if the context was cancelled while emitting.
+// order. ok is false if the context was cancelled while emitting.
 func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, cfg Config, s *Stream) ([]Msg, bool) {
 	results := make([]Msg, len(calls))
 
@@ -318,8 +318,7 @@ func toAIMessages(transcript []Msg) []ai.Message {
 // to keep on-screen history aligned with the loop transcript.
 
 // MessagesFromTranscript converts the agent transcript into provider-facing
-// ai.Messages, preserving assistant tool-call blocks and toolResult pairing
-// (pi convertToLlm / ToolResultMessage).
+// ai.Messages, preserving assistant tool-call blocks and toolResult pairing.
 func MessagesFromTranscript(transcript []Msg) []ai.Message {
 	out := make([]ai.Message, 0, len(transcript))
 	for _, m := range transcript {

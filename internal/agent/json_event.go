@@ -8,7 +8,6 @@ import (
 
 // ToJSON maps an AgentEvent to the JSON-mode / RPC stdout shape.
 //
-// Ported from pi packages/coding-agent/src/modes/json-event.ts (toJsonEvent):
 // message_update drops the cumulative message and any `partial` snapshot, leaving
 // usage + assistantMessageEvent. toolcall_start also carries id and toolName.
 func ToJSON(ev Event) (any, error) {

@@ -9,9 +9,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config holds the resolved pigo settings. Keys match pi's settings.json
-// (defaultProvider / defaultModel / theme) with aliases (provider / model)
-// for the earlier scaffold.
+// Config holds the resolved pigo settings. Keys are defaultProvider /
+// defaultModel / theme, with aliases (provider / model) for the earlier scaffold.
 type Config struct {
 	Provider         string `mapstructure:"provider"`
 	Model            string `mapstructure:"model"`
@@ -27,7 +26,7 @@ type Config struct {
 	FollowUpMode     string `mapstructure:"followUpMode"`
 }
 
-// CompactionEnabled reports whether auto-compaction is on (default true, like pi).
+// CompactionEnabled reports whether auto-compaction is on (default true).
 func (c Config) CompactionEnabled() bool {
 	if c.CompactionOn == nil {
 		return true
@@ -51,17 +50,16 @@ func (c Config) ResolvedModel() string {
 	return c.Model
 }
 
-// DefaultConfigDir is ~/.pi/agent, matching pi's getAgentDir()
-// (override with PI_CODING_AGENT_DIR).
+// DefaultConfigDir is ~/.pigo/agent (override with PIGO_CODING_AGENT_DIR).
 func DefaultConfigDir() string {
-	if d := os.Getenv("PI_CODING_AGENT_DIR"); d != "" {
+	if d := os.Getenv("PIGO_CODING_AGENT_DIR"); d != "" {
 		return d
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".pi", "agent")
+		return filepath.Join(".pigo", "agent")
 	}
-	return filepath.Join(home, ".pi", "agent")
+	return filepath.Join(home, ".pigo", "agent")
 }
 
 // Load reads settings.json from configDir. A missing file is not an error.
@@ -103,7 +101,7 @@ func Load(configDir string) (Config, error) {
 	return cfg, nil
 }
 
-// Save writes settings.json (pi-compatible key names).
+// Save writes settings.json.
 func Save(configDir string, cfg Config) error {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-// File is the on-disk credential map (pi auth.json).
+// File is the on-disk credential map (auth.json).
 type File struct {
 	Providers map[string]Credential `json:"providers"`
 }

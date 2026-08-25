@@ -9,8 +9,8 @@ import (
 	"github.com/Lowpower/pigo/internal/models"
 )
 
-// expandPiAliases rewrites pi's two-letter flags (args.ts) before cobra sees them.
-func expandPiAliases(args []string) []string {
+// expandShortFlags rewrites two-letter flags before cobra sees them.
+func expandShortFlags(args []string) []string {
 	aliases := map[string]string{
 		"-nt":  "--no-tools",
 		"-nbt": "--no-builtin-tools",

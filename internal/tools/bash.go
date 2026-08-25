@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// bashTool executes a shell command. Ports pi's bash.ts. Unix-only in v1 (process
-// group via setpgid); Windows support is a documented follow-up.
+// bashTool executes a shell command. Unix-only in v1 (process group via setpgid);
+// Windows support is a documented follow-up.
 type bashTool struct{}
 
 type bashParams struct {

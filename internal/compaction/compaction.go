@@ -7,7 +7,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 )
 
-// Settings controls when and how much to compact (pi CompactionSettings).
+// Settings controls when and how much to compact.
 type Settings struct {
 	// ReserveTokens is headroom kept below the context window before compacting.
 	ReserveTokens int
@@ -15,13 +15,12 @@ type Settings struct {
 	KeepRecentTokens int
 }
 
-// DefaultSettings mirrors pi's DEFAULT_COMPACTION_SETTINGS.
+// DefaultSettings is the built-in compaction window.
 func DefaultSettings() Settings {
 	return Settings{ReserveTokens: 16384, KeepRecentTokens: 20000}
 }
 
-// EstimateTokens approximates a message's token count as ceil(chars/4), matching
-// pi's estimateTokens.
+// EstimateTokens approximates a message's token count as ceil(chars/4).
 func EstimateTokens(m ai.Message) int {
 	return ceilDiv(len(m.Text()), 4)
 }
@@ -35,7 +34,7 @@ func EstimateContextTokens(msgs []ai.Message) int {
 	return total
 }
 
-// ShouldCompact reports whether the context should be compacted (pi shouldCompact):
+// ShouldCompact reports whether the context should be compacted:
 // contextTokens > contextWindow - reserveTokens.
 func ShouldCompact(contextTokens, contextWindow int, s Settings) bool {
 	return contextTokens > contextWindow-s.ReserveTokens
@@ -56,8 +55,8 @@ func FindCutIndex(msgs []ai.Message, keepRecentTokens int) int {
 	return 0
 }
 
-// SummarizationPrompt is the structured checkpoint prompt (ported from pi's
-// SUMMARIZATION_PROMPT). It is appended as the final user turn.
+// SummarizationPrompt is the structured checkpoint prompt. It is appended as the
+// final user turn.
 const SummarizationPrompt = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 
 Use this EXACT format:

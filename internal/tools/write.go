@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-// writeTool creates or overwrites a file. Ports pi's write.ts.
+// writeTool creates or overwrites a file.
 type writeTool struct{}
 
 type writeParams struct {

@@ -12,10 +12,9 @@ import (
 	"time"
 )
 
-// This file ports the streaming core of pi's packages/ai/src/api/openai-completions.ts
-// (the OpenAI Chat Completions SSE format). It covers text and tool-call streaming,
-// finish_reason mapping, and usage; the large per-provider compat matrix is not
-// ported (only the fields needed by OpenAI-compatible gateways such as opencode).
+// This file streams OpenAI Chat Completions SSE: text and tool-call streaming,
+// finish_reason mapping, and usage. Only the fields needed by OpenAI-compatible
+// gateways such as opencode are handled.
 
 // OpenAICompletionsClient talks to an OpenAI-compatible /v1/chat/completions
 // endpoint. BaseURL and APIKey are configurable; auth is Bearer.
@@ -173,7 +172,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 		return
 	}
 
-	// Finalize every open block in content order (pi's finishBlock loop).
+	// Finalize every open block in content order.
 	for i, c := range out.Content {
 		switch c.Type {
 		case KindText:

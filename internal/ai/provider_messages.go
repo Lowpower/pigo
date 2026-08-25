@@ -3,8 +3,8 @@ package ai
 import "encoding/json"
 
 // AnthropicWireMessages maps pigo messages onto the Anthropic Messages API
-// shape (pi packages/ai/src/api/anthropic-messages.ts). Assistant tool calls
-// become tool_use blocks; toolResult becomes a user message with tool_result.
+// shape. Assistant tool calls become tool_use blocks; toolResult becomes a user
+// message with tool_result.
 func AnthropicWireMessages(msgs []Message) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
@@ -74,9 +74,9 @@ func anthropicContent(msg *AssistantMessage) []map[string]any {
 	return blocks
 }
 
-// OpenAIWireMessages maps pigo messages onto OpenAI Chat Completions
-// (pi packages/ai/src/api/openai-completions.ts). toolResult becomes role=tool
-// with tool_call_id; assistant tool calls become tool_calls.
+// OpenAIWireMessages maps pigo messages onto OpenAI Chat Completions.
+// toolResult becomes role=tool with tool_call_id; assistant tool calls become
+// tool_calls.
 func OpenAIWireMessages(msgs []Message) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {

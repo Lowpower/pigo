@@ -11,8 +11,7 @@ import (
 // no globstar, so segments are matched individually (a non-`**` segment matches a
 // single path component; `*` within a segment does not cross `/`).
 //
-// This mirrors the glob semantics pi relies on (fast-glob): `*.go` matches only
-// top-level files, while `**/*.go` matches at any depth.
+// `*.go` matches only top-level files, while `**/*.go` matches at any depth.
 type globMatcher struct {
 	segs []globSeg
 }

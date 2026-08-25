@@ -42,7 +42,7 @@ type agentClosedMsg struct{}
 // Model is the interactive TUI: it drives the agent loop (internal/agent)
 // with real tools (internal/tools) and a provider (internal/ai), streaming the
 // assistant response to screen live (plain text during the turn), then rendering
-// it as markdown via glamour once the turn ends. Keybindings follow pi.
+// it as markdown via glamour once the turn ends.
 type Model struct {
 	cfg      config.Config
 	engine   *runtime.Engine
@@ -51,7 +51,7 @@ type Model struct {
 
 	transcript []entry
 	history    []ai.Message // raw user/assistant messages carried across turns
-	queued     []string     // follow-up prompts typed while a turn is running (pi follow-up)
+	queued     []string     // follow-up prompts typed while a turn is running
 
 	streaming       string // in-progress assistant text (plain)
 	streamingActive bool
@@ -234,7 +234,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	}
 	if m.running {
 		m.textarea.Reset()
-		// pi: Enter while streaming steers the current loop; leftover lines
+		// Enter while streaming steers the current loop; leftover lines
 		// after the turn are follow-ups (drained on agentClosedMsg).
 		if m.engine != nil {
 			m.engine.PushSteer(text)
@@ -477,7 +477,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		return note("session name = " + m.engine.Opts.Session.Name())
 	case "login":
-		return note("OAuth login is not available in pigo; run: pi auth login <provider>")
+		return note("OAuth login is not available in pigo; run: pigo auth login <provider>")
 	case "logout":
 		prov := cmd.Rest
 		if prov == "" {
