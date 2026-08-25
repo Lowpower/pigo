@@ -76,7 +76,14 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 	auth.ApplyEnv(opts.AgentDir)
 
-	sf, provider := ai.DefaultStreamFn()
+	provider := opts.Config.ResolvedProvider()
+	if provider == "" {
+		provider = "anthropic"
+	}
+	sf := boundStream(opts.AgentDir, provider)
+	if sf == nil {
+		sf, provider = ai.DefaultStreamFn()
+	}
 	reg := tools.Default()
 	if opts.NoTools {
 		reg = tools.NewRegistry()
@@ -433,6 +440,11 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 		e.Provider = provider
 		e.Opts.Config.Provider = provider
 		e.Opts.Config.DefaultProvider = provider
+		if e.Opts.AgentDir != "" {
+			if fn := boundStream(e.Opts.AgentDir, provider); fn != nil {
+				e.Stream = fn
+			}
+		}
 	}
 	if id != "" {
 		e.Opts.Config.Model = id
@@ -486,4 +498,36 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	e.PersistTranscript(last)
 	write(map[string]any{"type": "agent_settled"})
 	return nil
+}
+
+func boundStream(agentDir, provider string) ai.StreamFn {
+	if provider == "" {
+		return nil
+	}
+	p, ok := auth.Lookup(provider)
+	if !ok {
+		return nil
+	}
+	store := auth.Open(agentDir)
+	return func(ctx context.Context, reqCtx ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		res, err := auth.Resolve(ctx, store, p, auth.ResolveOpts{})
+		if err != nil {
+			return ai.StreamWithAuth(provider, "", "", nil)(ctx, reqCtx, opts)
+		}
+		if res == nil {
+			key := auth.APIKey(agentDir, provider)
+			if key == "" {
+				return ai.EchoStreamFn()(ctx, reqCtx, opts)
+			}
+			return ai.StreamWithAuth(provider, key, "", nil)(ctx, reqCtx, opts)
+		}
+		key := res.Auth.APIKey
+		if key == "" {
+			key = auth.Secret(res)
+		}
+		if key == "" && len(res.Auth.Headers) == 0 {
+			return ai.EchoStreamFn()(ctx, reqCtx, opts)
+		}
+		return ai.StreamWithAuth(provider, key, res.Auth.BaseURL, res.Auth.Headers)(ctx, reqCtx, opts)
+	}
 }

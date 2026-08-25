@@ -21,6 +21,7 @@ import (
 type OpenAICompletionsClient struct {
 	BaseURL    string
 	APIKey     string
+	Headers    map[string]string
 	HTTPClient *http.Client
 }
 
@@ -37,8 +38,13 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 			return nil, err
 		}
 		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("authorization", "Bearer "+c.APIKey)
+		if c.APIKey != "" {
+			httpReq.Header.Set("authorization", "Bearer "+c.APIKey)
+		}
 		httpReq.Header.Set("accept", "text/event-stream")
+		for k, v := range c.Headers {
+			httpReq.Header.Set(k, v)
+		}
 
 		client := c.HTTPClient
 		if client == nil {
