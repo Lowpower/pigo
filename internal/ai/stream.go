@@ -23,6 +23,16 @@ type Message struct {
 	ToolCallID string            `json:"toolCallId,omitempty"`
 	ToolName   string            `json:"toolName,omitempty"`
 	IsError    bool              `json:"isError,omitempty"`
+	// Images are extra user-message blocks (pi ImageContent). Empty for text-only.
+	Images []ImageContent `json:"images,omitempty"`
+}
+
+// ImageContent is a base64 image attached to a user (or tool-result) message.
+// Ported from pi packages/ai/src/types.ts ImageContent.
+type ImageContent struct {
+	Type     string `json:"type"`
+	Data     string `json:"data"`
+	MimeType string `json:"mimeType"`
 }
 
 // Text returns the display/token-estimate text of the message.

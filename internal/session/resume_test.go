@@ -74,3 +74,26 @@ func TestRestoreAIMessagesRoundTrip(t *testing.T) {
 		t.Fatalf("FindByID id=%s want %s", opened.ID(), m.ID())
 	}
 }
+
+func TestRestoreAIMessagesUserImages(t *testing.T) {
+	agentDir := t.TempDir()
+	cwd := t.TempDir()
+	m := New(cwd, agentDir)
+	content := []any{
+		map[string]any{"type": "text", "text": "look"},
+		map[string]any{"type": "image", "data": "AAA", "mimeType": "image/png"},
+	}
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": content}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	msgs := RestoreAIMessages(m.Entries())
+	if len(msgs) != 2 {
+		t.Fatalf("len=%d", len(msgs))
+	}
+	if msgs[0].Content != "look" || len(msgs[0].Images) != 1 || msgs[0].Images[0].Data != "AAA" {
+		t.Fatalf("user = %+v", msgs[0])
+	}
+}

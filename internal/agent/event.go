@@ -28,6 +28,9 @@ type Msg struct {
 	ToolCallID string `json:"toolCallId,omitempty"`
 	ToolName   string `json:"toolName,omitempty"`
 	IsError    bool   `json:"isError,omitempty"`
+
+	// Images are user-message attachments (pi ImageContent).
+	Images []ai.ImageContent `json:"images,omitempty"`
 }
 
 // EventType enumerates AgentEvent variants (pi packages/agent/src/types.ts ~L428).

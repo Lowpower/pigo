@@ -540,7 +540,7 @@ func (m Model) startTurn(text string) (tea.Model, tea.Cmd) {
 		m.provider = m.engine.Provider
 		// history already contains the user turn; RunPrompt appends user again, so pass without last
 		hist := m.history[:len(m.history)-1]
-		stream = m.engine.RunPrompt(ctx, hist, text)
+		stream = m.engine.RunPrompt(ctx, hist, text, nil)
 	} else {
 		sf, provider := ai.DefaultStreamFn()
 		m.provider = provider
