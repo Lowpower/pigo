@@ -326,6 +326,19 @@ func splitCSV(s string) []string {
 	return out
 }
 
+func authProviderFromFlags(cmd *cobra.Command) (string, error) {
+	provider, _ := cmd.Flags().GetString("provider")
+	model, _ := cmd.Flags().GetString("model")
+	if provider == "" && model != "" {
+		p, _, _ := models.ParseSpec(model)
+		provider = p
+	}
+	if provider == "" {
+		return "", fmt.Errorf("credential printing requires --provider <provider> or --model <model>")
+	}
+	return provider, nil
+}
+
 func isTTY() bool {
 	st, err := os.Stdin.Stat()
 	if err != nil {
@@ -362,18 +375,13 @@ func newAuthCmd() *cobra.Command {
 		Use:   "print-api-key",
 		Short: "print a stored API key",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			provider, _ := cmd.Flags().GetString("provider")
-			model, _ := cmd.Flags().GetString("model")
-			if provider == "" && model != "" {
-				p, _, _ := models.ParseSpec(model)
-				provider = p
+			provider, err := authProviderFromFlags(cmd)
+			if err != nil {
+				return err
 			}
-			if provider == "" {
-				return fmt.Errorf("Credential printing requires --provider <provider> or --model <model>")
-			}
-			key := auth.APIKey(config.DefaultConfigDir(), provider)
-			if key == "" {
-				return fmt.Errorf("no API key stored for %s", provider)
+			key, err := auth.PrintSecret(cmd.Context(), config.DefaultConfigDir(), provider, auth.TypeAPIKey, 0)
+			if err != nil {
+				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), key)
 			return nil
@@ -383,46 +391,57 @@ func newAuthCmd() *cobra.Command {
 	printKey.Flags().String("model", "", "model spec (provider inferred)")
 	printBearer := &cobra.Command{
 		Use:   "print-bearer-token",
-		Short: "print an OAuth bearer token (not implemented)",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return fmt.Errorf("OAuth bearer tokens are not implemented")
+		Short: "print an OAuth bearer token",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			provider, err := authProviderFromFlags(cmd)
+			if err != nil {
+				return err
+			}
+			raw, _ := cmd.Flags().GetString("min-expiry")
+			d := auth.DefaultBearerMinExpiry
+			if raw != "" {
+				d, err = auth.ParseMinExpiry(raw)
+				if err != nil {
+					return err
+				}
+			}
+			key, err := auth.PrintSecret(cmd.Context(), config.DefaultConfigDir(), provider, auth.TypeOAuth, d)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), key)
+			return nil
 		},
 	}
+	printBearer.Flags().String("provider", "", "provider id")
+	printBearer.Flags().String("model", "", "model spec (provider inferred)")
+	printBearer.Flags().String("min-expiry", "30m", "minimum remaining token validity")
 	check := &cobra.Command{
 		Use:   "check",
-		Short: "check whether a provider has an API key (OAuth refresh is not implemented)",
+		Short: "check whether a provider is authenticated",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			provider, _ := cmd.Flags().GetString("provider")
-			model, _ := cmd.Flags().GetString("model")
+			provider, err := authProviderFromFlags(cmd)
+			if err != nil {
+				return fmt.Errorf("auth checks require --provider <provider> or --model <model>")
+			}
 			asJSON, _ := cmd.Flags().GetBool("json")
 			showCreds, _ := cmd.Flags().GetBool("credentials")
-			if provider == "" && model != "" {
-				p, _, _ := models.ParseSpec(model)
-				provider = p
-			}
-			if provider == "" {
-				return fmt.Errorf("Auth checks require --provider <provider> or --model <model>")
-			}
-			key := auth.APIKey(config.DefaultConfigDir(), provider)
-			ok := key != ""
+			noRefresh, _ := cmd.Flags().GetBool("no-refresh")
+			res := auth.CheckProvider(cmd.Context(), config.DefaultConfigDir(), provider, !noRefresh, showCreds)
 			if asJSON {
-				payload := map[string]any{"provider": provider, "ok": ok, "type": "api_key"}
-				if showCreds && ok {
-					payload["credentials"] = key
-				}
-				b, _ := json.Marshal(payload)
+				b, _ := json.Marshal(res)
 				fmt.Fprintln(cmd.OutOrStdout(), string(b))
-				if !ok {
-					return fmt.Errorf("no API key for %s", provider)
+			} else {
+				if res.Status != "ready" {
+					return fmt.Errorf("%s: %s", provider, res.Reason)
 				}
-				return nil
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: ok (%s)\n", provider, res.AuthType)
+				if showCreds && res.Credentials != "" {
+					fmt.Fprintln(cmd.OutOrStdout(), res.Credentials)
+				}
 			}
-			if !ok {
-				return fmt.Errorf("no API key for %s", provider)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s: ok (api_key)\n", provider)
-			if showCreds {
-				fmt.Fprintln(cmd.OutOrStdout(), key)
+			if res.Status != "ready" {
+				return fmt.Errorf("%s: %s", provider, res.Reason)
 			}
 			return nil
 		},
@@ -431,7 +450,7 @@ func newAuthCmd() *cobra.Command {
 	check.Flags().String("model", "", "model spec")
 	check.Flags().Bool("json", false, "JSON output")
 	check.Flags().Bool("credentials", false, "include the credential")
-	check.Flags().Bool("no-refresh", false, "ignored (OAuth refresh is not implemented)")
+	check.Flags().Bool("no-refresh", false, "do not refresh OAuth tokens")
 	cmd.AddCommand(login, logout, printKey, printBearer, check)
 	return cmd
 }
