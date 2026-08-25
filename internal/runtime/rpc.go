@@ -127,8 +127,12 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			e.PushFollow(msg)
 			reply(id, "follow_up", true, nil, "")
 		case "new_session":
+			parent, _ := raw["parentSession"].(string)
 			if e.Opts.Session != nil {
 				e.Opts.Session = session.New(e.Opts.Cwd, e.Opts.AgentDir)
+				if parent != "" {
+					e.Opts.Session.SetParentSession(parent)
+				}
 			}
 			stateMu.Lock()
 			history = nil
@@ -152,7 +156,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				"model":                 map[string]string{"provider": e.Opts.Config.ResolvedProvider(), "id": e.Opts.Config.ResolvedModel()},
 				"thinkingLevel":         e.Opts.Config.Thinking,
 				"isStreaming":           isStreaming,
-				"isCompacting":          false,
+				"isCompacting":          e.isCompacting(),
 				"steeringMode":          queueMode(e.Opts.Config.SteeringMode),
 				"followUpMode":          queueMode(e.Opts.Config.FollowUpMode),
 				"sessionFile":           sfile,
@@ -160,7 +164,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				"sessionName":           sname,
 				"autoCompactionEnabled": e.Opts.Config.CompactionEnabled(),
 				"messageCount":          nmsg,
-				"pendingMessageCount":   0,
+				"pendingMessageCount":   e.pendingCount(),
 			}, "")
 		case "set_model":
 			provider, _ := raw["provider"].(string)
@@ -204,10 +208,11 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			e.Opts.Config.FollowUpMode = mode
 			reply(id, "set_follow_up_mode", true, nil, "")
 		case "compact":
+			custom, _ := raw["customInstructions"].(string)
 			stateMu.Lock()
 			hist := history
 			stateMu.Unlock()
-			outHist, summary, err := e.MaybeCompact(ctx, hist)
+			outHist, summary, err := e.CompactNow(ctx, hist, custom)
 			if err != nil {
 				reply(id, "compact", false, nil, err.Error())
 				break
@@ -369,14 +374,11 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			}
 			reply(id, "get_commands", true, map[string]any{"commands": cmds}, "")
 		case "get_session_stats":
-			n := 0
-			if e.Opts.Session != nil {
-				n = len(e.Opts.Session.Entries())
-			}
 			stateMu.Lock()
-			nmsg := len(history)
+			hist := history
 			stateMu.Unlock()
-			reply(id, "get_session_stats", true, map[string]any{"entries": n, "messages": nmsg}, "")
+			stats := session.CollectStats(e.Opts.Session, hist, e.contextWindow())
+			reply(id, "get_session_stats", true, stats, "")
 		case "set_auto_retry", "abort_retry", "abort_bash":
 			reply(id, typ, false, nil, "unsupported rpc command: "+typ)
 		default:

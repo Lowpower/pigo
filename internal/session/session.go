@@ -93,6 +93,12 @@ func (m *Manager) Name() string { return m.header.Name }
 
 func (m *Manager) SetName(name string) { m.header.Name = name }
 
+// SetParentSession records the parent session path in the header (RPC new_session).
+func (m *Manager) SetParentSession(path string) { m.header.ParentSession = path }
+
+// ParentSession returns the parent session path, if any.
+func (m *Manager) ParentSession() string { return m.header.ParentSession }
+
 // LeafID is the current branch tip.
 func (m *Manager) LeafID() string { return m.leafID }
 

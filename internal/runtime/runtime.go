@@ -59,9 +59,10 @@ type Engine struct {
 	FollowUp  func() []ai.Message
 	persisted int
 
-	mu     sync.Mutex
-	steer  []ai.Message
-	follow []ai.Message
+	mu         sync.Mutex
+	steer      []ai.Message
+	follow     []ai.Message
+	compacting bool
 
 	onSessionEvent func(any)
 }
@@ -135,6 +136,68 @@ func (e *Engine) emitSession(v any) {
 	if e.onSessionEvent != nil {
 		e.onSessionEvent(v)
 	}
+}
+
+func (e *Engine) setCompacting(v bool) {
+	e.mu.Lock()
+	e.compacting = v
+	e.mu.Unlock()
+}
+
+func (e *Engine) isCompacting() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.compacting
+}
+
+func (e *Engine) pendingCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.steer) + len(e.follow)
+}
+
+func (e *Engine) contextWindow() int {
+	window := e.Opts.ContextWindow
+	if window <= 0 {
+		window = e.Opts.Config.ContextWindow
+	}
+	if window <= 0 {
+		window = 200000
+	}
+	return window
+}
+
+// CompactNow runs a manual compaction (RPC compact), including customInstructions.
+func (e *Engine) CompactNow(ctx context.Context, msgs []ai.Message, customInstructions string) ([]ai.Message, string, error) {
+	s := compaction.DefaultSettings()
+	if e.Opts.Config.ReserveTokens > 0 {
+		s.ReserveTokens = e.Opts.Config.ReserveTokens
+	}
+	if e.Opts.Config.KeepRecentTokens > 0 {
+		s.KeepRecentTokens = e.Opts.Config.KeepRecentTokens
+	}
+	s.CustomInstructions = customInstructions
+	e.setCompacting(true)
+	defer e.setCompacting(false)
+	e.emitSession(map[string]any{"type": "compaction_start", "reason": "manual"})
+	out, summary, err := compaction.Compact(ctx, e.Stream, e.Opts.Config.ResolvedModel(), msgs, s)
+	if err != nil {
+		e.emitSession(map[string]any{
+			"type": "compaction_end", "reason": "manual",
+			"result": nil, "aborted": false, "willRetry": false, "errorMessage": err.Error(),
+		})
+		return msgs, "", err
+	}
+	if summary != "" && e.Opts.Session != nil {
+		if entry, err := e.Opts.Session.AppendCompaction(summary); err == nil && entry != nil {
+			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
+		}
+	}
+	e.emitSession(map[string]any{
+		"type": "compaction_end", "reason": "manual",
+		"result": map[string]any{"summary": summary}, "aborted": false, "willRetry": false,
+	})
+	return out, summary, nil
 }
 
 func (e *Engine) queueTexts() (steering, follow []string) {
@@ -299,6 +362,8 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 	if !compaction.ShouldCompact(compaction.EstimateContextTokens(msgs), window, s) {
 		return msgs, "", nil
 	}
+	e.setCompacting(true)
+	defer e.setCompacting(false)
 	e.emitSession(map[string]any{"type": "compaction_start", "reason": "threshold"})
 	out, summary, err := compaction.Compact(ctx, e.Stream, e.Opts.Config.ResolvedModel(), msgs, s)
 	if err != nil {
