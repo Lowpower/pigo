@@ -1,3 +1,4 @@
+// Package runtime is the agent engine used by TUI, print, json, and rpc modes.
 package runtime
 
 import (
