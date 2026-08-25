@@ -139,7 +139,7 @@ func TestLoopEventTrace(t *testing.T) {
 	want := []EventType{
 		EventAgentStart,
 		EventTurnStart, EventMessageStart, mu, mu, mu, mu, mu, EventMessageEnd,
-		EventToolStart, EventToolEnd, EventTurnEnd,
+		EventToolStart, EventToolEnd, EventMessageStart, EventMessageEnd, EventTurnEnd,
 		EventTurnStart, EventMessageStart, mu, mu, mu, mu, mu, EventMessageEnd, EventTurnEnd,
 		EventAgentEnd,
 	}

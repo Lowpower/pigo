@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync"
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/models"
@@ -12,14 +13,27 @@ import (
 	"github.com/Lowpower/pigo/internal/slash"
 )
 
+const rpcAlreadyStreaming = "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
+
 // ServeRPC is a JSONL stdin/stdout subset of pi --mode rpc.
 func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) error {
 	dec := json.NewDecoder(in)
 	enc := json.NewEncoder(out)
-	history := e.History()
-	var cancel context.CancelFunc
-	running := false
-	emit := func(v any) { _ = enc.Encode(v) }
+	var (
+		encMu   sync.Mutex
+		stateMu sync.Mutex
+		wg      sync.WaitGroup
+		history = e.History()
+		cancel  context.CancelFunc
+		running bool
+	)
+	emit := func(v any) {
+		encMu.Lock()
+		defer encMu.Unlock()
+		_ = enc.Encode(v)
+	}
+	e.onSessionEvent = emit
+	defer func() { e.onSessionEvent = nil }()
 	emit(map[string]any{"type": "ready", "provider": e.Provider, "model": e.Opts.Config.ResolvedModel()})
 
 	reply := func(id any, command string, success bool, data any, errStr string) {
@@ -39,6 +53,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 	for {
 		var raw map[string]any
 		if err := dec.Decode(&raw); err != nil {
+			wg.Wait()
 			if err == io.EOF {
 				return nil
 			}
@@ -50,39 +65,61 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 
 		switch typ {
 		case "quit", "shutdown":
+			wg.Wait()
 			return nil
 		case "abort":
+			stateMu.Lock()
 			if cancel != nil {
 				cancel()
 			}
+			stateMu.Unlock()
 			reply(id, "abort", true, nil, "")
 		case "prompt":
 			behavior, _ := raw["streamingBehavior"].(string)
-			if running && behavior == "steer" {
+			stateMu.Lock()
+			isRunning := running
+			stateMu.Unlock()
+			if isRunning && behavior == "steer" {
 				e.PushSteer(msg)
 				reply(id, "prompt", true, nil, "")
 				continue
 			}
-			if running && behavior == "followUp" {
+			if isRunning && behavior == "followUp" {
 				e.PushFollow(msg)
 				reply(id, "prompt", true, nil, "")
 				continue
 			}
+			if isRunning {
+				reply(id, "prompt", false, nil, rpcAlreadyStreaming)
+				continue
+			}
+			stateMu.Lock()
 			if cancel != nil {
 				cancel()
 			}
 			cctx, c := context.WithCancel(ctx)
 			cancel = c
 			running = true
+			hist := history
+			stateMu.Unlock()
 			reply(id, "prompt", true, nil, "")
-			if err := e.PrintJSON(cctx, out, history, msg); err != nil {
-				emit(map[string]any{"type": "error", "message": err.Error(), "id": id})
-			}
-			history = e.History()
-			if len(history) == 0 {
-				history = append(history, ai.Message{Role: ai.RoleUser, Content: msg})
-			}
-			running = false
+			wg.Add(1)
+			go func(msg string, hist []ai.Message, cctx context.Context, id any) {
+				defer wg.Done()
+				defer func() {
+					stateMu.Lock()
+					running = false
+					cancel = nil
+					history = e.History()
+					if len(history) == 0 {
+						history = append(append([]ai.Message(nil), hist...), ai.Message{Role: ai.RoleUser, Content: msg})
+					}
+					stateMu.Unlock()
+				}()
+				if err := e.PrintJSON(cctx, out, hist, msg); err != nil {
+					emit(map[string]any{"type": "error", "message": err.Error(), "id": id})
+				}
+			}(msg, hist, cctx, id)
 		case "steer":
 			e.PushSteer(msg)
 			reply(id, "steer", true, nil, "")
@@ -93,8 +130,10 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			if e.Opts.Session != nil {
 				e.Opts.Session = session.New(e.Opts.Cwd, e.Opts.AgentDir)
 			}
+			stateMu.Lock()
 			history = nil
 			e.persisted = 0
+			stateMu.Unlock()
 			reply(id, "new_session", true, map[string]any{"cancelled": false}, "")
 		case "get_state":
 			sid := ""
@@ -105,10 +144,14 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				sfile = e.Opts.Session.File()
 				sname = e.Opts.Session.Name()
 			}
+			stateMu.Lock()
+			isStreaming := running
+			nmsg := len(history)
+			stateMu.Unlock()
 			reply(id, "get_state", true, map[string]any{
 				"model":                 map[string]string{"provider": e.Opts.Config.ResolvedProvider(), "id": e.Opts.Config.ResolvedModel()},
 				"thinkingLevel":         e.Opts.Config.Thinking,
-				"isStreaming":           running,
+				"isStreaming":           isStreaming,
 				"isCompacting":          false,
 				"steeringMode":          queueMode(e.Opts.Config.SteeringMode),
 				"followUpMode":          queueMode(e.Opts.Config.FollowUpMode),
@@ -116,7 +159,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				"sessionId":             sid,
 				"sessionName":           sname,
 				"autoCompactionEnabled": e.Opts.Config.CompactionEnabled(),
-				"messageCount":          len(history),
+				"messageCount":          nmsg,
 				"pendingMessageCount":   0,
 			}, "")
 		case "set_model":
@@ -144,9 +187,11 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 		case "set_thinking_level":
 			level, _ := raw["level"].(string)
 			e.Opts.Config.Thinking = level
+			emit(map[string]any{"type": "thinking_level_changed", "level": level})
 			reply(id, "set_thinking_level", true, nil, "")
 		case "cycle_thinking_level":
 			level := e.CycleThinking()
+			emit(map[string]any{"type": "thinking_level_changed", "level": level})
 			reply(id, "cycle_thinking_level", true, map[string]any{"level": level}, "")
 		case "get_available_thinking_levels":
 			reply(id, "get_available_thinking_levels", true, map[string]any{"levels": models.ThinkingLevels}, "")
@@ -159,12 +204,17 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			e.Opts.Config.FollowUpMode = mode
 			reply(id, "set_follow_up_mode", true, nil, "")
 		case "compact":
-			outHist, summary, err := e.MaybeCompact(ctx, history)
+			stateMu.Lock()
+			hist := history
+			stateMu.Unlock()
+			outHist, summary, err := e.MaybeCompact(ctx, hist)
 			if err != nil {
 				reply(id, "compact", false, nil, err.Error())
 				break
 			}
+			stateMu.Lock()
 			history = outHist
+			stateMu.Unlock()
 			reply(id, "compact", true, map[string]any{"summary": summary}, "")
 		case "set_auto_compaction":
 			enabled, _ := raw["enabled"].(bool)
@@ -176,9 +226,15 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			result, isErr := e.Tools.Execute(ctx, "bash", map[string]any{"command": cmdStr})
 			reply(id, "bash", !isErr, map[string]any{"output": result, "isError": isErr}, "")
 		case "get_messages":
-			reply(id, "get_messages", true, map[string]any{"messages": history}, "")
+			stateMu.Lock()
+			hist := history
+			stateMu.Unlock()
+			reply(id, "get_messages", true, map[string]any{"messages": hist}, "")
 		case "get_last_assistant_text":
-			text := lastAssistantText(history)
+			stateMu.Lock()
+			hist := history
+			stateMu.Unlock()
+			text := lastAssistantText(hist)
 			var data any
 			if text == "" {
 				data = map[string]any{"text": nil}
@@ -196,6 +252,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			if e.Opts.Session != nil {
 				e.Opts.Session.SetName(name)
 			}
+			emit(map[string]any{"type": "session_info_changed", "name": name})
 			reply(id, "set_session_name", true, nil, "")
 		case "switch_session":
 			path, _ := raw["sessionPath"].(string)
@@ -205,7 +262,9 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				break
 			}
 			e.AdoptSession(m)
+			stateMu.Lock()
 			history = e.History()
+			stateMu.Unlock()
 			reply(id, "switch_session", true, map[string]any{"cancelled": false, "session": m.ID()}, "")
 		case "clone":
 			if e.Opts.Session == nil {
@@ -218,7 +277,9 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				break
 			}
 			e.AdoptSession(child)
+			stateMu.Lock()
 			history = e.History()
+			stateMu.Unlock()
 			reply(id, "clone", true, map[string]any{"cancelled": false, "session": child.ID(), "file": child.File()}, "")
 		case "fork":
 			entryID, _ := raw["entryId"].(string)
@@ -232,7 +293,9 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				break
 			}
 			e.AdoptSession(child)
+			stateMu.Lock()
 			history = e.History()
+			stateMu.Unlock()
 			reply(id, "fork", true, map[string]any{"text": text, "cancelled": false}, "")
 		case "get_fork_messages":
 			var messages []map[string]string
@@ -310,7 +373,10 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			if e.Opts.Session != nil {
 				n = len(e.Opts.Session.Entries())
 			}
-			reply(id, "get_session_stats", true, map[string]any{"entries": n, "messages": len(history)}, "")
+			stateMu.Lock()
+			nmsg := len(history)
+			stateMu.Unlock()
+			reply(id, "get_session_stats", true, map[string]any{"entries": n, "messages": nmsg}, "")
 		case "set_auto_retry", "abort_retry", "abort_bash":
 			reply(id, typ, false, nil, "unsupported rpc command: "+typ)
 		default:
