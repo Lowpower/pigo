@@ -299,7 +299,7 @@ func msgFromAI(m ai.Message) Msg {
 	case m.Role == RoleToolResult || m.Role == ai.RoleToolResult || m.ToolCallID != "":
 		return Msg{Role: RoleToolResult, Text: m.Content, ToolCallID: m.ToolCallID, ToolName: m.ToolName, IsError: m.IsError}
 	default:
-		return Msg{Role: RoleUser, Text: m.Content}
+		return Msg{Role: RoleUser, Text: m.Content, Images: m.Images}
 	}
 }
 func toToolCalls(m *ai.AssistantMessage) []ToolCall {
@@ -342,7 +342,7 @@ func MessagesFromTranscript(transcript []Msg) []ai.Message {
 				IsError:    m.IsError,
 			})
 		default:
-			out = append(out, ai.Message{Role: ai.RoleUser, Content: m.Text})
+			out = append(out, ai.Message{Role: ai.RoleUser, Content: m.Text, Images: m.Images})
 		}
 	}
 	return out
