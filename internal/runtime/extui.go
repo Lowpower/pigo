@@ -1,3 +1,4 @@
+// Package runtime is the agent engine used by TUI, print, json, and rpc modes.
 package runtime
 
 import (
@@ -46,11 +47,6 @@ func (e *Engine) RequestExtensionUI(method string, fields map[string]any, timeou
 		req[k] = v
 	}
 	return fn(req, timeout)
-}
-
-// uiPending is an in-flight dialog waiting on stdin extension_ui_response.
-type uiPending struct {
-	ch chan map[string]any
 }
 
 func newUIBridge(emit func(any), done <-chan struct{}) (setHandler func(e *Engine), onResponse func(raw map[string]any), closeAll func()) {
