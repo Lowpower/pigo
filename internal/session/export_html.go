@@ -9,8 +9,8 @@ import (
 )
 
 // ExportHTML writes a self-contained HTML dump of the session (pi --export /
-// /export when the path ends in .html). The themed template/CSS/JS from pi's
-// export-html package is tracked as a remaining visual-parity issue.
+// /export when the path ends in .html). It does not yet use pi's themed
+// export-html template/CSS/JS.
 func ExportHTML(m *Manager, outputPath string) (string, error) {
 	if m == nil {
 		return "", os.ErrInvalid

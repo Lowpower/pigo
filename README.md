@@ -3,18 +3,10 @@
 A Go reimplementation of the [pi](https://github.com/earendil-works/pi) coding agent
 (agent loop, streaming LLM, built-in tools, TUI, session persistence, extensions).
 
-The executable matches pi's control flow on the path that can be expressed in Go:
-agent loop (`internal/agent`), streaming providers (`internal/ai`), built-in tools
-(`internal/tools`), interactive TUI (`internal/tui`), JSONL sessions (`internal/session`),
-slash commands / skills / prompt templates / themes, compaction, and a `--mode rpc`
-subset. Remaining gaps (OAuth, npm, extra providers, interactive tree navigator) are
-listed in [`docs/parity-gaps.md`](docs/parity-gaps.md).
-
-The full, source-grounded implementation plan is in
-[`docs/migration-plan.md`](docs/migration-plan.md).
-**Development is grounded in the real pi source** (cloned read-only to `~/deps/pi`):
-read the corresponding pi files before porting each module, and treat the source as
-the authority over any summary.
+**pi’s source is the behaviour reference.** pi keeps evolving; when adding or
+changing a feature, read the corresponding files under `~/deps/pi` (or a fresh
+clone of earendil-works/pi) and match that behaviour. Remaining work is tracked
+as GitHub issues, not a phased migration plan.
 
 ## Requirements
 
@@ -22,11 +14,11 @@ the authority over any summary.
 
 ## Toolchain
 
-The Cloud Agent environment installs everything automatically via
+The Cloud Agent environment installs everything via
 [`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain, `golangci-lint`,
-and a read-only clone of the `pi` reference repo at `~/deps/pi`.
+and a read-only clone of pi at `~/deps/pi`.
 
-To set up locally instead:
+To set up locally:
 
 ```bash
 # Go 1.27 (https://go.dev/dl/) and golangci-lint on your PATH, then:

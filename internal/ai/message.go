@@ -55,7 +55,7 @@ type Content struct {
 	partialJSON string
 }
 
-// Usage mirrors pi's Usage (token counts; cost intentionally omitted for Phase 1).
+// Usage mirrors pi's Usage (token counts).
 type Usage struct {
 	Input        int `json:"input"`
 	Output       int `json:"output"`
@@ -66,7 +66,7 @@ type Usage struct {
 	TotalTokens  int `json:"totalTokens"`
 }
 
-// AssistantMessage mirrors the fields of pi's AssistantMessage that Phase 1 needs.
+// AssistantMessage mirrors pi's AssistantMessage.
 type AssistantMessage struct {
 	Role          string     `json:"role"`
 	Content       []*Content `json:"content"`

@@ -23,7 +23,7 @@ type ToolCall struct {
 
 // ToolExecutor runs a tool call and returns its textual result. isError reports
 // whether the tool failed (the result then describes the failure). Tools
-// themselves are implemented in Phase 3; the loop is tool-agnostic.
+// themselves live in internal/tools; the loop is tool-agnostic.
 type ToolExecutor interface {
 	Execute(ctx context.Context, call ToolCall) (result string, isError bool)
 }

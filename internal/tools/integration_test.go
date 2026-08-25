@@ -12,9 +12,8 @@ import (
 	"github.com/Lowpower/pigo/internal/tools"
 )
 
-// TestAgentLoopWithRealTools ties Phase 2 (agent loop) to Phase 3 (real tools):
-// a scripted provider asks to `read` a real file, the registry executes it, and
-// the loop feeds the result back and finishes.
+// TestAgentLoopWithRealTools: a scripted provider asks to `read` a real file,
+// the registry executes it, and the loop feeds the result back and finishes.
 func TestAgentLoopWithRealTools(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "hello.txt")

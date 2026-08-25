@@ -19,7 +19,7 @@ const defaultOpenCodeBaseURL = "https://opencode.ai/zen"
 // OpenCode multiplexes several wire formats behind one key, so this routes each
 // request by model id: claude-* -> Anthropic Messages (x-api-key), everything
 // else -> OpenAI Chat Completions (Bearer). GPT models that require the OpenAI
-// Responses API are not yet supported (that adapter is on the backlog).
+// Responses API are not supported.
 func NewOpenCodeFromEnv() (StreamFn, bool) {
 	key := os.Getenv("OPENCODE_API_KEY")
 	if key == "" {

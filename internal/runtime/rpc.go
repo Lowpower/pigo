@@ -312,9 +312,9 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			}
 			reply(id, "get_session_stats", true, map[string]any{"entries": n, "messages": len(history)}, "")
 		case "set_auto_retry", "abort_retry", "abort_bash":
-			reply(id, typ, false, nil, "unsupported rpc command: "+typ+" (see docs/parity-gaps.md)")
+			reply(id, typ, false, nil, "unsupported rpc command: "+typ)
 		default:
-			emit(map[string]any{"type": "error", "id": id, "message": "unsupported rpc command: " + typ + " (see docs/parity-gaps.md)"})
+			emit(map[string]any{"type": "error", "id": id, "message": "unsupported rpc command: " + typ})
 		}
 	}
 }

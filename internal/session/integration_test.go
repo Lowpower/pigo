@@ -14,9 +14,8 @@ import (
 	"github.com/Lowpower/pigo/internal/tools"
 )
 
-// TestAgentToolsSessionEndToEnd ties Phases 1–4: run the agent loop with real
-// tools, then persist the resulting transcript to a JSONL session file and
-// reload it.
+// TestAgentToolsSessionEndToEnd: run the agent loop with real tools, then persist
+// the resulting transcript to a JSONL session file and reload it.
 func TestAgentToolsSessionEndToEnd(t *testing.T) {
 	work := t.TempDir()
 	agentDir := t.TempDir()

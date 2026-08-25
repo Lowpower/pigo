@@ -50,7 +50,7 @@ type Context struct {
 	Tools    []Tool
 }
 
-// Options carries per-request knobs. Kept minimal for Phase 1.
+// Options carries per-request knobs.
 type Options struct {
 	Model     string
 	MaxTokens int

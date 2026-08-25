@@ -383,9 +383,9 @@ func newAuthCmd() *cobra.Command {
 	printKey.Flags().String("model", "", "model spec (provider inferred)")
 	printBearer := &cobra.Command{
 		Use:   "print-bearer-token",
-		Short: "print an OAuth bearer token (not implemented; see docs/parity-gaps.md)",
+		Short: "print an OAuth bearer token (not implemented)",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return fmt.Errorf("OAuth bearer tokens are not implemented in pigo (see docs/parity-gaps.md)")
+			return fmt.Errorf("OAuth bearer tokens are not implemented")
 		},
 	}
 	check := &cobra.Command{

@@ -10,9 +10,8 @@ import (
 // MaxFrameLen is the maximum size of one framed payload (pi DEFAULT_MAX_FRAME_LENGTH).
 const MaxFrameLen = 16 * 1024 * 1024
 
-// Message type tags for the extension RPC. This is the minimal v1 set from the
-// migration plan (handshake, registration, tool invocation, events, shallow UI,
-// lifecycle).
+// Message type tags for the extension RPC (handshake, registration, tool
+// invocation, events, shallow UI, lifecycle).
 const (
 	TypeHello           = "hello"            // ext -> host: announce { ExtName, APIVersion }
 	TypeReady           = "ready"            // host -> ext: handshake accepted

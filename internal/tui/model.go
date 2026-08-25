@@ -39,7 +39,7 @@ type entry struct {
 type agentEventMsg struct{ ev agent.Event }
 type agentClosedMsg struct{}
 
-// Model is the Phase 5 interactive TUI: it drives the agent loop (internal/agent)
+// Model is the interactive TUI: it drives the agent loop (internal/agent)
 // with real tools (internal/tools) and a provider (internal/ai), streaming the
 // assistant response to screen live (plain text during the turn), then rendering
 // it as markdown via glamour once the turn ends. Keybindings follow pi.
@@ -524,7 +524,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 				return m.startTurn(body)
 			}
 		}
-		return note("/" + cmd.Name + " is listed in pi but not implemented yet — see docs/parity-gaps.md")
+		return note("/" + cmd.Name + " is not implemented")
 	}
 }
 
