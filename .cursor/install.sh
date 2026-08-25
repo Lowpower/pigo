@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Idempotent Cloud Agent setup for pigo.
-# Installs the Go 1.27 toolchain and golangci-lint, then refreshes module deps and builds.
+# Installs the Go 1.27 toolchain and golangci-lint, clones a read-only behaviour
+# reference to ~/deps/pi (for GitHub issue work; never imported), then refreshes
+# module deps and builds.
 set -euo pipefail
 
 GO_VERSION="1.27.0"
@@ -30,6 +32,17 @@ if ! command -v golangci-lint >/dev/null 2>&1; then
     | sudo sh -s -- -b /usr/local/bin
 fi
 echo "Using $(golangci-lint version 2>/dev/null || echo 'golangci-lint (version unavailable)')"
+
+# --- behaviour reference (read-only, never imported; used when working issues) ---
+REF_DIR="${HOME}/deps/pi"
+if [ ! -d "${REF_DIR}/.git" ]; then
+  echo "Cloning behaviour reference into ${REF_DIR}..."
+  mkdir -p "$(dirname "${REF_DIR}")"
+  git clone --depth 1 https://github.com/earendil-works/pi.git "${REF_DIR}" \
+    || echo "warning: could not clone behaviour reference (continuing without it)"
+else
+  echo "behaviour reference already present at ${REF_DIR}"
+fi
 
 # --- project dependencies & build ---
 go mod download

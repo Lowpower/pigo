@@ -11,8 +11,9 @@ issues, not a phased migration plan.
 ## Toolchain
 
 The Cloud Agent environment installs everything via
-[`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain and
-`golangci-lint`.
+[`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain,
+`golangci-lint`, and a read-only behaviour reference at `~/deps/pi` (for
+working GitHub issues; never imported).
 
 To set up locally:
 

@@ -5,10 +5,15 @@ Guidance for AI agents working on **pigo**, a CLI/TUI coding agent written in Go
 
 New work is tracked as **GitHub issues**. Do not revive a phased migration plan.
 
+When working an issue that needs a behaviour reference, read the corresponding
+files under `~/deps/pi` (cloned by `.cursor/install.sh`; never imported). If that
+directory is missing, re-run `.cursor/install.sh`. Do not sprinkle source-path
+citations or “align with …” comments into this repo.
+
 ## Environment
 
 - **Go 1.27** (the base image ships an EOL Go 1.22). `.cursor/install.sh` installs Go
-  1.27 and `golangci-lint`. It is idempotent.
+  1.27, `golangci-lint`, and the read-only clone at `~/deps/pi`. It is idempotent.
 - The environment is repo-managed via `.cursor/environment.json` (runs the install
   script). A fresh Cloud Agent reproduces the whole toolchain automatically.
 
