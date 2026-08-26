@@ -98,6 +98,28 @@ func TestLoadThinkingAndIdleTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadTreeSettings(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DoubleEscape() != "tree" || cfg.TreeFilter() != "default" || cfg.BranchSummarySkipPrompt() {
+		t.Fatalf("defaults escape=%s filter=%s skip=%v", cfg.DoubleEscape(), cfg.TreeFilter(), cfg.BranchSummarySkipPrompt())
+	}
+	dir := t.TempDir()
+	raw := `{"doubleEscapeAction":"none","treeFilterMode":"user-only","branchSummary":{"skipPrompt":true,"reserveTokens":100}}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DoubleEscape() != "none" || cfg.TreeFilter() != "user-only" || !cfg.BranchSummarySkipPrompt() || cfg.BranchSummaryReserveTokens() != 100 {
+		t.Fatalf("got escape=%s filter=%s skip=%v reserve=%d", cfg.DoubleEscape(), cfg.TreeFilter(), cfg.BranchSummarySkipPrompt(), cfg.BranchSummaryReserveTokens())
+	}
+}
+
 func TestLoadPackagesAndMergeSave(t *testing.T) {
 	dir := t.TempDir()
 	raw := `{

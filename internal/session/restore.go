@@ -14,6 +14,27 @@ import (
 func RestoreAIMessages(entries []Entry) []ai.Message {
 	out := make([]ai.Message, 0, len(entries))
 	for _, e := range entries {
+		if e.Type == "branch_summary" {
+			text := e.Summary
+			if text != "" {
+				out = append(out, ai.Message{Role: ai.RoleUser, Content: text})
+			}
+			continue
+		}
+		if e.Type == "compaction" {
+			text := e.Summary
+			if text == "" {
+				var p struct {
+					Summary string `json:"summary"`
+				}
+				_ = json.Unmarshal(e.Message, &p)
+				text = p.Summary
+			}
+			if text != "" {
+				out = append(out, ai.Message{Role: ai.RoleUser, Content: "[Conversation summary — earlier messages were compacted]\n\n" + text})
+			}
+			continue
+		}
 		if e.Type != "message" && e.Type != "" {
 			continue
 		}

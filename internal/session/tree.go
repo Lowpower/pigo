@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -21,6 +23,7 @@ type Summary struct {
 	Path         string
 	ID           string
 	Name         string
+	Cwd          string
 	FirstMessage string
 	Modified     time.Time
 }
@@ -79,6 +82,7 @@ func buildTree(entries []Entry) []TreeNode {
 	for _, e := range entries {
 		byID[e.ID] = e
 	}
+	labels, labelTS := resolvedLabels(entries)
 	children := map[string][]string{}
 	var rootIDs []string
 	for _, e := range entries {
@@ -94,7 +98,7 @@ func buildTree(entries []Entry) []TreeNode {
 	}
 	var build func(id string) TreeNode
 	build = func(id string) TreeNode {
-		n := TreeNode{Entry: byID[id], Children: []TreeNode{}}
+		n := TreeNode{Entry: byID[id], Children: []TreeNode{}, Label: labels[id], LabelTimestamp: labelTS[id]}
 		kids := append([]string(nil), children[id]...)
 		for i := 0; i < len(kids); i++ {
 			for j := i + 1; j < len(kids); j++ {
@@ -232,8 +236,21 @@ func userText(e *Entry) string {
 	switch c := p.Content.(type) {
 	case string:
 		return c
+	case []any:
+		var b strings.Builder
+		for _, item := range c {
+			m, _ := item.(map[string]any)
+			if m == nil {
+				continue
+			}
+			if m["type"] == "text" {
+				t, _ := m["text"].(string)
+				b.WriteString(t)
+			}
+		}
+		return b.String()
 	default:
-		return strings.TrimSpace(string(e.Message))
+		return ""
 	}
 }
 
@@ -331,8 +348,70 @@ func Summaries(cwd, agentDir string) ([]Summary, error) {
 		}
 		first = strings.ReplaceAll(first, "\n", " ")
 		out = append(out, Summary{
-			Path: p, ID: h.ID, Name: h.Name, FirstMessage: first, Modified: info.ModTime(),
+			Path: p, ID: h.ID, Name: displayName(h, entries), Cwd: h.Cwd, FirstMessage: first, Modified: info.ModTime(),
 		})
 	}
+	return out, nil
+}
+
+func displayName(h Header, entries []Entry) string {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Type == "session_info" && entries[i].Name != "" {
+			return entries[i].Name
+		}
+	}
+	return h.Name
+}
+
+// SummariesAll lists sessions under agentDir/sessions, newest first.
+func SummariesAll(agentDir string) ([]Summary, error) {
+	root := filepath.Join(agentDir, "sessions")
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []Summary
+	for _, d := range ents {
+		if !d.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, d.Name())
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+				continue
+			}
+			p := filepath.Join(dir, f.Name())
+			h, entries, err := Load(p)
+			if err != nil {
+				continue
+			}
+			info, err := f.Info()
+			if err != nil {
+				continue
+			}
+			first := ""
+			for _, e := range entries {
+				if t := userText(&e); t != "" {
+					first = t
+					break
+				}
+			}
+			if len(first) > 60 {
+				first = first[:60] + "…"
+			}
+			first = strings.ReplaceAll(first, "\n", " ")
+			out = append(out, Summary{
+				Path: p, ID: h.ID, Name: displayName(h, entries), Cwd: h.Cwd, FirstMessage: first, Modified: info.ModTime(),
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Modified.After(out[j].Modified) })
 	return out, nil
 }

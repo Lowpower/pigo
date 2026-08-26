@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -108,4 +109,28 @@ func makeMessages(n, chars int) []ai.Message {
 		msgs[i] = ai.Message{Role: role, Content: strings.Repeat("x", chars)}
 	}
 	return msgs
+}
+
+func TestGenerateBranchSummaryPrependsPreamble(t *testing.T) {
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: "try something"},
+		{Role: ai.RoleAssistant, Content: "did it"},
+	}
+	got, err := GenerateBranchSummary(context.Background(), ai.ScriptedStreamFn("## Goal\nExplore.", 0), "test", msgs, BranchSummaryOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got, BranchSummaryPreamble) || !strings.Contains(got, "Goal") {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
+func TestGenerateBranchSummaryAbort(t *testing.T) {
+	sf := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		return ai.EmitMessage(ctx, &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopAborted}), nil
+	}
+	_, err := GenerateBranchSummary(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "x"}}, BranchSummaryOpts{})
+	if !errors.Is(err, ErrSummaryAborted) {
+		t.Fatalf("err = %v", err)
+	}
 }

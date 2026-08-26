@@ -55,7 +55,7 @@ func Builtins() []Command {
 	return []Command{
 		{Name: "settings", Description: "show settings path"},
 		{Name: "model", Description: "select model (opens selector UI)"},
-		{Name: "tree", Description: "show the session parentId tree"},
+		{Name: "tree", Description: "navigate session tree (switch branches)"},
 		{Name: "thinking", Description: "set thinking level"},
 		{Name: "scoped-models", Description: "not implemented"},
 		{Name: "export", Description: "export the session (HTML default, or .html/.jsonl path)"},
