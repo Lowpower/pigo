@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -76,6 +77,10 @@ type Engine struct {
 
 	onSessionEvent func(any)
 	uiHandler      uiHandlerFunc
+
+	// BeforeTree / AfterTree are optional NavigateTree hooks (#15 will wire extensions).
+	BeforeTree func(session.TreePrep) session.TreeHookResult
+	AfterTree  func(oldLeaf, newLeaf string)
 
 	retryMu      sync.Mutex
 	retryCancel  context.CancelFunc
@@ -515,12 +520,87 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 	e.persisted = len(s.Entries())
 }
 
+// NavigateTree moves the session leaf. Callers must not invoke this while streaming.
+func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session.NavigateOpts) (session.NavigateResult, error) {
+	if e.Opts.Session == nil {
+		return session.NavigateResult{}, fmt.Errorf("no session")
+	}
+	if e.Compacting() {
+		return session.NavigateResult{}, fmt.Errorf("wait for compaction to finish before navigating the session tree")
+	}
+	sess := e.Opts.Session
+	oldLeaf := sess.LeafID()
+	if targetID == oldLeaf {
+		return session.NavigateResult{OldLeafID: oldLeaf, NewLeafID: oldLeaf}, nil
+	}
+	abandoned, ancestor := session.AbandonedBranch(sess, oldLeaf, targetID)
+	prep := session.TreePrep{
+		TargetID:            targetID,
+		OldLeafID:           oldLeaf,
+		CommonAncestorID:    ancestor,
+		EntriesToSummarize:  abandoned,
+		UserWantsSummary:    opts.Summarize,
+		CustomInstructions:  opts.CustomInstructions,
+		ReplaceInstructions: opts.ReplaceInstructions,
+		Label:               opts.Label,
+	}
+	if e.BeforeTree != nil {
+		hook := e.BeforeTree(prep)
+		if hook.Cancel {
+			return session.NavigateResult{Cancelled: true, OldLeafID: oldLeaf, NewLeafID: oldLeaf}, nil
+		}
+		if hook.CustomInstructions != "" {
+			opts.CustomInstructions = hook.CustomInstructions
+		}
+		if hook.ReplaceInstructions != nil {
+			opts.ReplaceInstructions = *hook.ReplaceInstructions
+		}
+		if hook.Label != nil {
+			opts.Label = *hook.Label
+		}
+		if hook.Summary != "" {
+			opts.Summary = hook.Summary
+			opts.FromHook = true
+		}
+	}
+	if opts.Summarize && opts.Summary == "" && len(abandoned) > 0 {
+		summary, err := compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.RestoreAIMessages(abandoned), compaction.BranchSummaryOpts{
+			CustomInstructions:  opts.CustomInstructions,
+			ReplaceInstructions: opts.ReplaceInstructions,
+			ReserveTokens:       e.Opts.Config.BranchSummaryReserveTokens(),
+			ContextWindow:       e.Opts.Config.ContextWindow,
+		})
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, compaction.ErrSummaryAborted) {
+				return session.NavigateResult{Cancelled: true, Aborted: true, OldLeafID: oldLeaf, NewLeafID: oldLeaf}, nil
+			}
+			return session.NavigateResult{}, err
+		}
+		opts.Summary = summary
+	}
+	res, err := sess.Navigate(targetID, opts)
+	if err != nil {
+		return res, err
+	}
+	if e.AfterTree != nil {
+		e.AfterTree(res.OldLeafID, res.NewLeafID)
+	}
+	return res, nil
+}
+
+// Compacting reports whether auto-compaction is running.
+func (e *Engine) Compacting() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.compacting
+}
+
 // History restores provider-facing messages from the attached session.
 func (e *Engine) History() []ai.Message {
 	if e.Opts.Session == nil {
 		return nil
 	}
-	msgs := session.RestoreAIMessages(e.Opts.Session.Entries())
+	msgs := session.RestoreAIMessages(session.ContextEntries(e.Opts.Session))
 	e.persisted = len(msgs)
 	return msgs
 }
