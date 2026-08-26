@@ -7,11 +7,11 @@ import (
 	"errors"
 	"os/exec"
 	"syscall"
+	"time"
 )
 
-// bashResult is the RPC bash payload (pi BashResult).
-// packages/coding-agent/src/core/bash-executor.ts
-type bashResult struct {
+// BashResult is the bang/RPC bash payload.
+type BashResult struct {
 	Output         string
 	ExitCode       *int
 	Cancelled      bool
@@ -19,7 +19,7 @@ type bashResult struct {
 	FullOutputPath string
 }
 
-func (r bashResult) asData() map[string]any {
+func (r BashResult) asData() map[string]any {
 	data := map[string]any{
 		"output":    r.Output,
 		"cancelled": r.Cancelled,
@@ -34,7 +34,8 @@ func (r bashResult) asData() map[string]any {
 	return data
 }
 
-func executeRPCBash(ctx context.Context, cwd, command string, onChunk func(string)) bashResult {
+// RunBash executes command with bash -c in cwd (pi user bang / RPC bash).
+func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) BashResult {
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	if cwd != "" {
 		cmd.Dir = cwd
@@ -50,12 +51,12 @@ func executeRPCBash(ctx context.Context, cwd, command string, onChunk func(strin
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		code := 1
-		return bashResult{Output: err.Error(), ExitCode: &code}
+		return BashResult{Output: err.Error(), ExitCode: &code}
 	}
 	cmd.Stderr = cmd.Stdout
 	if err := cmd.Start(); err != nil {
 		code := 1
-		return bashResult{Output: err.Error(), ExitCode: &code}
+		return BashResult{Output: err.Error(), ExitCode: &code}
 	}
 
 	var output []byte
@@ -64,10 +65,9 @@ func executeRPCBash(ctx context.Context, cwd, command string, onChunk func(strin
 	for {
 		n, readErr := r.Read(buf)
 		if n > 0 {
-			chunk := string(buf[:n])
 			output = append(output, buf[:n]...)
 			if onChunk != nil {
-				onChunk(chunk)
+				onChunk(string(buf[:n]))
 			}
 		}
 		if readErr != nil {
@@ -77,7 +77,7 @@ func executeRPCBash(ctx context.Context, cwd, command string, onChunk func(strin
 	waitErr := cmd.Wait()
 	cancelled := ctx.Err() != nil
 	if cancelled {
-		return bashResult{Output: string(output), Cancelled: true, Truncated: false}
+		return BashResult{Output: string(output), Cancelled: true, Truncated: false}
 	}
 	code := 0
 	if waitErr != nil {
@@ -87,9 +87,34 @@ func executeRPCBash(ctx context.Context, cwd, command string, onChunk func(strin
 		} else {
 			code = 1
 			if len(output) == 0 {
-				return bashResult{Output: waitErr.Error(), ExitCode: &code}
+				return BashResult{Output: waitErr.Error(), ExitCode: &code}
 			}
 		}
 	}
-	return bashResult{Output: string(output), ExitCode: &code, Cancelled: false, Truncated: false}
+	return BashResult{Output: string(output), ExitCode: &code, Cancelled: false, Truncated: false}
+}
+
+// PersistBash writes a bashExecution session entry. excludeFromContext skips LLM history.
+func (e *Engine) PersistBash(command string, result BashResult, exclude bool) {
+	if e == nil || e.Opts.Session == nil {
+		return
+	}
+	payload := map[string]any{
+		"role":      "bashExecution",
+		"command":   command,
+		"output":    result.Output,
+		"cancelled": result.Cancelled,
+		"truncated": result.Truncated,
+		"timestamp": time.Now().UnixMilli(),
+	}
+	if result.ExitCode != nil {
+		payload["exitCode"] = *result.ExitCode
+	}
+	if result.FullOutputPath != "" {
+		payload["fullOutputPath"] = result.FullOutputPath
+	}
+	if exclude {
+		payload["excludeFromContext"] = true
+	}
+	_, _ = e.Opts.Session.AppendMessage("bashExecution", payload)
 }

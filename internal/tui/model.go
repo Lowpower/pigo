@@ -80,11 +80,15 @@ type Model struct {
 	streamStyle lipgloss.Style
 	footerStyle lipgloss.Style
 
-	keys      *keys.Manager
-	models    modelPicker
-	sessions  sessionPicker
-	lastClear time.Time
-	login     loginState
+	keys        *keys.Manager
+	models      modelPicker
+	sessions    sessionPicker
+	complete    completer
+	completeDir string
+	bashCancel  context.CancelFunc
+	bashRunning bool
+	lastClear   time.Time
+	login       loginState
 
 	overlay       overlayKind
 	tree          treeOverlay
@@ -142,6 +146,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case bashDoneMsg:
+		return m.handleBashDone(msg)
+
 	case tea.KeyMsg:
 		if m.sessionPickerActive() {
 			return m.handleSessionPickerKey(msg)
@@ -154,6 +161,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.loginActive() {
 			return m.handleLoginKey(msg)
+		}
+		if m.complete.active {
+			if m.keyIs(msg, "tui.select.up") || m.keyIs(msg, "tui.editor.cursorUp") {
+				m.complete.move(-1)
+				return m, nil
+			}
+			if m.keyIs(msg, "tui.select.down") || m.keyIs(msg, "tui.editor.cursorDown") {
+				m.complete.move(1)
+				return m, nil
+			}
+			if m.keyIs(msg, "tui.select.confirm") || m.keyIs(msg, "tui.input.submit") || m.keyIs(msg, "tui.input.tab") {
+				return m.applyCompletion()
+			}
+			if m.keyIs(msg, "tui.select.cancel") || m.keyIs(msg, "app.interrupt") {
+				m.complete.hide()
+				return m, nil
+			}
 		}
 		if m.editor.jump != "" {
 			if m.keyIs(msg, "tui.editor.jumpForward") || m.keyIs(msg, "tui.editor.jumpBackward") {
@@ -180,7 +204,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancel()
 				return m, nil
 			}
+			if m.bashRunning && m.bashCancel != nil {
+				m.bashCancel()
+				return m, nil
+			}
 			return m.handleIdleEscape()
+		}
+		if m.keyIs(msg, "tui.input.tab") {
+			m.refreshComplete(true)
+			if m.complete.active && len(m.complete.items) == 1 {
+				m.complete.sel = 0
+				return m.applyCompletion()
+			}
+			return m, nil
 		}
 		if m.keyIs(msg, "tui.input.submit") {
 			return m.submit()
@@ -208,6 +244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.editor.handle(msg, m.keys) {
+			m.refreshComplete(false)
 			return m, nil
 		}
 
@@ -237,6 +274,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok && m.keys != nil {
 		m.editor.afterTextareaKey(key, m.keys)
 	}
+	m.refreshComplete(false)
 	return m, cmd
 }
 
@@ -294,6 +332,12 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	images := extractImages(text)
+	if command, exclude, ok := parseBang(text); ok {
+		m.editor.AddHistory(text)
+		m.editor.Reset()
+		m.complete.hide()
+		return m.startBash(command, exclude)
+	}
 	if m.running {
 		m.editor.Reset()
 		// Enter while streaming steers the current loop; leftover lines
@@ -679,10 +723,17 @@ func (m Model) View() string {
 		b.WriteString(m.metaStyle.Render("…working (Ctrl+C to interrupt)"))
 		b.WriteString("\n\n")
 	}
+	if m.bashRunning {
+		b.WriteString(m.metaStyle.Render("…bash (Esc to cancel)"))
+		b.WriteString("\n\n")
+	}
 
 	b.WriteString(m.editor.View())
 	b.WriteString("\n")
-	b.WriteString(m.footerStyle.Render("Enter send · Ctrl+G editor · Ctrl+L model · Shift+Tab thinking · Ctrl+P cycle · /help · Ctrl+D exit"))
+	if m.complete.active {
+		b.WriteString(m.complete.view())
+	}
+	b.WriteString(m.footerStyle.Render("Enter send · Tab complete · ! bash · Ctrl+G editor · Ctrl+L model · /help · Ctrl+D exit"))
 	return b.String()
 }
 
@@ -753,6 +804,7 @@ func (m Model) handleClear() (tea.Model, tea.Cmd) {
 	}
 	m.lastClear = now
 	m.editor.Reset()
+	m.complete.hide()
 	return m, nil
 }
 
