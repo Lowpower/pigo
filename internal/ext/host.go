@@ -30,6 +30,8 @@ type Options struct {
 	CallTimeout time.Duration
 	// Notify receives the extension's notify messages (level, text). Optional.
 	Notify func(level, text string)
+	// UI handles extension UI methods (select/confirm/...) in RPC mode.
+	UI func(method string, args map[string]any, timeout time.Duration) map[string]any
 }
 
 type registeredTool struct {
@@ -45,6 +47,7 @@ type Host struct {
 	stdin       io.WriteCloser
 	callTimeout time.Duration
 	notify      func(level, text string)
+	ui          func(method string, args map[string]any, timeout time.Duration) map[string]any
 
 	writeMu sync.Mutex
 
@@ -90,6 +93,7 @@ func Spawn(ctx context.Context, name string, argv []string, opts Options) (*Host
 		stdin:       stdin,
 		callTimeout: callTimeout,
 		notify:      opts.Notify,
+		ui:          opts.UI,
 		pending:     make(map[string]chan protocol.Message),
 		waitDone:    make(chan struct{}),
 	}
@@ -160,6 +164,26 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 			if h.notify != nil {
 				h.notify(m.Level, m.Text)
 			}
+		case protocol.TypeUIRequest:
+			h.mu.Lock()
+			ui := h.ui
+			h.mu.Unlock()
+			if ui == nil {
+				continue
+			}
+			go func(m protocol.Message) {
+				var timeout time.Duration
+				if m.Args != nil {
+					switch v := m.Args["timeout"].(type) {
+					case float64:
+						timeout = time.Duration(v) * time.Millisecond
+					case int:
+						timeout = time.Duration(v) * time.Millisecond
+					}
+				}
+				result := ui(m.Name, m.Args, timeout)
+				_ = h.send(protocol.Message{Type: protocol.TypeUIResult, ID: m.ID, Args: result})
+			}(m)
 		}
 	}
 }
@@ -185,6 +209,13 @@ func (h *Host) Tools() []ai.Tool {
 		out = append(out, ai.Tool{Name: t.name, Description: t.description, Parameters: t.schema})
 	}
 	return out
+}
+
+// SetUI installs the RPC (or TUI) handler for extension UI requests.
+func (h *Host) SetUI(ui func(method string, args map[string]any, timeout time.Duration) map[string]any) {
+	h.mu.Lock()
+	h.ui = ui
+	h.mu.Unlock()
 }
 
 // HasTool reports whether the extension registered a tool with this name.

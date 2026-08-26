@@ -70,6 +70,7 @@ type Engine struct {
 	compacting bool
 
 	onSessionEvent func(any)
+	uiHandler      uiHandlerFunc
 
 	retryMu      sync.Mutex
 	retryCancel  context.CancelFunc
