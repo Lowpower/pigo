@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -18,14 +16,17 @@ type TreeNode struct {
 	LabelTimestamp string     `json:"labelTimestamp,omitempty"`
 }
 
-// Summary is a one-line listing used by /resume.
+// Summary is a listing row used by /resume.
 type Summary struct {
-	Path         string
-	ID           string
-	Name         string
-	Cwd          string
-	FirstMessage string
-	Modified     time.Time
+	Path          string
+	ID            string
+	Name          string
+	FirstMessage  string
+	Cwd           string
+	ParentSession string
+	SearchText    string
+	MessageCount  int
+	Modified      time.Time
 }
 
 // Branch moves the leaf pointer so the next append is a child of id.
@@ -326,6 +327,10 @@ func Summaries(cwd, agentDir string) ([]Summary, error) {
 	if err != nil {
 		return nil, err
 	}
+	return summariesFrom(paths)
+}
+
+func summariesFrom(paths []string) ([]Summary, error) {
 	out := make([]Summary, 0, len(paths))
 	for _, p := range paths {
 		h, entries, err := Load(p)
@@ -337,21 +342,43 @@ func Summaries(cwd, agentDir string) ([]Summary, error) {
 			continue
 		}
 		first := ""
-		for _, e := range entries {
-			if t := userText(&e); t != "" {
+		var texts []string
+		msgs := 0
+		for i := range entries {
+			e := &entries[i]
+			if t := userText(e); t != "" && first == "" {
 				first = t
-				break
+			}
+			if piece := searchPiece(e); piece != "" {
+				texts = append(texts, piece)
+			}
+			if e.Type == "message" || e.Type == "" {
+				msgs++
 			}
 		}
 		if len(first) > 60 {
 			first = first[:60] + "…"
 		}
 		first = strings.ReplaceAll(first, "\n", " ")
+		name := displayName(h, entries)
+		search := strings.Join([]string{h.ID, name, h.Cwd, strings.Join(texts, " ")}, " ")
 		out = append(out, Summary{
-			Path: p, ID: h.ID, Name: displayName(h, entries), Cwd: h.Cwd, FirstMessage: first, Modified: info.ModTime(),
+			Path: p, ID: h.ID, Name: name, FirstMessage: first,
+			Cwd: h.Cwd, ParentSession: h.ParentSession, SearchText: search,
+			MessageCount: msgs, Modified: info.ModTime(),
 		})
 	}
 	return out, nil
+}
+
+func searchPiece(e *Entry) string {
+	if e == nil {
+		return ""
+	}
+	if t := userText(e); t != "" {
+		return t
+	}
+	return strings.TrimSpace(string(e.Message))
 }
 
 func displayName(h Header, entries []Entry) string {
@@ -361,57 +388,4 @@ func displayName(h Header, entries []Entry) string {
 		}
 	}
 	return h.Name
-}
-
-// SummariesAll lists sessions under agentDir/sessions, newest first.
-func SummariesAll(agentDir string) ([]Summary, error) {
-	root := filepath.Join(agentDir, "sessions")
-	ents, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var out []Summary
-	for _, d := range ents {
-		if !d.IsDir() {
-			continue
-		}
-		dir := filepath.Join(root, d.Name())
-		files, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
-				continue
-			}
-			p := filepath.Join(dir, f.Name())
-			h, entries, err := Load(p)
-			if err != nil {
-				continue
-			}
-			info, err := f.Info()
-			if err != nil {
-				continue
-			}
-			first := ""
-			for _, e := range entries {
-				if t := userText(&e); t != "" {
-					first = t
-					break
-				}
-			}
-			if len(first) > 60 {
-				first = first[:60] + "…"
-			}
-			first = strings.ReplaceAll(first, "\n", " ")
-			out = append(out, Summary{
-				Path: p, ID: h.ID, Name: displayName(h, entries), Cwd: h.Cwd, FirstMessage: first, Modified: info.ModTime(),
-			})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Modified.After(out[j].Modified) })
-	return out, nil
 }

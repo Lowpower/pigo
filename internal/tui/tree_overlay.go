@@ -20,7 +20,6 @@ const (
 	overlayTreeLabel
 	overlayTreeSummary
 	overlayTreeCustom
-	overlayResume
 )
 
 type treeOverlay struct {

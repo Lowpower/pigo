@@ -370,24 +370,4 @@ func TestDoubleEscapeOpensTree(t *testing.T) {
 	}
 }
 
-func TestSlashResumeOpensPicker(t *testing.T) {
-	agent := t.TempDir()
-	cwd := t.TempDir()
-	sess := session.New(cwd, agent)
-	_, _ = sess.AppendMessage("user", map[string]any{"role": "user", "content": "old chat"})
-	_, _ = sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
-	m := New(testCfg())
-	m.engine = &runtime.Engine{Opts: runtime.Options{Session: sess, AgentDir: agent, Cwd: cwd}}
-	m.textarea.SetValue("/resume")
-	// Summaries uses cwd from os.Getwd, so open picker via helper.
-	next, _ := m.openResumePicker(cwd)
-	got := next.(Model)
-	if got.overlay != overlayResume {
-		t.Fatalf("overlay = %d", got.overlay)
-	}
-	if !strings.Contains(got.View(), "Resume Session") {
-		t.Fatalf("view =\n%s", got.View())
-	}
-}
-
 func boolPtr(v bool) *bool { return &v }
