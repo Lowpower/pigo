@@ -86,8 +86,6 @@ type Model struct {
 	tree          treeOverlay
 	lastEscape    time.Time
 	summaryCancel context.CancelFunc
-	picking       bool
-	pickResult    string
 }
 
 // New builds the interactive model from the resolved config.
