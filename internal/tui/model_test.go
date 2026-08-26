@@ -10,6 +10,8 @@ import (
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/runtime"
+	"github.com/Lowpower/pigo/internal/session"
 )
 
 func testCfg() config.Config {
@@ -133,3 +135,89 @@ func TestCtrlDQuitsWhenEmpty(t *testing.T) {
 		t.Fatal("expected quit cmd")
 	}
 }
+
+func treeModel(t *testing.T) Model {
+	t.Helper()
+	sess := session.New(t.TempDir(), t.TempDir())
+	_, _ = sess.AppendMessage("user", map[string]any{"role": "user", "content": "hello tree"})
+	_, _ = sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Session: sess, AgentDir: t.TempDir(), Cwd: t.TempDir()}}
+	return m
+}
+
+func TestSlashTreeOpensOverlay(t *testing.T) {
+	m := treeModel(t)
+	m.textarea.SetValue("/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.overlay != overlayTree {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+	if !strings.Contains(m.View(), "Session Tree") {
+		t.Fatalf("view =\n%s", m.View())
+	}
+	if !strings.Contains(m.View(), "hello tree") {
+		t.Fatalf("missing node:\n%s", m.View())
+	}
+}
+
+func TestTreeCtrlDDoesNotQuit(t *testing.T) {
+	m := treeModel(t)
+	m.textarea.SetValue("/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	got := next.(Model)
+	if got.quitting {
+		t.Fatal("ctrl+d in tree must not quit")
+	}
+	if got.overlay != overlayTree {
+		t.Fatalf("overlay = %d", got.overlay)
+	}
+}
+
+func TestTreeEnterNavigatesUserIntoEditor(t *testing.T) {
+	m := treeModel(t)
+	m.cfg.BranchSummary.SkipPrompt = boolPtr(true)
+	m.textarea.SetValue("/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	// cursor on leaf (assistant). Move up to user.
+	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.overlay != overlayNone {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+	if !strings.Contains(m.textarea.Value(), "hello tree") {
+		t.Fatalf("editor = %q", m.textarea.Value())
+	}
+}
+
+func TestDoubleEscapeOpensTree(t *testing.T) {
+	m := treeModel(t)
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.overlay != overlayTree {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+}
+
+func TestSlashResumeOpensPicker(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	sess := session.New(cwd, agent)
+	_, _ = sess.AppendMessage("user", map[string]any{"role": "user", "content": "old chat"})
+	_, _ = sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Session: sess, AgentDir: agent, Cwd: cwd}}
+	m.textarea.SetValue("/resume")
+	// Summaries uses cwd from os.Getwd, so open picker via helper.
+	next, _ := m.openResumePicker(cwd)
+	got := next.(Model)
+	if got.overlay != overlayResume {
+		t.Fatalf("overlay = %d", got.overlay)
+	}
+	if !strings.Contains(got.View(), "Resume Session") {
+		t.Fatalf("view =\n%s", got.View())
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }

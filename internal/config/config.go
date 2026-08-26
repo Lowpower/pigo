@@ -13,22 +13,25 @@ import (
 // Config holds the resolved pigo settings. Keys are defaultProvider /
 // defaultModel / theme, with aliases (provider / model) for the earlier scaffold.
 type Config struct {
-	Provider            string            `mapstructure:"provider"`
-	Model               string            `mapstructure:"model"`
-	DefaultProvider     string            `mapstructure:"defaultProvider"`
-	DefaultModel        string            `mapstructure:"defaultModel"`
-	Theme               string            `mapstructure:"theme"`
-	Thinking            string            `mapstructure:"thinking"`
-	ContextWindow       int               `mapstructure:"contextWindow"`
-	CompactionOn        *bool             `mapstructure:"compactionEnabled"`
-	ReserveTokens       int               `mapstructure:"compactionReserveTokens"`
-	KeepRecentTokens    int               `mapstructure:"compactionKeepRecentTokens"`
-	SteeringMode        string            `mapstructure:"steeringMode"`
-	FollowUpMode        string            `mapstructure:"followUpMode"`
-	Retry               RetrySettings     `mapstructure:"retry"`
-	ThinkingBudgets     map[string]int    `mapstructure:"thinkingBudgets"`
-	ModelThinkingLevels map[string]string `mapstructure:"modelThinkingLevels"`
-	HTTPIdleTimeoutMs   *int              `mapstructure:"httpIdleTimeoutMs"`
+	Provider            string                `mapstructure:"provider"`
+	Model               string                `mapstructure:"model"`
+	DefaultProvider     string                `mapstructure:"defaultProvider"`
+	DefaultModel        string                `mapstructure:"defaultModel"`
+	Theme               string                `mapstructure:"theme"`
+	Thinking            string                `mapstructure:"thinking"`
+	ContextWindow       int                   `mapstructure:"contextWindow"`
+	CompactionOn        *bool                 `mapstructure:"compactionEnabled"`
+	ReserveTokens       int                   `mapstructure:"compactionReserveTokens"`
+	KeepRecentTokens    int                   `mapstructure:"compactionKeepRecentTokens"`
+	SteeringMode        string                `mapstructure:"steeringMode"`
+	FollowUpMode        string                `mapstructure:"followUpMode"`
+	Retry               RetrySettings         `mapstructure:"retry"`
+	ThinkingBudgets     map[string]int        `mapstructure:"thinkingBudgets"`
+	ModelThinkingLevels map[string]string     `mapstructure:"modelThinkingLevels"`
+	HTTPIdleTimeoutMs   *int                  `mapstructure:"httpIdleTimeoutMs"`
+	DoubleEscapeAction  string                `mapstructure:"doubleEscapeAction"`
+	TreeFilterMode      string                `mapstructure:"treeFilterMode"`
+	BranchSummary       BranchSummarySettings `mapstructure:"branchSummary"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -43,6 +46,12 @@ type RetrySettings struct {
 	Enabled     *bool `mapstructure:"enabled" json:"enabled,omitempty"`
 	MaxRetries  *int  `mapstructure:"maxRetries" json:"maxRetries,omitempty"`
 	BaseDelayMs *int  `mapstructure:"baseDelayMs" json:"baseDelayMs,omitempty"`
+}
+
+// BranchSummarySettings is pi settings.branchSummary.
+type BranchSummarySettings struct {
+	SkipPrompt    *bool `mapstructure:"skipPrompt" json:"skipPrompt,omitempty"`
+	ReserveTokens int   `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
 }
 
 // ResourceKinds is the settings.json key order for discovered resources.
@@ -121,6 +130,45 @@ func (c Config) HTTPIdleTimeout() time.Duration {
 	return time.Duration(*c.HTTPIdleTimeoutMs) * time.Millisecond
 }
 
+// DoubleEscape is tree, fork, or none (default tree).
+func (c Config) DoubleEscape() string {
+	switch c.DoubleEscapeAction {
+	case "fork", "none", "tree":
+		return c.DoubleEscapeAction
+	default:
+		return "tree"
+	}
+}
+
+// TreeFilter is the initial /tree filter (default "default").
+func (c Config) TreeFilter() string {
+	switch c.TreeFilterMode {
+	case "no-tools", "user-only", "labeled-only", "all", "default":
+		return c.TreeFilterMode
+	default:
+		return "default"
+	}
+}
+
+// BranchSummarySkipPrompt reports whether to skip the summarize dialog.
+func (c Config) BranchSummarySkipPrompt() bool {
+	if c.BranchSummary.SkipPrompt == nil {
+		return false
+	}
+	return *c.BranchSummary.SkipPrompt
+}
+
+// BranchSummaryReserveTokens is the summarization token reserve (default 16384).
+func (c Config) BranchSummaryReserveTokens() int {
+	if c.BranchSummary.ReserveTokens > 0 {
+		return c.BranchSummary.ReserveTokens
+	}
+	if c.ReserveTokens > 0 {
+		return c.ReserveTokens
+	}
+	return 16384
+}
+
 // ModelThinkingLevel is the per-model default thinking override.
 func (c Config) ModelThinkingLevel(provider, id string) string {
 	if len(c.ModelThinkingLevels) == 0 || provider == "" || id == "" {
@@ -173,6 +221,8 @@ func Load(configDir string) (Config, error) {
 	v.SetDefault("compactionKeepRecentTokens", 20000)
 	v.SetDefault("steeringMode", "one-at-a-time")
 	v.SetDefault("followUpMode", "one-at-a-time")
+	v.SetDefault("doubleEscapeAction", "tree")
+	v.SetDefault("treeFilterMode", "default")
 
 	v.SetEnvPrefix("PIGO")
 	v.AutomaticEnv()

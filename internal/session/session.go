@@ -37,6 +37,14 @@ type Entry struct {
 	Message   json.RawMessage `json:"message,omitempty"`
 	Usage     *ai.Usage       `json:"usage,omitempty"`
 
+	// Label / branch_summary / session_info fields (top-level, like pi).
+	TargetID string          `json:"targetId,omitempty"`
+	Label    *string         `json:"label,omitempty"`
+	Summary  string          `json:"summary,omitempty"`
+	FromID   string          `json:"fromId,omitempty"`
+	Details  json.RawMessage `json:"details,omitempty"`
+	Name     string          `json:"name,omitempty"`
+
 	// role is used only for the buffer-until-assistant flush rule; not serialized.
 	role string
 }
@@ -92,9 +100,24 @@ func (m *Manager) ID() string { return m.id }
 // File returns the session file path.
 func (m *Manager) File() string { return m.file }
 
-func (m *Manager) Name() string { return m.header.Name }
+// Name is the display name (latest session_info, else header).
+func (m *Manager) Name() string {
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i] != nil && m.entries[i].Type == "session_info" && m.entries[i].Name != "" {
+			return m.entries[i].Name
+		}
+	}
+	return m.header.Name
+}
 
-func (m *Manager) SetName(name string) { m.header.Name = name }
+// SetName updates the display name. After the file is flushed it also appends
+// a session_info entry so the name survives reload.
+func (m *Manager) SetName(name string) {
+	m.header.Name = name
+	if m.flushed {
+		_, _ = m.AppendSessionInfo(name)
+	}
+}
 
 // SetParentSession records the parent session path in the header (RPC new_session).
 func (m *Manager) SetParentSession(path string) { m.header.ParentSession = path }
@@ -131,6 +154,10 @@ func (m *Manager) AppendMessage(role string, message any) (*Entry, error) {
 		Message:   raw,
 		role:      role,
 	}
+	return m.appendEntry(e)
+}
+
+func (m *Manager) appendEntry(e *Entry) (*Entry, error) {
 	if m.leafID != "" {
 		prev := m.leafID
 		e.ParentID = &prev
@@ -141,6 +168,16 @@ func (m *Manager) AppendMessage(role string, message any) (*Entry, error) {
 		return nil, err
 	}
 	return e, nil
+}
+
+// EntryByID returns a copy of the named entry.
+func (m *Manager) EntryByID(id string) (Entry, bool) {
+	for _, e := range m.entries {
+		if e != nil && e.ID == id {
+			return *e, true
+		}
+	}
+	return Entry{}, false
 }
 
 func (m *Manager) persistEntry(e *Entry) error {
