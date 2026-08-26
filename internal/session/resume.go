@@ -118,16 +118,7 @@ func (m *Manager) AppendCompaction(summary string) (*Entry, error) {
 		return nil, err
 	}
 	e := &Entry{Type: "compaction", ID: newUUID(), Timestamp: isoNow(), Message: raw, role: "assistant"}
-	if m.leafID != "" {
-		prev := m.leafID
-		e.ParentID = &prev
-	}
-	m.entries = append(m.entries, e)
-	m.leafID = e.ID
-	if err := m.persistEntry(e); err != nil {
-		return nil, err
-	}
-	return e, nil
+	return m.appendEntry(e)
 }
 
 // RestoreMessages rebuilds a provider-facing transcript from session entries.

@@ -416,6 +416,32 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				tree = []session.TreeNode{}
 			}
 			reply(id, "get_tree", true, map[string]any{"tree": tree, "leafId": leaf}, "")
+		case "navigate_tree":
+			target, _ := raw["targetId"].(string)
+			if running {
+				reply(id, "navigate_tree", false, nil, "Wait for the current response to finish before navigating the session tree.")
+				break
+			}
+			opts := session.NavigateOpts{
+				Summarize:           raw["summarize"] == true,
+				CustomInstructions:  strField(raw, "customInstructions"),
+				ReplaceInstructions: raw["replaceInstructions"] == true,
+				Label:               strField(raw, "label"),
+			}
+			res, err := e.NavigateTree(ctx, target, opts)
+			if err != nil {
+				reply(id, "navigate_tree", false, nil, err.Error())
+				break
+			}
+			stateMu.Lock()
+			history = e.History()
+			stateMu.Unlock()
+			reply(id, "navigate_tree", true, map[string]any{
+				"editorText": res.EditorText,
+				"cancelled":  res.Cancelled,
+				"aborted":    res.Aborted,
+				"leafId":     res.NewLeafID,
+			}, "")
 		case "export_html":
 			if e.Opts.Session == nil {
 				reply(id, "export_html", false, nil, "no session")
@@ -510,4 +536,9 @@ func lastAssistantText(msgs []ai.Message) string {
 		}
 	}
 	return ""
+}
+
+func strField(raw map[string]any, key string) string {
+	s, _ := raw[key].(string)
+	return s
 }

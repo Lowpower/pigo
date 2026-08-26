@@ -83,6 +83,7 @@ func buildTree(entries []Entry) []TreeNode {
 	for _, e := range entries {
 		byID[e.ID] = e
 	}
+	labels, labelTS := resolvedLabels(entries)
 	children := map[string][]string{}
 	var rootIDs []string
 	for _, e := range entries {
@@ -98,7 +99,7 @@ func buildTree(entries []Entry) []TreeNode {
 	}
 	var build func(id string) TreeNode
 	build = func(id string) TreeNode {
-		n := TreeNode{Entry: byID[id], Children: []TreeNode{}}
+		n := TreeNode{Entry: byID[id], Children: []TreeNode{}, Label: labels[id], LabelTimestamp: labelTS[id]}
 		kids := append([]string(nil), children[id]...)
 		for i := 0; i < len(kids); i++ {
 			for j := i + 1; j < len(kids); j++ {
@@ -236,8 +237,21 @@ func userText(e *Entry) string {
 	switch c := p.Content.(type) {
 	case string:
 		return c
+	case []any:
+		var b strings.Builder
+		for _, item := range c {
+			m, _ := item.(map[string]any)
+			if m == nil {
+				continue
+			}
+			if m["type"] == "text" {
+				t, _ := m["text"].(string)
+				b.WriteString(t)
+			}
+		}
+		return b.String()
 	default:
-		return strings.TrimSpace(string(e.Message))
+		return ""
 	}
 }
 
@@ -346,9 +360,10 @@ func summariesFrom(paths []string) ([]Summary, error) {
 			first = first[:60] + "…"
 		}
 		first = strings.ReplaceAll(first, "\n", " ")
-		search := strings.Join([]string{h.ID, h.Name, h.Cwd, strings.Join(texts, " ")}, " ")
+		name := displayName(h, entries)
+		search := strings.Join([]string{h.ID, name, h.Cwd, strings.Join(texts, " ")}, " ")
 		out = append(out, Summary{
-			Path: p, ID: h.ID, Name: h.Name, FirstMessage: first,
+			Path: p, ID: h.ID, Name: name, FirstMessage: first,
 			Cwd: h.Cwd, ParentSession: h.ParentSession, SearchText: search,
 			MessageCount: msgs, Modified: info.ModTime(),
 		})
@@ -364,4 +379,13 @@ func searchPiece(e *Entry) string {
 		return t
 	}
 	return strings.TrimSpace(string(e.Message))
+}
+
+func displayName(h Header, entries []Entry) string {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Type == "session_info" && entries[i].Name != "" {
+			return entries[i].Name
+		}
+	}
+	return h.Name
 }
