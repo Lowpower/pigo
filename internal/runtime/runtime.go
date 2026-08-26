@@ -721,12 +721,27 @@ func (e *Engine) CycleThinking() string {
 	return next
 }
 
-// ApplyModel sets provider/model and optional thinking override.
+// ApplyModel sets the session provider/model without writing settings.json.
 func (e *Engine) ApplyModel(provider, id, thinking string) {
+	e.setModel(provider, id, thinking, false)
+}
+
+// PersistModel applies the model and writes it as the saved default.
+func (e *Engine) PersistModel(provider, id, thinking string) error {
+	e.setModel(provider, id, thinking, true)
+	if e.Opts.AgentDir == "" {
+		return nil
+	}
+	return config.Save(e.Opts.AgentDir, e.Opts.Config)
+}
+
+func (e *Engine) setModel(provider, id, thinking string, persist bool) {
 	if provider != "" {
 		e.Provider = provider
 		e.Opts.Config.Provider = provider
-		e.Opts.Config.DefaultProvider = provider
+		if persist {
+			e.Opts.Config.DefaultProvider = provider
+		}
 		if e.Opts.AgentDir != "" {
 			if fn := boundStream(e.Opts.AgentDir, provider); fn != nil {
 				e.Stream = fn
@@ -735,7 +750,9 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 	}
 	if id != "" {
 		e.Opts.Config.Model = id
-		e.Opts.Config.DefaultModel = id
+		if persist {
+			e.Opts.Config.DefaultModel = id
+		}
 	}
 	if thinking != "" {
 		e.Opts.Config.Thinking = thinking

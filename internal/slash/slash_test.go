@@ -39,3 +39,23 @@ func TestParseCloneAndTree(t *testing.T) {
 		t.Fatalf("tree: %+v ok=%v", c, ok)
 	}
 }
+
+func TestHotkeysTextIncludesModelSelect(t *testing.T) {
+	text := HotkeysText()
+	if !contains(text, "ctrl+l") || !contains(text, "open model selector") {
+		t.Fatalf("hotkeys missing model select:\n%s", text)
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || (len(sub) > 0 && indexOf(s, sub) >= 0))
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
