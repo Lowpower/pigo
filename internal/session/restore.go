@@ -60,11 +60,39 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 			errFlag, _ := payload["isError"].(bool)
 			out = append(out, ai.Message{Role: ai.RoleToolResult, Content: content, ToolCallID: id, ToolName: name, IsError: errFlag})
 		default:
-			content, _ := payload["content"].(string)
-			out = append(out, ai.Message{Role: ai.RoleUser, Content: content})
+			content, images := parseUserContent(payload["content"])
+			out = append(out, ai.Message{Role: ai.RoleUser, Content: content, Images: images})
 		}
 	}
 	return out
+}
+
+func parseUserContent(v any) (string, []ai.ImageContent) {
+	if s, ok := v.(string); ok {
+		return s, nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return "", nil
+	}
+	var text string
+	var images []ai.ImageContent
+	for _, item := range arr {
+		m, _ := item.(map[string]any)
+		if m == nil {
+			continue
+		}
+		switch m["type"] {
+		case "text":
+			t, _ := m["text"].(string)
+			text += t
+		case "image":
+			data, _ := m["data"].(string)
+			mime, _ := m["mimeType"].(string)
+			images = append(images, ai.ImageContent{Type: "image", Data: data, MimeType: mime})
+		}
+	}
+	return text, images
 }
 
 // FindByID opens the session whose id equals or is prefixed by id for cwd.

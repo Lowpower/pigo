@@ -76,7 +76,14 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 	auth.ApplyEnv(opts.AgentDir)
 
-	sf, provider := ai.DefaultStreamFn()
+	provider := opts.Config.ResolvedProvider()
+	if provider == "" {
+		provider = "anthropic"
+	}
+	sf := boundStream(opts.AgentDir, provider)
+	if sf == nil {
+		sf, provider = ai.DefaultStreamFn()
+	}
 	reg := tools.Default()
 	if opts.NoTools {
 		reg = tools.NewRegistry()
@@ -156,28 +163,35 @@ func (e *Engine) emitQueueUpdate() {
 	e.emitSession(map[string]any{"type": "queue_update", "steering": s, "followUp": f})
 }
 
-// PushSteer queues a user message for the in-flight turn.
-func (e *Engine) PushSteer(text string) {
+func (e *Engine) queueUser(dst *[]ai.Message, text string, images []ai.ImageContent) {
 	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" && len(images) == 0 {
 		return
 	}
 	e.mu.Lock()
-	e.steer = append(e.steer, ai.Message{Role: ai.RoleUser, Content: text})
+	*dst = append(*dst, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 	e.mu.Unlock()
 	e.emitQueueUpdate()
 }
 
+// PushSteer queues a user message for the in-flight turn.
+func (e *Engine) PushSteer(text string) {
+	e.queueUser(&e.steer, text, nil)
+}
+
+// PushSteerImages queues a steering message with optional image blocks.
+func (e *Engine) PushSteerImages(text string, images []ai.ImageContent) {
+	e.queueUser(&e.steer, text, images)
+}
+
 // PushFollow queues a user message for after the current turn.
 func (e *Engine) PushFollow(text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	e.mu.Lock()
-	e.follow = append(e.follow, ai.Message{Role: ai.RoleUser, Content: text})
-	e.mu.Unlock()
-	e.emitQueueUpdate()
+	e.queueUser(&e.follow, text, nil)
+}
+
+// PushFollowImages queues a follow-up message with optional image blocks.
+func (e *Engine) PushFollowImages(text string, images []ai.ImageContent) {
+	e.queueUser(&e.follow, text, images)
 }
 
 func (e *Engine) drainSteer() []ai.Message {
@@ -321,8 +335,8 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 }
 
 // RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
-func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string) *agent.Stream {
-	userMsg := ai.Message{Role: ai.RoleUser, Content: user}
+func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent) *agent.Stream {
+	userMsg := ai.Message{Role: ai.RoleUser, Content: user, Images: images}
 	history = append(append([]ai.Message(nil), history...), userMsg)
 	compacted, _, err := e.MaybeCompact(ctx, history)
 	if err == nil {
@@ -401,7 +415,11 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 				"content": msg.Text, "isError": msg.IsError,
 			})
 		default:
-			entry, err = e.Opts.Session.AppendMessage("user", map[string]any{"role": "user", "content": msg.Text})
+			payload := map[string]any{"role": "user", "content": msg.Text}
+			if len(msg.Images) > 0 {
+				payload["content"] = agent.UserContentBlocks(msg.Text, msg.Images)
+			}
+			entry, err = e.Opts.Session.AppendMessage("user", payload)
 		}
 		if err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
@@ -433,6 +451,11 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 		e.Provider = provider
 		e.Opts.Config.Provider = provider
 		e.Opts.Config.DefaultProvider = provider
+		if e.Opts.AgentDir != "" {
+			if fn := boundStream(e.Opts.AgentDir, provider); fn != nil {
+				e.Stream = fn
+			}
+		}
 	}
 	if id != "" {
 		e.Opts.Config.Model = id
@@ -445,7 +468,7 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 
 // PrintText streams a prompt to out as plain text (--mode text / --print).
 func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
-	stream := e.RunPrompt(ctx, history, user)
+	stream := e.RunPrompt(ctx, history, user, nil)
 	var last []agent.Msg
 	for ev := range stream.Events() {
 		switch ev.Type {
@@ -465,13 +488,13 @@ func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Mess
 }
 
 // PrintJSON writes NDJSON agent events (--mode json).
-func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
+func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string, images []ai.ImageContent) error {
 	enc := json.NewEncoder(out)
 	write := e.onSessionEvent
 	if write == nil {
 		write = func(v any) { _ = enc.Encode(v) }
 	}
-	stream := e.RunPrompt(ctx, history, user)
+	stream := e.RunPrompt(ctx, history, user, images)
 	var last []agent.Msg
 	for ev := range stream.Events() {
 		payload, err := agent.ToJSON(ev)
@@ -486,4 +509,36 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	e.PersistTranscript(last)
 	write(map[string]any{"type": "agent_settled"})
 	return nil
+}
+
+func boundStream(agentDir, provider string) ai.StreamFn {
+	if provider == "" {
+		return nil
+	}
+	p, ok := auth.Lookup(provider)
+	if !ok {
+		return nil
+	}
+	store := auth.Open(agentDir)
+	return func(ctx context.Context, reqCtx ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		res, err := auth.Resolve(ctx, store, p, auth.ResolveOpts{})
+		if err != nil {
+			return ai.StreamWithAuth(provider, "", "", nil)(ctx, reqCtx, opts)
+		}
+		if res == nil {
+			key := auth.APIKey(agentDir, provider)
+			if key == "" {
+				return ai.EchoStreamFn()(ctx, reqCtx, opts)
+			}
+			return ai.StreamWithAuth(provider, key, "", nil)(ctx, reqCtx, opts)
+		}
+		key := res.Auth.APIKey
+		if key == "" {
+			key = auth.Secret(res)
+		}
+		if key == "" && len(res.Auth.Headers) == 0 {
+			return ai.EchoStreamFn()(ctx, reqCtx, opts)
+		}
+		return ai.StreamWithAuth(provider, key, res.Auth.BaseURL, res.Auth.Headers)(ctx, reqCtx, opts)
+	}
 }
