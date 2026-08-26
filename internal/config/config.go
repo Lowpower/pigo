@@ -24,6 +24,46 @@ type Config struct {
 	KeepRecentTokens int    `mapstructure:"compactionKeepRecentTokens"`
 	SteeringMode     string `mapstructure:"steeringMode"`
 	FollowUpMode     string `mapstructure:"followUpMode"`
+
+	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
+	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
+	Skills     []string       `mapstructure:"-" json:"skills,omitempty"`
+	Prompts    []string       `mapstructure:"-" json:"prompts,omitempty"`
+	Themes     []string       `mapstructure:"-" json:"themes,omitempty"`
+	NpmCommand []string       `mapstructure:"-" json:"npmCommand,omitempty"`
+}
+
+// ResourceKinds is the settings.json key order for discovered resources.
+var ResourceKinds = []string{"extensions", "skills", "prompts", "themes"}
+
+// ResourcePaths returns the top-level path/override list for a resource kind.
+func (c *Config) ResourcePaths(kind string) []string {
+	switch kind {
+	case "extensions":
+		return c.Extensions
+	case "skills":
+		return c.Skills
+	case "prompts":
+		return c.Prompts
+	case "themes":
+		return c.Themes
+	default:
+		return nil
+	}
+}
+
+// SetResourcePaths writes the top-level path/override list for a resource kind.
+func (c *Config) SetResourcePaths(kind string, paths []string) {
+	switch kind {
+	case "extensions":
+		c.Extensions = paths
+	case "skills":
+		c.Skills = paths
+	case "prompts":
+		c.Prompts = paths
+	case "themes":
+		c.Themes = paths
+	}
 }
 
 // CompactionEnabled reports whether auto-compaction is on (default true).
@@ -98,29 +138,76 @@ func Load(configDir string) (Config, error) {
 	if cfg.ContextWindow <= 0 {
 		cfg.ContextWindow = 200000
 	}
+	fillPackagesFromFile(configDir, &cfg)
 	return cfg, nil
 }
 
-// Save writes settings.json.
+func fillPackagesFromFile(configDir string, cfg *Config) {
+	b, err := os.ReadFile(filepath.Join(configDir, "settings.json"))
+	if err != nil {
+		return
+	}
+	var extra struct {
+		Packages   []PackageEntry `json:"packages"`
+		Extensions []string       `json:"extensions"`
+		Skills     []string       `json:"skills"`
+		Prompts    []string       `json:"prompts"`
+		Themes     []string       `json:"themes"`
+		NpmCommand []string       `json:"npmCommand"`
+	}
+	if err := json.Unmarshal(b, &extra); err != nil {
+		return
+	}
+	cfg.Packages = extra.Packages
+	cfg.Extensions = extra.Extensions
+	cfg.Skills = extra.Skills
+	cfg.Prompts = extra.Prompts
+	cfg.Themes = extra.Themes
+	cfg.NpmCommand = extra.NpmCommand
+}
+
+// Save writes settings.json, merging with any existing file so extra keys
+// (and packages/extensions) are not dropped.
 func Save(configDir string, cfg Config) error {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err
 	}
-	payload := map[string]any{
-		"defaultProvider":            cfg.ResolvedProvider(),
-		"defaultModel":               cfg.ResolvedModel(),
-		"theme":                      cfg.Theme,
-		"thinking":                   cfg.Thinking,
-		"contextWindow":              cfg.ContextWindow,
-		"compactionEnabled":          cfg.CompactionEnabled(),
-		"compactionReserveTokens":    cfg.ReserveTokens,
-		"compactionKeepRecentTokens": cfg.KeepRecentTokens,
-		"steeringMode":               cfg.SteeringMode,
-		"followUpMode":               cfg.FollowUpMode,
+	path := filepath.Join(configDir, "settings.json")
+	existing := map[string]any{}
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &existing)
 	}
-	b, err := json.MarshalIndent(payload, "", "  ")
+	existing["defaultProvider"] = cfg.ResolvedProvider()
+	existing["defaultModel"] = cfg.ResolvedModel()
+	existing["theme"] = cfg.Theme
+	existing["thinking"] = cfg.Thinking
+	existing["contextWindow"] = cfg.ContextWindow
+	existing["compactionEnabled"] = cfg.CompactionEnabled()
+	existing["compactionReserveTokens"] = cfg.ReserveTokens
+	existing["compactionKeepRecentTokens"] = cfg.KeepRecentTokens
+	existing["steeringMode"] = cfg.SteeringMode
+	existing["followUpMode"] = cfg.FollowUpMode
+	if cfg.Packages != nil {
+		existing["packages"] = cfg.Packages
+	}
+	if cfg.Extensions != nil {
+		existing["extensions"] = cfg.Extensions
+	}
+	if cfg.Skills != nil {
+		existing["skills"] = cfg.Skills
+	}
+	if cfg.Prompts != nil {
+		existing["prompts"] = cfg.Prompts
+	}
+	if cfg.Themes != nil {
+		existing["themes"] = cfg.Themes
+	}
+	if cfg.NpmCommand != nil {
+		existing["npmCommand"] = cfg.NpmCommand
+	}
+	b, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(configDir, "settings.json"), append(b, '\n'), 0o644)
+	return os.WriteFile(path, append(b, '\n'), 0o644)
 }

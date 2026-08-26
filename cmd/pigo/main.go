@@ -16,6 +16,7 @@ import (
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/session"
+	"github.com/Lowpower/pigo/internal/trust"
 	"github.com/Lowpower/pigo/internal/tui"
 )
 
@@ -98,7 +99,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&f.tools, "tools", "t", "", "comma-separated tool allowlist")
 	cmd.Flags().StringVar(&f.excludeTools, "exclude-tools", "", "comma-separated tool denylist")
 	cmd.Flags().StringArrayVarP(&f.extension, "extension", "e", nil, "extension command to spawn (repeatable)")
-	cmd.Flags().BoolVar(&f.noExtensions, "no-extensions", false, "do not load extensions")
+	cmd.Flags().BoolVar(&f.noExtensions, "no-extensions", false, "skip extension auto-discovery (explicit -e still loads)")
 	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name")
 	cmd.Flags().BoolVar(&f.listModels, "list-models", false, "list known models and exit")
 	cmd.Flags().StringVar(&f.listModelsQuery, "list-models-query", "", "filter --list-models")
@@ -115,6 +116,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
 	cmd.AddCommand(newAuthCmd(), newConfigCmd())
+	addPackageCommands(cmd)
 	return cmd
 }
 
@@ -157,10 +159,6 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			_ = os.Setenv("ANTHROPIC_API_KEY", f.apiKey)
 		}
 	}
-	if f.noBuiltinTools {
-		f.noTools = true
-	}
-
 	if f.listModels {
 		q := f.listModelsQuery
 		if q == "" && len(args) > 0 {
@@ -254,8 +252,10 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 
 	exts := f.extension
-	if f.noExtensions {
-		exts = nil
+	trusted := false
+	if !f.noExtensions && !f.noTools {
+		st := trust.Open(agentDir)
+		trusted = trust.Resolve(st, cwd, nil)
 	}
 
 	eng, err := runtime.New(cmd.Context(), runtime.Options{
@@ -269,9 +269,12 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		NoSkills:       f.noSkills,
 		SkillPaths:     f.skills,
 		NoTools:        f.noTools,
+		NoBuiltinTools: f.noBuiltinTools,
 		ToolAllow:      splitCSV(f.tools),
 		ToolDeny:       splitCSV(f.excludeTools),
-		Extensions:     exts,
+		CLIExtensions:  exts,
+		NoExtensions:   f.noExtensions,
+		ProjectTrusted: trusted,
 		ContextWindow:  cfg.ContextWindow,
 		NoPromptTpls:   f.noPromptTpls,
 		PromptPaths:    f.promptTemplates,
@@ -456,17 +459,37 @@ func newAuthCmd() *cobra.Command {
 }
 
 func newConfigCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "config", Short: "show or write settings.json"}
-	cmd.Flags().Bool("print", false, "print resolved settings")
+	var f packageFlags
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "enable or disable extensions, skills, prompts, and themes",
+		Args:  cobra.NoArgs,
+	}
+	cmd.Flags().Bool("print", false, "print resolved provider/model/theme")
+	addPackageFlags(cmd, &f, true, false)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		dir := config.DefaultConfigDir()
-		cfg, err := config.Load(dir)
+		printDump, _ := cmd.Flags().GetBool("print")
+		if printDump {
+			dir := config.DefaultConfigDir()
+			cfg, err := config.Load(dir)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "dir=%s\nprovider=%s\nmodel=%s\ntheme=%s\nthinking=%s\n",
+				dir, cfg.ResolvedProvider(), cfg.ResolvedModel(), cfg.Theme, cfg.Thinking)
+			return nil
+		}
+		m, err := openPackageManager(f)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "dir=%s\nprovider=%s\nmodel=%s\ntheme=%s\nthinking=%s\n",
-			dir, cfg.ResolvedProvider(), cfg.ResolvedModel(), cfg.Theme, cfg.Thinking)
-		return nil
+		if f.local && !m.Trusted {
+			return fmt.Errorf("project is not trusted; use --approve to modify local resource config")
+		}
+		if !isTTY() {
+			return fmt.Errorf("config editor requires a TTY (use --print to dump settings)")
+		}
+		return tui.RunConfigSelector(m, f.local)
 	}
 	return cmd
 }

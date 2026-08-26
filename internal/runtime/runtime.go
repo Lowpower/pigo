@@ -16,6 +16,7 @@ import (
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
+	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/skills"
@@ -34,9 +35,13 @@ type Options struct {
 	NoSkills       bool
 	SkillPaths     []string
 	NoTools        bool
+	NoBuiltinTools bool
 	ToolAllow      []string
 	ToolDeny       []string
-	Extensions     []string // argv[0] of each extension binary
+	Extensions     []string // argv[0] of each extension binary (CLI -e plus discovered)
+	CLIExtensions  []string // explicit -e; kept across --no-extensions and /reload
+	NoExtensions   bool     // skip auto-discovery; CLI -e still loads
+	ProjectTrusted bool
 	ContextWindow  int
 	NoPromptTpls   bool
 	PromptPaths    []string
@@ -87,23 +92,24 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	reg := tools.Default()
 	if opts.NoTools {
 		reg = tools.NewRegistry()
+	} else if opts.NoBuiltinTools {
+		reg = tools.NewRegistry()
 	} else {
 		reg = filterTools(reg, opts.ToolAllow, opts.ToolDeny)
 	}
 
+	if len(opts.CLIExtensions) == 0 && len(opts.Extensions) > 0 {
+		opts.CLIExtensions = opts.Extensions
+	}
+	extSpecs := collectExtensionSpecs(ctx, opts)
+	opts.Extensions = extSpecs
+
 	var hosts []*ext.Host
-	for _, spec := range opts.Extensions {
-		argv := strings.Fields(spec)
-		if len(argv) == 0 {
-			continue
-		}
-		h, err := ext.Spawn(ctx, argv[0], argv, ext.Options{})
+	if !opts.NoTools {
+		var err error
+		hosts, reg, err = spawnExtensions(ctx, extSpecs, reg)
 		if err != nil {
-			return nil, fmt.Errorf("extension %q: %w", spec, err)
-		}
-		hosts = append(hosts, h)
-		for _, t := range h.Tools() {
-			reg = tools.NewRegistry(append(reg.List(), wrapExt(h, t.Name, t.Description, t.Parameters))...)
+			return nil, err
 		}
 	}
 
@@ -136,6 +142,41 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.Steering = e.drainSteer
 	e.FollowUp = e.drainFollow
 	return e, nil
+}
+
+func collectExtensionSpecs(ctx context.Context, opts Options) []string {
+	var specs []string
+	if !opts.NoExtensions {
+		m, err := pkgmgr.Open(opts.Cwd, opts.AgentDir, opts.ProjectTrusted)
+		if err == nil {
+			if rs, err := m.Resolve(ctx); err == nil {
+				for _, argv := range pkgmgr.SpawnArgv(rs) {
+					specs = append(specs, strings.Join(argv, " "))
+				}
+			}
+		}
+	}
+	specs = append(specs, opts.CLIExtensions...)
+	return specs
+}
+
+func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry) ([]*ext.Host, *tools.Registry, error) {
+	var hosts []*ext.Host
+	for _, spec := range specs {
+		argv := strings.Fields(spec)
+		if len(argv) == 0 {
+			continue
+		}
+		h, err := ext.Spawn(ctx, argv[0], argv, ext.Options{})
+		if err != nil {
+			return hosts, reg, fmt.Errorf("extension %q: %w", spec, err)
+		}
+		hosts = append(hosts, h)
+		for _, t := range h.Tools() {
+			reg = tools.NewRegistry(append(reg.List(), wrapExt(h, t.Name, t.Description, t.Parameters))...)
+		}
+	}
+	return hosts, reg, nil
 }
 
 func (e *Engine) emitSession(v any) {
@@ -355,7 +396,7 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 	})
 }
 
-// History restores provider-facing messages from the attached session.
+// AdoptSession attaches a session manager and records how many entries are already persisted.
 func (e *Engine) AdoptSession(s *session.Manager) {
 	e.Opts.Session = s
 	if s == nil {
@@ -365,6 +406,7 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 	e.persisted = len(s.Entries())
 }
 
+// History restores provider-facing messages from the attached session.
 func (e *Engine) History() []ai.Message {
 	if e.Opts.Session == nil {
 		return nil
@@ -374,14 +416,39 @@ func (e *Engine) History() []ai.Message {
 	return msgs
 }
 
-// Reload rediscovers skills and rebuilds the system prompt (/reload).
+// Reload rediscovers skills, extensions, and rebuilds the system prompt (/reload).
 func (e *Engine) Reload() {
+	ctx := context.Background()
 	if e.Opts.NoSkills {
 		e.Skills = nil
 	} else {
 		e.Skills, _ = skills.Discover(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SkillPaths, true)
 	}
 	e.Templates = prompt.DiscoverTemplates(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.PromptPaths, !e.Opts.NoPromptTpls)
+
+	for _, h := range e.Hosts {
+		_ = h.Close()
+	}
+	e.Hosts = nil
+	reg := tools.Default()
+	if e.Opts.NoTools {
+		reg = tools.NewRegistry()
+	} else if e.Opts.NoBuiltinTools {
+		reg = tools.NewRegistry()
+	} else {
+		reg = filterTools(reg, e.Opts.ToolAllow, e.Opts.ToolDeny)
+	}
+	if !e.Opts.NoTools {
+		specs := collectExtensionSpecs(ctx, e.Opts)
+		e.Opts.Extensions = specs
+		hosts, r, err := spawnExtensions(ctx, specs, reg)
+		if err == nil {
+			e.Hosts = hosts
+			reg = r
+		}
+	}
+	e.Tools = reg
+
 	e.System = prompt.Build(prompt.Options{
 		Cwd:              e.Opts.Cwd,
 		Custom:           e.Opts.SystemPrompt,
