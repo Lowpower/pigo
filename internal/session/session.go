@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Lowpower/pigo/internal/ai"
 )
 
 // CurrentVersion is the session file schema version.
@@ -33,6 +35,7 @@ type Entry struct {
 	ParentID  *string         `json:"parentId"`
 	Timestamp string          `json:"timestamp"`
 	Message   json.RawMessage `json:"message,omitempty"`
+	Usage     *ai.Usage       `json:"usage,omitempty"`
 
 	// role is used only for the buffer-until-assistant flush rule; not serialized.
 	role string

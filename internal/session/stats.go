@@ -40,12 +40,20 @@ type ContextUsage struct {
 
 // CollectStats walks session entries. contextMsgs is the live branch used for
 // contextUsage (typically RestoreAIMessages). contextWindow 0 omits contextUsage.
+// Usage/cost aggregation matches pi getSessionStats / addUsageToTotals
+// (packages/coding-agent/src/core/agent-session.ts, usage-totals.ts).
 func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats {
 	s := Stats{}
 	if m != nil {
 		s.SessionFile = m.File()
 		s.SessionID = m.ID()
 		for _, e := range m.Entries() {
+			if e.Type == "compaction" || e.Type == "branch_summary" {
+				if e.Usage != nil {
+					addUsage(&s, *e.Usage)
+				}
+				continue
+			}
 			if e.Type != "message" && e.Type != "" {
 				continue
 			}
@@ -60,6 +68,12 @@ func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats
 				s.UserMessages++
 			case "toolResult", "tool":
 				s.ToolResults++
+				var tr struct {
+					Usage *ai.Usage `json:"usage"`
+				}
+				if json.Unmarshal(e.Message, &tr) == nil && tr.Usage != nil {
+					addUsage(&s, *tr.Usage)
+				}
 			case "assistant":
 				s.AssistantMessages++
 				var am ai.AssistantMessage
@@ -69,10 +83,7 @@ func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats
 							s.ToolCalls++
 						}
 					}
-					s.Tokens.Input += am.Usage.Input
-					s.Tokens.Output += am.Usage.Output
-					s.Tokens.CacheRead += am.Usage.CacheRead
-					s.Tokens.CacheWrite += am.Usage.CacheWrite
+					addUsage(&s, am.Usage)
 				}
 			}
 		}
@@ -87,4 +98,12 @@ func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats
 		s.ContextUsage = &ContextUsage{Tokens: &tok, ContextWindow: contextWindow, Percent: &pct}
 	}
 	return s
+}
+
+func addUsage(s *Stats, u ai.Usage) {
+	s.Tokens.Input += u.Input
+	s.Tokens.Output += u.Output
+	s.Tokens.CacheRead += u.CacheRead
+	s.Tokens.CacheWrite += u.CacheWrite
+	s.Cost += u.Cost.Total
 }
