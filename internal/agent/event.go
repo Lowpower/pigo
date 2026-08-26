@@ -13,8 +13,7 @@ const (
 	RoleToolResult = "toolResult"
 )
 
-// Msg is one entry in the agent transcript (pi's AgentMessage: user / assistant /
-// toolResult).
+// Msg is one entry in the agent transcript (user / assistant / toolResult).
 type Msg struct {
 	Role string `json:"role"`
 
@@ -28,9 +27,12 @@ type Msg struct {
 	ToolCallID string `json:"toolCallId,omitempty"`
 	ToolName   string `json:"toolName,omitempty"`
 	IsError    bool   `json:"isError,omitempty"`
+
+	// Images are user-message attachments.
+	Images []ai.ImageContent `json:"images,omitempty"`
 }
 
-// EventType enumerates AgentEvent variants (pi packages/agent/src/types.ts ~L428).
+// EventType enumerates AgentEvent variants.
 type EventType string
 
 // AgentEvent variant tags.
@@ -73,7 +75,7 @@ type Event struct {
 	Msg *Msg
 }
 
-// Stream is a channel-backed stream of AgentEvents (pi's EventStream<AgentEvent>).
+// Stream is a channel-backed stream of AgentEvents.
 type Stream struct {
 	ch chan Event
 }

@@ -2,6 +2,4 @@
 // find, and ls. Tool parameter schemas are generated from Go structs via
 // invopop/jsonschema. A Registry exposes them to a provider (as ai.Tool) and
 // dispatches tool calls (usable as an agent ToolExecutor).
-//
-// Port of pi's packages/coding-agent/src/core/tools.
 package tools

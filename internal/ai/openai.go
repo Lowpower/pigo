@@ -12,16 +12,16 @@ import (
 	"time"
 )
 
-// This file ports the streaming core of pi's packages/ai/src/api/openai-completions.ts
-// (the OpenAI Chat Completions SSE format). It covers text and tool-call streaming,
-// finish_reason mapping, and usage; the large per-provider compat matrix is not
-// ported (only the fields needed by OpenAI-compatible gateways such as opencode).
+// This file streams OpenAI Chat Completions SSE: text and tool-call streaming,
+// finish_reason mapping, and usage. Only the fields needed by OpenAI-compatible
+// gateways such as opencode are handled.
 
 // OpenAICompletionsClient talks to an OpenAI-compatible /v1/chat/completions
 // endpoint. BaseURL and APIKey are configurable; auth is Bearer.
 type OpenAICompletionsClient struct {
 	BaseURL    string
 	APIKey     string
+	Headers    map[string]string
 	HTTPClient *http.Client
 }
 
@@ -38,8 +38,13 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 			return nil, err
 		}
 		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("authorization", "Bearer "+c.APIKey)
+		if c.APIKey != "" {
+			httpReq.Header.Set("authorization", "Bearer "+c.APIKey)
+		}
 		httpReq.Header.Set("accept", "text/event-stream")
+		for k, v := range c.Headers {
+			httpReq.Header.Set(k, v)
+		}
 
 		client := c.HTTPClient
 		if client == nil {
@@ -173,7 +178,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 		return
 	}
 
-	// Finalize every open block in content order (pi's finishBlock loop).
+	// Finalize every open block in content order.
 	for i, c := range out.Content {
 		switch c.Type {
 		case KindText:

@@ -8,7 +8,6 @@ import (
 
 // ToJSON maps an AgentEvent to the JSON-mode / RPC stdout shape.
 //
-// Ported from pi packages/coding-agent/src/modes/json-event.ts (toJsonEvent):
 // message_update drops the cumulative message and any `partial` snapshot, leaving
 // usage + assistantMessageEvent. toolcall_start also carries id and toolName.
 func ToJSON(ev Event) (any, error) {
@@ -164,6 +163,26 @@ func msgJSON(m Msg) any {
 			"isError":    m.IsError,
 		}
 	default:
-		return map[string]any{"role": "user", "content": m.Text}
+		if len(m.Images) == 0 {
+			return map[string]any{"role": "user", "content": m.Text}
+		}
+		return map[string]any{"role": "user", "content": UserContentBlocks(m.Text, m.Images)}
 	}
+}
+
+// UserContentBlocks is the user-message content array: text block plus images.
+func UserContentBlocks(text string, images []ai.ImageContent) []any {
+	blocks := []any{map[string]any{"type": "text", "text": text}}
+	for _, img := range images {
+		typ := img.Type
+		if typ == "" {
+			typ = "image"
+		}
+		blocks = append(blocks, map[string]any{
+			"type":     typ,
+			"data":     img.Data,
+			"mimeType": img.MimeType,
+		})
+	}
+	return blocks
 }

@@ -10,7 +10,7 @@ import (
 
 const lsDefaultLimit = 500
 
-// listTool lists directory contents. Ports pi's ls.ts. The tool name is "ls".
+// listTool lists directory contents. The tool name is "ls".
 type listTool struct{}
 
 type lsParams struct {

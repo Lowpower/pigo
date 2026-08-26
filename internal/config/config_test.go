@@ -33,7 +33,7 @@ func TestLoadEnvOverride(t *testing.T) {
 	}
 }
 
-func TestLoadPiKeyNames(t *testing.T) {
+func TestLoadSettingsKeyNames(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"defaultProvider":"openai","defaultModel":"gpt-4o","theme":"light"}`), 0o644); err != nil {
 		t.Fatal(err)

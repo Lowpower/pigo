@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-// Command is a built-in or extension-registered slash command (pi core/slash-commands.ts).
+// Command is a built-in or extension-registered slash command.
 type Command struct {
 	Name        string
 	Aliases     []string
@@ -48,7 +48,7 @@ func lookup(name string) (Command, bool) {
 	return Command{}, false
 }
 
-// Builtins matches pi BUILTIN_SLASH_COMMANDS, plus /help which pigo keeps as an alias of /hotkeys.
+// Builtins is the built-in slash command list.
 func Builtins() []Command {
 	return []Command{
 		{Name: "settings", Description: "show settings path"},
@@ -97,7 +97,7 @@ func HelpText() string {
 	return b.String()
 }
 
-// HotkeysText matches pi /hotkeys for the bindings pigo actually honours.
+// HotkeysText is the /hotkeys help for the bindings this TUI honours.
 func HotkeysText() string {
 	return `keybindings:
   enter                 send (steer while streaming)

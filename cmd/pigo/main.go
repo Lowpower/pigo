@@ -22,7 +22,7 @@ import (
 var version = "0.0.1-dev"
 
 func main() {
-	os.Args = append([]string{os.Args[0]}, expandPiAliases(os.Args[1:])...)
+	os.Args = append([]string{os.Args[0]}, expandShortFlags(os.Args[1:])...)
 	if err := newRootCmd().Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -69,8 +69,8 @@ func newRootCmd() *cobra.Command {
 	var f cliFlags
 
 	cmd := &cobra.Command{
-		Use:          "pi [prompt...]",
-		Short:        "pigo — a Go reimplementation of the pi coding agent",
+		Use:          "pigo [prompt...]",
+		Short:        "pigo — a coding agent",
 		SilenceUsage: true,
 		Args:         cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,10 +78,10 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&f.print, "print", "p", false, "run non-interactively (pi --print)")
+	cmd.Flags().BoolVarP(&f.print, "print", "p", false, "run non-interactively")
 	cmd.Flags().StringVar(&f.mode, "mode", "", "output mode: text|json|rpc (default: interactive TTY, else text)")
 	cmd.Flags().StringVar(&f.prompt, "prompt", "", "prompt text (alias of positional args)")
-	cmd.Flags().StringVar(&f.configDir, "config-dir", "", "agent dir (default ~/.pi/agent; env PI_CODING_AGENT_DIR)")
+	cmd.Flags().StringVar(&f.configDir, "config-dir", "", "agent dir (default ~/.pigo/agent; env PIGO_CODING_AGENT_DIR)")
 	cmd.Flags().BoolVarP(&f.continueSession, "continue", "c", false, "continue the most recent session in this directory")
 	cmd.Flags().BoolVarP(&f.resume, "resume", "r", false, "resume a session (most recent if --session omitted)")
 	cmd.Flags().StringVar(&f.sessionPath, "session", "", "session file path or id")
@@ -102,7 +102,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name")
 	cmd.Flags().BoolVar(&f.listModels, "list-models", false, "list known models and exit")
 	cmd.Flags().StringVar(&f.listModelsQuery, "list-models-query", "", "filter --list-models")
-	cmd.Flags().BoolVar(&f.offline, "offline", false, "skip network at startup (sets PI_OFFLINE=1)")
+	cmd.Flags().BoolVar(&f.offline, "offline", false, "skip network at startup (sets PIGO_OFFLINE=1)")
 	cmd.Flags().StringVar(&f.export, "export", "", "export a session JSONL to HTML and exit")
 	cmd.Flags().StringVar(&f.fork, "fork", "", "fork session file or id into a new session")
 	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "resume session by id prefix")
@@ -124,7 +124,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		return nil
 	}
 	if f.offline {
-		_ = os.Setenv("PI_OFFLINE", "1")
+		_ = os.Setenv("PIGO_OFFLINE", "1")
 	}
 	agentDir := f.configDir
 	if agentDir == "" {
@@ -303,7 +303,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		if prompt == "" {
 			return fmt.Errorf("--mode json requires a prompt")
 		}
-		return eng.PrintJSON(ctx, out, history, prompt)
+		return eng.PrintJSON(ctx, out, history, prompt, nil)
 	case "rpc":
 		return eng.ServeRPC(ctx, cmd.InOrStdin(), out)
 	default:
@@ -324,6 +324,19 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func authProviderFromFlags(cmd *cobra.Command) (string, error) {
+	provider, _ := cmd.Flags().GetString("provider")
+	model, _ := cmd.Flags().GetString("model")
+	if provider == "" && model != "" {
+		p, _, _ := models.ParseSpec(model)
+		provider = p
+	}
+	if provider == "" {
+		return "", fmt.Errorf("credential printing requires --provider <provider> or --model <model>")
+	}
+	return provider, nil
 }
 
 func isTTY() bool {
@@ -360,20 +373,15 @@ func newAuthCmd() *cobra.Command {
 	}
 	printKey := &cobra.Command{
 		Use:   "print-api-key",
-		Short: "print a stored API key (pi auth print-api-key)",
+		Short: "print a stored API key",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			provider, _ := cmd.Flags().GetString("provider")
-			model, _ := cmd.Flags().GetString("model")
-			if provider == "" && model != "" {
-				p, _, _ := models.ParseSpec(model)
-				provider = p
+			provider, err := authProviderFromFlags(cmd)
+			if err != nil {
+				return err
 			}
-			if provider == "" {
-				return fmt.Errorf("Credential printing requires --provider <provider> or --model <model>")
-			}
-			key := auth.APIKey(config.DefaultConfigDir(), provider)
-			if key == "" {
-				return fmt.Errorf("no API key stored for %s", provider)
+			key, err := auth.PrintSecret(cmd.Context(), config.DefaultConfigDir(), provider, auth.TypeAPIKey, 0)
+			if err != nil {
+				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), key)
 			return nil
@@ -383,46 +391,57 @@ func newAuthCmd() *cobra.Command {
 	printKey.Flags().String("model", "", "model spec (provider inferred)")
 	printBearer := &cobra.Command{
 		Use:   "print-bearer-token",
-		Short: "print an OAuth bearer token (not implemented)",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return fmt.Errorf("OAuth bearer tokens are not implemented")
+		Short: "print an OAuth bearer token",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			provider, err := authProviderFromFlags(cmd)
+			if err != nil {
+				return err
+			}
+			raw, _ := cmd.Flags().GetString("min-expiry")
+			d := auth.DefaultBearerMinExpiry
+			if raw != "" {
+				d, err = auth.ParseMinExpiry(raw)
+				if err != nil {
+					return err
+				}
+			}
+			key, err := auth.PrintSecret(cmd.Context(), config.DefaultConfigDir(), provider, auth.TypeOAuth, d)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), key)
+			return nil
 		},
 	}
+	printBearer.Flags().String("provider", "", "provider id")
+	printBearer.Flags().String("model", "", "model spec (provider inferred)")
+	printBearer.Flags().String("min-expiry", "30m", "minimum remaining token validity")
 	check := &cobra.Command{
 		Use:   "check",
-		Short: "check whether a provider has an API key (OAuth refresh is not implemented)",
+		Short: "check whether a provider is authenticated",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			provider, _ := cmd.Flags().GetString("provider")
-			model, _ := cmd.Flags().GetString("model")
+			provider, err := authProviderFromFlags(cmd)
+			if err != nil {
+				return fmt.Errorf("auth checks require --provider <provider> or --model <model>")
+			}
 			asJSON, _ := cmd.Flags().GetBool("json")
 			showCreds, _ := cmd.Flags().GetBool("credentials")
-			if provider == "" && model != "" {
-				p, _, _ := models.ParseSpec(model)
-				provider = p
-			}
-			if provider == "" {
-				return fmt.Errorf("Auth checks require --provider <provider> or --model <model>")
-			}
-			key := auth.APIKey(config.DefaultConfigDir(), provider)
-			ok := key != ""
+			noRefresh, _ := cmd.Flags().GetBool("no-refresh")
+			res := auth.CheckProvider(cmd.Context(), config.DefaultConfigDir(), provider, !noRefresh, showCreds)
 			if asJSON {
-				payload := map[string]any{"provider": provider, "ok": ok, "type": "api_key"}
-				if showCreds && ok {
-					payload["credentials"] = key
-				}
-				b, _ := json.Marshal(payload)
+				b, _ := json.Marshal(res)
 				fmt.Fprintln(cmd.OutOrStdout(), string(b))
-				if !ok {
-					return fmt.Errorf("no API key for %s", provider)
+			} else {
+				if res.Status != "ready" {
+					return fmt.Errorf("%s: %s", provider, res.Reason)
 				}
-				return nil
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: ok (%s)\n", provider, res.AuthType)
+				if showCreds && res.Credentials != "" {
+					fmt.Fprintln(cmd.OutOrStdout(), res.Credentials)
+				}
 			}
-			if !ok {
-				return fmt.Errorf("no API key for %s", provider)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s: ok (api_key)\n", provider)
-			if showCreds {
-				fmt.Fprintln(cmd.OutOrStdout(), key)
+			if res.Status != "ready" {
+				return fmt.Errorf("%s: %s", provider, res.Reason)
 			}
 			return nil
 		},
@@ -431,7 +450,7 @@ func newAuthCmd() *cobra.Command {
 	check.Flags().String("model", "", "model spec")
 	check.Flags().Bool("json", false, "JSON output")
 	check.Flags().Bool("credentials", false, "include the credential")
-	check.Flags().Bool("no-refresh", false, "ignored (OAuth refresh is not implemented)")
+	check.Flags().Bool("no-refresh", false, "do not refresh OAuth tokens")
 	cmd.AddCommand(login, logout, printKey, printBearer, check)
 	return cmd
 }

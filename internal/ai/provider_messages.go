@@ -3,8 +3,8 @@ package ai
 import "encoding/json"
 
 // AnthropicWireMessages maps pigo messages onto the Anthropic Messages API
-// shape (pi packages/ai/src/api/anthropic-messages.ts). Assistant tool calls
-// become tool_use blocks; toolResult becomes a user message with tool_result.
+// shape. Assistant tool calls become tool_use blocks; toolResult becomes a user
+// message with tool_result.
 func AnthropicWireMessages(msgs []Message) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
@@ -34,9 +34,40 @@ func AnthropicWireMessages(msgs []Message) []map[string]any {
 		if role == "" {
 			role = RoleUser
 		}
-		out = append(out, map[string]any{"role": role, "content": m.Content})
+		out = append(out, map[string]any{"role": role, "content": anthropicUserContent(m)})
 	}
 	return out
+}
+
+func anthropicUserContent(m Message) any {
+	if len(m.Images) == 0 {
+		return m.Content
+	}
+	blocks := make([]map[string]any, 0, 1+len(m.Images))
+	if m.Content != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+	}
+	for _, img := range m.Images {
+		blocks = append(blocks, map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": img.MimeType,
+				"data":       img.Data,
+			},
+		})
+	}
+	hasText := false
+	for _, b := range blocks {
+		if b["type"] == "text" {
+			hasText = true
+			break
+		}
+	}
+	if !hasText {
+		blocks = append([]map[string]any{{"type": "text", "text": "(see attached image)"}}, blocks...)
+	}
+	return blocks
 }
 
 func anthropicContent(msg *AssistantMessage) []map[string]any {
@@ -74,9 +105,9 @@ func anthropicContent(msg *AssistantMessage) []map[string]any {
 	return blocks
 }
 
-// OpenAIWireMessages maps pigo messages onto OpenAI Chat Completions
-// (pi packages/ai/src/api/openai-completions.ts). toolResult becomes role=tool
-// with tool_call_id; assistant tool calls become tool_calls.
+// OpenAIWireMessages maps pigo messages onto OpenAI Chat Completions.
+// toolResult becomes role=tool with tool_call_id; assistant tool calls become
+// tool_calls.
 func OpenAIWireMessages(msgs []Message) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
@@ -96,9 +127,26 @@ func OpenAIWireMessages(msgs []Message) []map[string]any {
 		if role == RoleTool {
 			role = "tool"
 		}
-		out = append(out, map[string]any{"role": role, "content": m.Content})
+		out = append(out, map[string]any{"role": role, "content": openaiUserContent(m)})
 	}
 	return out
+}
+
+func openaiUserContent(m Message) any {
+	if len(m.Images) == 0 {
+		return m.Content
+	}
+	blocks := make([]map[string]any, 0, 1+len(m.Images))
+	blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+	for _, img := range m.Images {
+		blocks = append(blocks, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url": "data:" + img.MimeType + ";base64," + img.Data,
+			},
+		})
+	}
+	return blocks
 }
 
 func openaiAssistant(msg *AssistantMessage) map[string]any {

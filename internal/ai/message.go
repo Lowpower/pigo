@@ -2,15 +2,14 @@
 // (AssistantMessageEvent), the StreamFn abstraction, incremental JSON parsing for
 // streamed tool-call arguments, and the per-provider adapters.
 //
-// Ported from pi's packages/ai/src (types.ts, utils/json-parse.ts, api/*). Event
-// and field names follow the pi source (snake_case event types; usage carried on
-// the final message, not as a separate chunk).
+// Event types use snake_case; usage is carried on the final message, not as a
+// separate chunk.
 package ai
 
-// StopReason mirrors pi's StopReason (packages/ai/src/types.ts).
+// StopReason is why a stream ended.
 type StopReason string
 
-// StopReason values (pi types.ts ~L405).
+// StopReason values.
 const (
 	StopPending  StopReason = "pending"
 	StopStop     StopReason = "stop"
@@ -24,7 +23,7 @@ const (
 // ContentKind discriminates the content blocks of an AssistantMessage.
 type ContentKind string
 
-// Content block kinds (pi types.ts: TextContent / ThinkingContent / ToolCall).
+// Content block kinds.
 const (
 	KindText     ContentKind = "text"
 	KindThinking ContentKind = "thinking"
@@ -33,7 +32,7 @@ const (
 
 // Content is one block of an assistant message. It is a flat struct (rather than
 // an interface) so streaming code can address blocks by index and mutate them in
-// place, matching pi's anthropic-messages.ts block handling.
+// place.
 type Content struct {
 	Type ContentKind `json:"type"`
 
@@ -51,11 +50,11 @@ type Content struct {
 	Arguments map[string]any `json:"arguments,omitempty"`
 
 	// partialJSON is a streaming scratch buffer for tool-call argument deltas.
-	// It is never serialized (matching pi, which strips it before persisting).
+	// It is never serialized.
 	partialJSON string
 }
 
-// Usage mirrors pi's Usage (token counts).
+// Usage holds token counts.
 type Usage struct {
 	Input        int `json:"input"`
 	Output       int `json:"output"`
@@ -66,7 +65,7 @@ type Usage struct {
 	TotalTokens  int `json:"totalTokens"`
 }
 
-// AssistantMessage mirrors pi's AssistantMessage.
+// AssistantMessage is a completed assistant turn.
 type AssistantMessage struct {
 	Role          string     `json:"role"`
 	Content       []*Content `json:"content"`

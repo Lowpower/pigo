@@ -1,12 +1,8 @@
 # pigo
 
-A Go reimplementation of the [pi](https://github.com/earendil-works/pi) coding agent
-(agent loop, streaming LLM, built-in tools, TUI, session persistence, extensions).
-
-**pi’s source is the behaviour reference.** pi keeps evolving; when adding or
-changing a feature, read the corresponding files under `~/deps/pi` (or a fresh
-clone of earendil-works/pi) and match that behaviour. Remaining work is tracked
-as GitHub issues, not a phased migration plan.
+A CLI/TUI coding agent written in Go (agent loop, streaming LLM, built-in tools,
+TUI, session persistence, extensions). Remaining work is tracked as GitHub
+issues, not a phased migration plan.
 
 ## Requirements
 
@@ -15,8 +11,9 @@ as GitHub issues, not a phased migration plan.
 ## Toolchain
 
 The Cloud Agent environment installs everything via
-[`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain, `golangci-lint`,
-and a read-only clone of pi at `~/deps/pi`.
+[`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain,
+`golangci-lint`, and a read-only behaviour reference at `~/deps/pi` (for
+working GitHub issues; never imported).
 
 To set up locally:
 
@@ -29,14 +26,14 @@ go mod download
 
 ```bash
 go build ./...                 # build everything
-go run ./cmd/pi --version      # print version
-go run ./cmd/pi --help         # usage
-go run ./cmd/pi -p "hello"     # single non-interactive prompt (print mode)
+go run ./cmd/pigo --version      # print version
+go run ./cmd/pigo --help         # usage
+go run ./cmd/pigo -p "hello"     # single non-interactive prompt (print mode)
 go test ./...                  # run tests
 golangci-lint run              # lint
 ```
 
-### Flags (aligned with pi `cli/args.ts`)
+### Flags
 
 | Flag | Description |
 | --- | --- |
@@ -58,14 +55,14 @@ golangci-lint run              # lint
 
 Positional `@file` arguments are inlined as `<file name="...">` blocks (text only).
 
-Configuration is read from `~/.pi/agent/settings.json` (override with
-`PI_CODING_AGENT_DIR`) and can also be overridden with `PIGO_`-prefixed environment
+Configuration is read from `~/.pigo/agent/settings.json` (override with
+`PIGO_CODING_AGENT_DIR`) and can also be overridden with `PIGO_`-prefixed environment
 variables.
 
 ## Layout
 
 ```
-cmd/pi/            # entrypoint (cobra), flags aligned with pi
+cmd/pigo/          # entrypoint (cobra)
 internal/
 ├── ai/            # StreamFn + provider adapters
 ├── agent/         # agent loop, tool scheduling, cancellation
@@ -82,10 +79,5 @@ internal/
 ├── ext/           # extension system (subprocess RPC)
 ├── protocol/      # cross-process wire format
 ├── runtime/       # shared engine (print/json/rpc/TUI)
-└── config/        # settings.json (~/.pi/agent)
+└── config/        # settings.json (~/.pigo/agent)
 ```
-
-## Reference
-
-The original TypeScript implementation is cloned read-only to `~/deps/pi` in the
-Cloud Agent environment. It is a reference only and is never imported by `pigo`.

@@ -6,7 +6,7 @@ import (
 	"github.com/gobwas/glob"
 )
 
-// ThinkingLevels is pi's VALID_THINKING_LEVELS.
+// ThinkingLevels is the ordered set of thinking levels.
 var ThinkingLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 // IsThinkingLevel reports whether s is a known thinking level.
@@ -20,7 +20,7 @@ func IsThinkingLevel(s string) bool {
 	return false
 }
 
-// NextThinkingLevel cycles thinking levels (pi cycleThinkingLevel).
+// NextThinkingLevel cycles thinking levels.
 func NextThinkingLevel(current string) string {
 	current = strings.ToLower(strings.TrimSpace(current))
 	idx := 0
@@ -40,13 +40,13 @@ type Model struct {
 	API      string
 }
 
-// Spec is a model plus optional thinking override (pi --models sonnet:high).
+// Spec is a model plus optional thinking override (--models sonnet:high).
 type Spec struct {
 	Model
 	Thinking string
 }
 
-// ParseSpec parses "provider/id", "id", and optional ":thinking" (pi --model).
+// ParseSpec parses "provider/id", "id", and optional ":thinking" (--model).
 func ParseSpec(s string) (provider, id, thinking string) {
 	s = strings.TrimSpace(s)
 	if i := strings.LastIndex(s, ":"); i >= 0 && IsThinkingLevel(s[i+1:]) {

@@ -1,25 +1,19 @@
 # AGENTS.md
 
-Guidance for AI agents working on **pigo**, a Go reimplementation of the
-[pi](https://github.com/earendil-works/pi) coding agent (a CLI/TUI agent — **not** a web service).
-
-## Ground truth: read the pi source
-
-**pi’s real source is the single source of truth**, and pi itself keeps iterating.
-It is cloned read-only to `~/deps/pi` (Cloud Agent setup via `.cursor/install.sh`).
-
-- Before changing behaviour, **read the corresponding pi file(s)** and match them.
-  Do not port from memory or from old summaries.
-- When pigo and pi disagree, **the current pi source wins**.
-- `~/deps/pi` is a reference only; it is **never imported** by pigo.
-- If `~/deps/pi` is missing, re-run `.cursor/install.sh`.
+Guidance for AI agents working on **pigo**, a CLI/TUI coding agent written in Go
+(**not** a web service).
 
 New work is tracked as **GitHub issues**. Do not revive a phased migration plan.
+
+When working an issue that needs a behaviour reference, read the corresponding
+files under `~/deps/pi` (cloned by `.cursor/install.sh`; never imported). If that
+directory is missing, re-run `.cursor/install.sh`. Do not sprinkle source-path
+citations or “align with …” comments into this repo.
 
 ## Environment
 
 - **Go 1.27** (the base image ships an EOL Go 1.22). `.cursor/install.sh` installs Go
-  1.27, `golangci-lint`, and clones `~/deps/pi`. It is idempotent.
+  1.27, `golangci-lint`, and the read-only clone at `~/deps/pi`. It is idempotent.
 - The environment is repo-managed via `.cursor/environment.json` (runs the install
   script). A fresh Cloud Agent reproduces the whole toolchain automatically.
 
@@ -32,8 +26,8 @@ go test ./...
 golangci-lint run ./...
 go build -tags tools ./...  # compile the full pinned dependency stack
 
-go run ./cmd/pi           # interactive TUI (needs a TTY)
-go run ./cmd/pi -p "hi"   # single non-interactive prompt
+go run ./cmd/pigo           # interactive TUI (needs a TTY)
+go run ./cmd/pigo -p "hi"   # single non-interactive prompt
 ```
 
 ## Dependencies
@@ -69,5 +63,4 @@ Create it at **Settings → Rules → Rulesets** (this cannot be applied from a 
 
 - Respond to the repository owner in Chinese; keep code identifiers/paths in English.
 - Prefer simple solutions; do not add scope that was not requested.
-- Cite the pi source path in a header comment when porting a module.
-- Keep on-disk formats (session JSONL, `~/.pi/agent`) read/write-compatible with pi.
+- Keep on-disk formats (session JSONL, `~/.pigo/agent`) stable.

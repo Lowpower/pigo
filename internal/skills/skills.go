@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Skill is one SKILL.md document (pi core/skills.ts).
+// Skill is one SKILL.md document.
 type Skill struct {
 	Name        string
 	Description string
@@ -17,13 +17,13 @@ type Skill struct {
 	Source      string // user | project | extra
 }
 
-// Discover walks the pi skill directories and extra paths.
+// Discover walks the skill directories and extra paths.
 func Discover(cwd, agentDir string, extra []string, includeDefaults bool) ([]Skill, error) {
 	var dirs []dirSrc
 	if includeDefaults {
 		dirs = append(dirs,
 			dirSrc{filepath.Join(agentDir, "skills"), "user"},
-			dirSrc{filepath.Join(cwd, ".pi", "skills"), "project"},
+			dirSrc{filepath.Join(cwd, ".pigo", "skills"), "project"},
 		)
 	}
 	for _, p := range extra {
@@ -174,7 +174,7 @@ func parseYAMLMap(s string) map[string]string {
 	return out
 }
 
-// FormatForPrompt renders the <available_skills> XML block (pi formatSkillsForPrompt).
+// FormatForPrompt renders the <available_skills> XML block.
 func FormatForPrompt(skills []Skill) string {
 	var b strings.Builder
 	b.WriteString("<available_skills>\n")
@@ -194,7 +194,7 @@ func FormatForPrompt(skills []Skill) string {
 	return b.String()
 }
 
-// ExpandCommand turns `/skill:name args` into the XML payload pi injects.
+// ExpandCommand turns `/skill:name args` into the XML payload injected into the prompt.
 func ExpandCommand(skills []Skill, name, args string) (string, bool) {
 	name = strings.TrimPrefix(strings.ToLower(name), "skill:")
 	for _, s := range skills {

@@ -2,8 +2,8 @@ package ai
 
 import "context"
 
-// Role values for messages sent to a provider. RoleToolResult matches pi's
-// ToolResultMessage.role ("toolResult"); providers map it onto their wire format.
+// Role values for messages sent to a provider. RoleToolResult is "toolResult";
+// providers map it onto their wire format.
 const (
 	RoleUser       = "user"
 	RoleAssistant  = "assistant"
@@ -14,7 +14,7 @@ const (
 // Message is a single conversation message in a request Context.
 // Content is the plain-text body for user (and a fallback for others).
 // Assistant, when set, is the full assistant message including tool-call blocks
-// and must be replayed to the provider on subsequent turns (pi convertToLlm).
+// and must be replayed to the provider on subsequent turns.
 // ToolCallID / ToolName / IsError describe a toolResult turn.
 type Message struct {
 	Role       string            `json:"role"`
@@ -23,6 +23,16 @@ type Message struct {
 	ToolCallID string            `json:"toolCallId,omitempty"`
 	ToolName   string            `json:"toolName,omitempty"`
 	IsError    bool              `json:"isError,omitempty"`
+	// Images are extra user-message blocks. Empty for text-only.
+	Images []ImageContent `json:"images,omitempty"`
+}
+
+// ImageContent is a base64 image attached to a user (or tool-result) message.
+// packages/ai/src/types.ts ImageContent
+type ImageContent struct {
+	Type     string `json:"type"`
+	Data     string `json:"data"`
+	MimeType string `json:"mimeType"`
 }
 
 // Text returns the display/token-estimate text of the message.
@@ -42,8 +52,8 @@ type Tool struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 
-// Context is the request context passed to a StreamFn (pi's Context:
-// systemPrompt + messages + tools).
+// Context is the request context passed to a StreamFn (system prompt, messages,
+// tools).
 type Context struct {
 	System   string
 	Messages []Message
@@ -54,19 +64,17 @@ type Context struct {
 type Options struct {
 	Model     string
 	MaxTokens int
-	Thinking  string // off|minimal|low|medium|high|xhigh|max (pi thinking level)
+	Thinking  string // off|minimal|low|medium|high|xhigh|max
 }
 
 // StreamFn is the spine abstraction: given a request context it returns a stream
-// of AssistantMessageEvents. This is the Go form of pi's StreamFn
-// (packages/agent/src/types.ts ~L28). Request/model failures are encoded in the
-// stream (a terminal error event), not returned as err; err is reserved for
-// setup failures before any event is produced.
+// of AssistantMessageEvents. Request/model failures are encoded in the stream (a
+// terminal error event), not returned as err; err is reserved for setup failures
+// before any event is produced.
 type StreamFn func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error)
 
 // EventStream is a channel-backed stream of events, closed when the producer is
-// done. It mirrors pi's AssistantMessageEventStream (a push stream consumers
-// range over).
+// done. Consumers range over it.
 type EventStream struct {
 	ch chan Event
 }

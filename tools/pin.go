@@ -11,8 +11,8 @@ package tools
 
 import (
 	// LLM SDKs (official) — not yet used. The anthropic/openai-completions adapters
-	// use raw HTTP/SSE (matching pi); these remain pinned for optional future
-	// provider adapters (e.g. openai-responses, google genai, bedrock).
+	// use raw HTTP/SSE; these remain pinned for optional future provider adapters
+	// (e.g. openai-responses, google genai, bedrock).
 	_ "github.com/anthropics/anthropic-sdk-go"
 	_ "github.com/aws/aws-sdk-go-v2/config"
 	_ "github.com/aws/aws-sdk-go-v2/service/bedrockruntime"

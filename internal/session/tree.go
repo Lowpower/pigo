@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// TreeNode is one node of the session parentId tree (pi SessionTreeNode).
+// TreeNode is one node of the session parentId tree.
 type TreeNode struct {
 	Entry          Entry      `json:"entry"`
 	Children       []TreeNode `json:"children"`
@@ -25,8 +25,7 @@ type Summary struct {
 	Modified     time.Time
 }
 
-// Branch moves the leaf pointer so the next append is a child of id
-// (pi SessionManager.branch).
+// Branch moves the leaf pointer so the next append is a child of id.
 func (m *Manager) Branch(id string) error {
 	if id == "" {
 		m.leafID = ""
@@ -41,8 +40,7 @@ func (m *Manager) Branch(id string) error {
 	return fmt.Errorf("entry %s not found", id)
 }
 
-// GetBranch walks from fromID (or the current leaf) to the root, oldest first
-// (pi SessionManager.getBranch).
+// GetBranch walks from fromID (or the current leaf) to the root, oldest first.
 func (m *Manager) GetBranch(fromID string) []Entry {
 	byID := map[string]*Entry{}
 	for _, e := range m.entries {
@@ -71,7 +69,7 @@ func (m *Manager) GetBranch(fromID string) []Entry {
 	return rev
 }
 
-// GetTree returns the parentId forest (pi SessionManager.getTree).
+// GetTree returns the parentId forest.
 func (m *Manager) GetTree() []TreeNode {
 	return buildTree(m.Entries())
 }
@@ -118,7 +116,7 @@ func buildTree(entries []Entry) []TreeNode {
 }
 
 // CreateBranchedSession writes a new session file containing only the path from
-// root to leafID (pi SessionManager.createBranchedSession).
+// root to leafID.
 func (m *Manager) CreateBranchedSession(leafID, cwd, agentDir string) (*Manager, error) {
 	path := m.GetBranch(leafID)
 	if len(path) == 0 {
@@ -194,7 +192,7 @@ func entryRole(e *Entry) string {
 }
 
 // ForkFrom creates a child session branched before (or at) entryID.
-// position "at" keeps the entry (pi /clone); "before" drops it and returns its text (pi /fork).
+// position "at" keeps the entry (/clone); "before" drops it and returns its text (/fork).
 func (m *Manager) ForkFrom(entryID, cwd, agentDir, position string) (*Manager, string, error) {
 	var target *Entry
 	for _, e := range m.entries {
@@ -239,7 +237,7 @@ func userText(e *Entry) string {
 	}
 }
 
-// UserMessagesForForking lists user turns for the fork picker (pi getUserMessagesForForking).
+// UserMessagesForForking lists user turns for the fork picker.
 func (m *Manager) UserMessagesForForking() []map[string]string {
 	var out []map[string]string
 	for _, e := range m.entries {

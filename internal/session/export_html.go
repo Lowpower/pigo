@@ -8,16 +8,15 @@ import (
 	"strings"
 )
 
-// ExportHTML writes a self-contained HTML dump of the session (pi --export /
-// /export when the path ends in .html). It does not yet use pi's themed
-// export-html template/CSS/JS.
+// ExportHTML writes a self-contained HTML dump of the session (--export /
+// /export when the path ends in .html).
 func ExportHTML(m *Manager, outputPath string) (string, error) {
 	if m == nil {
 		return "", os.ErrInvalid
 	}
 	if outputPath == "" {
 		base := strings.TrimSuffix(filepath.Base(m.file), ".jsonl")
-		outputPath = "pi-session-" + base + ".html"
+		outputPath = "pigo-session-" + base + ".html"
 	}
 	b, err := RenderHTML(m)
 	if err != nil {
@@ -42,7 +41,7 @@ func ExportHTMLFile(inputPath, outputPath string) (string, error) {
 func RenderHTML(m *Manager) (string, error) {
 	var b strings.Builder
 	b.WriteString(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">`)
-	b.WriteString(`<title>pi session `)
+	b.WriteString(`<title>pigo session `)
 	b.WriteString(html.EscapeString(m.id))
 	b.WriteString(`</title><style>
 body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:52rem;margin:2rem auto;background:#18181e;color:#e8e8e8;padding:0 1rem}

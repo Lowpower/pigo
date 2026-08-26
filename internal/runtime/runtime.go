@@ -80,7 +80,14 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 	auth.ApplyEnv(opts.AgentDir)
 
-	sf, provider := ai.DefaultStreamFn()
+	provider := opts.Config.ResolvedProvider()
+	if provider == "" {
+		provider = "anthropic"
+	}
+	sf := boundStream(opts.AgentDir, provider)
+	if sf == nil {
+		sf, provider = ai.DefaultStreamFn()
+	}
 	reg := tools.Default()
 	if opts.NoTools {
 		reg = tools.NewRegistry()
@@ -160,28 +167,35 @@ func (e *Engine) emitQueueUpdate() {
 	e.emitSession(map[string]any{"type": "queue_update", "steering": s, "followUp": f})
 }
 
-// PushSteer queues a user message for the in-flight turn (pi steer).
-func (e *Engine) PushSteer(text string) {
+func (e *Engine) queueUser(dst *[]ai.Message, text string, images []ai.ImageContent) {
 	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" && len(images) == 0 {
 		return
 	}
 	e.mu.Lock()
-	e.steer = append(e.steer, ai.Message{Role: ai.RoleUser, Content: text})
+	*dst = append(*dst, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 	e.mu.Unlock()
 	e.emitQueueUpdate()
 }
 
-// PushFollow queues a user message for after the current turn (pi followUp).
+// PushSteer queues a user message for the in-flight turn.
+func (e *Engine) PushSteer(text string) {
+	e.queueUser(&e.steer, text, nil)
+}
+
+// PushSteerImages queues a steering message with optional image blocks.
+func (e *Engine) PushSteerImages(text string, images []ai.ImageContent) {
+	e.queueUser(&e.steer, text, images)
+}
+
+// PushFollow queues a user message for after the current turn.
 func (e *Engine) PushFollow(text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	e.mu.Lock()
-	e.follow = append(e.follow, ai.Message{Role: ai.RoleUser, Content: text})
-	e.mu.Unlock()
-	e.emitQueueUpdate()
+	e.queueUser(&e.follow, text, nil)
+}
+
+// PushFollowImages queues a follow-up message with optional image blocks.
+func (e *Engine) PushFollowImages(text string, images []ai.ImageContent) {
+	e.queueUser(&e.follow, text, images)
 }
 
 func (e *Engine) drainSteer() []ai.Message {
@@ -204,8 +218,8 @@ func (e *Engine) drainFollow() []ai.Message {
 	return out
 }
 
-// drainQueue matches pi PendingMessageQueue.drain: "all" empties the queue;
-// "one-at-a-time" (default) returns only the oldest message.
+// drainQueue: "all" empties the queue; "one-at-a-time" (default) returns only
+// the oldest message.
 func drainQueue(q *[]ai.Message, mode string) []ai.Message {
 	if q == nil || len(*q) == 0 {
 		return nil
@@ -281,7 +295,7 @@ func (e *Engine) Executor() agent.ToolExecutor {
 	})
 }
 
-// MaybeCompact runs compaction when the estimate exceeds the window (pi auto-compact).
+// MaybeCompact runs compaction when the estimate exceeds the window.
 func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Message, string, error) {
 	if !e.Opts.Config.CompactionEnabled() {
 		return msgs, "", nil
@@ -325,8 +339,8 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 }
 
 // RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
-func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string) *agent.Stream {
-	userMsg := ai.Message{Role: ai.RoleUser, Content: user}
+func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent) *agent.Stream {
+	userMsg := ai.Message{Role: ai.RoleUser, Content: user, Images: images}
 	history = append(append([]ai.Message(nil), history...), userMsg)
 	compacted, _, err := e.MaybeCompact(ctx, history)
 	if err == nil {
@@ -368,7 +382,7 @@ func (e *Engine) History() []ai.Message {
 	return msgs
 }
 
-// Reload rediscovers skills and rebuilds the system prompt (pi /reload).
+// Reload rediscovers skills and rebuilds the system prompt (/reload).
 func (e *Engine) Reload() {
 	if e.Opts.NoSkills {
 		e.Skills = nil
@@ -409,7 +423,11 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 				"content": msg.Text, "isError": msg.IsError,
 			})
 		default:
-			entry, err = e.Opts.Session.AppendMessage("user", map[string]any{"role": "user", "content": msg.Text})
+			payload := map[string]any{"role": "user", "content": msg.Text}
+			if len(msg.Images) > 0 {
+				payload["content"] = agent.UserContentBlocks(msg.Text, msg.Images)
+			}
+			entry, err = e.Opts.Session.AppendMessage("user", payload)
 		}
 		if err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
@@ -418,7 +436,7 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 	e.persisted = len(msgs)
 }
 
-// CycleModel steps through --models or the catalog (pi cycle_model / ctrl+p).
+// CycleModel steps through --models or the catalog (ctrl+p).
 func (e *Engine) CycleModel(backward bool) (models.Spec, bool) {
 	next, ok := models.Cycle(e.Opts.Config.ResolvedProvider(), e.Opts.Config.ResolvedModel(), e.Scoped, backward)
 	if !ok {
@@ -428,7 +446,7 @@ func (e *Engine) CycleModel(backward bool) (models.Spec, bool) {
 	return next, true
 }
 
-// CycleThinking steps thinking levels (pi cycle_thinking_level / shift+tab).
+// CycleThinking steps thinking levels (shift+tab).
 func (e *Engine) CycleThinking() string {
 	next := models.NextThinkingLevel(e.Opts.Config.Thinking)
 	e.Opts.Config.Thinking = next
@@ -441,6 +459,11 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 		e.Provider = provider
 		e.Opts.Config.Provider = provider
 		e.Opts.Config.DefaultProvider = provider
+		if e.Opts.AgentDir != "" {
+			if fn := boundStream(e.Opts.AgentDir, provider); fn != nil {
+				e.Stream = fn
+			}
+		}
 	}
 	if id != "" {
 		e.Opts.Config.Model = id
@@ -451,9 +474,9 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 	}
 }
 
-// PrintText streams a prompt to out as plain text (pi --mode text / --print).
+// PrintText streams a prompt to out as plain text (--mode text / --print).
 func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
-	stream := e.RunPrompt(ctx, history, user)
+	stream := e.RunPrompt(ctx, history, user, nil)
 	var last []agent.Msg
 	for ev := range stream.Events() {
 		switch ev.Type {
@@ -472,8 +495,8 @@ func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Mess
 	return nil
 }
 
-// PrintJSON writes NDJSON agent events using pi's toJsonEvent shape.
-func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
+// PrintJSON writes NDJSON agent events (--mode json).
+func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string, images []ai.ImageContent) error {
 	enc := json.NewEncoder(out)
 	write := e.onSessionEvent
 	if write == nil {
@@ -489,7 +512,7 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	for {
 		var stream *agent.Stream
 		if !continued {
-			stream = e.RunPrompt(ctx, hist, user)
+			stream = e.RunPrompt(ctx, hist, user, images)
 		} else {
 			stream = e.runLoop(ctx, hist, nil)
 		}
@@ -534,4 +557,36 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	}
 	write(map[string]any{"type": "agent_settled"})
 	return nil
+}
+
+func boundStream(agentDir, provider string) ai.StreamFn {
+	if provider == "" {
+		return nil
+	}
+	p, ok := auth.Lookup(provider)
+	if !ok {
+		return nil
+	}
+	store := auth.Open(agentDir)
+	return func(ctx context.Context, reqCtx ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		res, err := auth.Resolve(ctx, store, p, auth.ResolveOpts{})
+		if err != nil {
+			return ai.StreamWithAuth(provider, "", "", nil)(ctx, reqCtx, opts)
+		}
+		if res == nil {
+			key := auth.APIKey(agentDir, provider)
+			if key == "" {
+				return ai.EchoStreamFn()(ctx, reqCtx, opts)
+			}
+			return ai.StreamWithAuth(provider, key, "", nil)(ctx, reqCtx, opts)
+		}
+		key := res.Auth.APIKey
+		if key == "" {
+			key = auth.Secret(res)
+		}
+		if key == "" && len(res.Auth.Headers) == 0 {
+			return ai.EchoStreamFn()(ctx, reqCtx, opts)
+		}
+		return ai.StreamWithAuth(provider, key, res.Auth.BaseURL, res.Auth.Headers)(ctx, reqCtx, opts)
+	}
 }

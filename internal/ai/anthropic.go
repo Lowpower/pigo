@@ -13,8 +13,7 @@ import (
 	"time"
 )
 
-// This file ports pi's packages/ai/src/api/anthropic-messages.ts streaming path:
-// it maps Anthropic Messages SSE events to AssistantMessageEvents.
+// This file maps Anthropic Messages SSE events to AssistantMessageEvents.
 
 const (
 	defaultAnthropicBaseURL = "https://api.anthropic.com"
@@ -28,6 +27,7 @@ const (
 type AnthropicClient struct {
 	BaseURL    string
 	APIKey     string
+	Headers    map[string]string
 	HTTPClient *http.Client
 }
 
@@ -62,9 +62,14 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 			return nil, err
 		}
 		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("x-api-key", c.APIKey)
+		if c.APIKey != "" {
+			httpReq.Header.Set("x-api-key", c.APIKey)
+		}
 		httpReq.Header.Set("anthropic-version", anthropicVersion)
 		httpReq.Header.Set("accept", "text/event-stream")
+		for k, v := range c.Headers {
+			httpReq.Header.Set(k, v)
+		}
 
 		client := c.HTTPClient
 		if client == nil {
@@ -427,7 +432,7 @@ func finishError(ctx context.Context, out *AssistantMessage, s *EventStream, msg
 	s.push(ctx, Event{Type: EventError, Reason: out.StopReason, Message: out})
 }
 
-// mapAnthropicStopReason ports the relevant cases of pi's mapStopReason.
+// mapAnthropicStopReason maps Anthropic stop reasons onto StopReason.
 func mapAnthropicStopReason(raw string) StopReason {
 	switch raw {
 	case "end_turn", "stop_sequence", "pause_turn":
