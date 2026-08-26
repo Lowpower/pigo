@@ -27,7 +27,43 @@ type Config struct {
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
+	Skills     []string       `mapstructure:"-" json:"skills,omitempty"`
+	Prompts    []string       `mapstructure:"-" json:"prompts,omitempty"`
+	Themes     []string       `mapstructure:"-" json:"themes,omitempty"`
 	NpmCommand []string       `mapstructure:"-" json:"npmCommand,omitempty"`
+}
+
+// ResourceKinds is the settings.json key order for discovered resources.
+var ResourceKinds = []string{"extensions", "skills", "prompts", "themes"}
+
+// ResourcePaths returns the top-level path/override list for a resource kind.
+func (c *Config) ResourcePaths(kind string) []string {
+	switch kind {
+	case "extensions":
+		return c.Extensions
+	case "skills":
+		return c.Skills
+	case "prompts":
+		return c.Prompts
+	case "themes":
+		return c.Themes
+	default:
+		return nil
+	}
+}
+
+// SetResourcePaths writes the top-level path/override list for a resource kind.
+func (c *Config) SetResourcePaths(kind string, paths []string) {
+	switch kind {
+	case "extensions":
+		c.Extensions = paths
+	case "skills":
+		c.Skills = paths
+	case "prompts":
+		c.Prompts = paths
+	case "themes":
+		c.Themes = paths
+	}
 }
 
 // CompactionEnabled reports whether auto-compaction is on (default true).
@@ -114,6 +150,9 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 	var extra struct {
 		Packages   []PackageEntry `json:"packages"`
 		Extensions []string       `json:"extensions"`
+		Skills     []string       `json:"skills"`
+		Prompts    []string       `json:"prompts"`
+		Themes     []string       `json:"themes"`
 		NpmCommand []string       `json:"npmCommand"`
 	}
 	if err := json.Unmarshal(b, &extra); err != nil {
@@ -121,6 +160,9 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 	}
 	cfg.Packages = extra.Packages
 	cfg.Extensions = extra.Extensions
+	cfg.Skills = extra.Skills
+	cfg.Prompts = extra.Prompts
+	cfg.Themes = extra.Themes
 	cfg.NpmCommand = extra.NpmCommand
 }
 
@@ -150,6 +192,15 @@ func Save(configDir string, cfg Config) error {
 	}
 	if cfg.Extensions != nil {
 		existing["extensions"] = cfg.Extensions
+	}
+	if cfg.Skills != nil {
+		existing["skills"] = cfg.Skills
+	}
+	if cfg.Prompts != nil {
+		existing["prompts"] = cfg.Prompts
+	}
+	if cfg.Themes != nil {
+		existing["themes"] = cfg.Themes
 	}
 	if cfg.NpmCommand != nil {
 		existing["npmCommand"] = cfg.NpmCommand

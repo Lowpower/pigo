@@ -459,17 +459,37 @@ func newAuthCmd() *cobra.Command {
 }
 
 func newConfigCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "config", Short: "show or write settings.json"}
-	cmd.Flags().Bool("print", false, "print resolved settings")
+	var f packageFlags
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "enable or disable extensions, skills, prompts, and themes",
+		Args:  cobra.NoArgs,
+	}
+	cmd.Flags().Bool("print", false, "print resolved provider/model/theme")
+	addPackageFlags(cmd, &f, true, false)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		dir := config.DefaultConfigDir()
-		cfg, err := config.Load(dir)
+		printDump, _ := cmd.Flags().GetBool("print")
+		if printDump {
+			dir := config.DefaultConfigDir()
+			cfg, err := config.Load(dir)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "dir=%s\nprovider=%s\nmodel=%s\ntheme=%s\nthinking=%s\n",
+				dir, cfg.ResolvedProvider(), cfg.ResolvedModel(), cfg.Theme, cfg.Thinking)
+			return nil
+		}
+		m, err := openPackageManager(f)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "dir=%s\nprovider=%s\nmodel=%s\ntheme=%s\nthinking=%s\n",
-			dir, cfg.ResolvedProvider(), cfg.ResolvedModel(), cfg.Theme, cfg.Thinking)
-		return nil
+		if f.local && !m.Trusted {
+			return fmt.Errorf("project is not trusted; use --approve to modify local resource config")
+		}
+		if !isTTY() {
+			return fmt.Errorf("config editor requires a TTY (use --print to dump settings)")
+		}
+		return tui.RunConfigSelector(m, f.local)
 	}
 	return cmd
 }

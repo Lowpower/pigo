@@ -10,13 +10,15 @@ import (
 	"strings"
 )
 
-// Resource is one discovered extension path.
+// Resource is one discovered extensions/skills/prompts/themes path.
 type Resource struct {
 	Path    string
 	Enabled bool
 	Scope   string // user | project
 	Origin  string // package | top-level
 	Source  string
+	Type    string // extensions | skills | prompts | themes
+	BaseDir string
 }
 
 func collectAutoExtensionEntries(dir string) []string {
@@ -75,9 +77,12 @@ func collectAutoExtensionEntries(dir string) []string {
 
 func resolveExtensionEntries(dir string) []string {
 	manifest := readPiManifest(filepath.Join(dir, "package.json"))
-	if len(manifest) > 0 {
+	if len(manifest.Extensions) > 0 {
 		var entries []string
-		for _, rel := range manifest {
+		for _, rel := range manifest.Extensions {
+			if isOverridePattern(rel) {
+				continue
+			}
 			p := filepath.Join(dir, rel)
 			if _, err := os.Stat(p); err == nil {
 				entries = append(entries, p)
@@ -98,20 +103,40 @@ func resolveExtensionEntries(dir string) []string {
 	return nil
 }
 
-func readPiManifest(packageJSON string) []string {
+func readPiManifest(packageJSON string) piManifest {
 	b, err := os.ReadFile(packageJSON)
 	if err != nil {
-		return nil
+		return piManifest{}
 	}
 	var pkg struct {
-		Pi struct {
-			Extensions []string `json:"extensions"`
-		} `json:"pi"`
+		Pi piManifest `json:"pi"`
 	}
 	if err := json.Unmarshal(b, &pkg); err != nil {
+		return piManifest{}
+	}
+	return pkg.Pi
+}
+
+type piManifest struct {
+	Extensions []string `json:"extensions"`
+	Skills     []string `json:"skills"`
+	Prompts    []string `json:"prompts"`
+	Themes     []string `json:"themes"`
+}
+
+func (m piManifest) entries(kind string) []string {
+	switch kind {
+	case KindExtensions:
+		return m.Extensions
+	case KindSkills:
+		return m.Skills
+	case KindPrompts:
+		return m.Prompts
+	case KindThemes:
+		return m.Themes
+	default:
 		return nil
 	}
-	return pkg.Pi.Extensions
 }
 
 func collectPackageExtensionFiles(packageRoot string) []string {
@@ -123,6 +148,138 @@ func collectPackageExtensionFiles(packageRoot string) []string {
 		return collectAutoExtensionEntries(extDir)
 	}
 	return nil
+}
+
+func collectPackageFiles(packageRoot, kind string) []string {
+	if kind == KindExtensions {
+		if st, err := os.Stat(packageRoot); err == nil && st.Mode().IsRegular() {
+			return []string{packageRoot}
+		}
+		return collectPackageExtensionFiles(packageRoot)
+	}
+	man := readPiManifest(filepath.Join(packageRoot, "package.json"))
+	if ents := man.entries(kind); len(ents) > 0 {
+		var out []string
+		for _, rel := range ents {
+			if isOverridePattern(rel) {
+				continue
+			}
+			p := filepath.Join(packageRoot, rel)
+			if st, err := os.Stat(p); err == nil {
+				if st.IsDir() {
+					out = append(out, collectResourceFiles(p, kind)...)
+				} else {
+					out = append(out, p)
+				}
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	dir := filepath.Join(packageRoot, kind)
+	if st, err := os.Stat(dir); err == nil && st.IsDir() {
+		return collectResourceFiles(dir, kind)
+	}
+	return nil
+}
+
+func collectResourceFiles(dir, kind string) []string {
+	switch kind {
+	case KindExtensions:
+		return collectAutoExtensionEntries(dir)
+	case KindSkills:
+		return collectSkillEntries(dir)
+	case KindPrompts:
+		return collectFilesByExt(dir, ".md")
+	case KindThemes:
+		return collectFilesByExt(dir, ".json")
+	default:
+		return nil
+	}
+}
+
+func collectSkillEntries(dir string) []string {
+	return collectSkillEntriesAt(dir, dir)
+}
+
+func collectSkillEntriesAt(dir, root string) []string {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, e := range ents {
+		if e.Name() != "SKILL.md" {
+			continue
+		}
+		full := filepath.Join(dir, e.Name())
+		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+			return []string{full}
+		}
+	}
+	var out []string
+	for _, e := range ents {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") || name == "node_modules" {
+			continue
+		}
+		full := filepath.Join(dir, name)
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if e.Type()&os.ModeSymlink != 0 {
+			info, err = os.Stat(full)
+			if err != nil {
+				continue
+			}
+		}
+		if info.Mode().IsRegular() {
+			if strings.HasSuffix(name, ".md") && dir == root {
+				out = append(out, full)
+			}
+			continue
+		}
+		if info.IsDir() {
+			out = append(out, collectSkillEntriesAt(full, root)...)
+		}
+	}
+	return out
+}
+
+func collectFilesByExt(dir, ext string) []string {
+	var out []string
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, e := range ents {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") || name == "node_modules" {
+			continue
+		}
+		full := filepath.Join(dir, name)
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if e.Type()&os.ModeSymlink != 0 {
+			info, err = os.Stat(full)
+			if err != nil {
+				continue
+			}
+		}
+		if info.Mode().IsRegular() {
+			if strings.HasSuffix(strings.ToLower(name), ext) {
+				out = append(out, full)
+			}
+			continue
+		}
+		if info.IsDir() {
+			out = append(out, collectFilesByExt(full, ext)...)
+		}
+	}
+	return out
 }
 
 // IsSpawnable reports whether path can be started as an extension subprocess.
@@ -153,6 +310,9 @@ func SpawnArgv(rs []Resource) [][]string {
 	seen := map[string]bool{}
 	for _, r := range rs {
 		if !r.Enabled {
+			continue
+		}
+		if r.Type != "" && r.Type != KindExtensions {
 			continue
 		}
 		if !IsSpawnable(r.Path) {

@@ -85,3 +85,35 @@ func TestExpandNoApproveAlias(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+func TestConfigPrint(t *testing.T) {
+	agent := t.TempDir()
+	t.Setenv("PIGO_CODING_AGENT_DIR", agent)
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"config", "--print"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err, out.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "provider=") || !strings.Contains(s, "model=") {
+		t.Fatalf("print: %s", s)
+	}
+}
+
+func TestConfigLocalRequiresTrust(t *testing.T) {
+	t.Setenv("PIGO_CODING_AGENT_DIR", t.TempDir())
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"config", "-l"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "not trusted") {
+		t.Fatalf("err=%v out=%s", err, out.String())
+	}
+}

@@ -165,6 +165,9 @@ func (m *Manager) persist(local bool) error {
 	s := m.settings(local)
 	onDisk.Packages = s.Packages
 	onDisk.Extensions = s.Extensions
+	onDisk.Skills = s.Skills
+	onDisk.Prompts = s.Prompts
+	onDisk.Themes = s.Themes
 	if s.NpmCommand != nil {
 		onDisk.NpmCommand = s.NpmCommand
 	}
@@ -403,11 +406,20 @@ func (m *Manager) Update(ctx context.Context, source string) error {
 	return nil
 }
 
-// Resolve returns discovered extension resources (packages, explicit paths, auto dirs).
+// Resolve returns discovered resources (packages, explicit paths, auto dirs).
 func (m *Manager) Resolve(ctx context.Context) ([]Resource, error) {
+	return m.resolve(ctx, m.Trusted)
+}
+
+// ResolveGlobal is Resolve with project files ignored (config TUI global mode).
+func (m *Manager) ResolveGlobal(ctx context.Context) ([]Resource, error) {
+	return m.resolve(ctx, false)
+}
+
+func (m *Manager) resolve(ctx context.Context, trusted bool) ([]Resource, error) {
 	var out []Resource
 	seen := map[string]int{}
-	add := func(path, scope, origin, source string) {
+	add := func(path, scope, origin, source, kind, baseDir string, enabled bool) {
 		if path == "" {
 			return
 		}
@@ -415,17 +427,21 @@ func (m *Manager) Resolve(ctx context.Context) ([]Resource, error) {
 		if !filepath.IsAbs(abs) {
 			abs = filepath.Clean(path)
 		}
-		r := Resource{Path: abs, Enabled: true, Scope: scope, Origin: origin, Source: source}
-		if i, ok := seen[abs]; ok {
+		key := kind + "\x00" + abs
+		r := Resource{
+			Path: abs, Enabled: enabled, Scope: scope, Origin: origin,
+			Source: source, Type: kind, BaseDir: baseDir,
+		}
+		if i, ok := seen[key]; ok {
 			out[i] = r
 			return
 		}
-		seen[abs] = len(out)
+		seen[key] = len(out)
 		out = append(out, r)
 	}
 
 	var pkgs []pkgRef
-	if m.Trusted {
+	if trusted {
 		for _, p := range m.Project.Packages {
 			pkgs = append(pkgs, pkgRef{p, true})
 		}
@@ -460,32 +476,56 @@ func (m *Manager) Resolve(ctx context.Context) ([]Resource, error) {
 		if root == "" {
 			continue
 		}
-		files := collectPackageExtensionFiles(root)
-		if st, err := os.Stat(root); err == nil && st.Mode().IsRegular() {
-			files = []string{root}
-		}
-		if p.entry.Filtered() && len(p.entry.Extensions) > 0 {
-			var filtered []string
-			for _, rel := range p.entry.Extensions {
-				filtered = append(filtered, filepath.Join(root, rel))
-			}
-			files = filtered
-		}
 		scope := "user"
 		if p.local {
 			scope = "project"
 		}
-		if len(files) == 0 {
-			add(root, scope, "package", p.entry.Source)
-			continue
-		}
-		for _, f := range files {
-			add(f, scope, "package", p.entry.Source)
+		for _, kind := range config.ResourceKinds {
+			files := collectPackageFiles(root, kind)
+			if kind == KindExtensions {
+				if st, err := os.Stat(root); err == nil && st.Mode().IsRegular() && len(files) == 0 {
+					files = []string{root}
+				}
+			}
+			filters := p.entry.ResourceFilters(kind)
+			enabledFor := map[string]bool{}
+			switch {
+			case p.entry.AutoloadOff():
+				enabledFor = applyAutoloadDisabled(files, filters, root)
+				var matched []string
+				for _, f := range files {
+					if _, ok := enabledFor[f]; ok {
+						matched = append(matched, f)
+					}
+				}
+				files = matched
+			case len(filters) > 0:
+				enabledFor = applyPatterns(files, filters, root)
+			default:
+				for _, f := range files {
+					enabledFor[f] = true
+				}
+			}
+			if len(files) == 0 && kind == KindExtensions && !p.entry.AutoloadOff() {
+				add(root, scope, "package", p.entry.Source, kind, root, true)
+				continue
+			}
+			for _, f := range files {
+				add(f, scope, "package", p.entry.Source, kind, root, enabledFor[f])
+			}
 		}
 	}
 
-	addExplicit := func(paths []string, scope, base string) {
+	addExplicit := func(paths []string, kind, scope, base string) {
+		var plain []string
 		for _, p := range paths {
+			if isOverridePattern(p) {
+				continue
+			}
+			plain = append(plain, p)
+		}
+		var files []string
+		for _, p := range plain {
 			fp := p
 			if !filepath.IsAbs(fp) {
 				fp = filepath.Join(base, p)
@@ -495,27 +535,43 @@ func (m *Manager) Resolve(ctx context.Context) ([]Resource, error) {
 				continue
 			}
 			if st.IsDir() {
-				for _, e := range collectAutoExtensionEntries(fp) {
-					add(e, scope, "top-level", "local")
-				}
+				files = append(files, collectResourceFiles(fp, kind)...)
 				continue
 			}
-			add(fp, scope, "top-level", "local")
+			files = append(files, fp)
+		}
+		enabledFor := applyPatterns(files, paths, base)
+		for _, f := range files {
+			add(f, scope, "top-level", "local", kind, base, enabledFor[f])
 		}
 	}
-	if m.Trusted {
-		addExplicit(m.Project.Extensions, "project", config.ProjectDir(m.Cwd))
+	if trusted {
+		for _, kind := range config.ResourceKinds {
+			addExplicit(m.Project.ResourcePaths(kind), kind, "project", config.ProjectDir(m.Cwd))
+		}
 	}
-	addExplicit(m.User.Extensions, "user", m.AgentDir)
+	for _, kind := range config.ResourceKinds {
+		addExplicit(m.User.ResourcePaths(kind), kind, "user", m.AgentDir)
+	}
 
-	userExt := filepath.Join(m.AgentDir, "extensions")
-	for _, e := range collectAutoExtensionEntries(userExt) {
-		add(e, "user", "top-level", "auto")
+	addAuto := func(dir, kind, scope, base string, overrides []string) {
+		var files []string
+		if kind == KindExtensions {
+			files = collectAutoExtensionEntries(dir)
+		} else {
+			files = collectResourceFiles(dir, kind)
+		}
+		for _, f := range files {
+			add(f, scope, "top-level", "auto", kind, base, IsEnabledByOverrides(f, overrides, base))
+		}
 	}
-	if m.Trusted {
-		projExt := filepath.Join(config.ProjectDir(m.Cwd), "extensions")
-		for _, e := range collectAutoExtensionEntries(projExt) {
-			add(e, "project", "top-level", "auto")
+	for _, kind := range config.ResourceKinds {
+		addAuto(filepath.Join(m.AgentDir, kind), kind, "user", m.AgentDir, m.User.ResourcePaths(kind))
+	}
+	if trusted {
+		proj := config.ProjectDir(m.Cwd)
+		for _, kind := range config.ResourceKinds {
+			addAuto(filepath.Join(proj, kind), kind, "project", proj, m.Project.ResourcePaths(kind))
 		}
 	}
 	return out, nil
