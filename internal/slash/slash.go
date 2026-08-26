@@ -53,7 +53,7 @@ func Builtins() []Command {
 	return []Command{
 		{Name: "settings", Description: "show settings path"},
 		{Name: "model", Description: "show or set the model"},
-		{Name: "tree", Description: "show the session parentId tree"},
+		{Name: "tree", Description: "navigate session tree (switch branches)"},
 		{Name: "thinking", Description: "set thinking level"},
 		{Name: "scoped-models", Description: "not implemented"},
 		{Name: "export", Description: "export the session (HTML default, or .html/.jsonl path)"},
@@ -103,7 +103,7 @@ func HotkeysText() string {
   enter                 send (steer while streaming)
   alt+enter             queue follow-up while streaming
   shift+enter / ctrl+j  newline
-  escape                interrupt current turn
+  escape                interrupt / double-esc tree
   ctrl+c                clear editor / interrupt / quit
   ctrl+d                exit when editor is empty
   ctrl+p                cycle model forward

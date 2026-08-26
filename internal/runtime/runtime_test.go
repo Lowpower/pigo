@@ -580,3 +580,63 @@ func TestNewHonorsCLIProvider(t *testing.T) {
 		t.Fatalf("provider=%s model=%s", e.Provider, e.Opts.Config.ResolvedModel())
 	}
 }
+
+func TestHistoryFollowsLeafNotSiblings(t *testing.T) {
+	dir := t.TempDir()
+	cwd := t.TempDir()
+	sess := session.New(cwd, dir)
+	_, _ = sess.AppendMessage("user", map[string]any{"role": "user", "content": "main"})
+	a, _ := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
+	_, _ = sess.AppendMessage("user", map[string]any{"role": "user", "content": "side"})
+	_, _ = sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "side-ok"})
+	if _, err := sess.Navigate(a.ID, session.NavigateOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = sess.AppendMessage("user", map[string]any{"role": "user", "content": "alt"})
+	e := &Engine{Opts: Options{Session: sess}}
+	var texts []string
+	for _, m := range e.History() {
+		texts = append(texts, m.Content)
+	}
+	joined := strings.Join(texts, ",")
+	if strings.Contains(joined, "side") {
+		t.Fatalf("abandoned leaked: %s", joined)
+	}
+	if !strings.Contains(joined, "alt") || !strings.Contains(joined, "main") {
+		t.Fatalf("history = %s", joined)
+	}
+}
+
+func TestRPCNavigateTree(t *testing.T) {
+	dir := t.TempDir()
+	cwd := t.TempDir()
+	sess := session.New(cwd, dir)
+	_, _ = sess.AppendMessage("user", map[string]any{"role": "user", "content": "hi"})
+	a, _ := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"})
+	u2, _ := sess.AppendMessage("user", map[string]any{"role": "user", "content": "later"})
+	_, _ = sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}, Session: sess, Cwd: cwd, AgentDir: dir},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	in := strings.NewReader(`{"type":"navigate_tree","targetId":"` + u2.ID + `"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"command":"navigate_tree"`) || !strings.Contains(out.String(), `"success":true`) {
+		t.Fatalf("rpc:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), `"editorText":"later"`) {
+		t.Fatalf("missing editorText:\n%s", out.String())
+	}
+	if sess.LeafID() != a.ID {
+		t.Fatalf("leaf = %s want %s", sess.LeafID(), a.ID)
+	}
+}

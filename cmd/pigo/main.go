@@ -84,7 +84,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.prompt, "prompt", "", "prompt text (alias of positional args)")
 	cmd.Flags().StringVar(&f.configDir, "config-dir", "", "agent dir (default ~/.pigo/agent; env PIGO_CODING_AGENT_DIR)")
 	cmd.Flags().BoolVarP(&f.continueSession, "continue", "c", false, "continue the most recent session in this directory")
-	cmd.Flags().BoolVarP(&f.resume, "resume", "r", false, "resume a session (most recent if --session omitted)")
+	cmd.Flags().BoolVarP(&f.resume, "resume", "r", false, "resume a session (interactive picker; most recent if not a TTY)")
 	cmd.Flags().StringVar(&f.sessionPath, "session", "", "session file path or id")
 	cmd.Flags().BoolVar(&f.noSession, "no-session", false, "do not persist a session")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "provider id")
@@ -252,7 +252,23 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			if err != nil {
 				return fmt.Errorf("session-id: %w", err)
 			}
-		case f.continueSession || f.resume:
+		case f.resume:
+			if mode == "interactive" && isTTY() {
+				path, err2 := tui.PickSession(cwd, agentDir)
+				if err2 != nil {
+					return fmt.Errorf("resume session: %w", err2)
+				}
+				if path == "" {
+					return fmt.Errorf("no session selected")
+				}
+				sess, err = session.Open(path)
+			} else {
+				sess, err = session.ContinueRecent(cwd, agentDir)
+			}
+			if err != nil {
+				return fmt.Errorf("resume session: %w", err)
+			}
+		case f.continueSession:
 			sess, err = session.ContinueRecent(cwd, agentDir)
 			if err != nil {
 				return fmt.Errorf("resume session: %w", err)

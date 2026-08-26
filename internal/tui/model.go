@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -75,6 +76,14 @@ type Model struct {
 	footerStyle lipgloss.Style
 
 	login loginState
+
+	overlay       overlayKind
+	tree          treeOverlay
+	resume        resumeOverlay
+	lastEscape    time.Time
+	summaryCancel context.CancelFunc
+	picking       bool
+	pickResult    string
 }
 
 // New builds the interactive model from the resolved config.
@@ -132,6 +141,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.loginActive() {
 			return m.handleLoginKey(msg)
 		}
+		if m.overlay != overlayNone {
+			if m.overlay == overlayResume {
+				return m.handleResumeKey(msg)
+			}
+			return m.handleTreeKey(msg)
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			if m.running && m.cancel != nil {
@@ -150,6 +165,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancel()
 				return m, nil
 			}
+			return m.handleIdleEscape()
 		case "enter":
 			return m.submit()
 		case "alt+enter":
@@ -395,7 +411,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("clone error: " + err.Error())
 		}
 		m.engine.AdoptSession(child)
-		m.history = m.engine.History()
+		m.reloadFromSession()
 		return note("cloned session " + child.ID() + "\n" + child.File())
 	case "fork":
 		if m.engine == nil || m.engine.Opts.Session == nil {
@@ -419,39 +435,20 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("fork error: " + err.Error())
 		}
 		m.engine.AdoptSession(child)
-		m.history = m.engine.History()
+		m.reloadFromSession()
 		if text != "" {
 			m.textarea.SetValue(text)
 		}
 		return note("forked session " + child.ID() + "\n" + child.File())
 	case "tree":
-		if m.engine == nil || m.engine.Opts.Session == nil {
-			return note("no session")
-		}
-		return note(m.engine.Opts.Session.FormatTree())
+		return m.openTree()
 	case "resume":
 		if m.engine == nil {
 			return note("no engine")
 		}
 		cwd, _ := os.Getwd()
 		if cmd.Rest == "" {
-			list, err := session.Summaries(cwd, m.engine.Opts.AgentDir)
-			if err != nil {
-				return note("resume error: " + err.Error())
-			}
-			if len(list) == 0 {
-				return note("no sessions in this directory")
-			}
-			var b strings.Builder
-			b.WriteString("sessions ( /resume <id> ):\n")
-			for _, s := range list {
-				name := s.Name
-				if name == "" {
-					name = s.ID[:min(8, len(s.ID))]
-				}
-				fmt.Fprintf(&b, "  %s  %s\n", name, s.FirstMessage)
-			}
-			return note(b.String())
+			return m.openResumePicker(cwd)
 		}
 		opened, err := session.FindByID(cwd, m.engine.Opts.AgentDir, cmd.Rest)
 		if err != nil {
@@ -461,7 +458,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("resume error: " + err.Error())
 		}
 		m.engine.AdoptSession(opened)
-		m.history = m.engine.History()
+		m.reloadFromSession()
 		return note("resumed " + opened.ID() + "\n" + opened.File())
 	case "import":
 		if cmd.Rest == "" {
@@ -473,7 +470,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		if m.engine != nil {
 			m.engine.AdoptSession(opened)
-			m.history = m.engine.History()
+			m.reloadFromSession()
 		}
 		return note("imported " + opened.ID() + "\n" + opened.File())
 	case "name":
@@ -639,6 +636,12 @@ func (m Model) View() string {
 	if m.loginActive() {
 		return m.loginView()
 	}
+	if m.overlay == overlayTree || m.overlay == overlayTreeLabel || m.overlay == overlayTreeSummary || m.overlay == overlayTreeCustom {
+		return m.treeView()
+	}
+	if m.overlay == overlayResume {
+		return m.resumeView()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.titleStyle.Render("pigo"))
@@ -695,7 +698,7 @@ func RunEngine(cfg config.Config, eng *runtime.Engine) error {
 	m.engine = eng
 	if eng != nil {
 		m.provider = eng.Provider
-		m.history = eng.History()
+		m.reloadFromSession()
 	}
 	_, err := tea.NewProgram(m).Run()
 	return err
