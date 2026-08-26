@@ -72,7 +72,10 @@ func TestRPCGetSessionStatsShape(t *testing.T) {
 			{Type: ai.KindText, Text: "yo"},
 			{Type: ai.KindToolCall, ToolID: "c1", ToolName: "read"},
 		},
-		Usage: ai.Usage{Input: 10, Output: 5, CacheRead: 2, CacheWrite: 1, TotalTokens: 18},
+		Usage: ai.Usage{
+			Input: 10, Output: 5, CacheRead: 2, CacheWrite: 1, TotalTokens: 18,
+			Cost: ai.UsageCost{Input: 0.1, Output: 0.4, CacheRead: 0.02, CacheWrite: 0.08, Total: 0.6},
+		},
 	}
 	if _, err := sess.AppendMessage("assistant", asst); err != nil {
 		t.Fatal(err)
@@ -104,6 +107,9 @@ func TestRPCGetSessionStatsShape(t *testing.T) {
 	tokens, _ := data["tokens"].(map[string]any)
 	if tokens["input"] != float64(10) || tokens["output"] != float64(5) || tokens["total"] != float64(18) {
 		t.Fatalf("tokens = %#v", tokens)
+	}
+	if data["cost"] != 0.6 {
+		t.Fatalf("cost = %#v want 0.6", data["cost"])
 	}
 	usage, _ := data["contextUsage"].(map[string]any)
 	if usage["contextWindow"] != float64(1000) {
