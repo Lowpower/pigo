@@ -13,13 +13,15 @@ const pickerMaxVisible = 10
 
 // listPicker is a searchable overlay used by model/session selectors.
 type listPicker struct {
-	title    string
-	hint     string
-	query    string
-	items    []pickerItem
-	filtered []pickerItem
-	selected int
-	active   bool
+	title        string
+	hint         string
+	query        string
+	items        []pickerItem
+	filtered     []pickerItem
+	selected     int
+	active       bool
+	detailPrefix string
+	skipFilter   bool // when true, handleKey "edit" does not fuzzy-filter items
 }
 
 type pickerItem struct {
@@ -78,9 +80,6 @@ func (p *listPicker) handleKey(msg tea.KeyMsg, kb *keys.Manager) string {
 	if kb.Matches(k, "tui.select.cancel") {
 		return "cancel"
 	}
-	if kb.Matches(k, "app.models.save") {
-		return "save"
-	}
 	if kb.Matches(k, "tui.input.tab") {
 		return "tab"
 	}
@@ -88,13 +87,17 @@ func (p *listPicker) handleKey(msg tea.KeyMsg, kb *keys.Manager) string {
 	case "backspace":
 		if p.query != "" {
 			p.query = p.query[:len(p.query)-1]
-			p.applyFilter()
+			if !p.skipFilter {
+				p.applyFilter()
+			}
 		}
 		return "edit"
 	}
 	if len(msg.Runes) > 0 && !msg.Alt {
 		p.query += string(msg.Runes)
-		p.applyFilter()
+		if !p.skipFilter {
+			p.applyFilter()
+		}
 		return "edit"
 	}
 	return ""
@@ -140,7 +143,12 @@ func (p listPicker) view() string {
 		b.WriteString(")\n")
 	}
 	if it, ok := p.current(); ok && it.Aux != "" {
-		b.WriteString("\n  Model Name: ")
+		prefix := p.detailPrefix
+		if prefix == "" {
+			prefix = "Model Name: "
+		}
+		b.WriteString("\n  ")
+		b.WriteString(prefix)
 		b.WriteString(it.Aux)
 		b.WriteByte('\n')
 	}

@@ -78,6 +78,7 @@ type Model struct {
 
 	keys      *keys.Manager
 	models    modelPicker
+	sessions  sessionPicker
 	lastClear time.Time
 	login     loginState
 }
@@ -135,6 +136,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.sessionPickerActive() {
+			return m.handleSessionPickerKey(msg)
+		}
 		if m.modelPickerActive() {
 			return m.handleModelPickerKey(msg)
 		}
@@ -428,39 +432,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		return note(m.engine.Opts.Session.FormatTree())
 	case "resume":
-		if m.engine == nil {
-			return note("no engine")
-		}
-		cwd, _ := os.Getwd()
-		if cmd.Rest == "" {
-			list, err := session.Summaries(cwd, m.engine.Opts.AgentDir)
-			if err != nil {
-				return note("resume error: " + err.Error())
-			}
-			if len(list) == 0 {
-				return note("no sessions in this directory")
-			}
-			var b strings.Builder
-			b.WriteString("sessions ( /resume <id> ):\n")
-			for _, s := range list {
-				name := s.Name
-				if name == "" {
-					name = s.ID[:min(8, len(s.ID))]
-				}
-				fmt.Fprintf(&b, "  %s  %s\n", name, s.FirstMessage)
-			}
-			return note(b.String())
-		}
-		opened, err := session.FindByID(cwd, m.engine.Opts.AgentDir, cmd.Rest)
-		if err != nil {
-			opened, err = session.Open(cmd.Rest)
-		}
-		if err != nil {
-			return note("resume error: " + err.Error())
-		}
-		m.engine.AdoptSession(opened)
-		m.history = m.engine.History()
-		return note("resumed " + opened.ID() + "\n" + opened.File())
+		return m.handleResumeCommand(cmd.Rest)
 	case "import":
 		if cmd.Rest == "" {
 			return note("usage: /import <path.jsonl>")
@@ -480,6 +452,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		if cmd.Rest != "" {
 			m.engine.Opts.Session.SetName(cmd.Rest)
+			_ = session.UpdateHeader(m.engine.Opts.Session.File(), func(h *session.Header) { h.Name = cmd.Rest })
 		}
 		return note("session name = " + m.engine.Opts.Session.Name())
 	case "login":
@@ -637,6 +610,9 @@ func (m Model) View() string {
 	if m.quitting {
 		return "bye\n"
 	}
+	if m.sessionPickerActive() {
+		return m.sessions.view()
+	}
 	if m.modelPickerActive() {
 		return m.models.view()
 	}
@@ -695,12 +671,25 @@ func Run(cfg config.Config) error {
 
 // RunEngine starts the TUI with a preconfigured runtime engine (session, tools, skills).
 func RunEngine(cfg config.Config, eng *runtime.Engine) error {
+	return runEngine(cfg, eng, false)
+}
+
+// RunEngineResumePicker starts the TUI and opens the session picker (--resume).
+func RunEngineResumePicker(cfg config.Config, eng *runtime.Engine) error {
+	return runEngine(cfg, eng, true)
+}
+
+func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 	m := New(cfg)
 	m.engine = eng
 	if eng != nil {
 		m.provider = eng.Provider
 		m.history = eng.History()
 		m.keys = keys.NewManager(eng.Opts.AgentDir)
+	}
+	if openResume {
+		next, _ := m.openSessionPicker()
+		m = next.(Model)
 	}
 	_, err := tea.NewProgram(m).Run()
 	return err

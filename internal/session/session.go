@@ -92,8 +92,10 @@ func (m *Manager) ID() string { return m.id }
 // File returns the session file path.
 func (m *Manager) File() string { return m.file }
 
+// Name is the optional display name (/name).
 func (m *Manager) Name() string { return m.header.Name }
 
+// SetName sets the in-memory display name. Call UpdateHeader to persist it.
 func (m *Manager) SetName(name string) { m.header.Name = name }
 
 // SetParentSession records the parent session path in the header (RPC new_session).
