@@ -21,6 +21,7 @@ const (
 	overlayTreeSummary
 	overlayTreeCustom
 	overlayResume
+	overlayFork
 )
 
 type treeOverlay struct {
@@ -48,9 +49,6 @@ func (m Model) openTree() (tea.Model, tea.Cmd) {
 	}
 	if m.engine == nil || m.engine.Opts.Session == nil {
 		return note("no session")
-	}
-	if m.running {
-		return note("Wait for the current response to finish before navigating the session tree.")
 	}
 	sess := m.engine.Opts.Session
 	roots := sess.GetTree()
@@ -229,17 +227,11 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.tree.cursor = min(len(m.tree.vis)-1, m.tree.cursor+max(5, m.height/2))
 		}
 	case "ctrl+left", "alt+left":
-		n, ok := m.tree.current()
-		if ok && m.tree.hasKids(n.node.Entry.ID) && !m.tree.folded[n.node.Entry.ID] {
-			m.tree.folded[n.node.Entry.ID] = true
-			m.tree.rebuild()
-		}
+		m.tree.foldOrUp()
 	case "ctrl+right", "alt+right":
-		n, ok := m.tree.current()
-		if ok && m.tree.folded[n.node.Entry.ID] {
-			delete(m.tree.folded, n.node.Entry.ID)
-			m.tree.rebuild()
-		}
+		m.tree.unfoldOrDown()
+	case "ctrl+x":
+		return m.copyTreeSelection()
 	case "enter":
 		n, ok := m.tree.current()
 		if !ok {
@@ -334,14 +326,77 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (t *treeOverlay) foldOrUp() {
+	n, ok := t.current()
+	if !ok {
+		return
+	}
+	parent, kids := visFamily(t.vis, t.all)
+	id := n.node.Entry.ID
+	if isFoldableID(id, parent, kids) && !t.folded[id] {
+		t.folded[id] = true
+		t.rebuild()
+		t.selectID(id)
+		return
+	}
+	t.cursor = findBranchSegmentStart(t.vis, t.cursor, "up", parent, kids)
+}
+
+func (t *treeOverlay) unfoldOrDown() {
+	n, ok := t.current()
+	if !ok {
+		return
+	}
+	id := n.node.Entry.ID
+	if t.folded[id] {
+		delete(t.folded, id)
+		t.rebuild()
+		t.selectID(id)
+		return
+	}
+	parent, kids := visFamily(t.vis, t.all)
+	t.cursor = findBranchSegmentStart(t.vis, t.cursor, "down", parent, kids)
+}
+
+func (m Model) copyTreeSelection() (tea.Model, tea.Cmd) {
+	n, ok := m.tree.current()
+	if !ok {
+		m.tree.status = "Selected entry has no text to copy"
+		return m, nil
+	}
+	text := entryCopyText(n.node.Entry)
+	if text == "" {
+		m.tree.status = "Selected entry has no text to copy"
+		return m, nil
+	}
+	m.clipOSC = osc52(text)
+	m.tree.status = "Copied selected message to clipboard"
+	return m, nil
+}
+
 func (m Model) confirmTreeNav(summarize bool, custom string, replace bool) (tea.Model, tea.Cmd) {
+	target := m.tree.pendingID
+	if m.turnBusy() {
+		m.restoreQueuedToEditor()
+		if m.cancel != nil {
+			m.cancel()
+		}
+		m.pendingNav = &pendingNav{target: target, summarize: summarize, custom: custom, replace: replace}
+		m.overlay = overlayNone
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Stopping current response…")})
+		return m, nil
+	}
+	return m.applyTreeNav(target, summarize, custom, replace)
+}
+
+func (m Model) applyTreeNav(target string, summarize bool, custom string, replace bool) (tea.Model, tea.Cmd) {
 	if m.engine == nil || m.engine.Opts.Session == nil {
 		m.overlay = overlayNone
 		return m, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.summaryCancel = cancel
-	res, err := m.engine.NavigateTree(ctx, m.tree.pendingID, session.NavigateOpts{
+	res, err := m.engine.NavigateTree(ctx, target, session.NavigateOpts{
 		Summarize:           summarize,
 		CustomInstructions:  custom,
 		ReplaceInstructions: replace,
@@ -354,8 +409,9 @@ func (m Model) confirmTreeNav(summarize bool, custom string, replace bool) (tea.
 		return m, nil
 	}
 	if res.Aborted {
+		m.tree.pendingID = target
 		m.overlay = overlayTree
-		m.tree.selectID(m.tree.pendingID)
+		m.tree.selectID(target)
 		return m, nil
 	}
 	if res.Cancelled {
@@ -404,7 +460,7 @@ func (m Model) treeView() string {
 	var b strings.Builder
 	b.WriteString(m.titleStyle.Render("  Session Tree"))
 	b.WriteString("\n")
-	b.WriteString(m.metaStyle.Render("↑↓ enter  esc  ctrl+d/t/u/l/a filter  type to search  shift+l label  shift+t time"))
+	b.WriteString(m.metaStyle.Render("↑↓ enter  esc  ctrl+x copy  ctrl/alt+←→ branch  ctrl+d/t/u/l/a filter  shift+l label"))
 	b.WriteString("\n")
 	b.WriteString(m.metaStyle.Render("Type to search: " + m.tree.query))
 	b.WriteString("\n")
@@ -440,10 +496,18 @@ func (m Model) treeView() string {
 		start = m.tree.cursor - maxLines + 1
 	}
 	end := min(len(m.tree.vis), start+maxLines)
+	tools := collectToolCalls(m.tree.all)
+	var rows []treeViewRow
 	for i := start; i < end; i++ {
 		n := m.tree.vis[i]
 		foldable := m.tree.hasKids(n.node.Entry.ID)
-		line := renderTreeLine(n, i == m.tree.cursor, m.tree.path[n.node.Entry.ID], m.tree.showLabelTime, foldable, m.tree.folded[n.node.Entry.ID], m.tree.multiRoots)
+		rows = append(rows, buildTreeRow(n, i == m.tree.cursor, m.tree.path[n.node.Entry.ID], m.tree.showLabelTime, foldable, m.tree.folded[n.node.Entry.ID], m.tree.multiRoots, tools))
+	}
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	for _, line := range clipTreeRows(rows, width) {
 		b.WriteString(line)
 		b.WriteByte('\n')
 	}
@@ -478,8 +542,7 @@ func (m Model) handleIdleEscape() (tea.Model, tea.Cmd) {
 	if !m.lastEscape.IsZero() && now.Sub(m.lastEscape) < 500*time.Millisecond {
 		m.lastEscape = time.Time{}
 		if act == "fork" {
-			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("use /fork <id> to fork")})
-			return m, nil
+			return m.openFork()
 		}
 		return m.openTree()
 	}

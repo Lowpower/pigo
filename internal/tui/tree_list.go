@@ -2,6 +2,8 @@ package tui
 
 import (
 	"encoding/json"
+	"os"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -150,6 +152,7 @@ func nodePassesFilter(n flatNode, mode, leafID string) bool {
 }
 
 func filterFlat(nodes []flatNode, mode, query, leafID string, folded map[string]bool) []flatNode {
+	tools := collectToolCalls(nodes)
 	tokens := strings.Fields(strings.ToLower(query))
 	var vis []flatNode
 	for _, n := range nodes {
@@ -157,7 +160,7 @@ func filterFlat(nodes []flatNode, mode, query, leafID string, folded map[string]
 			continue
 		}
 		if len(tokens) > 0 {
-			text := strings.ToLower(searchableText(n.node))
+			text := strings.ToLower(searchableText(n.node, tools))
 			ok := true
 			for _, tok := range tokens {
 				if !strings.Contains(text, tok) {
@@ -285,10 +288,35 @@ func recalculateVisual(filtered, all []flatNode) []flatNode {
 	return filtered
 }
 
+const (
+	treeGutterWidth              = 2
+	minVisibleAnchorContentWidth = 4
+	maxVisibleAnchorContentWidth = 20
+	minAnchorContextWidth        = 2
+	maxAnchorContextWidth        = 12
+)
+
+type toolCallInfo struct {
+	name string
+	args map[string]any
+}
+
+type treeViewRow struct {
+	gutter    string
+	body      string
+	anchorCol int
+	selected  bool
+}
+
 func renderTreeLine(n flatNode, selected, onPath, showLabelTime, foldable, folded bool, multiRoots bool) string {
-	cur := "  "
+	r := buildTreeRow(n, selected, onPath, showLabelTime, foldable, folded, multiRoots, nil)
+	return r.gutter + r.body
+}
+
+func buildTreeRow(n flatNode, selected, onPath, showLabelTime, foldable, folded bool, multiRoots bool, tools map[string]toolCallInfo) treeViewRow {
+	gutter := "  "
 	if selected {
-		cur = "› "
+		gutter = "› "
 	}
 	displayIndent := n.indent
 	if multiRoots && displayIndent > 0 {
@@ -333,10 +361,194 @@ func renderTreeLine(n flatNode, selected, onPath, showLabelTime, foldable, folde
 			label += n.node.LabelTimestamp + " "
 		}
 	}
-	return cur + prefix.String() + foldMark + active + label + entryDisplay(n.node.Entry)
+	lead := prefix.String() + foldMark + active + label
+	return treeViewRow{
+		gutter:    gutter,
+		body:      lead + entryDisplay(n.node.Entry, tools),
+		anchorCol: len([]rune(lead)),
+		selected:  selected,
+	}
 }
 
-func entryDisplay(e session.Entry) string {
+func clipTreeRows(rows []treeViewRow, width int) []string {
+	if width <= 0 {
+		width = 80
+	}
+	viewportWidth := max(0, width-treeGutterWidth)
+	maxBody := 0
+	var selected *treeViewRow
+	for i := range rows {
+		w := len([]rune(rows[i].body))
+		if w > maxBody {
+			maxBody = w
+		}
+		if rows[i].selected {
+			selected = &rows[i]
+		}
+	}
+	maxScroll := max(0, maxBody-viewportWidth)
+	scroll := 0
+	if selected != nil && maxScroll > 0 {
+		minVisible := min(maxVisibleAnchorContentWidth, max(minVisibleAnchorContentWidth, viewportWidth/3))
+		if selected.anchorCol > viewportWidth-minVisible {
+			ctx := min(maxAnchorContextWidth, max(minAnchorContextWidth, viewportWidth/4))
+			scroll = min(maxScroll, selected.anchorCol-ctx)
+		}
+	}
+	out := make([]string, len(rows))
+	for i, row := range rows {
+		body := row.body
+		if scroll > 0 {
+			body = sliceByColumn(row.body, scroll, viewportWidth)
+		}
+		out[i] = truncateRunes(row.gutter+body, width)
+	}
+	return out
+}
+
+func sliceByColumn(s string, start, width int) string {
+	r := []rune(s)
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(r) || width <= 0 {
+		return ""
+	}
+	end := min(len(r), start+width)
+	return string(r[start:end])
+}
+
+func truncateRunes(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	return string(r[:width])
+}
+
+func collectToolCalls(nodes []flatNode) map[string]toolCallInfo {
+	out := map[string]toolCallInfo{}
+	for _, n := range nodes {
+		if entryRoleOf(n.node.Entry) != "assistant" {
+			continue
+		}
+		var p struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(n.node.Entry.Message, &p) != nil || len(p.Content) == 0 {
+			continue
+		}
+		var blocks []struct {
+			Type      string         `json:"type"`
+			ID        string         `json:"id"`
+			Name      string         `json:"name"`
+			Arguments map[string]any `json:"arguments"`
+		}
+		if json.Unmarshal(p.Content, &blocks) != nil {
+			continue
+		}
+		for _, b := range blocks {
+			if b.Type == "toolCall" && b.ID != "" {
+				out[b.ID] = toolCallInfo{name: b.Name, args: b.Arguments}
+			}
+		}
+	}
+	return out
+}
+
+func formatToolCall(name string, args map[string]any) string {
+	if args == nil {
+		args = map[string]any{}
+	}
+	shorten := func(p string) string {
+		home, _ := os.UserHomeDir()
+		if home != "" && strings.HasPrefix(p, home) {
+			return "~" + p[len(home):]
+		}
+		return p
+	}
+	argStr := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := args[k]; ok && v != nil {
+				if s, ok := v.(string); ok {
+					return s
+				}
+				b, _ := json.Marshal(v)
+				return string(b)
+			}
+		}
+		return ""
+	}
+	switch name {
+	case "read":
+		path := shorten(argStr("path", "file_path"))
+		display := path
+		_, hasOff := args["offset"]
+		_, hasLim := args["limit"]
+		if hasOff || hasLim {
+			start := 1
+			if hasOff {
+				start = intFrom(args["offset"], 1)
+			}
+			if hasLim {
+				end := start + intFrom(args["limit"], 0) - 1
+				display += ":" + strconv.Itoa(start) + "-" + strconv.Itoa(end)
+			} else {
+				display += ":" + strconv.Itoa(start)
+			}
+		}
+		return "[read: " + display + "]"
+	case "write":
+		return "[write: " + shorten(argStr("path", "file_path")) + "]"
+	case "edit":
+		return "[edit: " + shorten(argStr("path", "file_path")) + "]"
+	case "bash":
+		raw := argStr("command")
+		cmd := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(raw, "\n", " "), "\t", " "))
+		if len([]rune(cmd)) > 50 {
+			cmd = string([]rune(cmd)[:50]) + "..."
+		}
+		return "[bash: " + cmd + "]"
+	case "grep":
+		return "[grep: /" + argStr("pattern") + "/ in " + shorten(orDefault(argStr("path"), ".")) + "]"
+	case "find":
+		return "[find: " + argStr("pattern") + " in " + shorten(orDefault(argStr("path"), ".")) + "]"
+	case "ls":
+		return "[ls: " + shorten(orDefault(argStr("path"), ".")) + "]"
+	default:
+		raw, _ := json.Marshal(args)
+		s := string(raw)
+		if len(s) > 40 {
+			s = s[:40] + "..."
+		}
+		return "[" + name + ": " + s + "]"
+	}
+}
+
+func intFrom(v any, fallback int) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	default:
+		return fallback
+	}
+}
+
+func orDefault(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
+func entryDisplay(e session.Entry, tools map[string]toolCallInfo) string {
 	role := entryRoleOf(e)
 	norm := func(s string) string {
 		s = strings.ReplaceAll(s, "\n", " ")
@@ -372,11 +584,43 @@ func entryDisplay(e session.Entry) string {
 		if t != "" {
 			return "assistant: " + norm(t)
 		}
+		var p struct {
+			StopReason   string `json:"stopReason"`
+			ErrorMessage string `json:"errorMessage"`
+		}
+		_ = json.Unmarshal(e.Message, &p)
+		if p.StopReason == "aborted" {
+			return "assistant: (aborted)"
+		}
+		if p.ErrorMessage != "" {
+			errMsg := norm(p.ErrorMessage)
+			if len(errMsg) > 80 {
+				errMsg = errMsg[:80]
+			}
+			return "assistant: " + errMsg
+		}
 		return "assistant: (no content)"
 	case "toolResult":
+		var p struct {
+			ToolCallID string `json:"toolCallId"`
+			ToolName   string `json:"toolName"`
+		}
+		_ = json.Unmarshal(e.Message, &p)
+		if tools != nil {
+			if tc, ok := tools[p.ToolCallID]; ok {
+				return formatToolCall(tc.name, tc.args)
+			}
+		}
+		if p.ToolName != "" {
+			return "[" + p.ToolName + "]"
+		}
 		return "[tool]"
 	case "bashExecution":
-		return "[bash]"
+		var p struct {
+			Command string `json:"command"`
+		}
+		_ = json.Unmarshal(e.Message, &p)
+		return "[bash]: " + norm(p.Command)
 	default:
 		if role != "" {
 			return "[" + role + "]"
@@ -385,8 +629,115 @@ func entryDisplay(e session.Entry) string {
 	}
 }
 
-func searchableText(n session.TreeNode) string {
-	return n.Label + " " + entryDisplay(n.Entry) + " " + n.Entry.ID
+func searchableText(n session.TreeNode, tools map[string]toolCallInfo) string {
+	return n.Label + " " + entryDisplay(n.Entry, tools) + " " + n.Entry.ID
+}
+
+func entryCopyText(e session.Entry) string {
+	switch e.Type {
+	case "custom_message":
+		return strings.TrimSpace(session.EntryContentText(e))
+	case "compaction", "branch_summary":
+		return strings.TrimSpace(e.Summary)
+	}
+	role := entryRoleOf(e)
+	switch role {
+	case "bashExecution":
+		var p struct {
+			Command string `json:"command"`
+		}
+		_ = json.Unmarshal(e.Message, &p)
+		return strings.TrimSpace(p.Command)
+	case "user", "assistant":
+		text := strings.TrimSpace(session.EntryContentText(e))
+		if text == "" && role == "assistant" {
+			var p struct {
+				ErrorMessage string `json:"errorMessage"`
+			}
+			_ = json.Unmarshal(e.Message, &p)
+			text = strings.TrimSpace(p.ErrorMessage)
+		}
+		return text
+	}
+	return ""
+}
+
+func visFamily(vis, all []flatNode) (parent map[string]string, children map[string][]string) {
+	visible := map[string]bool{}
+	for _, n := range vis {
+		visible[n.node.Entry.ID] = true
+	}
+	idParent := map[string]string{}
+	for _, n := range all {
+		pid := ""
+		if n.node.Entry.ParentID != nil {
+			pid = *n.node.Entry.ParentID
+		}
+		idParent[n.node.Entry.ID] = pid
+	}
+	parent = map[string]string{}
+	children = map[string][]string{}
+	for _, n := range vis {
+		anc := ""
+		cur := idParent[n.node.Entry.ID]
+		for cur != "" {
+			if visible[cur] {
+				anc = cur
+				break
+			}
+			cur = idParent[cur]
+		}
+		parent[n.node.Entry.ID] = anc
+		children[anc] = append(children[anc], n.node.Entry.ID)
+	}
+	return parent, children
+}
+
+func isFoldableID(id string, parent map[string]string, children map[string][]string) bool {
+	if len(children[id]) == 0 {
+		return false
+	}
+	pid := parent[id]
+	if pid == "" {
+		return true
+	}
+	return len(children[pid]) > 1
+}
+
+func findBranchSegmentStart(vis []flatNode, cursor int, direction string, parent map[string]string, children map[string][]string) int {
+	if cursor < 0 || cursor >= len(vis) {
+		return cursor
+	}
+	indexBy := map[string]int{}
+	for i, n := range vis {
+		indexBy[n.node.Entry.ID] = i
+	}
+	currentID := vis[cursor].node.Entry.ID
+	if direction == "down" {
+		for {
+			kids := children[currentID]
+			if len(kids) == 0 {
+				return indexBy[currentID]
+			}
+			if len(kids) > 1 {
+				return indexBy[kids[0]]
+			}
+			currentID = kids[0]
+		}
+	}
+	for {
+		pid := parent[currentID]
+		if pid == "" {
+			return indexBy[currentID]
+		}
+		if len(children[pid]) > 1 {
+			segment := indexBy[currentID]
+			if segment < cursor {
+				return segment
+			}
+		}
+		currentID = pid
+	}
 }
 
 func entryRoleOf(e session.Entry) string {

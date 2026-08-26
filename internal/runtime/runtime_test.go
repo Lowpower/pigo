@@ -480,6 +480,23 @@ func TestEnginePushSteerOneAtATime(t *testing.T) {
 	}
 }
 
+func TestTakeQueuesClearsSteerAndFollow(t *testing.T) {
+	e := &Engine{Opts: Options{Config: config.Config{}}}
+	e.PushSteer("s1")
+	e.PushFollow("f1")
+	e.PushFollow("f2")
+	steer, follow := e.TakeQueues()
+	if len(steer) != 1 || steer[0] != "s1" {
+		t.Fatalf("steer=%v", steer)
+	}
+	if len(follow) != 2 || follow[0] != "f1" || follow[1] != "f2" {
+		t.Fatalf("follow=%v", follow)
+	}
+	if n := e.pendingCount(); n != 0 {
+		t.Fatalf("pending=%d", n)
+	}
+}
+
 func TestNoBuiltinToolsLeavesRegistryEmptyWithoutExtensions(t *testing.T) {
 	ctx := context.Background()
 	e, err := New(ctx, Options{
