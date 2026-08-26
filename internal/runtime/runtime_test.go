@@ -369,6 +369,103 @@ func TestRPCGetTreeAndCycleThinking(t *testing.T) {
 	}
 }
 
+func TestRPCPromptAttachesImagesToUserMessage(t *testing.T) {
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+
+	in := strings.NewReader(`{"type":"prompt","message":"look","images":[{"type":"image","data":"AAA","mimeType":"image/png"}]}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	rows := decodeRPCRows(t, out.String())
+	var user map[string]any
+	for _, s := range rpcRowsOfType(rows, "message_start") {
+		msg, _ := s["message"].(map[string]any)
+		if msg["role"] == "user" {
+			user = msg
+			break
+		}
+	}
+	if user == nil {
+		t.Fatalf("missing user message_start in %s", out.String())
+	}
+	blocks, ok := user["content"].([]any)
+	if !ok || len(blocks) != 2 {
+		t.Fatalf("user content = %#v, want [text, image]", user["content"])
+	}
+	text, _ := blocks[0].(map[string]any)
+	img, _ := blocks[1].(map[string]any)
+	if text["type"] != "text" || text["text"] != "look" {
+		t.Fatalf("text block = %#v", text)
+	}
+	if img["type"] != "image" || img["data"] != "AAA" || img["mimeType"] != "image/png" {
+		t.Fatalf("image block = %#v", img)
+	}
+}
+
+func TestRPCPromptPersistsImages(t *testing.T) {
+	dir := t.TempDir()
+	cwd := t.TempDir()
+	sess := session.New(cwd, dir)
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts: Options{
+			Config:   config.Config{Provider: "anthropic", Model: "claude-sonnet-4"},
+			Session:  sess,
+			Cwd:      cwd,
+			AgentDir: dir,
+		},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	e.AdoptSession(sess)
+
+	in := strings.NewReader(`{"type":"prompt","message":"look","images":[{"type":"image","data":"AAA","mimeType":"image/png"}]}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	msgs := session.RestoreAIMessages(sess.Entries())
+	var user *ai.Message
+	for i := range msgs {
+		if msgs[i].Role == ai.RoleUser {
+			user = &msgs[i]
+			break
+		}
+	}
+	if user == nil || user.Content != "look" || len(user.Images) != 1 || user.Images[0].Data != "AAA" {
+		t.Fatalf("restored user = %+v from entries %+v", user, sess.Entries())
+	}
+}
+
+func TestRPCSteerQueuesImages(t *testing.T) {
+	e := &Engine{Opts: Options{Config: config.Config{SteeringMode: "one-at-a-time"}}}
+	in := strings.NewReader(`{"type":"steer","message":"nudge","images":[{"type":"image","data":"BBB","mimeType":"image/jpeg"}]}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := e.drainSteer()
+	if len(got) != 1 || got[0].Content != "nudge" || len(got[0].Images) != 1 || got[0].Images[0].Data != "BBB" {
+		t.Fatalf("queued = %+v", got)
+	}
+}
+
 func TestEnginePushSteerOneAtATime(t *testing.T) {
 	e := &Engine{Opts: Options{Config: config.Config{SteeringMode: "one-at-a-time"}}}
 	e.PushSteer("first")
@@ -380,5 +477,58 @@ func TestEnginePushSteerOneAtATime(t *testing.T) {
 	got = e.drainSteer()
 	if len(got) != 1 || got[0].Content != "second" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestNoBuiltinToolsLeavesRegistryEmptyWithoutExtensions(t *testing.T) {
+	ctx := context.Background()
+	e, err := New(ctx, Options{
+		Cwd:            t.TempDir(),
+		AgentDir:       t.TempDir(),
+		NoBuiltinTools: true,
+		NoExtensions:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if n := len(e.Tools.List()); n != 0 {
+		t.Fatalf("tools=%d, want 0 builtins", n)
+	}
+}
+
+func TestNoToolsSkipsCLIExtensions(t *testing.T) {
+	ctx := context.Background()
+	e, err := New(ctx, Options{
+		Cwd:           t.TempDir(),
+		AgentDir:      t.TempDir(),
+		NoTools:       true,
+		CLIExtensions: []string{"/bin/true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if len(e.Hosts) != 0 {
+		t.Fatalf("hosts=%d, --no-tools should not spawn extensions", len(e.Hosts))
+	}
+	if n := len(e.Tools.List()); n != 0 {
+		t.Fatalf("tools=%d", n)
+	}
+}
+
+func TestDefaultLoadsBuiltinTools(t *testing.T) {
+	ctx := context.Background()
+	e, err := New(ctx, Options{
+		Cwd:          t.TempDir(),
+		AgentDir:     t.TempDir(),
+		NoExtensions: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if n := len(e.Tools.List()); n != 7 {
+		t.Fatalf("tools=%d, want 7 builtins", n)
 	}
 }

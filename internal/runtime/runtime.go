@@ -16,6 +16,7 @@ import (
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
+	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/skills"
@@ -34,9 +35,13 @@ type Options struct {
 	NoSkills       bool
 	SkillPaths     []string
 	NoTools        bool
+	NoBuiltinTools bool
 	ToolAllow      []string
 	ToolDeny       []string
-	Extensions     []string // argv[0] of each extension binary
+	Extensions     []string // argv[0] of each extension binary (CLI -e plus discovered)
+	CLIExtensions  []string // explicit -e; kept across --no-extensions and /reload
+	NoExtensions   bool     // skip auto-discovery; CLI -e still loads
+	ProjectTrusted bool
 	ContextWindow  int
 	NoPromptTpls   bool
 	PromptPaths    []string
@@ -65,6 +70,10 @@ type Engine struct {
 	compacting bool
 
 	onSessionEvent func(any)
+
+	retryMu      sync.Mutex
+	retryCancel  context.CancelFunc
+	retryAttempt int
 }
 
 // New applies auth, discovers skills, loads tools/extensions, and builds the prompt.
@@ -77,27 +86,35 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 	auth.ApplyEnv(opts.AgentDir)
 
-	sf, provider := ai.DefaultStreamFn()
+	provider := opts.Config.ResolvedProvider()
+	if provider == "" {
+		provider = "anthropic"
+	}
+	sf := boundStream(opts.AgentDir, provider)
+	if sf == nil {
+		sf, provider = ai.DefaultStreamFn()
+	}
 	reg := tools.Default()
 	if opts.NoTools {
+		reg = tools.NewRegistry()
+	} else if opts.NoBuiltinTools {
 		reg = tools.NewRegistry()
 	} else {
 		reg = filterTools(reg, opts.ToolAllow, opts.ToolDeny)
 	}
 
+	if len(opts.CLIExtensions) == 0 && len(opts.Extensions) > 0 {
+		opts.CLIExtensions = opts.Extensions
+	}
+	extSpecs := collectExtensionSpecs(ctx, opts)
+	opts.Extensions = extSpecs
+
 	var hosts []*ext.Host
-	for _, spec := range opts.Extensions {
-		argv := strings.Fields(spec)
-		if len(argv) == 0 {
-			continue
-		}
-		h, err := ext.Spawn(ctx, argv[0], argv, ext.Options{})
+	if !opts.NoTools {
+		var err error
+		hosts, reg, err = spawnExtensions(ctx, extSpecs, reg)
 		if err != nil {
-			return nil, fmt.Errorf("extension %q: %w", spec, err)
-		}
-		hosts = append(hosts, h)
-		for _, t := range h.Tools() {
-			reg = tools.NewRegistry(append(reg.List(), wrapExt(h, t.Name, t.Description, t.Parameters))...)
+			return nil, err
 		}
 	}
 
@@ -130,6 +147,41 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.Steering = e.drainSteer
 	e.FollowUp = e.drainFollow
 	return e, nil
+}
+
+func collectExtensionSpecs(ctx context.Context, opts Options) []string {
+	var specs []string
+	if !opts.NoExtensions {
+		m, err := pkgmgr.Open(opts.Cwd, opts.AgentDir, opts.ProjectTrusted)
+		if err == nil {
+			if rs, err := m.Resolve(ctx); err == nil {
+				for _, argv := range pkgmgr.SpawnArgv(rs) {
+					specs = append(specs, strings.Join(argv, " "))
+				}
+			}
+		}
+	}
+	specs = append(specs, opts.CLIExtensions...)
+	return specs
+}
+
+func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry) ([]*ext.Host, *tools.Registry, error) {
+	var hosts []*ext.Host
+	for _, spec := range specs {
+		argv := strings.Fields(spec)
+		if len(argv) == 0 {
+			continue
+		}
+		h, err := ext.Spawn(ctx, argv[0], argv, ext.Options{})
+		if err != nil {
+			return hosts, reg, fmt.Errorf("extension %q: %w", spec, err)
+		}
+		hosts = append(hosts, h)
+		for _, t := range h.Tools() {
+			reg = tools.NewRegistry(append(reg.List(), wrapExt(h, t.Name, t.Description, t.Parameters))...)
+		}
+	}
+	return hosts, reg, nil
 }
 
 func (e *Engine) emitSession(v any) {
@@ -219,28 +271,35 @@ func (e *Engine) emitQueueUpdate() {
 	e.emitSession(map[string]any{"type": "queue_update", "steering": s, "followUp": f})
 }
 
-// PushSteer queues a user message for the in-flight turn.
-func (e *Engine) PushSteer(text string) {
+func (e *Engine) queueUser(dst *[]ai.Message, text string, images []ai.ImageContent) {
 	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" && len(images) == 0 {
 		return
 	}
 	e.mu.Lock()
-	e.steer = append(e.steer, ai.Message{Role: ai.RoleUser, Content: text})
+	*dst = append(*dst, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 	e.mu.Unlock()
 	e.emitQueueUpdate()
 }
 
+// PushSteer queues a user message for the in-flight turn.
+func (e *Engine) PushSteer(text string) {
+	e.queueUser(&e.steer, text, nil)
+}
+
+// PushSteerImages queues a steering message with optional image blocks.
+func (e *Engine) PushSteerImages(text string, images []ai.ImageContent) {
+	e.queueUser(&e.steer, text, images)
+}
+
 // PushFollow queues a user message for after the current turn.
 func (e *Engine) PushFollow(text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	e.mu.Lock()
-	e.follow = append(e.follow, ai.Message{Role: ai.RoleUser, Content: text})
-	e.mu.Unlock()
-	e.emitQueueUpdate()
+	e.queueUser(&e.follow, text, nil)
+}
+
+// PushFollowImages queues a follow-up message with optional image blocks.
+func (e *Engine) PushFollowImages(text string, images []ai.ImageContent) {
+	e.queueUser(&e.follow, text, images)
 }
 
 func (e *Engine) drainSteer() []ai.Message {
@@ -386,13 +445,17 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 }
 
 // RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
-func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string) *agent.Stream {
-	userMsg := ai.Message{Role: ai.RoleUser, Content: user}
+func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent) *agent.Stream {
+	userMsg := ai.Message{Role: ai.RoleUser, Content: user, Images: images}
 	history = append(append([]ai.Message(nil), history...), userMsg)
 	compacted, _, err := e.MaybeCompact(ctx, history)
 	if err == nil {
 		history = compacted
 	}
+	return e.runLoop(ctx, history, []ai.Message{userMsg})
+}
+
+func (e *Engine) runLoop(ctx context.Context, history, newUsers []ai.Message) *agent.Stream {
 	req := ai.Context{System: e.System, Messages: history}
 	if e.Tools != nil {
 		req.Tools = e.Tools.AITools()
@@ -402,11 +465,11 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 		Thinking:        e.Opts.Config.Thinking,
 		Steering:        e.Steering,
 		FollowUp:        e.FollowUp,
-		NewUserMessages: []ai.Message{userMsg},
+		NewUserMessages: newUsers,
 	})
 }
 
-// History restores provider-facing messages from the attached session.
+// AdoptSession attaches a session manager and records how many entries are already persisted.
 func (e *Engine) AdoptSession(s *session.Manager) {
 	e.Opts.Session = s
 	if s == nil {
@@ -416,6 +479,7 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 	e.persisted = len(s.Entries())
 }
 
+// History restores provider-facing messages from the attached session.
 func (e *Engine) History() []ai.Message {
 	if e.Opts.Session == nil {
 		return nil
@@ -425,14 +489,39 @@ func (e *Engine) History() []ai.Message {
 	return msgs
 }
 
-// Reload rediscovers skills and rebuilds the system prompt (/reload).
+// Reload rediscovers skills, extensions, and rebuilds the system prompt (/reload).
 func (e *Engine) Reload() {
+	ctx := context.Background()
 	if e.Opts.NoSkills {
 		e.Skills = nil
 	} else {
 		e.Skills, _ = skills.Discover(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SkillPaths, true)
 	}
 	e.Templates = prompt.DiscoverTemplates(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.PromptPaths, !e.Opts.NoPromptTpls)
+
+	for _, h := range e.Hosts {
+		_ = h.Close()
+	}
+	e.Hosts = nil
+	reg := tools.Default()
+	if e.Opts.NoTools {
+		reg = tools.NewRegistry()
+	} else if e.Opts.NoBuiltinTools {
+		reg = tools.NewRegistry()
+	} else {
+		reg = filterTools(reg, e.Opts.ToolAllow, e.Opts.ToolDeny)
+	}
+	if !e.Opts.NoTools {
+		specs := collectExtensionSpecs(ctx, e.Opts)
+		e.Opts.Extensions = specs
+		hosts, r, err := spawnExtensions(ctx, specs, reg)
+		if err == nil {
+			e.Hosts = hosts
+			reg = r
+		}
+	}
+	e.Tools = reg
+
 	e.System = prompt.Build(prompt.Options{
 		Cwd:              e.Opts.Cwd,
 		Custom:           e.Opts.SystemPrompt,
@@ -466,7 +555,11 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 				"content": msg.Text, "isError": msg.IsError,
 			})
 		default:
-			entry, err = e.Opts.Session.AppendMessage("user", map[string]any{"role": "user", "content": msg.Text})
+			payload := map[string]any{"role": "user", "content": msg.Text}
+			if len(msg.Images) > 0 {
+				payload["content"] = agent.UserContentBlocks(msg.Text, msg.Images)
+			}
+			entry, err = e.Opts.Session.AppendMessage("user", payload)
 		}
 		if err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
@@ -498,6 +591,11 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 		e.Provider = provider
 		e.Opts.Config.Provider = provider
 		e.Opts.Config.DefaultProvider = provider
+		if e.Opts.AgentDir != "" {
+			if fn := boundStream(e.Opts.AgentDir, provider); fn != nil {
+				e.Stream = fn
+			}
+		}
 	}
 	if id != "" {
 		e.Opts.Config.Model = id
@@ -510,7 +608,7 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 
 // PrintText streams a prompt to out as plain text (--mode text / --print).
 func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
-	stream := e.RunPrompt(ctx, history, user)
+	stream := e.RunPrompt(ctx, history, user, nil)
 	var last []agent.Msg
 	for ev := range stream.Events() {
 		switch ev.Type {
@@ -530,25 +628,97 @@ func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Mess
 }
 
 // PrintJSON writes NDJSON agent events (--mode json).
-func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
+func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string, images []ai.ImageContent) error {
 	enc := json.NewEncoder(out)
 	write := e.onSessionEvent
 	if write == nil {
 		write = func(v any) { _ = enc.Encode(v) }
+		prev := e.onSessionEvent
+		e.onSessionEvent = write
+		defer func() { e.onSessionEvent = prev }()
 	}
-	stream := e.RunPrompt(ctx, history, user)
-	var last []agent.Msg
-	for ev := range stream.Events() {
-		payload, err := agent.ToJSON(ev)
-		if err != nil {
-			return err
+	e.retryAttempt = 0
+	hist := history
+	continued := false
+	prefixLen := 0
+	for {
+		var stream *agent.Stream
+		if !continued {
+			stream = e.RunPrompt(ctx, hist, user, images)
+		} else {
+			stream = e.runLoop(ctx, hist, nil)
 		}
-		write(payload)
-		if ev.Type == agent.EventAgentEnd {
-			last = ev.Messages
+		var last []agent.Msg
+		for ev := range stream.Events() {
+			if ev.Type == agent.EventMessageEnd && ev.Assistant != nil &&
+				ev.Assistant.StopReason != ai.StopError && e.retryAttempt > 0 {
+				e.emitSession(map[string]any{
+					"type":    "auto_retry_end",
+					"success": true,
+					"attempt": e.retryAttempt,
+				})
+				e.retryAttempt = 0
+			}
+			if ev.Type == agent.EventAgentEnd {
+				ev.WillRetry = e.willRetryAfterAgentEnd(ev)
+			}
+			payload, err := agent.ToJSON(ev)
+			if err != nil {
+				return err
+			}
+			write(payload)
+			if ev.Type == agent.EventAgentEnd {
+				last = ev.Messages
+			}
 		}
+		if continued {
+			if prefixLen > len(last) {
+				prefixLen = len(last)
+			}
+			e.persisted = 0
+			e.PersistTranscript(last[prefixLen:])
+		} else {
+			e.PersistTranscript(last)
+		}
+		if !e.prepareRetry(ctx, last) {
+			break
+		}
+		hist = stripLastAssistant(last)
+		prefixLen = len(hist)
+		continued = true
 	}
-	e.PersistTranscript(last)
 	write(map[string]any{"type": "agent_settled"})
 	return nil
+}
+
+func boundStream(agentDir, provider string) ai.StreamFn {
+	if provider == "" {
+		return nil
+	}
+	p, ok := auth.Lookup(provider)
+	if !ok {
+		return nil
+	}
+	store := auth.Open(agentDir)
+	return func(ctx context.Context, reqCtx ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		res, err := auth.Resolve(ctx, store, p, auth.ResolveOpts{})
+		if err != nil {
+			return ai.StreamWithAuth(provider, "", "", nil)(ctx, reqCtx, opts)
+		}
+		if res == nil {
+			key := auth.APIKey(agentDir, provider)
+			if key == "" {
+				return ai.EchoStreamFn()(ctx, reqCtx, opts)
+			}
+			return ai.StreamWithAuth(provider, key, "", nil)(ctx, reqCtx, opts)
+		}
+		key := res.Auth.APIKey
+		if key == "" {
+			key = auth.Secret(res)
+		}
+		if key == "" && len(res.Auth.Headers) == 0 {
+			return ai.EchoStreamFn()(ctx, reqCtx, opts)
+		}
+		return ai.StreamWithAuth(provider, key, res.Auth.BaseURL, res.Auth.Headers)(ctx, reqCtx, opts)
+	}
 }

@@ -27,6 +27,9 @@ type Msg struct {
 	ToolCallID string `json:"toolCallId,omitempty"`
 	ToolName   string `json:"toolName,omitempty"`
 	IsError    bool   `json:"isError,omitempty"`
+
+	// Images are user-message attachments.
+	Images []ai.ImageContent `json:"images,omitempty"`
 }
 
 // EventType enumerates AgentEvent variants.
@@ -65,7 +68,7 @@ type Event struct {
 	ToolResults []Msg
 	// agent_end: the full transcript.
 	Messages []Msg
-	// agent_end: whether the session will auto-retry (always false until retry lands).
+	// agent_end: whether the session will auto-retry the last assistant error.
 	WillRetry bool
 
 	// message_start / message_end for user and toolResult (assistant still uses Assistant).
