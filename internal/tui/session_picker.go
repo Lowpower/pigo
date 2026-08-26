@@ -365,7 +365,7 @@ func (m Model) applyPickedSession() (tea.Model, tea.Cmd) {
 	}
 	if m.engine != nil {
 		m.engine.AdoptSession(opened)
-		m.history = m.engine.History()
+		m.reloadFromSession()
 	}
 	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("resumed " + opened.ID() + "\n" + opened.File())})
 	return m, nil
@@ -403,6 +403,6 @@ func (m Model) handleResumeCommand(rest string) (tea.Model, tea.Cmd) {
 		return note("resume error: " + err.Error())
 	}
 	m.engine.AdoptSession(opened)
-	m.history = m.engine.History()
+	m.reloadFromSession()
 	return note("resumed " + opened.ID() + "\n" + opened.File())
 }

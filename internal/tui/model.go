@@ -85,6 +85,13 @@ type Model struct {
 	sessions  sessionPicker
 	lastClear time.Time
 	login     loginState
+
+	overlay       overlayKind
+	tree          treeOverlay
+	lastEscape    time.Time
+	summaryCancel context.CancelFunc
+	picking       bool
+	pickResult    string
 }
 
 // New builds the interactive model from the resolved config.
@@ -141,6 +148,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sessionPickerActive() {
 			return m.handleSessionPickerKey(msg)
 		}
+		if m.overlay != overlayNone {
+			return m.handleTreeKey(msg)
+		}
 		if m.modelPickerActive() {
 			return m.handleModelPickerKey(msg)
 		}
@@ -172,6 +182,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancel()
 				return m, nil
 			}
+			return m.handleIdleEscape()
 		}
 		if m.keyIs(msg, "tui.input.submit") {
 			return m.submit()
@@ -427,7 +438,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("clone error: " + err.Error())
 		}
 		m.engine.AdoptSession(child)
-		m.history = m.engine.History()
+		m.reloadFromSession()
 		return note("cloned session " + child.ID() + "\n" + child.File())
 	case "fork":
 		if m.engine == nil || m.engine.Opts.Session == nil {
@@ -451,16 +462,13 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("fork error: " + err.Error())
 		}
 		m.engine.AdoptSession(child)
-		m.history = m.engine.History()
+		m.reloadFromSession()
 		if text != "" {
 			m.editor.SetValue(text)
 		}
 		return note("forked session " + child.ID() + "\n" + child.File())
 	case "tree":
-		if m.engine == nil || m.engine.Opts.Session == nil {
-			return note("no session")
-		}
-		return note(m.engine.Opts.Session.FormatTree())
+		return m.openTree()
 	case "resume":
 		return m.handleResumeCommand(cmd.Rest)
 	case "import":
@@ -473,7 +481,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		if m.engine != nil {
 			m.engine.AdoptSession(opened)
-			m.history = m.engine.History()
+			m.reloadFromSession()
 		}
 		return note("imported " + opened.ID() + "\n" + opened.File())
 	case "name":
@@ -650,6 +658,9 @@ func (m Model) View() string {
 	if m.loginActive() {
 		return m.loginView()
 	}
+	if m.overlay == overlayTree || m.overlay == overlayTreeLabel || m.overlay == overlayTreeSummary || m.overlay == overlayTreeCustom {
+		return m.treeView()
+	}
 
 	var b strings.Builder
 	b.WriteString(m.titleStyle.Render("pigo"))
@@ -715,7 +726,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 	m.engine = eng
 	if eng != nil {
 		m.provider = eng.Provider
-		m.history = eng.History()
+		m.reloadFromSession()
 		m.keys = keys.NewManager(eng.Opts.AgentDir)
 	}
 	if openResume {

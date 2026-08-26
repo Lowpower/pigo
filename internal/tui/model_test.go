@@ -14,6 +14,7 @@ import (
 	"github.com/Lowpower/pigo/internal/keys"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/runtime"
+	"github.com/Lowpower/pigo/internal/session"
 )
 
 func testCfg() config.Config {
@@ -304,3 +305,69 @@ func TestHotkeysReflectsOverride(t *testing.T) {
 		t.Fatalf("hotkeys = %+v", m.transcript)
 	}
 }
+
+func treeModel(t *testing.T) Model {
+	t.Helper()
+	sess := session.New(t.TempDir(), t.TempDir())
+	_, _ = sess.AppendMessage("user", map[string]any{"role": "user", "content": "hello tree"})
+	_, _ = sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Session: sess, AgentDir: t.TempDir(), Cwd: t.TempDir()}}
+	return m
+}
+
+func TestSlashTreeOpensOverlay(t *testing.T) {
+	m := treeModel(t)
+	m.editor.SetValue("/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.overlay != overlayTree {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+	if !strings.Contains(m.View(), "Session Tree") {
+		t.Fatalf("view =\n%s", m.View())
+	}
+	if !strings.Contains(m.View(), "hello tree") {
+		t.Fatalf("missing node:\n%s", m.View())
+	}
+}
+
+func TestTreeCtrlDDoesNotQuit(t *testing.T) {
+	m := treeModel(t)
+	m.editor.SetValue("/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	got := next.(Model)
+	if got.quitting {
+		t.Fatal("ctrl+d in tree must not quit")
+	}
+	if got.overlay != overlayTree {
+		t.Fatalf("overlay = %d", got.overlay)
+	}
+}
+
+func TestTreeEnterNavigatesUserIntoEditor(t *testing.T) {
+	m := treeModel(t)
+	m.cfg.BranchSummary.SkipPrompt = boolPtr(true)
+	m.editor.SetValue("/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	// cursor on leaf (assistant). Move up to user.
+	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.overlay != overlayNone {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+	if !strings.Contains(m.editor.Value(), "hello tree") {
+		t.Fatalf("editor = %q", m.editor.Value())
+	}
+}
+
+func TestDoubleEscapeOpensTree(t *testing.T) {
+	m := treeModel(t)
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.overlay != overlayTree {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
