@@ -44,3 +44,35 @@ func TestEchoStreamFn(t *testing.T) {
 		t.Errorf("echo text = %q, want it to contain the user message", got)
 	}
 }
+
+func TestDefaultStreamFnPicksOpenAI(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	_, name := DefaultStreamFn()
+	if name != "openai" {
+		t.Fatalf("provider = %q, want openai", name)
+	}
+}
+
+func TestDefaultStreamFnMockWithoutKeys(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	_, name := DefaultStreamFn()
+	if name != "mock" {
+		t.Fatalf("provider = %q, want mock", name)
+	}
+}

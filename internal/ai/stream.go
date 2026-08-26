@@ -62,9 +62,10 @@ type Context struct {
 
 // Options carries per-request knobs.
 type Options struct {
-	Model     string
-	MaxTokens int
-	Thinking  string // off|minimal|low|medium|high|xhigh|max
+	Model          string
+	MaxTokens      int
+	Thinking       string // off|minimal|low|medium|high|xhigh|max
+	ThinkingBudget int    // token budget resolved from thinkingBudgets
 }
 
 // StreamFn is the spine abstraction: given a request context it returns a stream
