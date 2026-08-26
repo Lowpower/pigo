@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -41,19 +40,24 @@ type entry struct {
 type agentEventMsg struct{ ev agent.Event }
 type agentClosedMsg struct{}
 
+type queuedPrompt struct {
+	text   string
+	images []ai.ImageContent
+}
+
 // Model is the interactive TUI: it drives the agent loop (internal/agent)
 // with real tools (internal/tools) and a provider (internal/ai), streaming the
 // assistant response to screen live (plain text during the turn), then rendering
 // it as markdown via glamour once the turn ends.
 type Model struct {
-	cfg      config.Config
-	engine   *runtime.Engine
-	theme    theme.Theme
-	textarea textarea.Model
+	cfg    config.Config
+	engine *runtime.Engine
+	theme  theme.Theme
+	editor promptEditor
 
 	transcript []entry
 	history    []ai.Message // raw user/assistant messages carried across turns
-	queued     []string     // follow-up prompts typed while a turn is running
+	queued     []queuedPrompt
 
 	streaming       string // in-progress assistant text (plain)
 	streamingActive bool
@@ -90,19 +94,11 @@ type Model struct {
 
 // New builds the interactive model from the resolved config.
 func New(cfg config.Config) Model {
-	ta := textarea.New()
-	ta.Placeholder = "Ask pigo…  (Enter send, Ctrl+L model, Ctrl+C clear, Ctrl+D exit)"
-	ta.Prompt = "│ "
-	ta.CharLimit = 0
-	ta.ShowLineNumbers = false
-	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"))
-	ta.Focus()
-
 	th := theme.Load(cfg.Theme, "", "")
 	m := Model{
 		cfg:         cfg,
 		theme:       th,
-		textarea:    ta,
+		editor:      newPromptEditor(),
 		titleStyle:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(th.Accent)),
 		metaStyle:   lipgloss.NewStyle().Faint(true),
 		userStyle:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(th.User)),
@@ -136,8 +132,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.textarea.SetWidth(min(msg.Width, maxEditorWidth))
+		m.editor.SetWidth(min(msg.Width, maxEditorWidth))
 		m.glam = newRenderer(min(msg.Width, maxEditorWidth))
+		return m, nil
+
+	case externalEditorDoneMsg:
+		if msg.ok {
+			m.editor.SetValue(msg.content)
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -153,10 +155,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.loginActive() {
 			return m.handleLoginKey(msg)
 		}
+		if m.editor.jump != "" {
+			if m.keyIs(msg, "tui.editor.jumpForward") || m.keyIs(msg, "tui.editor.jumpBackward") {
+				m.editor.jump = ""
+				return m, nil
+			}
+			if ch, ok := printableJump(msg); ok {
+				dir := m.editor.jump
+				m.editor.jump = ""
+				m.editor.jumpTo(ch, dir)
+				return m, nil
+			}
+			m.editor.jump = ""
+		}
 		if m.keyIs(msg, "app.clear") {
 			return m.handleClear()
 		}
-		if m.keyIs(msg, "app.exit") && strings.TrimSpace(m.textarea.Value()) == "" {
+		if m.keyIs(msg, "app.exit") && strings.TrimSpace(m.editor.Value()) == "" {
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -185,6 +200,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.keyIs(msg, "app.model.select") {
 			return m.openModelPicker("")
 		}
+		if m.keyIs(msg, "app.editor.external") {
+			return m.openExternalEditor()
+		}
+		if m.keyIs(msg, "app.clipboard.pasteImage") {
+			m.editor.pasteClipboard()
+			return m, nil
+		}
+		if m.editor.handle(msg, m.keys) {
+			return m, nil
+		}
 
 	case loginDoneMsg, loginEventMsg, loginPromptMsg:
 		return m.handleLoginMsg(msg)
@@ -202,29 +227,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.queued) > 0 {
 			next := m.queued[0]
 			m.queued = m.queued[1:]
-			return m.startTurn(next)
+			return m.startTurn(next.text, next.images)
 		}
 		return m, nil
 	}
 
 	var cmd tea.Cmd
-	m.textarea, cmd = m.textarea.Update(msg)
+	m.editor.ta, cmd = m.editor.ta.Update(msg)
+	if key, ok := msg.(tea.KeyMsg); ok && m.keys != nil {
+		m.editor.afterTextareaKey(key, m.keys)
+	}
 	return m, cmd
 }
 
 func (m Model) queueFollowUp() (tea.Model, tea.Cmd) {
-	text := strings.TrimSpace(m.textarea.Value())
+	text := strings.TrimSpace(m.editor.Expanded())
 	if text == "" {
 		return m, nil
 	}
-	m.textarea.Reset()
+	images := extractImages(text)
+	m.editor.Reset()
 	if !m.running {
-		return m.startTurn(text)
+		return m.startTurn(text, images)
 	}
 	if m.engine != nil {
-		m.engine.PushFollow(text)
+		m.engine.PushFollowImages(text, images)
 	} else {
-		m.queued = append(m.queued, text)
+		m.queued = append(m.queued, queuedPrompt{text: text, images: images})
 	}
 	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("follow-up: " + text)})
 	return m, nil
@@ -260,31 +289,32 @@ func (m Model) cycleThinking() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) submit() (tea.Model, tea.Cmd) {
-	text := strings.TrimSpace(m.textarea.Value())
+	text := strings.TrimSpace(m.editor.Expanded())
 	if text == "" {
 		return m, nil
 	}
+	images := extractImages(text)
 	if m.running {
-		m.textarea.Reset()
+		m.editor.Reset()
 		// Enter while streaming steers the current loop; leftover lines
 		// after the turn are follow-ups (drained on agentClosedMsg).
 		if m.engine != nil {
-			m.engine.PushSteer(text)
+			m.engine.PushSteerImages(text, images)
 			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("steering: " + text)})
 			return m, nil
 		}
-		m.queued = append(m.queued, text)
+		m.queued = append(m.queued, queuedPrompt{text: text, images: images})
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("queued: " + text)})
 		return m, nil
 	}
 	if cmd, ok := slash.Parse(text); ok {
 		return m.handleSlash(cmd)
 	}
-	return m.startTurn(text)
+	return m.startTurn(text, images)
 }
 
 func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
-	m.textarea.Reset()
+	m.editor.Reset()
 	note := func(s string) (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
 		return m, nil
@@ -432,7 +462,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		m.engine.AdoptSession(child)
 		m.reloadFromSession()
 		if text != "" {
-			m.textarea.SetValue(text)
+			m.editor.SetValue(text)
 		}
 		return note("forked session " + child.ID() + "\n" + child.File())
 	case "tree":
@@ -502,24 +532,25 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if !ok {
 			return note("unknown skill: " + name)
 		}
-		return m.startTurn(body)
+		return m.startTurn(body, nil)
 	default:
 		if m.engine != nil {
 			if expanded, ok := prompt.ExpandTemplate("/"+cmd.Name+" "+cmd.Rest, m.engine.Templates); ok {
-				return m.startTurn(expanded)
+				return m.startTurn(expanded, nil)
 			}
 			if body, ok := skills.ExpandCommand(m.engine.Skills, cmd.Name, cmd.Rest); ok {
-				return m.startTurn(body)
+				return m.startTurn(body, nil)
 			}
 		}
 		return note("/" + cmd.Name + " is not implemented")
 	}
 }
 
-func (m Model) startTurn(text string) (tea.Model, tea.Cmd) {
-	m.textarea.Reset()
+func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.Cmd) {
+	m.editor.AddHistory(text)
+	m.editor.Reset()
 	m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
-	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text})
+	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 
 	var stream *agent.Stream
 	ctx, cancel := context.WithCancel(context.Background())
@@ -528,7 +559,7 @@ func (m Model) startTurn(text string) (tea.Model, tea.Cmd) {
 		m.provider = m.engine.Provider
 		// history already contains the user turn; RunPrompt appends user again, so pass without last
 		hist := m.history[:len(m.history)-1]
-		stream = m.engine.RunPrompt(ctx, hist, text, nil)
+		stream = m.engine.RunPrompt(ctx, hist, text, images)
 	} else {
 		sf, provider := ai.DefaultStreamFn()
 		m.provider = provider
@@ -649,9 +680,9 @@ func (m Model) View() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(m.textarea.View())
+	b.WriteString(m.editor.View())
 	b.WriteString("\n")
-	b.WriteString(m.footerStyle.Render("Enter send · Ctrl+L model · Shift+Tab thinking · Ctrl+P cycle · /help · Ctrl+D exit"))
+	b.WriteString(m.footerStyle.Render("Enter send · Ctrl+G editor · Ctrl+L model · Shift+Tab thinking · Ctrl+P cycle · /help · Ctrl+D exit"))
 	return b.String()
 }
 
@@ -721,7 +752,7 @@ func (m Model) handleClear() (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	m.lastClear = now
-	m.textarea.Reset()
+	m.editor.Reset()
 	return m, nil
 }
 

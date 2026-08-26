@@ -27,7 +27,7 @@ func send(m tea.Model, msg tea.Msg) Model {
 }
 
 func TestNewlineKeybindingMatchesPi(t *testing.T) {
-	keys := New(testCfg()).textarea.KeyMap.InsertNewline.Keys()
+	keys := New(testCfg()).editor.ta.KeyMap.InsertNewline.Keys()
 	if !slices.Contains(keys, "shift+enter") || !slices.Contains(keys, "ctrl+j") {
 		t.Errorf("newline keys = %v, want shift+enter and ctrl+j", keys)
 	}
@@ -38,7 +38,7 @@ func TestNewlineKeybindingMatchesPi(t *testing.T) {
 
 func TestCtrlCClearsEditorWhenIdle(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("hello")
+	m.editor.SetValue("hello")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	got := next.(Model)
 	if got.quitting {
@@ -47,8 +47,8 @@ func TestCtrlCClearsEditorWhenIdle(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("first Ctrl+C must not quit")
 	}
-	if got.textarea.Value() != "" {
-		t.Fatalf("editor = %q, want empty", got.textarea.Value())
+	if got.editor.Value() != "" {
+		t.Fatalf("editor = %q, want empty", got.editor.Value())
 	}
 }
 
@@ -66,7 +66,7 @@ func TestCtrlCTwiceQuits(t *testing.T) {
 
 func TestSlashQuitExits(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("/quit")
+	m.editor.SetValue("/quit")
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if !next.(Model).quitting {
 		t.Error("expected quitting after /quit")
@@ -138,9 +138,9 @@ func TestCycleThinkingKey(t *testing.T) {
 func TestAltEnterQueuesFollowUpWhileRunning(t *testing.T) {
 	m := New(testCfg())
 	m.running = true
-	m.textarea.SetValue("later")
+	m.editor.SetValue("later")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
-	if len(m.queued) != 1 || m.queued[0] != "later" {
+	if len(m.queued) != 1 || m.queued[0].text != "later" {
 		t.Fatalf("queued = %v (engine-less follow-up should use m.queued)", m.queued)
 	}
 }
@@ -170,7 +170,7 @@ func TestCtrlLOpensModelPicker(t *testing.T) {
 
 func TestSlashModelOpensPicker(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("/model")
+	m.editor.SetValue("/model")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.modelPickerActive() {
 		t.Fatal("/model with no args should open the picker")
@@ -179,7 +179,7 @@ func TestSlashModelOpensPicker(t *testing.T) {
 
 func TestSlashModelExactMatchDoesNotOpenPicker(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("/model anthropic/claude-haiku-4")
+	m.editor.SetValue("/model anthropic/claude-haiku-4")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.modelPickerActive() {
 		t.Fatal("exact spec should apply without a picker")
@@ -299,7 +299,7 @@ func TestHotkeysReflectsOverride(t *testing.T) {
 	}
 	m := New(testCfg())
 	m.keys = keys.NewManager(dir)
-	m.textarea.SetValue("/hotkeys")
+	m.editor.SetValue("/hotkeys")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "ctrl+k") {
 		t.Fatalf("hotkeys = %+v", m.transcript)
@@ -318,7 +318,7 @@ func treeModel(t *testing.T) Model {
 
 func TestSlashTreeOpensOverlay(t *testing.T) {
 	m := treeModel(t)
-	m.textarea.SetValue("/tree")
+	m.editor.SetValue("/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.overlay != overlayTree {
 		t.Fatalf("overlay = %d", m.overlay)
@@ -333,7 +333,7 @@ func TestSlashTreeOpensOverlay(t *testing.T) {
 
 func TestTreeCtrlDDoesNotQuit(t *testing.T) {
 	m := treeModel(t)
-	m.textarea.SetValue("/tree")
+	m.editor.SetValue("/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	got := next.(Model)
@@ -348,7 +348,7 @@ func TestTreeCtrlDDoesNotQuit(t *testing.T) {
 func TestTreeEnterNavigatesUserIntoEditor(t *testing.T) {
 	m := treeModel(t)
 	m.cfg.BranchSummary.SkipPrompt = boolPtr(true)
-	m.textarea.SetValue("/tree")
+	m.editor.SetValue("/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	// cursor on leaf (assistant). Move up to user.
 	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
@@ -356,8 +356,8 @@ func TestTreeEnterNavigatesUserIntoEditor(t *testing.T) {
 	if m.overlay != overlayNone {
 		t.Fatalf("overlay = %d", m.overlay)
 	}
-	if !strings.Contains(m.textarea.Value(), "hello tree") {
-		t.Fatalf("editor = %q", m.textarea.Value())
+	if !strings.Contains(m.editor.Value(), "hello tree") {
+		t.Fatalf("editor = %q", m.editor.Value())
 	}
 }
 

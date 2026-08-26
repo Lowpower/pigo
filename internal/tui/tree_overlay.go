@@ -364,8 +364,8 @@ func (m Model) confirmTreeNav(summarize bool, custom string, replace bool) (tea.
 	}
 	m.overlay = overlayNone
 	m.reloadFromSession()
-	if res.EditorText != "" && strings.TrimSpace(m.textarea.Value()) == "" {
-		m.textarea.SetValue(res.EditorText)
+	if res.EditorText != "" && strings.TrimSpace(m.editor.Value()) == "" {
+		m.editor.SetValue(res.EditorText)
 	}
 	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Navigated to selected point")})
 	return m, nil
@@ -466,7 +466,7 @@ func fmtTreeStatus(t treeOverlay) string {
 }
 
 func (m Model) handleIdleEscape() (tea.Model, tea.Cmd) {
-	if strings.TrimSpace(m.textarea.Value()) != "" {
+	if strings.TrimSpace(m.editor.Value()) != "" {
 		return m, nil
 	}
 	act := m.cfg.DoubleEscape()

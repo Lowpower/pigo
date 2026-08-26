@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -29,6 +31,7 @@ type Config struct {
 	ThinkingBudgets     map[string]int        `mapstructure:"thinkingBudgets"`
 	ModelThinkingLevels map[string]string     `mapstructure:"modelThinkingLevels"`
 	HTTPIdleTimeoutMs   *int                  `mapstructure:"httpIdleTimeoutMs"`
+	ExternalEditor      string                `mapstructure:"externalEditor"`
 	DoubleEscapeAction  string                `mapstructure:"doubleEscapeAction"`
 	TreeFilterMode      string                `mapstructure:"treeFilterMode"`
 	BranchSummary       BranchSummarySettings `mapstructure:"branchSummary"`
@@ -193,6 +196,23 @@ func (c Config) ResolvedModel() string {
 	return c.DefaultModel
 }
 
+// ExternalEditorCommand is settings.externalEditor, then $VISUAL, $EDITOR, then nano/notepad.
+func (c Config) ExternalEditorCommand() string {
+	if s := strings.TrimSpace(c.ExternalEditor); s != "" {
+		return s
+	}
+	if v := os.Getenv("VISUAL"); v != "" {
+		return v
+	}
+	if v := os.Getenv("EDITOR"); v != "" {
+		return v
+	}
+	if runtime.GOOS == "windows" {
+		return "notepad"
+	}
+	return "nano"
+}
+
 // DefaultConfigDir is ~/.pigo/agent (override with PIGO_CODING_AGENT_DIR).
 func DefaultConfigDir() string {
 	if d := os.Getenv("PIGO_CODING_AGENT_DIR"); d != "" {
@@ -328,6 +348,9 @@ func Save(configDir string, cfg Config) error {
 	}
 	if cfg.NpmCommand != nil {
 		existing["npmCommand"] = cfg.NpmCommand
+	}
+	if cfg.ExternalEditor != "" {
+		existing["externalEditor"] = cfg.ExternalEditor
 	}
 	b, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
