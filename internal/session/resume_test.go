@@ -3,7 +3,10 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/Lowpower/pigo/internal/ai"
 )
 
 func TestContinueRecentOpensLatest(t *testing.T) {
@@ -72,6 +75,30 @@ func TestRestoreAIMessagesRoundTrip(t *testing.T) {
 	}
 	if opened.ID() != m.ID() {
 		t.Fatalf("FindByID id=%s want %s", opened.ID(), m.ID())
+	}
+}
+
+func TestRestoreAIMessagesBashExecution(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	code := 0
+	if _, err := m.AppendMessage("bashExecution", map[string]any{
+		"role": "bashExecution", "command": "printf hi", "output": "hi",
+		"cancelled": false, "truncated": false, "exitCode": code,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("bashExecution", map[string]any{
+		"role": "bashExecution", "command": "printf secret", "output": "secret",
+		"cancelled": false, "truncated": false, "excludeFromContext": true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	msgs := RestoreAIMessages(m.Entries())
+	if len(msgs) != 1 {
+		t.Fatalf("len=%d %+v", len(msgs), msgs)
+	}
+	if msgs[0].Role != ai.RoleUser || !strings.Contains(msgs[0].Content, "Ran `printf hi`") {
+		t.Fatalf("msg = %+v", msgs[0])
 	}
 }
 
