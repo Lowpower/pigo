@@ -15,7 +15,7 @@ import (
 
 func TestSlashResumeOpensPicker(t *testing.T) {
 	m, sess := resumeFixture(t)
-	m.textarea.SetValue("/resume")
+	m.editor.SetValue("/resume")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.sessionPickerActive() {
 		t.Fatal("/resume should open the picker")
@@ -32,7 +32,7 @@ func TestSlashResumeOpensPicker(t *testing.T) {
 func TestSlashResumeIDStillSwitches(t *testing.T) {
 	m, sess := resumeFixture(t)
 	other := newFlushedSession(t, m.engine.Opts.Cwd, m.engine.Opts.AgentDir, "other")
-	m.textarea.SetValue("/resume " + other.ID())
+	m.editor.SetValue("/resume " + other.ID())
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.sessionPickerActive() {
 		t.Fatal("id resume should not open picker")
@@ -45,7 +45,7 @@ func TestSlashResumeIDStillSwitches(t *testing.T) {
 func TestSessionPickerEnterAdopts(t *testing.T) {
 	m, sess := resumeFixture(t)
 	other := newFlushedSession(t, m.engine.Opts.Cwd, m.engine.Opts.AgentDir, "pick-me")
-	m.textarea.SetValue("/resume")
+	m.editor.SetValue("/resume")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	found := false
 	for i, it := range m.sessions.filtered {
@@ -71,7 +71,7 @@ func TestSessionPickerTabLoadsAll(t *testing.T) {
 	m, _ := resumeFixture(t)
 	otherCwd := t.TempDir()
 	_ = newFlushedSession(t, otherCwd, m.engine.Opts.AgentDir, "elsewhere")
-	m.textarea.SetValue("/resume")
+	m.editor.SetValue("/resume")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.sessions.scope != sessCurrent {
 		t.Fatal("start current")
@@ -87,7 +87,7 @@ func TestSessionPickerTabLoadsAll(t *testing.T) {
 
 func TestSessionPickerCtrlSCyclesSort(t *testing.T) {
 	m, _ := resumeFixture(t)
-	m.textarea.SetValue("/resume")
+	m.editor.SetValue("/resume")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.sessions.sort != session.SortThreaded {
 		t.Fatal(m.sessions.sort)
@@ -100,7 +100,7 @@ func TestSessionPickerCtrlSCyclesSort(t *testing.T) {
 
 func TestSessionPickerDeleteRefusesCurrent(t *testing.T) {
 	m, sess := resumeFixture(t)
-	m.textarea.SetValue("/resume")
+	m.editor.SetValue("/resume")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	for i, it := range m.sessions.filtered {
 		if it.ID == sess.File() {
@@ -119,7 +119,7 @@ func TestSessionPickerDeleteRefusesCurrent(t *testing.T) {
 
 func TestSessionPickerRenamePersists(t *testing.T) {
 	m, sess := resumeFixture(t)
-	m.textarea.SetValue("/resume")
+	m.editor.SetValue("/resume")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	for i, it := range m.sessions.filtered {
 		if it.ID == sess.File() {

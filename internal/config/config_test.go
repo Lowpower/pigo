@@ -158,3 +158,49 @@ func TestSaveDoesNotPersistSessionOnlyModel(t *testing.T) {
 		t.Fatalf("load should restore the saved default as current, got %s/%s", loaded.ResolvedProvider(), loaded.ResolvedModel())
 	}
 }
+
+func TestExternalEditorCommand(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	cfg := Config{}
+	if got := cfg.ExternalEditorCommand(); got != "nano" && got != "notepad" {
+		t.Fatalf("default editor = %q", got)
+	}
+	t.Setenv("EDITOR", "vim")
+	if got := cfg.ExternalEditorCommand(); got != "vim" {
+		t.Fatalf("EDITOR = %q", got)
+	}
+	t.Setenv("VISUAL", "emacs")
+	if got := cfg.ExternalEditorCommand(); got != "emacs" {
+		t.Fatalf("VISUAL = %q", got)
+	}
+	cfg.ExternalEditor = "code --wait"
+	if got := cfg.ExternalEditorCommand(); got != "code --wait" {
+		t.Fatalf("settings override = %q", got)
+	}
+}
+
+func TestLoadAndSaveExternalEditor(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"externalEditor":"hx"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ExternalEditor != "hx" {
+		t.Fatalf("loaded %q", cfg.ExternalEditor)
+	}
+	cfg.ExternalEditor = "nvim"
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"externalEditor": "nvim"`) {
+		t.Fatalf("saved: %s", b)
+	}
+}
