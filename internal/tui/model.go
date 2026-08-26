@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -17,6 +18,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/keys"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/runtime"
@@ -74,13 +76,16 @@ type Model struct {
 	streamStyle lipgloss.Style
 	footerStyle lipgloss.Style
 
-	login loginState
+	keys      *keys.Manager
+	models    modelPicker
+	lastClear time.Time
+	login     loginState
 }
 
 // New builds the interactive model from the resolved config.
 func New(cfg config.Config) Model {
 	ta := textarea.New()
-	ta.Placeholder = "Ask pigo…  (Enter to send, Shift+Enter/Ctrl+J newline, Ctrl+C interrupt/quit)"
+	ta.Placeholder = "Ask pigo…  (Enter send, Ctrl+L model, Ctrl+C clear, Ctrl+D exit)"
 	ta.Prompt = "│ "
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
@@ -99,6 +104,7 @@ func New(cfg config.Config) Model {
 		errStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color(th.Error)),
 		streamStyle: lipgloss.NewStyle().Foreground(lipgloss.Color(th.Assistant)),
 		footerStyle: lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color(th.Muted)),
+		keys:        keys.NewManager(config.DefaultConfigDir()),
 	}
 	m.glam = newRenderer(80)
 	return m
@@ -129,37 +135,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.modelPickerActive() {
+			return m.handleModelPickerKey(msg)
+		}
 		if m.loginActive() {
 			return m.handleLoginKey(msg)
 		}
-		switch msg.String() {
-		case "ctrl+c":
-			if m.running && m.cancel != nil {
-				m.cancel() // interrupt the current run; keep the UI open
-				return m, nil
-			}
+		if m.keyIs(msg, "app.clear") {
+			return m.handleClear()
+		}
+		if m.keyIs(msg, "app.exit") && strings.TrimSpace(m.textarea.Value()) == "" {
 			m.quitting = true
 			return m, tea.Quit
-		case "ctrl+d":
-			if strings.TrimSpace(m.textarea.Value()) == "" {
-				m.quitting = true
-				return m, tea.Quit
-			}
-		case "esc", "escape":
+		}
+		if m.keyIs(msg, "app.interrupt") {
 			if m.running && m.cancel != nil {
 				m.cancel()
 				return m, nil
 			}
-		case "enter":
+		}
+		if m.keyIs(msg, "tui.input.submit") {
 			return m.submit()
-		case "alt+enter":
+		}
+		if m.keyIs(msg, "app.message.followUp") {
 			return m.queueFollowUp()
-		case "ctrl+p":
+		}
+		if m.keyIs(msg, "app.model.cycleForward") {
 			return m.cycleModel(false)
-		case "ctrl+shift+p", "shift+ctrl+p":
+		}
+		if m.keyIs(msg, "app.model.cycleBackward") {
 			return m.cycleModel(true)
-		case "shift+tab":
+		}
+		if m.keyIs(msg, "app.thinking.cycle") {
 			return m.cycleThinking()
+		}
+		if m.keyIs(msg, "app.model.select") {
+			return m.openModelPicker("")
 		}
 
 	case loginDoneMsg, loginEventMsg, loginPromptMsg:
@@ -272,6 +283,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 	case "help":
 		return note(slash.HelpText())
 	case "hotkeys":
+		if m.keys != nil {
+			return note(m.keys.HotkeysText())
+		}
 		return note(slash.HotkeysText())
 	case "clear":
 		m.transcript = nil
@@ -282,23 +296,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		return note("no session (started with --no-session)")
 	case "model":
-		if cmd.Rest != "" {
-			prov, id, thinking := models.ParseSpec(cmd.Rest)
-			if m.engine != nil {
-				m.engine.ApplyModel(prov, id, thinking)
-				m.cfg = m.engine.Opts.Config
-				m.provider = m.engine.Provider
-			} else {
-				if prov != "" {
-					m.cfg.Provider, m.cfg.DefaultProvider = prov, prov
-				}
-				m.cfg.Model, m.cfg.DefaultModel = id, id
-				if thinking != "" {
-					m.cfg.Thinking = thinking
-				}
-			}
-		}
-		return note("model = " + m.cfg.ResolvedProvider() + "/" + m.cfg.ResolvedModel())
+		return m.handleModelCommand(cmd.Rest)
 	case "provider":
 		if cmd.Rest != "" {
 			m.cfg.Provider = cmd.Rest
@@ -504,7 +502,10 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("reload requires a runtime engine")
 		}
 		m.engine.Reload()
-		return note("reloaded skills and context files")
+		if m.keys != nil {
+			m.keys.Reload()
+		}
+		return note("reloaded keybindings, skills, and context files")
 	case "copy":
 		text := lastAssistant(m.history)
 		if text == "" {
@@ -636,6 +637,9 @@ func (m Model) View() string {
 	if m.quitting {
 		return "bye\n"
 	}
+	if m.modelPickerActive() {
+		return m.models.view()
+	}
 	if m.loginActive() {
 		return m.loginView()
 	}
@@ -662,7 +666,7 @@ func (m Model) View() string {
 
 	b.WriteString(m.textarea.View())
 	b.WriteString("\n")
-	b.WriteString(m.footerStyle.Render("Enter send · Alt+Enter follow-up · Shift+Tab thinking · Ctrl+P model · /help · Ctrl+C exit"))
+	b.WriteString(m.footerStyle.Render("Enter send · Ctrl+L model · Shift+Tab thinking · Ctrl+P cycle · /help · Ctrl+D exit"))
 	return b.String()
 }
 
@@ -696,9 +700,31 @@ func RunEngine(cfg config.Config, eng *runtime.Engine) error {
 	if eng != nil {
 		m.provider = eng.Provider
 		m.history = eng.History()
+		m.keys = keys.NewManager(eng.Opts.AgentDir)
 	}
 	_, err := tea.NewProgram(m).Run()
 	return err
+}
+
+func (m Model) keyIs(msg tea.KeyMsg, action string) bool {
+	if m.keys == nil {
+		return false
+	}
+	return m.keys.Matches(msg.String(), action)
+}
+
+func (m Model) handleClear() (tea.Model, tea.Cmd) {
+	now := time.Now()
+	if !m.lastClear.IsZero() && now.Sub(m.lastClear) < 500*time.Millisecond {
+		if m.cancel != nil {
+			m.cancel()
+		}
+		m.quitting = true
+		return m, tea.Quit
+	}
+	m.lastClear = now
+	m.textarea.Reset()
+	return m, nil
 }
 
 func lastAssistant(msgs []ai.Message) string {

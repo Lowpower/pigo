@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +11,9 @@ import (
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/keys"
+	"github.com/Lowpower/pigo/internal/models"
+	"github.com/Lowpower/pigo/internal/runtime"
 )
 
 func testCfg() config.Config {
@@ -31,14 +35,31 @@ func TestNewlineKeybindingMatchesPi(t *testing.T) {
 	}
 }
 
-func TestCtrlCQuitsWhenIdle(t *testing.T) {
+func TestCtrlCClearsEditorWhenIdle(t *testing.T) {
 	m := New(testCfg())
+	m.textarea.SetValue("hello")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := next.(Model)
+	if got.quitting {
+		t.Fatal("first Ctrl+C must not quit")
+	}
+	if cmd != nil {
+		t.Fatal("first Ctrl+C must not quit")
+	}
+	if got.textarea.Value() != "" {
+		t.Fatalf("editor = %q, want empty", got.textarea.Value())
+	}
+}
+
+func TestCtrlCTwiceQuits(t *testing.T) {
+	m := New(testCfg())
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlC})
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if !next.(Model).quitting {
-		t.Error("expected quitting after Ctrl+C when idle")
+		t.Fatal("second Ctrl+C within 500ms should quit")
 	}
 	if cmd == nil {
-		t.Error("expected a quit command")
+		t.Fatal("expected a quit command")
 	}
 }
 
@@ -131,5 +152,155 @@ func TestCtrlDQuitsWhenEmpty(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected quit cmd")
+	}
+}
+
+func TestCtrlLOpensModelPicker(t *testing.T) {
+	m := New(testCfg())
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	if !m.modelPickerActive() {
+		t.Fatal("ctrl+l should open the model picker")
+	}
+	view := m.View()
+	if !strings.Contains(view, "Select model") {
+		t.Fatalf("picker view =\n%s", view)
+	}
+}
+
+func TestSlashModelOpensPicker(t *testing.T) {
+	m := New(testCfg())
+	m.textarea.SetValue("/model")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.modelPickerActive() {
+		t.Fatal("/model with no args should open the picker")
+	}
+}
+
+func TestSlashModelExactMatchDoesNotOpenPicker(t *testing.T) {
+	m := New(testCfg())
+	m.textarea.SetValue("/model anthropic/claude-haiku-4")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.modelPickerActive() {
+		t.Fatal("exact spec should apply without a picker")
+	}
+	if m.cfg.ResolvedModel() != "claude-haiku-4" {
+		t.Fatalf("model = %s", m.cfg.ResolvedModel())
+	}
+	if m.cfg.DefaultModel == "claude-haiku-4" {
+		t.Fatal("session-only /model should not rewrite the saved default")
+	}
+}
+
+func TestModelPickerEnterSelectsSessionOnly(t *testing.T) {
+	m := New(config.Config{
+		Provider: "anthropic", Model: "claude-sonnet-4",
+		DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4",
+		Theme: "default",
+	})
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	found := false
+	for i, it := range m.models.filtered {
+		if it.ID == "anthropic/claude-haiku-4" {
+			m.models.selected = i
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("missing anthropic/claude-haiku-4")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.modelPickerActive() {
+		t.Fatal("enter should close the picker")
+	}
+	if m.cfg.ResolvedModel() != "claude-haiku-4" {
+		t.Fatalf("session model = %s", m.cfg.ResolvedModel())
+	}
+	if m.cfg.DefaultModel != "claude-sonnet-4" {
+		t.Fatalf("default = %s, want unchanged", m.cfg.DefaultModel)
+	}
+}
+
+func TestModelPickerTabTogglesScope(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Scoped: []models.Spec{
+		{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4"}},
+		{Model: models.Model{Provider: "openai", ID: "gpt-4o"}},
+	}}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	if m.models.scope != scopeScoped {
+		t.Fatalf("scope = %s, want scoped when --models is set", m.models.scope)
+	}
+	if len(m.models.filtered) != 2 {
+		t.Fatalf("scoped rows = %d", len(m.models.filtered))
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.models.scope != scopeAll {
+		t.Fatalf("tab should switch to all, got %s", m.models.scope)
+	}
+}
+
+func TestModelPickerCtrlSPersistsDefault(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{
+		Provider: "anthropic", Model: "claude-sonnet-4",
+		DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4",
+		Theme: "default",
+	}
+	m := New(cfg)
+	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: dir, Config: cfg}}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	found := false
+	for i, it := range m.models.filtered {
+		if it.ID == "anthropic/claude-haiku-4" {
+			m.models.selected = i
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("missing anthropic/claude-haiku-4")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if m.modelPickerActive() {
+		t.Fatal("ctrl+s should close the picker")
+	}
+	if m.cfg.DefaultModel != "claude-haiku-4" {
+		t.Fatalf("default = %s", m.cfg.DefaultModel)
+	}
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.DefaultModel != "claude-haiku-4" {
+		t.Fatalf("saved default = %s", loaded.DefaultModel)
+	}
+}
+
+func TestModelPickerEscapeCancels(t *testing.T) {
+	m := New(testCfg())
+	orig := m.cfg.ResolvedModel()
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.modelPickerActive() {
+		t.Fatal("esc should close the picker")
+	}
+	if m.cfg.ResolvedModel() != orig {
+		t.Fatalf("cancel changed model to %s", m.cfg.ResolvedModel())
+	}
+}
+
+func TestHotkeysReflectsOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
+	if err := os.WriteFile(dir+"/keybindings.json", []byte(`{"app.model.select":"ctrl+k"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(testCfg())
+	m.keys = keys.NewManager(dir)
+	m.textarea.SetValue("/hotkeys")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "ctrl+k") {
+		t.Fatalf("hotkeys = %+v", m.transcript)
 	}
 }

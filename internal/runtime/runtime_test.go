@@ -580,3 +580,42 @@ func TestNewHonorsCLIProvider(t *testing.T) {
 		t.Fatalf("provider=%s model=%s", e.Provider, e.Opts.Config.ResolvedModel())
 	}
 }
+
+func TestApplyModelDoesNotOverwriteSavedDefault(t *testing.T) {
+	e := &Engine{Opts: Options{Config: config.Config{
+		Provider: "anthropic", Model: "claude-sonnet-4",
+		DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4",
+	}}}
+	e.ApplyModel("openai", "gpt-4o", "")
+	if e.Opts.Config.ResolvedModel() != "gpt-4o" {
+		t.Fatalf("session model = %s", e.Opts.Config.ResolvedModel())
+	}
+	if e.Opts.Config.DefaultModel != "claude-sonnet-4" {
+		t.Fatalf("default should stay, got %s", e.Opts.Config.DefaultModel)
+	}
+}
+
+func TestPersistModelWritesSettings(t *testing.T) {
+	dir := t.TempDir()
+	e := &Engine{Opts: Options{
+		AgentDir: dir,
+		Config: config.Config{
+			Provider: "anthropic", Model: "claude-sonnet-4",
+			DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4",
+			Theme: "default",
+		},
+	}}
+	if err := e.PersistModel("openai", "gpt-4o", ""); err != nil {
+		t.Fatal(err)
+	}
+	if e.Opts.Config.DefaultModel != "gpt-4o" {
+		t.Fatalf("default = %s", e.Opts.Config.DefaultModel)
+	}
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.DefaultProvider != "openai" || loaded.DefaultModel != "gpt-4o" {
+		t.Fatalf("saved %s/%s", loaded.DefaultProvider, loaded.DefaultModel)
+	}
+}

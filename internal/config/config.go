@@ -129,20 +129,20 @@ func (c Config) ModelThinkingLevel(provider, id string) string {
 	return c.ModelThinkingLevels[provider+"/"+id]
 }
 
-// ResolvedProvider returns defaultProvider, falling back to provider.
+// ResolvedProvider is the session provider, falling back to the saved default.
 func (c Config) ResolvedProvider() string {
-	if c.DefaultProvider != "" {
-		return c.DefaultProvider
+	if c.Provider != "" {
+		return c.Provider
 	}
-	return c.Provider
+	return c.DefaultProvider
 }
 
-// ResolvedModel returns defaultModel, falling back to model.
+// ResolvedModel is the session model, falling back to the saved default.
 func (c Config) ResolvedModel() string {
-	if c.DefaultModel != "" {
-		return c.DefaultModel
+	if c.Model != "" {
+		return c.Model
 	}
-	return c.Model
+	return c.DefaultModel
 }
 
 // DefaultConfigDir is ~/.pigo/agent (override with PIGO_CODING_AGENT_DIR).
@@ -194,6 +194,13 @@ func Load(configDir string) (Config, error) {
 		cfg.ContextWindow = 200000
 	}
 	fillPackagesFromFile(configDir, &cfg)
+	// Session current starts at the saved default (settings.json uses default*).
+	if cfg.DefaultProvider != "" {
+		cfg.Provider = cfg.DefaultProvider
+	}
+	if cfg.DefaultModel != "" {
+		cfg.Model = cfg.DefaultModel
+	}
 	return cfg, nil
 }
 
@@ -232,8 +239,15 @@ func Save(configDir string, cfg Config) error {
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &existing)
 	}
-	existing["defaultProvider"] = cfg.ResolvedProvider()
-	existing["defaultModel"] = cfg.ResolvedModel()
+	dp, dm := cfg.DefaultProvider, cfg.DefaultModel
+	if dp == "" {
+		dp = cfg.Provider
+	}
+	if dm == "" {
+		dm = cfg.Model
+	}
+	existing["defaultProvider"] = dp
+	existing["defaultModel"] = dm
 	existing["theme"] = cfg.Theme
 	existing["thinking"] = cfg.Thinking
 	existing["contextWindow"] = cfg.ContextWindow
