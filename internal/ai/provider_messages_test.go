@@ -60,3 +60,38 @@ func TestOpenAIWireMessagesPreservesToolPairing(t *testing.T) {
 		t.Fatalf("tool msg = %#v", wire[1])
 	}
 }
+
+func TestAnthropicWireMessagesIncludesUserImages(t *testing.T) {
+	wire := AnthropicWireMessages([]Message{{
+		Role:    RoleUser,
+		Content: "look",
+		Images:  []ImageContent{{Type: "image", Data: "AAA", MimeType: "image/png"}},
+	}})
+	if len(wire) != 1 {
+		t.Fatalf("len=%d", len(wire))
+	}
+	blocks, _ := wire[0]["content"].([]map[string]any)
+	if len(blocks) != 2 || blocks[0]["type"] != "text" || blocks[1]["type"] != "image" {
+		t.Fatalf("content = %#v", wire[0]["content"])
+	}
+	src, _ := blocks[1]["source"].(map[string]any)
+	if src["type"] != "base64" || src["media_type"] != "image/png" || src["data"] != "AAA" {
+		t.Fatalf("source = %#v", src)
+	}
+}
+
+func TestOpenAIWireMessagesIncludesUserImages(t *testing.T) {
+	wire := OpenAIWireMessages([]Message{{
+		Role:    RoleUser,
+		Content: "look",
+		Images:  []ImageContent{{Type: "image", Data: "AAA", MimeType: "image/png"}},
+	}})
+	blocks, _ := wire[0]["content"].([]map[string]any)
+	if len(blocks) != 2 || blocks[0]["type"] != "text" || blocks[1]["type"] != "image_url" {
+		t.Fatalf("content = %#v", wire[0]["content"])
+	}
+	url, _ := blocks[1]["image_url"].(map[string]any)
+	if url["url"] != "data:image/png;base64,AAA" {
+		t.Fatalf("url = %#v", url)
+	}
+}

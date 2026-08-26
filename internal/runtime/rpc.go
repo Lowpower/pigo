@@ -90,6 +90,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			wg.Wait()
 			return nil
 		case "abort":
+			e.AbortRetry()
 			stateMu.Lock()
 			if cancel != nil {
 				cancel()
@@ -98,16 +99,17 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			reply(id, "abort", true, nil, "")
 		case "prompt":
 			behavior, _ := raw["streamingBehavior"].(string)
+			imgs := parseRPCImages(raw)
 			stateMu.Lock()
 			isRunning := running
 			stateMu.Unlock()
 			if isRunning && behavior == "steer" {
-				e.PushSteer(msg)
+				e.PushSteerImages(msg, imgs)
 				reply(id, "prompt", true, nil, "")
 				continue
 			}
 			if isRunning && behavior == "followUp" {
-				e.PushFollow(msg)
+				e.PushFollowImages(msg, imgs)
 				reply(id, "prompt", true, nil, "")
 				continue
 			}
@@ -126,7 +128,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			stateMu.Unlock()
 			reply(id, "prompt", true, nil, "")
 			wg.Add(1)
-			go func(msg string, hist []ai.Message, cctx context.Context, id any) {
+			go func(msg string, hist []ai.Message, imgs []ai.ImageContent, cctx context.Context, id any) {
 				defer wg.Done()
 				defer func() {
 					stateMu.Lock()
@@ -134,19 +136,19 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 					cancel = nil
 					history = e.History()
 					if len(history) == 0 {
-						history = append(append([]ai.Message(nil), hist...), ai.Message{Role: ai.RoleUser, Content: msg})
+						history = append(append([]ai.Message(nil), hist...), ai.Message{Role: ai.RoleUser, Content: msg, Images: imgs})
 					}
 					stateMu.Unlock()
 				}()
-				if err := e.PrintJSON(cctx, out, hist, msg); err != nil {
+				if err := e.PrintJSON(cctx, out, hist, msg, imgs); err != nil {
 					emit(map[string]any{"type": "error", "message": err.Error(), "id": id})
 				}
-			}(msg, hist, cctx, id)
+			}(msg, hist, imgs, cctx, id)
 		case "steer":
-			e.PushSteer(msg)
+			e.PushSteerImages(msg, parseRPCImages(raw))
 			reply(id, "steer", true, nil, "")
 		case "follow_up":
-			e.PushFollow(msg)
+			e.PushFollowImages(msg, parseRPCImages(raw))
 			reply(id, "follow_up", true, nil, "")
 		case "new_session":
 			if e.Opts.Session != nil {
@@ -399,12 +401,48 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			nmsg := len(history)
 			stateMu.Unlock()
 			reply(id, "get_session_stats", true, map[string]any{"entries": n, "messages": nmsg}, "")
-		case "set_auto_retry", "abort_retry", "abort_bash":
+		case "set_auto_retry":
+			enabled, _ := raw["enabled"].(bool)
+			e.SetAutoRetryEnabled(enabled)
+			reply(id, "set_auto_retry", true, nil, "")
+		case "abort_retry":
+			e.AbortRetry()
+			reply(id, "abort_retry", true, nil, "")
+		case "abort_bash":
 			reply(id, typ, false, nil, "unsupported rpc command: "+typ)
 		default:
 			emit(map[string]any{"type": "error", "id": id, "message": "unsupported rpc command: " + typ})
 		}
 	}
+}
+
+func parseRPCImages(raw map[string]any) []ai.ImageContent {
+	v, ok := raw["images"]
+	if !ok || v == nil {
+		return nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	var out []ai.ImageContent
+	for _, item := range arr {
+		m, _ := item.(map[string]any)
+		if m == nil {
+			continue
+		}
+		typ, _ := m["type"].(string)
+		data, _ := m["data"].(string)
+		mime, _ := m["mimeType"].(string)
+		if data == "" || mime == "" {
+			continue
+		}
+		if typ != "" && typ != "image" {
+			continue
+		}
+		out = append(out, ai.ImageContent{Type: "image", Data: data, MimeType: mime})
+	}
+	return out
 }
 
 func queueMode(s string) string {

@@ -73,6 +73,8 @@ type Model struct {
 	errStyle    lipgloss.Style
 	streamStyle lipgloss.Style
 	footerStyle lipgloss.Style
+
+	login loginState
 }
 
 // New builds the interactive model from the resolved config.
@@ -127,6 +129,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.loginActive() {
+			return m.handleLoginKey(msg)
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			if m.running && m.cancel != nil {
@@ -156,6 +161,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "shift+tab":
 			return m.cycleThinking()
 		}
+
+	case loginDoneMsg, loginEventMsg, loginPromptMsg:
+		return m.handleLoginMsg(msg)
 
 	case agentEventMsg:
 		m.applyAgentEvent(msg.ev)
@@ -477,7 +485,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		return note("session name = " + m.engine.Opts.Session.Name())
 	case "login":
-		return note("OAuth login is not available in pigo; run: pigo auth login <provider>")
+		return m.startLogin(cmd.Rest)
 	case "logout":
 		prov := cmd.Rest
 		if prov == "" {
@@ -540,7 +548,7 @@ func (m Model) startTurn(text string) (tea.Model, tea.Cmd) {
 		m.provider = m.engine.Provider
 		// history already contains the user turn; RunPrompt appends user again, so pass without last
 		hist := m.history[:len(m.history)-1]
-		stream = m.engine.RunPrompt(ctx, hist, text)
+		stream = m.engine.RunPrompt(ctx, hist, text, nil)
 	} else {
 		sf, provider := ai.DefaultStreamFn()
 		m.provider = provider
@@ -627,6 +635,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 func (m Model) View() string {
 	if m.quitting {
 		return "bye\n"
+	}
+	if m.loginActive() {
+		return m.loginView()
 	}
 
 	var b strings.Builder

@@ -27,6 +27,7 @@ const (
 type AnthropicClient struct {
 	BaseURL    string
 	APIKey     string
+	Headers    map[string]string
 	HTTPClient *http.Client
 }
 
@@ -61,9 +62,14 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 			return nil, err
 		}
 		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("x-api-key", c.APIKey)
+		if c.APIKey != "" {
+			httpReq.Header.Set("x-api-key", c.APIKey)
+		}
 		httpReq.Header.Set("anthropic-version", anthropicVersion)
 		httpReq.Header.Set("accept", "text/event-stream")
+		for k, v := range c.Headers {
+			httpReq.Header.Set(k, v)
+		}
 
 		client := c.HTTPClient
 		if client == nil {

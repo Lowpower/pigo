@@ -34,9 +34,40 @@ func AnthropicWireMessages(msgs []Message) []map[string]any {
 		if role == "" {
 			role = RoleUser
 		}
-		out = append(out, map[string]any{"role": role, "content": m.Content})
+		out = append(out, map[string]any{"role": role, "content": anthropicUserContent(m)})
 	}
 	return out
+}
+
+func anthropicUserContent(m Message) any {
+	if len(m.Images) == 0 {
+		return m.Content
+	}
+	blocks := make([]map[string]any, 0, 1+len(m.Images))
+	if m.Content != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+	}
+	for _, img := range m.Images {
+		blocks = append(blocks, map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": img.MimeType,
+				"data":       img.Data,
+			},
+		})
+	}
+	hasText := false
+	for _, b := range blocks {
+		if b["type"] == "text" {
+			hasText = true
+			break
+		}
+	}
+	if !hasText {
+		blocks = append([]map[string]any{{"type": "text", "text": "(see attached image)"}}, blocks...)
+	}
+	return blocks
 }
 
 func anthropicContent(msg *AssistantMessage) []map[string]any {
@@ -96,9 +127,26 @@ func OpenAIWireMessages(msgs []Message) []map[string]any {
 		if role == RoleTool {
 			role = "tool"
 		}
-		out = append(out, map[string]any{"role": role, "content": m.Content})
+		out = append(out, map[string]any{"role": role, "content": openaiUserContent(m)})
 	}
 	return out
+}
+
+func openaiUserContent(m Message) any {
+	if len(m.Images) == 0 {
+		return m.Content
+	}
+	blocks := make([]map[string]any, 0, 1+len(m.Images))
+	blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+	for _, img := range m.Images {
+		blocks = append(blocks, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url": "data:" + img.MimeType + ";base64," + img.Data,
+			},
+		})
+	}
+	return blocks
 }
 
 func openaiAssistant(msg *AssistantMessage) map[string]any {
