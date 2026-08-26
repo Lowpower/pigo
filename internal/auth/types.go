@@ -121,9 +121,10 @@ type OAuth interface {
 
 // APIKeyHandler is api-key login + resolve for one provider.
 type APIKeyHandler struct {
-	Name  string
-	Login func(ix Interaction) (Credential, error)
-	Env   []string // ambient env vars, first match wins
+	Name    string
+	Login   func(ix Interaction) (Credential, error)
+	Env     []string // ambient env vars, first match wins
+	Resolve func() *Result
 }
 
 // Provider is auth configuration for one provider id.

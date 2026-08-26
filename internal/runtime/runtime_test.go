@@ -532,3 +532,51 @@ func TestDefaultLoadsBuiltinTools(t *testing.T) {
 		t.Fatalf("tools=%d, want 7 builtins", n)
 	}
 }
+
+func TestNewPicksAuthenticatedOpenAI(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	e, err := New(context.Background(), Options{
+		Cwd:          t.TempDir(),
+		AgentDir:     t.TempDir(),
+		NoExtensions: true,
+		Config:       config.Config{Provider: "anthropic", Model: "claude-sonnet-4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if e.Provider != "openai" {
+		t.Fatalf("provider = %q, want openai", e.Provider)
+	}
+	if e.Opts.Config.ResolvedModel() == "" {
+		t.Fatal("expected openai default model")
+	}
+}
+
+func TestNewHonorsCLIProvider(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	e, err := New(context.Background(), Options{
+		Cwd:          t.TempDir(),
+		AgentDir:     t.TempDir(),
+		NoExtensions: true,
+		CLIProvider:  "anthropic",
+		CLIModel:     "claude-haiku-4",
+		Config:       config.Config{Provider: "anthropic", Model: "claude-haiku-4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if e.Provider != "anthropic" || e.Opts.Config.ResolvedModel() != "claude-haiku-4" {
+		t.Fatalf("provider=%s model=%s", e.Provider, e.Opts.Config.ResolvedModel())
+	}
+}

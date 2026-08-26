@@ -10,17 +10,11 @@
 package tools
 
 import (
-	// LLM SDKs (official) — not yet used. The anthropic/openai-completions adapters
-	// use raw HTTP/SSE; these remain pinned for optional future provider adapters
-	// (e.g. openai-responses, google genai, bedrock).
+	// LLM SDKs (official) — anthropic-sdk-go remains unused (raw HTTP/SSE adapter).
 	_ "github.com/anthropics/anthropic-sdk-go"
-	_ "github.com/aws/aws-sdk-go-v2/config"
-	_ "github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	_ "github.com/openai/openai-go"
-	_ "google.golang.org/genai"
 
 	// sqlite — optional session backend (not wired yet)
 	_ "modernc.org/sqlite"
-	// bubbletea/bubbles/lipgloss/glamour, cobra/viper, glob/jsonschema/go-diff
-	// are now imported for real by the internal packages.
+	// openai-go, google.golang.org/genai, and aws-sdk-go-v2 are imported for real
+	// by the provider adapters.
 )

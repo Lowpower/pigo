@@ -78,6 +78,23 @@ func registerBuiltins() {
 		},
 		OAuth: xaiOAuth{},
 	})
+	registerProvider(Provider{
+		ID: "google",
+		APIKey: &APIKeyHandler{
+			Name:  "Gemini API key",
+			Env:   []string{"GEMINI_API_KEY"},
+			Login: promptAPIKey("Gemini API key"),
+		},
+	})
+	registerProvider(Provider{
+		ID: "amazon-bedrock",
+		APIKey: &APIKeyHandler{
+			Name:    "Amazon Bedrock",
+			Env:     []string{"AWS_BEARER_TOKEN_BEDROCK"},
+			Login:   promptAPIKey("Bedrock bearer token"),
+			Resolve: bedrockAmbientAuth,
+		},
+	})
 }
 
 func registerProvider(p Provider) {
@@ -106,6 +123,17 @@ func Providers() []Provider {
 	out := make([]Provider, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, registry[id])
+	}
+	return out
+}
+
+// AuthenticatedIDs returns registered providers that currently have credentials.
+func AuthenticatedIDs(s *Store) []string {
+	var out []string
+	for _, p := range Providers() {
+		if CheckAuth(s, p.ID) != nil {
+			out = append(out, p.ID)
+		}
 	}
 	return out
 }

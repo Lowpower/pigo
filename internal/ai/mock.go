@@ -3,8 +3,11 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // EmitMessage streams a canned AssistantMessage as a proper event sequence
@@ -135,21 +138,43 @@ func EchoStreamFn() StreamFn {
 			}
 		}
 		reply := "You said: " + last +
-			"  (mock provider — set ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL + key for a gateway, to use a real model.)"
+			"  (mock provider — set ANTHROPIC_API_KEY or OPENAI_API_KEY to use a real model.)"
 		return ScriptedStreamFn(reply, 40*time.Millisecond)(ctx, reqCtx, opts)
 	}
 }
 
 // DefaultStreamFn selects a provider from the environment and returns it with a
-// display name. Priority: OpenCode (OPENCODE_API_KEY) -> Anthropic
-// (ANTHROPIC_API_KEY) -> the offline mock. The name is "mock" when no live
-// provider is configured.
+// display name. Priority matches models.PickInitial: OpenCode, Anthropic,
+// OpenAI, Google, Bedrock, then the offline mock.
 func DefaultStreamFn() (fn StreamFn, name string) {
-	if f, ok := NewOpenCodeFromEnv(); ok {
-		return f, "opencode"
-	}
-	if c, ok := NewAnthropicFromEnv(); ok {
-		return c.StreamFn(), "anthropic"
+	for _, id := range []string{"opencode", "anthropic", "openai", "google", "amazon-bedrock"} {
+		spec, ok := models.LookupProvider(id)
+		if !ok {
+			continue
+		}
+		key := envKey(spec.Env...)
+		if key == "" && id == "amazon-bedrock" && bedrockAmbient() {
+			return StreamFor(id, ClientConfig{}), id
+		}
+		if key == "" {
+			continue
+		}
+		base := spec.BaseURL
+		switch id {
+		case "anthropic":
+			if v := os.Getenv("ANTHROPIC_BASE_URL"); v != "" {
+				base = strings.TrimRight(v, "/")
+			}
+		case "openai":
+			if v := os.Getenv("OPENAI_BASE_URL"); v != "" {
+				base = strings.TrimRight(v, "/")
+			}
+		case "opencode":
+			if v := os.Getenv("OPENCODE_BASE_URL"); v != "" {
+				base = strings.TrimRight(v, "/")
+			}
+		}
+		return StreamFor(id, ClientConfig{APIKey: key, BaseURL: base}), id
 	}
 	return EchoStreamFn(), "mock"
 }

@@ -225,3 +225,38 @@ func (s staticOAuth) Refresh(ctx context.Context, c Credential) (Credential, err
 	return s.refresh(ctx, c)
 }
 func (s staticOAuth) ToAuth(c Credential) (ModelAuth, error) { return s.toAuth(c) }
+
+func TestCheckAuthGoogleEnv(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "g-key")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "google")
+	if chk == nil || chk.Source != "GEMINI_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthBedrockAmbient(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIATEST")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "amazon-bedrock")
+	if chk == nil || chk.Source != "AWS_ACCESS_KEY_ID" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthBedrockNeedsSecret(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIATEST")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "")
+	t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", "")
+	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "")
+	s := Open(t.TempDir())
+	if chk := CheckAuth(s, "amazon-bedrock"); chk != nil {
+		t.Fatalf("access key alone should not auth: %+v", chk)
+	}
+}

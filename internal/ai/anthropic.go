@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // This file maps Anthropic Messages SSE events to AssistantMessageEvents.
@@ -159,30 +161,17 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		}
 		req["tools"] = tools
 	}
-	if budget := thinkingBudgetTokens(opts.Thinking); budget > 0 {
+	budget := opts.ThinkingBudget
+	if budget == 0 {
+		budget = models.BudgetTokens(opts.Thinking)
+	}
+	if budget > 0 {
 		req["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
 		if maxTokens <= budget {
 			req["max_tokens"] = budget + 4096
 		}
 	}
 	return json.Marshal(req)
-}
-
-func thinkingBudgetTokens(level string) int {
-	switch level {
-	case "minimal":
-		return 1024
-	case "low":
-		return 2048
-	case "medium":
-		return 5120
-	case "high":
-		return 10000
-	case "xhigh", "max":
-		return 31999
-	default:
-		return 0
-	}
 }
 
 // --- SSE core ---

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,5 +46,53 @@ func TestApplyModelSpec(t *testing.T) {
 	applyModelSpec(&provider, &model, &thinking, "openai/gpt-4o:high")
 	if provider != "openai" || model != "gpt-4o" || thinking != "high" {
 		t.Fatalf("provider=%s model=%s thinking=%s", provider, model, thinking)
+	}
+}
+
+func TestListModelsFiltersByAuth(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--list-models", "--offline", "--config-dir", t.TempDir()})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "openai/gpt-4o") {
+		t.Fatalf("missing openai: %s", s)
+	}
+	if strings.Contains(s, "anthropic/") {
+		t.Fatalf("unauthenticated anthropic leaked: %s", s)
+	}
+}
+
+func TestListModelsEmptyWithoutAuth(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--list-models", "--offline", "--config-dir", t.TempDir()})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.String()) != "" {
+		t.Fatalf("want empty list, got %q", out.String())
 	}
 }

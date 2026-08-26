@@ -4,6 +4,7 @@ go 1.27
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.66.0
+	github.com/aws/aws-sdk-go-v2 v1.43.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.38
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.57.4
 	github.com/charmbracelet/bubbles v1.0.0
@@ -26,7 +27,6 @@ require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.43.7 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.18 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.37 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.38 // indirect

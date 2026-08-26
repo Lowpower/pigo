@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/slash"
@@ -208,8 +209,9 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				"isScoped":      len(e.Scoped) > 0,
 			}, "")
 		case "get_available_models":
+			ids := auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))
 			var list []map[string]string
-			for _, m := range models.Catalog() {
+			for _, m := range models.Available(ids) {
 				list = append(list, map[string]string{"provider": m.Provider, "id": m.ID, "api": m.API})
 			}
 			reply(id, "get_available_models", true, map[string]any{"models": list}, "")

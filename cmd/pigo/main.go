@@ -155,16 +155,30 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			_ = os.Setenv("OPENAI_API_KEY", f.apiKey)
 		case "opencode":
 			_ = os.Setenv("OPENCODE_API_KEY", f.apiKey)
+		case "google":
+			_ = os.Setenv("GEMINI_API_KEY", f.apiKey)
+		case "amazon-bedrock":
+			_ = os.Setenv("AWS_BEARER_TOKEN_BEDROCK", f.apiKey)
 		default:
 			_ = os.Setenv("ANTHROPIC_API_KEY", f.apiKey)
 		}
+	}
+	auth.ApplyEnv(agentDir)
+	offline := f.offline || os.Getenv("PIGO_OFFLINE") != ""
+	catalogURL := ""
+	if !offline {
+		catalogURL = models.DefaultCatalogBaseURL()
+	}
+	if err := models.PrepareCatalog(agentDir, catalogURL, offline); err != nil {
+		return fmt.Errorf("models.json: %w", err)
 	}
 	if f.listModels {
 		q := f.listModelsQuery
 		if q == "" && len(args) > 0 {
 			q = args[0]
 		}
-		for _, m := range models.Search(q) {
+		ids := auth.AuthenticatedIDs(auth.Open(agentDir))
+		for _, m := range models.SearchIn(models.Available(ids), q) {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s/%s\t%s\n", m.Provider, m.ID, m.API)
 		}
 		return nil
@@ -258,6 +272,16 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		trusted = trust.Resolve(st, cwd, nil)
 	}
 
+	cliProvider := f.provider
+	cliModel := ""
+	if f.model != "" {
+		p, id, _ := models.ParseSpec(f.model)
+		if cliProvider == "" {
+			cliProvider = p
+		}
+		cliModel = id
+	}
+
 	eng, err := runtime.New(cmd.Context(), runtime.Options{
 		Config:         cfg,
 		Cwd:            cwd,
@@ -279,6 +303,11 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		NoPromptTpls:   f.noPromptTpls,
 		PromptPaths:    f.promptTemplates,
 		Models:         splitCSV(f.modelsFlag),
+		CLIProvider:    cliProvider,
+		CLIModel:       cliModel,
+		CLIThinking:    f.thinking,
+		CatalogBaseURL: catalogURL,
+		Offline:        f.offline,
 	})
 	if err != nil {
 		return err
