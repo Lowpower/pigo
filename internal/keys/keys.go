@@ -412,4 +412,5 @@ var helpOrder = []string{
 	"tui.editor.yankPop",
 	"tui.editor.jumpForward",
 	"tui.editor.jumpBackward",
+	"tui.input.tab",
 }

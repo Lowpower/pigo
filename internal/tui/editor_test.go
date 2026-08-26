@@ -231,7 +231,7 @@ func TestHotkeysListsEditorBindings(t *testing.T) {
 	if keys.UseWindowsKeys() {
 		paste = "alt+v"
 	}
-	for _, want := range []string{"ctrl+g", paste, "ctrl+y", "ctrl+]"} {
+	for _, want := range []string{"ctrl+g", paste, "ctrl+y", "ctrl+]", "tab"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("hotkeys missing %s:\n%s", want, text)
 		}

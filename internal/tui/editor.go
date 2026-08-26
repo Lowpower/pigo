@@ -62,6 +62,32 @@ func newPromptEditor() promptEditor {
 	}
 }
 
+func (e *promptEditor) bashMode() bool {
+	return strings.HasPrefix(strings.TrimLeft(e.ta.Value(), " \t"), "!")
+}
+
+func (e *promptEditor) refreshPrompt() {
+	if e.bashMode() {
+		e.ta.Prompt = "$ "
+		return
+	}
+	e.ta.Prompt = "│ "
+}
+
+func (e *promptEditor) applyComplete(prefix string, item completeItem) {
+	line, col := e.cursorLC()
+	lines := strings.Split(e.ta.Value(), "\n")
+	if line < 0 || line >= len(lines) {
+		return
+	}
+	next, newCol := applyComplete(lines[line], prefix, col, item)
+	lines[line] = next
+	e.last = ""
+	e.exitHistory()
+	e.setLines(lines, line, newCol)
+	e.refreshPrompt()
+}
+
 func (e *promptEditor) Value() string { return e.ta.Value() }
 
 func (e *promptEditor) View() string { return e.ta.View() }
@@ -76,6 +102,7 @@ func (e *promptEditor) SetValue(s string) {
 	e.yankN = 0
 	e.exitHistory()
 	e.ta.SetValue(s)
+	e.refreshPrompt()
 }
 
 func (e *promptEditor) Reset() {
@@ -112,6 +139,7 @@ func (e *promptEditor) insert(text string) {
 	e.last = ""
 	e.exitHistory()
 	e.ta.InsertString(text)
+	e.refreshPrompt()
 }
 
 func (e *promptEditor) insertPaste(raw string) {
@@ -135,9 +163,11 @@ func (e *promptEditor) insertPaste(raw string) {
 			marker += " " + strconv.Itoa(len(text)) + " chars]"
 		}
 		e.ta.InsertString(marker)
+		e.refreshPrompt()
 		return
 	}
 	e.ta.InsertString(text)
+	e.refreshPrompt()
 }
 
 func (e *promptEditor) pasteClipboard() {
@@ -217,6 +247,7 @@ func (e *promptEditor) afterTextareaKey(msg tea.KeyMsg, kb *keys.Manager) {
 		e.last = ""
 		e.exitHistory()
 	}
+	e.refreshPrompt()
 }
 
 func (e *promptEditor) handleUp() {
