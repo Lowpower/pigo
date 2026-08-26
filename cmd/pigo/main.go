@@ -303,7 +303,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		if prompt == "" {
 			return fmt.Errorf("--mode json requires a prompt")
 		}
-		return eng.PrintJSON(ctx, out, history, prompt)
+		return eng.PrintJSON(ctx, out, history, prompt, nil)
 	case "rpc":
 		return eng.ServeRPC(ctx, cmd.InOrStdin(), out)
 	default:
