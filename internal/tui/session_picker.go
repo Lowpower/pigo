@@ -13,17 +13,21 @@ import (
 )
 
 type resumeOverlay struct {
-	current   []session.Summary
-	all       []session.Summary
-	rows      []session.Summary
-	scope     string // "current" or "all"
-	cursor    int
-	query     string
-	cwd       string
-	agent     string
-	renaming  bool
-	renameBuf string
-	confirm   string // path pending delete
+	current     []session.Summary
+	all         []session.Summary
+	rows        []pickerRow
+	scope       string // "current" or "all"
+	sortMode    string
+	nameFilter  string
+	showPath    bool
+	cursor      int
+	query       string
+	cwd         string
+	agent       string
+	currentPath string
+	renaming    bool
+	renameBuf   string
+	confirm     string // path pending delete
 }
 
 func (m Model) openResumePicker(cwd string) (tea.Model, tea.Cmd) {
@@ -34,6 +38,10 @@ func (m Model) openResumePicker(cwd string) (tea.Model, tea.Cmd) {
 	if m.engine == nil {
 		return note("no engine")
 	}
+	currentPath := ""
+	if m.engine.Opts.Session != nil {
+		currentPath = m.engine.Opts.Session.File()
+	}
 	cur, err := session.Summaries(cwd, m.engine.Opts.AgentDir)
 	if err != nil {
 		return note("resume error: " + err.Error())
@@ -43,11 +51,14 @@ func (m Model) openResumePicker(cwd string) (tea.Model, tea.Cmd) {
 		return note("resume error: " + err.Error())
 	}
 	m.resume = resumeOverlay{
-		current: cur,
-		all:     all,
-		scope:   "current",
-		cwd:     cwd,
-		agent:   m.engine.Opts.AgentDir,
+		current:     cur,
+		all:         all,
+		scope:       "current",
+		sortMode:    sortThreaded,
+		nameFilter:  nameAll,
+		cwd:         cwd,
+		agent:       m.engine.Opts.AgentDir,
+		currentPath: currentPath,
 	}
 	m.resume.apply()
 	if len(m.resume.rows) == 0 {
@@ -62,15 +73,7 @@ func (r *resumeOverlay) apply() {
 	if r.scope == "all" {
 		src = r.all
 	}
-	q := strings.ToLower(strings.TrimSpace(r.query))
-	var rows []session.Summary
-	for _, s := range src {
-		hay := strings.ToLower(s.Name + " " + s.FirstMessage + " " + s.ID + " " + s.Cwd)
-		if q == "" || strings.Contains(hay, q) {
-			rows = append(rows, s)
-		}
-	}
-	r.rows = rows
+	r.rows = filterPickerSessions(src, r.query, r.sortMode, r.nameFilter)
 	if r.cursor >= len(r.rows) {
 		r.cursor = max(0, len(r.rows)-1)
 	}
@@ -82,7 +85,7 @@ func (m Model) handleResumeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "enter":
 			if m.resume.cursor >= 0 && m.resume.cursor < len(m.resume.rows) {
-				path := m.resume.rows[m.resume.cursor].Path
+				path := m.resume.rows[m.resume.cursor].session.Path
 				if opened, err := session.Open(path); err == nil {
 					opened.SetName(strings.TrimSpace(m.resume.renameBuf))
 				}
@@ -141,7 +144,7 @@ func (m Model) handleResumeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.resume.cursor < 0 || m.resume.cursor >= len(m.resume.rows) {
 			return m, nil
 		}
-		path := m.resume.rows[m.resume.cursor].Path
+		path := m.resume.rows[m.resume.cursor].session.Path
 		if m.picking {
 			m.pickResult = path
 			m.quitting = true
@@ -169,14 +172,45 @@ func (m Model) handleResumeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.overlay = overlayNone
 		return m, nil
-	case "n":
+	case "ctrl+s":
+		m.resume.sortMode = cycleSortMode(m.resume.sortMode)
+		m.resume.apply()
+	case "ctrl+n":
+		if m.resume.nameFilter == nameNamed {
+			m.resume.nameFilter = nameAll
+		} else {
+			m.resume.nameFilter = nameNamed
+		}
+		m.resume.cursor = 0
+		m.resume.apply()
+	case "ctrl+p":
+		m.resume.showPath = !m.resume.showPath
+	case "ctrl+r":
 		if m.resume.cursor >= 0 && m.resume.cursor < len(m.resume.rows) {
 			m.resume.renaming = true
-			m.resume.renameBuf = m.resume.rows[m.resume.cursor].Name
+			m.resume.renameBuf = m.resume.rows[m.resume.cursor].session.Name
 		}
-	case "d", "delete":
+	case "ctrl+d":
 		if m.resume.cursor >= 0 && m.resume.cursor < len(m.resume.rows) {
-			m.resume.confirm = m.resume.rows[m.resume.cursor].Path
+			path := m.resume.rows[m.resume.cursor].session.Path
+			if m.resume.currentPath != "" && path == m.resume.currentPath {
+				return m, nil
+			}
+			m.resume.confirm = path
+		}
+	case "ctrl+backspace":
+		if m.resume.query != "" {
+			r := []rune(m.resume.query)
+			m.resume.query = string(r[:len(r)-1])
+			m.resume.apply()
+			return m, nil
+		}
+		if m.resume.cursor >= 0 && m.resume.cursor < len(m.resume.rows) {
+			path := m.resume.rows[m.resume.cursor].session.Path
+			if m.resume.currentPath != "" && path == m.resume.currentPath {
+				return m, nil
+			}
+			m.resume.confirm = path
 		}
 	case "backspace":
 		if m.resume.query != "" {
@@ -205,7 +239,21 @@ func (m Model) resumeView() string {
 	var b strings.Builder
 	b.WriteString(m.titleStyle.Render("  Resume Session"))
 	b.WriteString("\n")
-	b.WriteString(m.metaStyle.Render("tab scope (" + m.resume.scope + ")  enter open  n rename  d delete  type to search  esc"))
+	nameLabel := "All"
+	if m.resume.nameFilter == nameNamed {
+		nameLabel = "Named"
+	}
+	pathState := "off"
+	if m.resume.showPath {
+		pathState = "on"
+	}
+	b.WriteString(m.metaStyle.Render(
+		"tab " + m.resume.scope +
+			"  ctrl+s " + sortLabel(m.resume.sortMode) +
+			"  ctrl+n " + nameLabel +
+			"  ctrl+p path(" + pathState + ")" +
+			"  ctrl+r rename  ctrl+d delete  esc",
+	))
 	b.WriteString("\nType to search: " + m.resume.query + "\n")
 	if m.resume.renaming {
 		b.WriteString("\n  Rename: " + m.resume.renameBuf + "█\n")
@@ -225,7 +273,8 @@ func (m Model) resumeView() string {
 	}
 	end := min(len(m.resume.rows), start+maxLines)
 	for i := start; i < end; i++ {
-		s := m.resume.rows[i]
+		row := m.resume.rows[i]
+		s := row.session
 		cur := "  "
 		if i == m.resume.cursor {
 			cur = "› "
@@ -237,8 +286,8 @@ func (m Model) resumeView() string {
 				name = name[:8]
 			}
 		}
-		line := cur + name + "  " + formatAge(s.Modified) + "  " + s.FirstMessage
-		if m.resume.scope == "all" && s.Cwd != "" {
+		line := cur + pickerTreePrefix(row) + name + "  " + formatAge(s.Modified) + "  " + s.FirstMessage
+		if (m.resume.showPath || m.resume.scope == "all") && s.Cwd != "" {
 			line += "  (" + s.Cwd + ")"
 		}
 		b.WriteString(line)
@@ -272,7 +321,7 @@ func PickSession(cwd, agentDir string) (string, error) {
 		return "", err
 	}
 	m := New(config.Config{Theme: "default"})
-	m.resume = resumeOverlay{current: cur, all: all, scope: "current", cwd: cwd, agent: agentDir}
+	m.resume = resumeOverlay{current: cur, all: all, scope: "current", sortMode: sortThreaded, nameFilter: nameAll, cwd: cwd, agent: agentDir}
 	m.resume.apply()
 	m.overlay = overlayResume
 	m.picking = true

@@ -20,12 +20,14 @@ type TreeNode struct {
 
 // Summary is a one-line listing used by /resume.
 type Summary struct {
-	Path         string
-	ID           string
-	Name         string
-	Cwd          string
-	FirstMessage string
-	Modified     time.Time
+	Path          string
+	ID            string
+	Name          string
+	Cwd           string
+	FirstMessage  string
+	ParentSession string
+	SearchText    string
+	Modified      time.Time
 }
 
 // Branch moves the leaf pointer so the next append is a child of id.
@@ -262,17 +264,13 @@ func (m *Manager) UserMessagesForForking() []map[string]string {
 			continue
 		}
 		var p struct {
-			Role    string `json:"role"`
-			Content any    `json:"content"`
+			Role string `json:"role"`
 		}
 		if json.Unmarshal(e.Message, &p) != nil || p.Role != "user" {
 			continue
 		}
-		text := ""
-		if s, ok := p.Content.(string); ok {
-			text = s
-		}
-		if text == "" {
+		text := userText(e)
+		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		out = append(out, map[string]string{"entryId": e.ID, "text": text})
@@ -320,6 +318,37 @@ func shortID(id string) string {
 	return id
 }
 
+func summaryFromFile(path string, h Header, entries []Entry, mod time.Time) Summary {
+	var userBits []string
+	first := ""
+	for _, e := range entries {
+		t := userText(&e)
+		if t == "" {
+			continue
+		}
+		if first == "" {
+			first = t
+		}
+		userBits = append(userBits, t)
+	}
+	if len(first) > 60 {
+		first = first[:60] + "…"
+	}
+	first = strings.ReplaceAll(first, "\n", " ")
+	name := displayName(h, entries)
+	search := strings.Join([]string{h.ID, name, h.Cwd, strings.Join(userBits, " ")}, " ")
+	return Summary{
+		Path:          path,
+		ID:            h.ID,
+		Name:          name,
+		Cwd:           h.Cwd,
+		FirstMessage:  first,
+		ParentSession: h.ParentSession,
+		SearchText:    search,
+		Modified:      mod,
+	}
+}
+
 // Summaries lists sessions for cwd, newest first, with a first-message preview.
 func Summaries(cwd, agentDir string) ([]Summary, error) {
 	paths, err := List(cwd, agentDir)
@@ -336,20 +365,7 @@ func Summaries(cwd, agentDir string) ([]Summary, error) {
 		if err != nil {
 			continue
 		}
-		first := ""
-		for _, e := range entries {
-			if t := userText(&e); t != "" {
-				first = t
-				break
-			}
-		}
-		if len(first) > 60 {
-			first = first[:60] + "…"
-		}
-		first = strings.ReplaceAll(first, "\n", " ")
-		out = append(out, Summary{
-			Path: p, ID: h.ID, Name: displayName(h, entries), Cwd: h.Cwd, FirstMessage: first, Modified: info.ModTime(),
-		})
+		out = append(out, summaryFromFile(p, h, entries, info.ModTime()))
 	}
 	return out, nil
 }
@@ -396,20 +412,7 @@ func SummariesAll(agentDir string) ([]Summary, error) {
 			if err != nil {
 				continue
 			}
-			first := ""
-			for _, e := range entries {
-				if t := userText(&e); t != "" {
-					first = t
-					break
-				}
-			}
-			if len(first) > 60 {
-				first = first[:60] + "…"
-			}
-			first = strings.ReplaceAll(first, "\n", " ")
-			out = append(out, Summary{
-				Path: p, ID: h.ID, Name: displayName(h, entries), Cwd: h.Cwd, FirstMessage: first, Modified: info.ModTime(),
-			})
+			out = append(out, summaryFromFile(p, h, entries, info.ModTime()))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Modified.After(out[j].Modified) })

@@ -200,6 +200,139 @@ func TestDoubleEscapeOpensTree(t *testing.T) {
 	}
 }
 
+func TestTreeOpensWhileRunning(t *testing.T) {
+	m := treeModel(t)
+	m.running = true
+	m.textarea.SetValue("/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.overlay != overlayTree {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+}
+
+func TestTreeConfirmAbortsThenNavigates(t *testing.T) {
+	m := treeModel(t)
+	m.cfg.BranchSummary.SkipPrompt = boolPtr(true)
+	m.running = true
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+	ch := make(chan agent.Event)
+	close(ch)
+	m.agentEvents = ch
+	m.queued = []string{"later"}
+	m.textarea.SetValue("/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !cancelled {
+		t.Fatal("expected abort")
+	}
+	if m.pendingNav == nil {
+		t.Fatal("expected pending nav")
+	}
+	if m.overlay != overlayNone {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+	if !strings.Contains(m.textarea.Value(), "later") {
+		t.Fatalf("queued not restored: %q", m.textarea.Value())
+	}
+	leafBefore := m.engine.Opts.Session.LeafID()
+	m = send(m, agentClosedMsg{})
+	if m.pendingNav != nil {
+		t.Fatal("pending nav should be cleared")
+	}
+	if m.engine.Opts.Session.LeafID() == leafBefore {
+		t.Fatal("leaf should move after abort completes")
+	}
+	if strings.TrimSpace(m.textarea.Value()) == "" {
+		t.Fatal("restored queue should not be overwritten")
+	}
+}
+
+func TestCtrlXCopiesTreeSelection(t *testing.T) {
+	m := treeModel(t)
+	m.textarea.SetValue("/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	if m.clipOSC == "" || !strings.Contains(m.clipOSC, "\x1b]52;c;") {
+		t.Fatalf("clipOSC = %q", m.clipOSC)
+	}
+	if m.tree.status != "Copied selected message to clipboard" {
+		t.Fatalf("status = %q", m.tree.status)
+	}
+	if !strings.Contains(m.View(), "\x1b]52;c;") {
+		t.Fatal("view should emit OSC 52")
+	}
+}
+
+func TestDoubleEscapeForkOpensPicker(t *testing.T) {
+	m := treeModel(t)
+	m.cfg.DoubleEscapeAction = "fork"
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.overlay != overlayFork {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+	if !strings.Contains(m.View(), "Fork from message") {
+		t.Fatalf("view =\n%s", m.View())
+	}
+}
+
+func TestSlashForkOpensPickerAndConfirms(t *testing.T) {
+	m := treeModel(t)
+	m.textarea.SetValue("/fork")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.overlay != overlayFork {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+	oldID := m.engine.Opts.Session.ID()
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.overlay != overlayNone {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+	if m.engine.Opts.Session.ID() == oldID {
+		t.Fatal("expected new forked session")
+	}
+	if !strings.Contains(m.textarea.Value(), "hello tree") {
+		t.Fatalf("editor = %q", m.textarea.Value())
+	}
+}
+
+func TestResumePickerSortAndNamedFilter(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	a := session.New(cwd, agent)
+	_, _ = a.AppendMessage("user", map[string]any{"role": "user", "content": "alpha chat"})
+	_, _ = a.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
+	a.SetName("Alpha")
+	b := session.New(cwd, agent)
+	_, _ = b.AppendMessage("user", map[string]any{"role": "user", "content": "beta chat"})
+	_, _ = b.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Session: b, AgentDir: agent, Cwd: cwd}}
+	next, _ := m.openResumePicker(cwd)
+	got := next.(Model)
+	if got.resume.sortMode != sortThreaded {
+		t.Fatalf("sort = %s", got.resume.sortMode)
+	}
+	got = send(got, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if got.resume.sortMode != sortRecent {
+		t.Fatalf("sort after ctrl+s = %s", got.resume.sortMode)
+	}
+	got = send(got, tea.KeyMsg{Type: tea.KeyCtrlN})
+	if got.resume.nameFilter != nameNamed {
+		t.Fatalf("nameFilter = %s", got.resume.nameFilter)
+	}
+	if len(got.resume.rows) != 1 || got.resume.rows[0].session.Name != "Alpha" {
+		t.Fatalf("named rows = %+v", got.resume.rows)
+	}
+	got = send(got, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if !strings.Contains(got.resume.query, "n") {
+		t.Fatalf("query should accept n, got %q", got.resume.query)
+	}
+}
+
 func TestSlashResumeOpensPicker(t *testing.T) {
 	agent := t.TempDir()
 	cwd := t.TempDir()

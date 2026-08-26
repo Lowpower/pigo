@@ -127,4 +127,14 @@ func TestUserMessagesForForking(t *testing.T) {
 	if len(got) != 1 || got[0]["text"] != "alpha" {
 		t.Fatalf("%+v", got)
 	}
+	_, _ = m.AppendMessage("user", map[string]any{
+		"role": "user",
+		"content": []map[string]any{
+			{"type": "text", "text": "array body"},
+		},
+	})
+	got = m.UserMessagesForForking()
+	if len(got) != 2 || got[1]["text"] != "array body" {
+		t.Fatalf("array content: %+v", got)
+	}
 }

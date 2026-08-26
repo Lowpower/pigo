@@ -80,10 +80,13 @@ type Model struct {
 	overlay       overlayKind
 	tree          treeOverlay
 	resume        resumeOverlay
+	fork          forkOverlay
 	lastEscape    time.Time
 	summaryCancel context.CancelFunc
 	picking       bool
 	pickResult    string
+	pendingNav    *pendingNav
+	clipOSC       string
 }
 
 // New builds the interactive model from the resolved config.
@@ -142,10 +145,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleLoginKey(msg)
 		}
 		if m.overlay != overlayNone {
-			if m.overlay == overlayResume {
+			switch m.overlay {
+			case overlayResume:
 				return m.handleResumeKey(msg)
+			case overlayFork:
+				return m.handleForkKey(msg)
+			default:
+				return m.handleTreeKey(msg)
 			}
-			return m.handleTreeKey(msg)
 		}
 		switch msg.String() {
 		case "ctrl+c":
@@ -191,6 +198,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.streaming = ""
 		m.agentEvents = nil
 		m.cancel = nil
+		if m.pendingNav != nil {
+			nav := *m.pendingNav
+			m.pendingNav = nil
+			return m.applyTreeNav(nav.target, nav.summarize, nav.custom, nav.replace)
+		}
 		if len(m.queued) > 0 {
 			next := m.queued[0]
 			m.queued = m.queued[1:]
@@ -256,6 +268,9 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	if text == "" {
 		return m, nil
 	}
+	if cmd, ok := slash.Parse(text); ok {
+		return m.handleSlash(cmd)
+	}
 	if m.running {
 		m.textarea.Reset()
 		// Enter while streaming steers the current loop; leftover lines
@@ -268,9 +283,6 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		m.queued = append(m.queued, text)
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("queued: " + text)})
 		return m, nil
-	}
-	if cmd, ok := slash.Parse(text); ok {
-		return m.handleSlash(cmd)
 	}
 	return m.startTurn(text)
 }
@@ -419,16 +431,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		cwd, _ := os.Getwd()
 		if cmd.Rest == "" {
-			msgs := m.engine.Opts.Session.UserMessagesForForking()
-			if len(msgs) == 0 {
-				return note("no user messages to fork from")
-			}
-			var b strings.Builder
-			b.WriteString("user messages ( /fork <entryId> ):\n")
-			for _, row := range msgs {
-				fmt.Fprintf(&b, "  %s  %s\n", row["entryId"][:min(8, len(row["entryId"]))], strings.ReplaceAll(row["text"], "\n", " "))
-			}
-			return note(b.String())
+			return m.openFork()
 		}
 		child, text, err := m.engine.Opts.Session.ForkFrom(cmd.Rest, cwd, m.engine.Opts.AgentDir, "before")
 		if err != nil {
@@ -507,9 +510,8 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if text == "" {
 			return note("no assistant text to copy")
 		}
-		b64 := base64.StdEncoding.EncodeToString([]byte(text))
-		osc := "\x1b]52;c;" + b64 + "\x07"
-		return note(osc + "copied last assistant message")
+		b64 := osc52(text)
+		return note(b64 + "copied last assistant message")
 	case "skill":
 		if m.engine == nil {
 			return note("no skills loaded")
@@ -534,6 +536,16 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) startTurn(text string) (tea.Model, tea.Cmd) {
+	if m.running {
+		if m.engine != nil {
+			m.engine.PushSteer(text)
+			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("steering: " + text)})
+			return m, nil
+		}
+		m.queued = append(m.queued, text)
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("queued: " + text)})
+		return m, nil
+	}
 	m.textarea.Reset()
 	m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
 	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text})
@@ -637,10 +649,13 @@ func (m Model) View() string {
 		return m.loginView()
 	}
 	if m.overlay == overlayTree || m.overlay == overlayTreeLabel || m.overlay == overlayTreeSummary || m.overlay == overlayTreeCustom {
-		return m.treeView()
+		return m.withClip(m.treeView())
 	}
 	if m.overlay == overlayResume {
-		return m.resumeView()
+		return m.withClip(m.resumeView())
+	}
+	if m.overlay == overlayFork {
+		return m.withClip(m.forkView())
 	}
 
 	var b strings.Builder
@@ -666,7 +681,54 @@ func (m Model) View() string {
 	b.WriteString(m.textarea.View())
 	b.WriteString("\n")
 	b.WriteString(m.footerStyle.Render("Enter send · Alt+Enter follow-up · Shift+Tab thinking · Ctrl+P model · /help · Ctrl+C exit"))
-	return b.String()
+	return m.withClip(b.String())
+}
+
+type pendingNav struct {
+	target    string
+	summarize bool
+	custom    string
+	replace   bool
+}
+
+func (m Model) turnBusy() bool {
+	return m.running || m.agentEvents != nil
+}
+
+func (m *Model) restoreQueuedToEditor() {
+	var parts []string
+	if m.engine != nil {
+		s, f := m.engine.TakeQueues()
+		parts = append(parts, s...)
+		parts = append(parts, f...)
+	}
+	parts = append(parts, m.queued...)
+	m.queued = nil
+	var keep []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			keep = append(keep, p)
+		}
+	}
+	if len(keep) == 0 {
+		return
+	}
+	cur := m.textarea.Value()
+	if strings.TrimSpace(cur) != "" {
+		keep = append(keep, cur)
+	}
+	m.textarea.SetValue(strings.Join(keep, "\n\n"))
+}
+
+func osc52(text string) string {
+	return "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(text)) + "\x07"
+}
+
+func (m Model) withClip(s string) string {
+	if m.clipOSC == "" {
+		return s
+	}
+	return m.clipOSC + s
 }
 
 func (m Model) providerLabel() string {

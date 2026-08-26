@@ -65,7 +65,7 @@ func Builtins() []Command {
 		{Name: "changelog", Description: "not implemented"},
 		{Name: "hotkeys", Description: "show keyboard shortcuts"},
 		{Name: "help", Aliases: []string{"?"}, Description: "list slash commands"},
-		{Name: "fork", Description: "create a new fork from a previous user message"},
+		{Name: "fork", Description: "open fork picker, or /fork <id>"},
 		{Name: "clone", Description: "duplicate the current session at the current position"},
 		{Name: "trust", Description: "not implemented"},
 		{Name: "login", Description: "configure provider authentication"},
@@ -103,12 +103,14 @@ func HotkeysText() string {
   enter                 send (steer while streaming)
   alt+enter             queue follow-up while streaming
   shift+enter / ctrl+j  newline
-  escape                interrupt / double-esc tree
+  escape                interrupt / double-esc tree or fork
   ctrl+c                clear editor / interrupt / quit
   ctrl+d                exit when editor is empty
   ctrl+p                cycle model forward
   shift+ctrl+p          cycle model backward
   shift+tab             cycle thinking level
+  /tree                 session tree (open while streaming; confirm aborts then navigates)
+  /fork                 fork picker (or /fork <id>)
   /help                 list slash commands
 `
 }

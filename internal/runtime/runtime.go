@@ -312,6 +312,26 @@ func (e *Engine) emitQueueUpdate() {
 	e.emitSession(map[string]any{"type": "queue_update", "steering": s, "followUp": f})
 }
 
+// TakeQueues empties steering and follow-up queues, returning their texts in
+// that order. Used by the TUI to restore queued messages before aborting a turn
+// so NavigateTree can run.
+func (e *Engine) TakeQueues() (steering, follow []string) {
+	e.mu.Lock()
+	steering = make([]string, 0, len(e.steer))
+	for _, m := range e.steer {
+		steering = append(steering, m.Content)
+	}
+	follow = make([]string, 0, len(e.follow))
+	for _, m := range e.follow {
+		follow = append(follow, m.Content)
+	}
+	e.steer = nil
+	e.follow = nil
+	e.mu.Unlock()
+	e.emitQueueUpdate()
+	return steering, follow
+}
+
 func (e *Engine) queueUser(dst *[]ai.Message, text string, images []ai.ImageContent) {
 	text = strings.TrimSpace(text)
 	if text == "" && len(images) == 0 {
