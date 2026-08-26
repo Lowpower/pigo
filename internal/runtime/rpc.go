@@ -70,6 +70,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			wg.Wait()
 			return nil
 		case "abort":
+			e.AbortRetry()
 			stateMu.Lock()
 			if cancel != nil {
 				cancel()
@@ -428,8 +429,13 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				c()
 			}
 			reply(id, "abort_bash", true, nil, "")
-		case "set_auto_retry", "abort_retry":
-			reply(id, typ, false, nil, "unsupported rpc command: "+typ)
+		case "set_auto_retry":
+			enabled, _ := raw["enabled"].(bool)
+			e.SetAutoRetryEnabled(enabled)
+			reply(id, "set_auto_retry", true, nil, "")
+		case "abort_retry":
+			e.AbortRetry()
+			reply(id, "abort_retry", true, nil, "")
 		default:
 			emit(map[string]any{"type": "error", "id": id, "message": "unsupported rpc command: " + typ})
 		}

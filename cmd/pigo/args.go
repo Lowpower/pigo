@@ -18,7 +18,7 @@ func expandShortFlags(args []string) []string {
 		"-nc":  "--no-context-files",
 		"-ne":  "--no-extensions",
 		"-xt":  "--exclude-tools",
-		"-np":  "--no-prompt-templates",
+		"-na":  "--no-approve",
 	}
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
