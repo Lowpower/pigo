@@ -69,6 +69,24 @@ func TestCompactReplacesOldWithSummary(t *testing.T) {
 	}
 }
 
+func TestCompactPassesCustomInstructions(t *testing.T) {
+	msgs := makeMessages(30, 4000)
+	var prompt string
+	sf := func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		if len(req.Messages) > 0 {
+			prompt = req.Messages[len(req.Messages)-1].Content
+		}
+		return ai.ScriptedStreamFn("## Goal\nFocus.", 0)(ctx, req, opts)
+	}
+	s := DefaultSettings()
+	s.CustomInstructions = "Focus on code changes"
+	if _, _, err := Compact(context.Background(), sf, "test", msgs, s); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "Additional focus: Focus on code changes") {
+		t.Fatalf("summarization prompt missing custom instructions:\n%s", prompt)
+	}
+}
 func TestCompactNoopWhenSmall(t *testing.T) {
 	msgs := makeMessages(3, 100)
 	compacted, summary, err := Compact(context.Background(), ai.ScriptedStreamFn("x", 0), "test", msgs, DefaultSettings())

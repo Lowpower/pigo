@@ -13,6 +13,8 @@ type Settings struct {
 	ReserveTokens int
 	// KeepRecentTokens is roughly how many tokens of recent messages to keep verbatim.
 	KeepRecentTokens int
+	// CustomInstructions is appended to the summarization prompt (RPC compact).
+	CustomInstructions string
 }
 
 // DefaultSettings is the built-in compaction window.
@@ -95,10 +97,14 @@ const SummaryMarker = "[Conversation summary — earlier messages were compacted
 
 // Summarize asks the model to summarize the given messages using StreamFn,
 // returning the assistant's text.
-func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message) (string, error) {
+func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra string) (string, error) {
 	reqMsgs := make([]ai.Message, 0, len(toSummarize)+1)
 	reqMsgs = append(reqMsgs, toSummarize...)
-	reqMsgs = append(reqMsgs, ai.Message{Role: ai.RoleUser, Content: SummarizationPrompt})
+	prompt := SummarizationPrompt
+	if extra != "" {
+		prompt = prompt + "\n\nAdditional focus: " + extra
+	}
+	reqMsgs = append(reqMsgs, ai.Message{Role: ai.RoleUser, Content: prompt})
 
 	stream, err := sf(ctx, ai.Context{Messages: reqMsgs}, ai.Options{Model: model})
 	if err != nil {
@@ -126,7 +132,7 @@ func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Messag
 	if cut <= 0 {
 		return msgs, "", nil
 	}
-	summary, err := Summarize(ctx, sf, model, msgs[:cut])
+	summary, err := Summarize(ctx, sf, model, msgs[:cut], s.CustomInstructions)
 	if err != nil {
 		return msgs, "", err
 	}

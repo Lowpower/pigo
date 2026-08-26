@@ -34,13 +34,6 @@ func (e *Engine) willRetryAfterAgentEnd(ev agent.Event) bool {
 	return ai.IsRetryableError(lastAssistantMsg(ev.Messages), e.contextWindow())
 }
 
-func (e *Engine) contextWindow() int {
-	if e.Opts.ContextWindow > 0 {
-		return e.Opts.ContextWindow
-	}
-	return e.Opts.Config.ContextWindow
-}
-
 func (e *Engine) prepareRetry(ctx context.Context, last []agent.Msg) bool {
 	msg := lastAssistantMsg(last)
 	if !ai.IsRetryableError(msg, e.contextWindow()) {
