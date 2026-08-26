@@ -69,6 +69,10 @@ type Engine struct {
 	follow []ai.Message
 
 	onSessionEvent func(any)
+
+	retryMu      sync.Mutex
+	retryCancel  context.CancelFunc
+	retryAttempt int
 }
 
 // New applies auth, discovers skills, loads tools/extensions, and builds the prompt.
@@ -383,6 +387,10 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 	if err == nil {
 		history = compacted
 	}
+	return e.runLoop(ctx, history, []ai.Message{userMsg})
+}
+
+func (e *Engine) runLoop(ctx context.Context, history, newUsers []ai.Message) *agent.Stream {
 	req := ai.Context{System: e.System, Messages: history}
 	if e.Tools != nil {
 		req.Tools = e.Tools.AITools()
@@ -392,7 +400,7 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 		Thinking:        e.Opts.Config.Thinking,
 		Steering:        e.Steering,
 		FollowUp:        e.FollowUp,
-		NewUserMessages: []ai.Message{userMsg},
+		NewUserMessages: newUsers,
 	})
 }
 
@@ -560,20 +568,60 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	write := e.onSessionEvent
 	if write == nil {
 		write = func(v any) { _ = enc.Encode(v) }
+		prev := e.onSessionEvent
+		e.onSessionEvent = write
+		defer func() { e.onSessionEvent = prev }()
 	}
-	stream := e.RunPrompt(ctx, history, user, images)
-	var last []agent.Msg
-	for ev := range stream.Events() {
-		payload, err := agent.ToJSON(ev)
-		if err != nil {
-			return err
+	e.retryAttempt = 0
+	hist := history
+	continued := false
+	prefixLen := 0
+	for {
+		var stream *agent.Stream
+		if !continued {
+			stream = e.RunPrompt(ctx, hist, user, images)
+		} else {
+			stream = e.runLoop(ctx, hist, nil)
 		}
-		write(payload)
-		if ev.Type == agent.EventAgentEnd {
-			last = ev.Messages
+		var last []agent.Msg
+		for ev := range stream.Events() {
+			if ev.Type == agent.EventMessageEnd && ev.Assistant != nil &&
+				ev.Assistant.StopReason != ai.StopError && e.retryAttempt > 0 {
+				e.emitSession(map[string]any{
+					"type":    "auto_retry_end",
+					"success": true,
+					"attempt": e.retryAttempt,
+				})
+				e.retryAttempt = 0
+			}
+			if ev.Type == agent.EventAgentEnd {
+				ev.WillRetry = e.willRetryAfterAgentEnd(ev)
+			}
+			payload, err := agent.ToJSON(ev)
+			if err != nil {
+				return err
+			}
+			write(payload)
+			if ev.Type == agent.EventAgentEnd {
+				last = ev.Messages
+			}
 		}
+		if continued {
+			if prefixLen > len(last) {
+				prefixLen = len(last)
+			}
+			e.persisted = 0
+			e.PersistTranscript(last[prefixLen:])
+		} else {
+			e.PersistTranscript(last)
+		}
+		if !e.prepareRetry(ctx, last) {
+			break
+		}
+		hist = stripLastAssistant(last)
+		prefixLen = len(hist)
+		continued = true
 	}
-	e.PersistTranscript(last)
 	write(map[string]any{"type": "agent_settled"})
 	return nil
 }
