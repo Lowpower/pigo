@@ -657,7 +657,26 @@ func TestSearchLazyFTS(t *testing.T) {
 }
 
 func TestJSONLDefaultUntouched(t *testing.T) {
-	if _, err := os.Stat("/workspace/internal/session/session.go"); err != nil {
+	root := testdataRoot(t)
+	if _, err := os.Stat(filepath.Join(root, "internal", "session", "session.go")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func testdataRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("go.mod not found")
+		}
+		dir = parent
 	}
 }
