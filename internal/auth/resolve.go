@@ -108,6 +108,14 @@ func resolveAPIKey(p Provider, cred *Credential) (*Result, error) {
 				return &Result{Auth: ModelAuth{APIKey: v}, Source: name, Env: env}, nil
 			}
 		}
+		if p.APIKey.Resolve != nil {
+			if r := p.APIKey.Resolve(); r != nil {
+				if r.Env == nil {
+					r.Env = env
+				}
+				return r, nil
+			}
+		}
 	}
 	if key == "" {
 		return nil, nil
@@ -117,4 +125,20 @@ func resolveAPIKey(p Provider, cred *Credential) (*Result, error) {
 		source = p.APIKey.Name
 	}
 	return &Result{Auth: ModelAuth{APIKey: key}, Source: source, Env: env}, nil
+}
+
+func bedrockAmbientAuth() *Result {
+	if os.Getenv("AWS_PROFILE") != "" {
+		return &Result{Auth: ModelAuth{}, Source: "AWS_PROFILE"}
+	}
+	if os.Getenv("AWS_ACCESS_KEY_ID") != "" && os.Getenv("AWS_SECRET_ACCESS_KEY") != "" {
+		return &Result{Auth: ModelAuth{}, Source: "AWS_ACCESS_KEY_ID"}
+	}
+	if os.Getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != "" || os.Getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" {
+		return &Result{Auth: ModelAuth{}, Source: "AWS_CONTAINER_CREDENTIALS"}
+	}
+	if os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE") != "" {
+		return &Result{Auth: ModelAuth{}, Source: "AWS_WEB_IDENTITY_TOKEN_FILE"}
+	}
+	return nil
 }

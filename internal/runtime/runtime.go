@@ -46,6 +46,11 @@ type Options struct {
 	NoPromptTpls   bool
 	PromptPaths    []string
 	Models         []string // --models cycling list
+	CLIProvider    string
+	CLIModel       string
+	CLIThinking    string
+	CatalogBaseURL string
+	Offline        bool
 }
 
 // Engine is a configured agent runner.
@@ -86,10 +91,40 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		opts.AgentDir = config.DefaultConfigDir()
 	}
 	auth.ApplyEnv(opts.AgentDir)
+	offline := opts.Offline || os.Getenv("PIGO_OFFLINE") != ""
+	if err := models.PrepareCatalog(opts.AgentDir, opts.CatalogBaseURL, offline); err != nil {
+		return nil, fmt.Errorf("models.json: %w", err)
+	}
+	models.SetThinkingBudgets(opts.Config.ThinkingBudgets)
+	ai.SetHTTPIdleTimeout(opts.Config.HTTPIdleTimeout())
 
-	provider := opts.Config.ResolvedProvider()
+	store := auth.Open(opts.AgentDir)
+	picked := models.PickInitial(models.PickOpts{
+		CLIProvider:   opts.CLIProvider,
+		CLIModel:      opts.CLIModel,
+		SavedProvider: opts.Config.ResolvedProvider(),
+		SavedModel:    opts.Config.ResolvedModel(),
+		Authenticated: auth.AuthenticatedIDs(store),
+	})
+	provider := picked.Provider
+	if provider == "" {
+		provider = opts.Config.ResolvedProvider()
+	}
 	if provider == "" {
 		provider = "anthropic"
+	}
+	if picked.Provider != "" {
+		opts.Config.Provider = picked.Provider
+		opts.Config.DefaultProvider = picked.Provider
+	}
+	if picked.ID != "" {
+		opts.Config.Model = picked.ID
+		opts.Config.DefaultModel = picked.ID
+	}
+	if opts.CLIThinking == "" {
+		if lvl := opts.Config.ModelThinkingLevel(provider, opts.Config.ResolvedModel()); lvl != "" {
+			opts.Config.Thinking = lvl
+		}
 	}
 	sf := boundStream(opts.AgentDir, provider)
 	if sf == nil {
@@ -604,6 +639,8 @@ func (e *Engine) ApplyModel(provider, id, thinking string) {
 	}
 	if thinking != "" {
 		e.Opts.Config.Thinking = thinking
+	} else if lvl := e.Opts.Config.ModelThinkingLevel(e.Provider, e.Opts.Config.ResolvedModel()); lvl != "" {
+		e.Opts.Config.Thinking = lvl
 	}
 }
 
@@ -709,6 +746,9 @@ func boundStream(agentDir, provider string) ai.StreamFn {
 		if res == nil {
 			key := auth.APIKey(agentDir, provider)
 			if key == "" {
+				if auth.CheckAuth(store, provider) != nil {
+					return ai.StreamWithAuth(provider, "", "", nil)(ctx, reqCtx, opts)
+				}
 				return ai.EchoStreamFn()(ctx, reqCtx, opts)
 			}
 			return ai.StreamWithAuth(provider, key, "", nil)(ctx, reqCtx, opts)
@@ -718,7 +758,9 @@ func boundStream(agentDir, provider string) ai.StreamFn {
 			key = auth.Secret(res)
 		}
 		if key == "" && len(res.Auth.Headers) == 0 {
-			return ai.EchoStreamFn()(ctx, reqCtx, opts)
+			if auth.CheckAuth(store, provider) == nil {
+				return ai.EchoStreamFn()(ctx, reqCtx, opts)
+			}
 		}
 		return ai.StreamWithAuth(provider, key, res.Auth.BaseURL, res.Auth.Headers)(ctx, reqCtx, opts)
 	}

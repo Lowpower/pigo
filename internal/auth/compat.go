@@ -49,6 +49,10 @@ func ambientAPIKey(provider string) string {
 			return k
 		}
 		return os.Getenv("GROK_API_KEY")
+	case "google":
+		return os.Getenv("GEMINI_API_KEY")
+	case "amazon-bedrock":
+		return os.Getenv("AWS_BEARER_TOKEN_BEDROCK")
 	default:
 		if k := os.Getenv("ANTHROPIC_API_KEY"); k != "" {
 			return k
@@ -89,6 +93,10 @@ func ApplyEnv(agentDir string) {
 			set("OPENCODE_API_KEY", key)
 		case "openrouter":
 			set("OPENROUTER_API_KEY", key)
+		case "google":
+			set("GEMINI_API_KEY", key)
+		case "amazon-bedrock":
+			set("AWS_BEARER_TOKEN_BEDROCK", key)
 		}
 	}
 }

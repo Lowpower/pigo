@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -66,6 +67,34 @@ func TestLoadRetryDefaultsAndOverride(t *testing.T) {
 	}
 	if cfg.RetryEnabled() || cfg.RetryMaxRetries() != 0 || cfg.RetryBaseDelayMs() != 50 {
 		t.Fatalf("override enabled=%v max=%d delay=%d", cfg.RetryEnabled(), cfg.RetryMaxRetries(), cfg.RetryBaseDelayMs())
+	}
+}
+
+func TestLoadThinkingAndIdleTimeout(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HTTPIdleTimeout() != 5*time.Minute {
+		t.Fatalf("default idle = %s", cfg.HTTPIdleTimeout())
+	}
+	dir := t.TempDir()
+	raw := `{"thinkingBudgets":{"high":42},"modelThinkingLevels":{"openai/gpt-4o":"low"},"httpIdleTimeoutMs":0}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ThinkingBudgets["high"] != 42 {
+		t.Fatalf("budgets=%v", cfg.ThinkingBudgets)
+	}
+	if cfg.ModelThinkingLevel("openai", "gpt-4o") != "low" {
+		t.Fatalf("level=%q", cfg.ModelThinkingLevel("openai", "gpt-4o"))
+	}
+	if cfg.HTTPIdleTimeout() != 0 {
+		t.Fatalf("0 should disable timeout, got %s", cfg.HTTPIdleTimeout())
 	}
 }
 

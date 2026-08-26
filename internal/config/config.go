@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -12,19 +13,22 @@ import (
 // Config holds the resolved pigo settings. Keys are defaultProvider /
 // defaultModel / theme, with aliases (provider / model) for the earlier scaffold.
 type Config struct {
-	Provider         string        `mapstructure:"provider"`
-	Model            string        `mapstructure:"model"`
-	DefaultProvider  string        `mapstructure:"defaultProvider"`
-	DefaultModel     string        `mapstructure:"defaultModel"`
-	Theme            string        `mapstructure:"theme"`
-	Thinking         string        `mapstructure:"thinking"`
-	ContextWindow    int           `mapstructure:"contextWindow"`
-	CompactionOn     *bool         `mapstructure:"compactionEnabled"`
-	ReserveTokens    int           `mapstructure:"compactionReserveTokens"`
-	KeepRecentTokens int           `mapstructure:"compactionKeepRecentTokens"`
-	SteeringMode     string        `mapstructure:"steeringMode"`
-	FollowUpMode     string        `mapstructure:"followUpMode"`
-	Retry            RetrySettings `mapstructure:"retry"`
+	Provider            string            `mapstructure:"provider"`
+	Model               string            `mapstructure:"model"`
+	DefaultProvider     string            `mapstructure:"defaultProvider"`
+	DefaultModel        string            `mapstructure:"defaultModel"`
+	Theme               string            `mapstructure:"theme"`
+	Thinking            string            `mapstructure:"thinking"`
+	ContextWindow       int               `mapstructure:"contextWindow"`
+	CompactionOn        *bool             `mapstructure:"compactionEnabled"`
+	ReserveTokens       int               `mapstructure:"compactionReserveTokens"`
+	KeepRecentTokens    int               `mapstructure:"compactionKeepRecentTokens"`
+	SteeringMode        string            `mapstructure:"steeringMode"`
+	FollowUpMode        string            `mapstructure:"followUpMode"`
+	Retry               RetrySettings     `mapstructure:"retry"`
+	ThinkingBudgets     map[string]int    `mapstructure:"thinkingBudgets"`
+	ModelThinkingLevels map[string]string `mapstructure:"modelThinkingLevels"`
+	HTTPIdleTimeoutMs   *int              `mapstructure:"httpIdleTimeoutMs"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -104,6 +108,25 @@ func (c Config) RetryBaseDelayMs() int {
 		return 2000
 	}
 	return *c.Retry.BaseDelayMs
+}
+
+// HTTPIdleTimeout is the HTTP client timeout (default 5m). 0 disables it.
+func (c Config) HTTPIdleTimeout() time.Duration {
+	if c.HTTPIdleTimeoutMs == nil {
+		return 5 * time.Minute
+	}
+	if *c.HTTPIdleTimeoutMs <= 0 {
+		return 0
+	}
+	return time.Duration(*c.HTTPIdleTimeoutMs) * time.Millisecond
+}
+
+// ModelThinkingLevel is the per-model default thinking override.
+func (c Config) ModelThinkingLevel(provider, id string) string {
+	if len(c.ModelThinkingLevels) == 0 || provider == "" || id == "" {
+		return ""
+	}
+	return c.ModelThinkingLevels[provider+"/"+id]
 }
 
 // ResolvedProvider returns defaultProvider, falling back to provider.
