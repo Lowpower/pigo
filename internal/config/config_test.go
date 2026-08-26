@@ -162,3 +162,21 @@ func TestLoadPackagesAndMergeSave(t *testing.T) {
 		t.Fatalf("missing merged fields: %s", s)
 	}
 }
+
+func TestSaveDoesNotPersistSessionOnlyModel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{DefaultProvider: "openai", DefaultModel: "gpt-4o", Provider: "anthropic", Model: "claude-haiku-4", Theme: "default"}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.DefaultProvider != "openai" || loaded.DefaultModel != "gpt-4o" {
+		t.Fatalf("saved default = %s/%s", loaded.DefaultProvider, loaded.DefaultModel)
+	}
+	if loaded.ResolvedProvider() != "openai" || loaded.ResolvedModel() != "gpt-4o" {
+		t.Fatalf("load should restore the saved default as current, got %s/%s", loaded.ResolvedProvider(), loaded.ResolvedModel())
+	}
+}

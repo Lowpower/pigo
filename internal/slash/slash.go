@@ -2,6 +2,8 @@ package slash
 
 import (
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/keys"
 )
 
 // Command is a built-in or extension-registered slash command.
@@ -52,7 +54,7 @@ func lookup(name string) (Command, bool) {
 func Builtins() []Command {
 	return []Command{
 		{Name: "settings", Description: "show settings path"},
-		{Name: "model", Description: "show or set the model"},
+		{Name: "model", Description: "select model (opens selector UI)"},
 		{Name: "tree", Description: "navigate session tree (switch branches)"},
 		{Name: "thinking", Description: "set thinking level"},
 		{Name: "scoped-models", Description: "not implemented"},
@@ -73,7 +75,7 @@ func Builtins() []Command {
 		{Name: "new", Description: "start a new session"},
 		{Name: "compact", Description: "manually compact the session context"},
 		{Name: "resume", Description: "resume a different session"},
-		{Name: "reload", Description: "reload skills, prompts, themes, and context files"},
+		{Name: "reload", Description: "reload keybindings, skills, prompts, themes, and context files"},
 		{Name: "quit", Aliases: []string{"exit", "q"}, Description: "quit pigo"},
 		{Name: "provider", Description: "show or set the provider"},
 		{Name: "theme", Description: "show or set the theme"},
@@ -99,16 +101,5 @@ func HelpText() string {
 
 // HotkeysText is the /hotkeys help for the bindings this TUI honours.
 func HotkeysText() string {
-	return `keybindings:
-  enter                 send (steer while streaming)
-  alt+enter             queue follow-up while streaming
-  shift+enter / ctrl+j  newline
-  escape                interrupt / double-esc tree
-  ctrl+c                clear editor / interrupt / quit
-  ctrl+d                exit when editor is empty
-  ctrl+p                cycle model forward
-  shift+ctrl+p          cycle model backward
-  shift+tab             cycle thinking level
-  /help                 list slash commands
-`
+	return keys.NewManager("").HotkeysText()
 }
