@@ -216,6 +216,45 @@ func loadFile(path string) map[string][]string {
 	return out
 }
 
+// RewriteLegacyFile rewrites keybindings.json when it still uses pre-dot action ids.
+func RewriteLegacyFile(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var raw map[string]any
+	if json.Unmarshal(b, &raw) != nil || raw == nil {
+		return false
+	}
+	out := map[string]any{}
+	migrated := false
+	for k, v := range raw {
+		next := k
+		if mapped, ok := legacyNames[k]; ok {
+			next = mapped
+			if _, exists := raw[next]; exists {
+				migrated = true
+				continue
+			}
+			if next != k {
+				migrated = true
+			}
+		}
+		out[next] = v
+	}
+	if !migrated {
+		return false
+	}
+	nb, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return false
+	}
+	if err := os.WriteFile(path, append(nb, '\n'), 0o644); err != nil {
+		return false
+	}
+	return true
+}
+
 func parseKeys(v any) []string {
 	switch t := v.(type) {
 	case string:

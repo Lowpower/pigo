@@ -3,6 +3,7 @@ package keys
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -67,6 +68,28 @@ func TestHotkeysTextUsesEffectiveKeys(t *testing.T) {
 	}
 	if containsStr(text, "ctrl+l") {
 		t.Fatalf("default ctrl+l should be replaced:\n%s", text)
+	}
+}
+
+func TestRewriteLegacyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keybindings.json")
+	if err := os.WriteFile(path, []byte(`{"selectModel":"ctrl+k","app.clear":"ctrl+x"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !RewriteLegacyFile(path) {
+		t.Fatal("expected rewrite")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, `"app.model.select"`) || strings.Contains(got, `"selectModel"`) {
+		t.Fatalf("not migrated: %s", got)
+	}
+	if RewriteLegacyFile(path) {
+		t.Fatal("second rewrite should be a no-op")
 	}
 }
 
