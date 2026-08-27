@@ -406,4 +406,11 @@ var helpOrder = []string{
 	"app.model.cycleBackward",
 	"app.thinking.cycle",
 	"app.model.select",
+	"app.editor.external",
+	"app.clipboard.pasteImage",
+	"tui.editor.yank",
+	"tui.editor.yankPop",
+	"tui.editor.jumpForward",
+	"tui.editor.jumpBackward",
+	"tui.input.tab",
 }

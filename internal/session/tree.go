@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -18,15 +16,16 @@ type TreeNode struct {
 	LabelTimestamp string     `json:"labelTimestamp,omitempty"`
 }
 
-// Summary is a one-line listing used by /resume.
+// Summary is a listing row used by /resume.
 type Summary struct {
 	Path          string
 	ID            string
 	Name          string
-	Cwd           string
 	FirstMessage  string
+	Cwd           string
 	ParentSession string
 	SearchText    string
+	MessageCount  int
 	Modified      time.Time
 }
 
@@ -264,13 +263,17 @@ func (m *Manager) UserMessagesForForking() []map[string]string {
 			continue
 		}
 		var p struct {
-			Role string `json:"role"`
+			Role    string `json:"role"`
+			Content any    `json:"content"`
 		}
 		if json.Unmarshal(e.Message, &p) != nil || p.Role != "user" {
 			continue
 		}
-		text := userText(e)
-		if strings.TrimSpace(text) == "" {
+		text := ""
+		if s, ok := p.Content.(string); ok {
+			text = s
+		}
+		if text == "" {
 			continue
 		}
 		out = append(out, map[string]string{"entryId": e.ID, "text": text})
@@ -318,43 +321,16 @@ func shortID(id string) string {
 	return id
 }
 
-func summaryFromFile(path string, h Header, entries []Entry, mod time.Time) Summary {
-	var userBits []string
-	first := ""
-	for _, e := range entries {
-		t := userText(&e)
-		if t == "" {
-			continue
-		}
-		if first == "" {
-			first = t
-		}
-		userBits = append(userBits, t)
-	}
-	if len(first) > 60 {
-		first = first[:60] + "…"
-	}
-	first = strings.ReplaceAll(first, "\n", " ")
-	name := displayName(h, entries)
-	search := strings.Join([]string{h.ID, name, h.Cwd, strings.Join(userBits, " ")}, " ")
-	return Summary{
-		Path:          path,
-		ID:            h.ID,
-		Name:          name,
-		Cwd:           h.Cwd,
-		FirstMessage:  first,
-		ParentSession: h.ParentSession,
-		SearchText:    search,
-		Modified:      mod,
-	}
-}
-
 // Summaries lists sessions for cwd, newest first, with a first-message preview.
 func Summaries(cwd, agentDir string) ([]Summary, error) {
 	paths, err := List(cwd, agentDir)
 	if err != nil {
 		return nil, err
 	}
+	return summariesFrom(paths)
+}
+
+func summariesFrom(paths []string) ([]Summary, error) {
 	out := make([]Summary, 0, len(paths))
 	for _, p := range paths {
 		h, entries, err := Load(p)
@@ -365,9 +341,44 @@ func Summaries(cwd, agentDir string) ([]Summary, error) {
 		if err != nil {
 			continue
 		}
-		out = append(out, summaryFromFile(p, h, entries, info.ModTime()))
+		first := ""
+		var texts []string
+		msgs := 0
+		for i := range entries {
+			e := &entries[i]
+			if t := userText(e); t != "" && first == "" {
+				first = t
+			}
+			if piece := searchPiece(e); piece != "" {
+				texts = append(texts, piece)
+			}
+			if e.Type == "message" || e.Type == "" {
+				msgs++
+			}
+		}
+		if len(first) > 60 {
+			first = first[:60] + "…"
+		}
+		first = strings.ReplaceAll(first, "\n", " ")
+		name := displayName(h, entries)
+		search := strings.Join([]string{h.ID, name, h.Cwd, strings.Join(texts, " ")}, " ")
+		out = append(out, Summary{
+			Path: p, ID: h.ID, Name: name, FirstMessage: first,
+			Cwd: h.Cwd, ParentSession: h.ParentSession, SearchText: search,
+			MessageCount: msgs, Modified: info.ModTime(),
+		})
 	}
 	return out, nil
+}
+
+func searchPiece(e *Entry) string {
+	if e == nil {
+		return ""
+	}
+	if t := userText(e); t != "" {
+		return t
+	}
+	return strings.TrimSpace(string(e.Message))
 }
 
 func displayName(h Header, entries []Entry) string {
@@ -377,44 +388,4 @@ func displayName(h Header, entries []Entry) string {
 		}
 	}
 	return h.Name
-}
-
-// SummariesAll lists sessions under agentDir/sessions, newest first.
-func SummariesAll(agentDir string) ([]Summary, error) {
-	root := filepath.Join(agentDir, "sessions")
-	ents, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var out []Summary
-	for _, d := range ents {
-		if !d.IsDir() {
-			continue
-		}
-		dir := filepath.Join(root, d.Name())
-		files, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
-				continue
-			}
-			p := filepath.Join(dir, f.Name())
-			h, entries, err := Load(p)
-			if err != nil {
-				continue
-			}
-			info, err := f.Info()
-			if err != nil {
-				continue
-			}
-			out = append(out, summaryFromFile(p, h, entries, info.ModTime()))
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Modified.After(out[j].Modified) })
-	return out, nil
 }

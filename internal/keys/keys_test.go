@@ -80,6 +80,20 @@ func TestWindowsCycleBackward(t *testing.T) {
 	}
 }
 
+func TestPasteImageDefaultKeys(t *testing.T) {
+	unix := newManager("", false)
+	if !unix.Matches("ctrl+v", "app.clipboard.pasteImage") {
+		t.Fatal("unix paste image is ctrl+v")
+	}
+	win := newManager("", true)
+	if !win.Matches("alt+v", "app.clipboard.pasteImage") {
+		t.Fatal("windows paste image is alt+v")
+	}
+	if win.Matches("ctrl+v", "app.clipboard.pasteImage") {
+		t.Fatal("windows should not keep ctrl+v for paste image")
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
 		(func() bool {
