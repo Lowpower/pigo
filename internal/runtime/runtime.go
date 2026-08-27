@@ -170,7 +170,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 
 	var sk []skills.Skill
 	if !opts.NoSkills {
-		sk, _ = skills.Discover(opts.Cwd, opts.AgentDir, opts.SkillPaths, true)
+		sk, _ = skills.Discover(opts.Cwd, opts.AgentDir, opts.SkillPaths, true, opts.ProjectTrusted)
 	}
 
 	sys := prompt.Build(prompt.Options{
@@ -178,6 +178,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		Custom:           opts.SystemPrompt,
 		Append:           opts.AppendSystem,
 		NoContextFiles:   opts.NoContextFiles,
+		ProjectTrusted:   opts.ProjectTrusted,
 		Skills:           sk,
 		Tools:            reg.AITools(),
 		IncludeToolHints: true,
@@ -190,7 +191,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		Tools:     reg,
 		Hosts:     hosts,
 		Skills:    sk,
-		Templates: prompt.DiscoverTemplates(opts.Cwd, opts.AgentDir, opts.PromptPaths, !opts.NoPromptTpls),
+		Templates: prompt.DiscoverTemplates(opts.Cwd, opts.AgentDir, opts.PromptPaths, !opts.NoPromptTpls, opts.ProjectTrusted),
 		Scoped:    models.ResolvePatterns(opts.Models),
 		System:    sys,
 	}
@@ -640,9 +641,9 @@ func (e *Engine) Reload() {
 	if e.Opts.NoSkills {
 		e.Skills = nil
 	} else {
-		e.Skills, _ = skills.Discover(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SkillPaths, true)
+		e.Skills, _ = skills.Discover(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SkillPaths, true, e.Opts.ProjectTrusted)
 	}
-	e.Templates = prompt.DiscoverTemplates(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.PromptPaths, !e.Opts.NoPromptTpls)
+	e.Templates = prompt.DiscoverTemplates(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.PromptPaths, !e.Opts.NoPromptTpls, e.Opts.ProjectTrusted)
 
 	for _, h := range e.Hosts {
 		_ = h.Close()
@@ -672,6 +673,7 @@ func (e *Engine) Reload() {
 		Custom:           e.Opts.SystemPrompt,
 		Append:           e.Opts.AppendSystem,
 		NoContextFiles:   e.Opts.NoContextFiles,
+		ProjectTrusted:   e.Opts.ProjectTrusted,
 		Skills:           e.Skills,
 		Tools:            e.Tools.AITools(),
 		IncludeToolHints: true,

@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"path/filepath"
 	"strings"
 )
 
 const findDefaultLimit = 1000
 
-// findTool searches for files by glob pattern (without .gitignore integration).
+// findTool searches for files by glob pattern. Honors .gitignore; outside a git
+// repository it still applies .gitignore files (fd --no-require-git).
 type findTool struct{}
 
 type findParams struct {
@@ -22,7 +22,7 @@ type findParams struct {
 func (findTool) Name() string { return "find" }
 
 func (findTool) Description() string {
-	return "Search for files by glob pattern. Returns matching file paths relative to the search directory."
+	return "Search for files by glob pattern. Respects .gitignore. Returns matching file paths relative to the search directory."
 }
 
 func (findTool) Schema() map[string]any { return schemaFor(&findParams{}) }
@@ -50,21 +50,7 @@ func (findTool) Execute(_ context.Context, args map[string]any) (string, bool) {
 
 	var matches []string
 	truncated := false
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries
-		}
-		if d.IsDir() {
-			if d.Name() == ".git" && path != root {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
+	walkErr := walkUnignored(root, ignoreNoRequireGit, func(_, rel string) error {
 		if g.Match(rel) {
 			matches = append(matches, rel)
 			if len(matches) >= limit {
@@ -74,7 +60,7 @@ func (findTool) Execute(_ context.Context, args map[string]any) (string, bool) {
 		}
 		return nil
 	})
-	if walkErr != nil {
+	if walkErr != nil && walkErr != fs.SkipAll {
 		return walkErr.Error(), true
 	}
 	if len(matches) == 0 {

@@ -52,10 +52,13 @@ func (m *Model) refreshSettingsItems() {
 		{"mermaid-rendering", "Mermaid diagrams", "Render Mermaid code blocks as Unicode diagrams", m.cfg.MermaidMode()},
 		{"show-images", "Show images", "Inline tool-result images when the terminal supports it", boolText(m.cfg.ShowImages())},
 		{"block-images", "Block images", "Omit images from requests sent to the model", boolText(m.cfg.BlockImages())},
+		{"default-project-trust", "Default project trust", "When a project has local resources and no saved decision", m.cfg.ProjectTrustDefault()},
 		{"double-escape-action", "Double-escape action", "Action when pressing Escape twice with empty editor", m.cfg.DoubleEscape()},
 		{"tree-filter-mode", "Tree filter mode", "Default filter when opening /tree", m.cfg.TreeFilter()},
 		{"theme", "Theme", "Colour theme", m.theme.Name},
 		{"thinking", "Thinking level", "Reasoning level for the current session", thinkingValue(m.cfg.Thinking)},
+		{"collapse-changelog", "Collapse changelog", "Show condensed changelog after updates", boolText(m.cfg.CollapsedChangelog())},
+		{"install-telemetry", "Install telemetry", "Send an anonymous version/update ping after changelog-detected updates", boolText(m.cfg.InstallTelemetryEnabled())},
 		{"tui-mode", "TUI mode", "Interface layout; fullscreen uses the alternate screen", m.cfg.TuiMode()},
 		{"fullscreen-exit-output", "Fullscreen exit output", "Print the transcript or a resume hint when leaving fullscreen", m.cfg.FullscreenExit()},
 	}
@@ -110,7 +113,7 @@ func nextChoice(cur string, values []string) string {
 
 func (m Model) settingChoices(id string) []string {
 	switch id {
-	case "autocompact", "show-images", "block-images":
+	case "autocompact", "show-images", "block-images", "collapse-changelog", "install-telemetry":
 		return []string{"true", "false"}
 	case "steering-mode", "follow-up-mode":
 		return []string{"one-at-a-time", "all"}
@@ -118,6 +121,8 @@ func (m Model) settingChoices(id string) []string {
 		return []string{"off", "final", "streaming"}
 	case "double-escape-action":
 		return []string{"tree", "fork", "none"}
+	case "default-project-trust":
+		return []string{"ask", "always", "never"}
 	case "tree-filter-mode":
 		return []string{"default", "no-tools", "user-only", "labeled-only", "all"}
 	case "theme":
@@ -151,6 +156,8 @@ func (m Model) settingCurrent(id string) string {
 		return boolText(m.cfg.ShowImages())
 	case "block-images":
 		return boolText(m.cfg.BlockImages())
+	case "default-project-trust":
+		return m.cfg.ProjectTrustDefault()
 	case "double-escape-action":
 		return m.cfg.DoubleEscape()
 	case "tree-filter-mode":
@@ -162,6 +169,10 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.Theme
 	case "thinking":
 		return thinkingValue(m.cfg.Thinking)
+	case "collapse-changelog":
+		return boolText(m.cfg.CollapsedChangelog())
+	case "install-telemetry":
+		return boolText(m.cfg.InstallTelemetryEnabled())
 	case "tui-mode":
 		return m.cfg.TuiMode()
 	case "fullscreen-exit-output":
@@ -189,6 +200,8 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 	case "block-images":
 		on := value == "true"
 		m.cfg.Images.BlockImages = &on
+	case "default-project-trust":
+		m.cfg.DefaultProjectTrust = value
 	case "double-escape-action":
 		m.cfg.DoubleEscapeAction = value
 	case "tree-filter-mode":
@@ -198,6 +211,12 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 		m.applyTheme(theme.LoadWith(m.themeOpts(value)))
 	case "thinking":
 		m.cfg.Thinking = value
+	case "collapse-changelog":
+		on := value == "true"
+		m.cfg.CollapseChangelog = &on
+	case "install-telemetry":
+		on := value == "true"
+		m.cfg.EnableInstallTelemetry = &on
 	case "tui-mode":
 		m.cfg.TUIMode = value
 		m.altScreen = value == "fullscreen"

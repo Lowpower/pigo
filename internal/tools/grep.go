@@ -13,7 +13,8 @@ import (
 
 const grepDefaultLimit = 100
 
-// grepTool searches file contents for a pattern (without .gitignore integration).
+// grepTool searches file contents for a pattern. Directory searches honor
+// .gitignore when inside a git repository (ripgrep default).
 type grepTool struct{}
 
 type grepParams struct {
@@ -29,7 +30,7 @@ type grepParams struct {
 func (grepTool) Name() string { return "grep" }
 
 func (grepTool) Description() string {
-	return "Search file contents for a pattern. Returns matching lines with file paths and line numbers."
+	return "Search file contents for a pattern. Respects .gitignore inside git repositories. Returns matching lines with file paths and line numbers."
 }
 
 func (grepTool) Schema() map[string]any { return schemaFor(&grepParams{}) }
@@ -114,21 +115,7 @@ func (grepTool) Execute(_ context.Context, args map[string]any) (string, bool) {
 	if !info.IsDir() {
 		searchFile(root, filepath.ToSlash(root))
 	} else {
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() {
-				if d.Name() == ".git" && path != root {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			rel, relErr := filepath.Rel(root, path)
-			if relErr != nil {
-				return nil
-			}
-			rel = filepath.ToSlash(rel)
+		_ = walkUnignored(root, ignoreGitRequired, func(path, rel string) error {
 			if g != nil && !g.Match(rel) {
 				return nil
 			}

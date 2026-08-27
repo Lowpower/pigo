@@ -24,6 +24,10 @@ type Theme struct {
 
 	// Colors is the resolved pi token map (accent, toolTitle, …). May be nil.
 	Colors map[string]string `json:"-"`
+
+	ExportPageBg string `json:"-"`
+	ExportCardBg string `json:"-"`
+	ExportInfoBg string `json:"-"`
 }
 
 // LoadOptions is how CLI flags and the TUI ask for a theme.
@@ -33,6 +37,7 @@ type LoadOptions struct {
 	AgentDir    string
 	Extra       []string // --theme paths (files or directories)
 	NoDiscovery bool     // --no-themes: skip agentDir/cwd discovery
+	NoProject   bool     // skip cwd/.pigo/themes (untrusted project)
 }
 
 var builtins = []Theme{
@@ -111,11 +116,12 @@ func collect(opt LoadOptions) []Theme {
 		out = append(out, t)
 	}
 	if !opt.NoDiscovery {
-		for _, dir := range []string{filepath.Join(opt.AgentDir, "themes"), filepath.Join(opt.Cwd, ".pigo", "themes")} {
+		dirs := []string{filepath.Join(opt.AgentDir, "themes")}
+		if !opt.NoProject && opt.Cwd != "" {
+			dirs = append(dirs, filepath.Join(opt.Cwd, ".pigo", "themes"))
+		}
+		for _, dir := range dirs {
 			if opt.AgentDir == "" && strings.HasPrefix(dir, "themes") {
-				continue
-			}
-			if opt.Cwd == "" && strings.Contains(dir, ".pigo") {
 				continue
 			}
 			for _, t := range loadDir(dir) {
@@ -213,6 +219,11 @@ type fileTheme struct {
 	Accent    string              `json:"accent"`
 	Vars      map[string]colorVal `json:"vars"`
 	Colors    map[string]colorVal `json:"colors"`
+	Export    *struct {
+		PageBg colorVal `json:"pageBg"`
+		CardBg colorVal `json:"cardBg"`
+		InfoBg colorVal `json:"infoBg"`
+	} `json:"export"`
 }
 
 func parseThemeJSON(b []byte) (Theme, bool) {
@@ -270,6 +281,11 @@ func fromPi(raw fileTheme) Theme {
 	t.Error = colors["error"]
 	t.Muted = colors["muted"]
 	t.Accent = colors["accent"]
+	if raw.Export != nil {
+		t.ExportPageBg = resolveRef(string(raw.Export.PageBg), vars, nil)
+		t.ExportCardBg = resolveRef(string(raw.Export.CardBg), vars, nil)
+		t.ExportInfoBg = resolveRef(string(raw.Export.InfoBg), vars, nil)
+	}
 	return overlayBuiltin(t)
 }
 

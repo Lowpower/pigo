@@ -65,28 +65,77 @@ func (s *Store) read() map[string]bool {
 	return out
 }
 
-// HasProjectResources reports whether cwd/.pigo has settings or resource dirs
-// that require a trust decision.
+var trustRequiring = []string{
+	"settings.json", "extensions", "skills", "prompts", "themes",
+	"SYSTEM.md", "APPEND_SYSTEM.md", "npm", "git",
+}
+
+// HasProjectResources reports whether cwd has project-local resources that
+// require a trust decision: entries under cwd/.pigo, or .agents/skills in cwd
+// or an ancestor (never ~/.agents/skills).
 func HasProjectResources(cwd string) bool {
 	root := filepath.Join(cwd, ".pigo")
-	names := []string{"settings.json", "extensions", "skills", "prompts", "themes", "SYSTEM.md", "APPEND_SYSTEM.md", "npm", "git"}
-	for _, n := range names {
+	for _, n := range trustRequiring {
 		if _, err := os.Stat(filepath.Join(root, n)); err == nil {
 			return true
 		}
 	}
-	return false
+	home, _ := os.UserHomeDir()
+	userAgents := filepath.Join(home, ".agents", "skills")
+	cur, err := filepath.Abs(cwd)
+	if err != nil {
+		cur = cwd
+	}
+	for {
+		agents := filepath.Join(cur, ".agents", "skills")
+		if agents != userAgents {
+			if _, err := os.Stat(agents); err == nil {
+				return true
+			}
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return false
+		}
+		cur = parent
+	}
+}
+
+// Options controls Decide besides the saved store and CLI override.
+type Options struct {
+	Override *bool
+	Default  string // ask (default), always, never
 }
 
 // Resolve combines an optional CLI override with the saved store.
-// No saved decision and no override → untrusted (non-interactive default).
 func Resolve(store *Store, cwd string, override *bool) bool {
-	if override != nil {
-		return *override
+	return Decide(store, cwd, Options{Override: override})
+}
+
+// Decide is the project-trust resolution order:
+// override → no project resources → saved store → defaultProjectTrust (ask/always/never).
+// "ask" without a saved decision is untrusted (print/json/rpc, or TUI until /trust).
+func Decide(store *Store, cwd string, opts Options) bool {
+	if opts.Override != nil {
+		return *opts.Override
 	}
-	if store == nil {
+	if !HasProjectResources(cwd) {
+		return true
+	}
+	if store != nil {
+		if v, ok := store.Get(cwd); ok {
+			return v
+		}
+	}
+	switch opts.Default {
+	case "always":
+		return true
+	case "never":
+		return false
+	default:
 		return false
 	}
-	v, ok := store.Get(cwd)
-	return ok && v
 }
+
+// UntrustedHint is shown in the TUI when project resources exist but are gated.
+const UntrustedHint = "project is not trusted; use /trust then restart to load project resources"

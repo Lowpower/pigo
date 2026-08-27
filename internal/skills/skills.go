@@ -18,13 +18,15 @@ type Skill struct {
 }
 
 // Discover walks the skill directories and extra paths.
-func Discover(cwd, agentDir string, extra []string, includeDefaults bool) ([]Skill, error) {
+func Discover(cwd, agentDir string, extra []string, includeDefaults, includeProject bool) ([]Skill, error) {
 	var dirs []dirSrc
 	if includeDefaults {
 		dirs = append(dirs,
 			dirSrc{filepath.Join(agentDir, "skills"), "user"},
-			dirSrc{filepath.Join(cwd, ".pigo", "skills"), "project"},
 		)
+		if includeProject && cwd != "" {
+			dirs = append(dirs, dirSrc{filepath.Join(cwd, ".pigo", "skills"), "project"})
+		}
 	}
 	for _, p := range extra {
 		dirs = append(dirs, dirSrc{p, "extra"})

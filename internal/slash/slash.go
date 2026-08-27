@@ -69,7 +69,7 @@ func Builtins() []Command {
 		{Name: "help", Aliases: []string{"?"}, Description: "list slash commands"},
 		{Name: "fork", Description: "open fork picker, or /fork <id>"},
 		{Name: "clone", Description: "duplicate the current session at the current position"},
-		{Name: "trust", Description: "not implemented"},
+		{Name: "trust", Description: "trust this project and write trust.json (restart to load resources)"},
 		{Name: "login", Description: "configure provider authentication"},
 		{Name: "logout", Description: "remove provider authentication"},
 		{Name: "new", Description: "start a new session"},

@@ -43,6 +43,7 @@ type Config struct {
 	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
 	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
 	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
+	DefaultProjectTrust    string                `mapstructure:"defaultProjectTrust"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -190,6 +191,16 @@ func (c Config) ShowImages() bool {
 // BlockImages reports whether images should be omitted from LLM requests (default false).
 func (c Config) BlockImages() bool {
 	return c.Images.BlockImages != nil && *c.Images.BlockImages
+}
+
+// ProjectTrustDefault is ask, always, or never (default ask).
+func (c Config) ProjectTrustDefault() string {
+	switch strings.ToLower(strings.TrimSpace(c.DefaultProjectTrust)) {
+	case "always", "never", "ask":
+		return strings.ToLower(strings.TrimSpace(c.DefaultProjectTrust))
+	default:
+		return "ask"
+	}
 }
 
 // MermaidMode is off, final, or streaming (default streaming).
@@ -408,6 +419,7 @@ func Save(configDir string, cfg Config) error {
 	existing["treeFilterMode"] = cfg.TreeFilter()
 	existing["tuiMode"] = cfg.TuiMode()
 	existing["fullscreenExitOutput"] = cfg.FullscreenExit()
+	existing["defaultProjectTrust"] = cfg.ProjectTrustDefault()
 	existing["retry"] = map[string]any{
 		"enabled":     cfg.RetryEnabled(),
 		"maxRetries":  cfg.RetryMaxRetries(),
