@@ -264,7 +264,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			go func(id any, cmdStr string, exclude bool, bctx context.Context, bcancel context.CancelFunc) {
 				defer wg.Done()
 				defer bcancel()
-				result := executeRPCBash(bctx, e.Opts.Cwd, cmdStr, func(delta string) {
+				result := RunBash(bctx, e.Opts.Cwd, cmdStr, func(delta string) {
 					emit(map[string]any{"type": "bash_execution_update", "id": id, "delta": delta})
 				})
 				payload := map[string]any{

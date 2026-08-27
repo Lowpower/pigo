@@ -74,7 +74,7 @@ func Builtins() []Command {
 		{Name: "logout", Description: "remove provider authentication"},
 		{Name: "new", Description: "start a new session"},
 		{Name: "compact", Description: "manually compact the session context"},
-		{Name: "resume", Description: "resume a different session"},
+		{Name: "resume", Description: "resume a session (opens selector UI)"},
 		{Name: "reload", Description: "reload keybindings, skills, prompts, themes, and context files"},
 		{Name: "quit", Aliases: []string{"exit", "q"}, Description: "quit pigo"},
 		{Name: "provider", Description: "show or set the provider"},

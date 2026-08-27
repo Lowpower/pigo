@@ -218,6 +218,9 @@ func (p *modelPicker) toggleScope() {
 }
 
 func (m Model) handleModelPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.keyIs(msg, "app.models.save") {
+		return m.applyPickerModel(true)
+	}
 	act := m.models.handleKey(msg, m.keys)
 	switch act {
 	case "tab":
@@ -228,8 +231,6 @@ func (m Model) handleModelPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "confirm":
 		return m.applyPickerModel(false)
-	case "save":
-		return m.applyPickerModel(true)
 	}
 	return m, nil
 }
