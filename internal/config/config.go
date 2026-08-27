@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -29,9 +31,14 @@ type Config struct {
 	ThinkingBudgets        map[string]int        `mapstructure:"thinkingBudgets"`
 	ModelThinkingLevels    map[string]string     `mapstructure:"modelThinkingLevels"`
 	HTTPIdleTimeoutMs      *int                  `mapstructure:"httpIdleTimeoutMs"`
+	ExternalEditor         string                `mapstructure:"externalEditor"`
 	DoubleEscapeAction     string                `mapstructure:"doubleEscapeAction"`
 	TreeFilterMode         string                `mapstructure:"treeFilterMode"`
 	BranchSummary          BranchSummarySettings `mapstructure:"branchSummary"`
+	Terminal               TerminalSettings      `mapstructure:"terminal"`
+	Markdown               MarkdownSettings      `mapstructure:"markdown"`
+	TUIMode                string                `mapstructure:"tuiMode"`
+	FullscreenExitOutput   string                `mapstructure:"fullscreenExitOutput"`
 	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
 	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
 	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
@@ -55,6 +62,16 @@ type RetrySettings struct {
 type BranchSummarySettings struct {
 	SkipPrompt    *bool `mapstructure:"skipPrompt" json:"skipPrompt,omitempty"`
 	ReserveTokens int   `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
+}
+
+// TerminalSettings is settings.terminal.
+type TerminalSettings struct {
+	ShowImages *bool `mapstructure:"showImages" json:"showImages,omitempty"`
+}
+
+// MarkdownSettings is settings.markdown.
+type MarkdownSettings struct {
+	Mermaid string `mapstructure:"mermaid" json:"mermaid,omitempty"`
 }
 
 // ResourceKinds is the settings.json key order for discovered resources.
@@ -156,6 +173,40 @@ func (c Config) DoubleEscape() string {
 	}
 }
 
+// ShowImages reports whether the TUI should inline tool-result images (default true).
+func (c Config) ShowImages() bool {
+	if c.Terminal.ShowImages == nil {
+		return true
+	}
+	return *c.Terminal.ShowImages
+}
+
+// MermaidMode is off, final, or streaming (default streaming).
+func (c Config) MermaidMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Markdown.Mermaid)) {
+	case "off", "final", "streaming":
+		return strings.ToLower(strings.TrimSpace(c.Markdown.Mermaid))
+	default:
+		return "streaming"
+	}
+}
+
+// TuiMode is regular or fullscreen (default regular).
+func (c Config) TuiMode() string {
+	if strings.EqualFold(strings.TrimSpace(c.TUIMode), "fullscreen") {
+		return "fullscreen"
+	}
+	return "regular"
+}
+
+// FullscreenExit is transcript or resume-hint (default transcript).
+func (c Config) FullscreenExit() string {
+	if strings.EqualFold(strings.TrimSpace(c.FullscreenExitOutput), "resume-hint") {
+		return "resume-hint"
+	}
+	return "transcript"
+}
+
 // TreeFilter is the initial /tree filter (default "default").
 func (c Config) TreeFilter() string {
 	switch c.TreeFilterMode {
@@ -207,6 +258,23 @@ func (c Config) ResolvedModel() string {
 		return c.Model
 	}
 	return c.DefaultModel
+}
+
+// ExternalEditorCommand is settings.externalEditor, then $VISUAL, $EDITOR, then nano/notepad.
+func (c Config) ExternalEditorCommand() string {
+	if s := strings.TrimSpace(c.ExternalEditor); s != "" {
+		return s
+	}
+	if v := os.Getenv("VISUAL"); v != "" {
+		return v
+	}
+	if v := os.Getenv("EDITOR"); v != "" {
+		return v
+	}
+	if runtime.GOOS == "windows" {
+		return "notepad"
+	}
+	return "nano"
 }
 
 // DefaultConfigDir is ~/.pigo/agent (override with PIGO_CODING_AGENT_DIR).
@@ -325,6 +393,10 @@ func Save(configDir string, cfg Config) error {
 	existing["lastChangelogVersion"] = cfg.LastChangelogVersion
 	existing["collapseChangelog"] = cfg.CollapsedChangelog()
 	existing["enableInstallTelemetry"] = cfg.InstallTelemetryEnabled()
+	existing["doubleEscapeAction"] = cfg.DoubleEscape()
+	existing["treeFilterMode"] = cfg.TreeFilter()
+	existing["tuiMode"] = cfg.TuiMode()
+	existing["fullscreenExitOutput"] = cfg.FullscreenExit()
 	existing["retry"] = map[string]any{
 		"enabled":     cfg.RetryEnabled(),
 		"maxRetries":  cfg.RetryMaxRetries(),
@@ -347,6 +419,26 @@ func Save(configDir string, cfg Config) error {
 	}
 	if cfg.NpmCommand != nil {
 		existing["npmCommand"] = cfg.NpmCommand
+	}
+	if cfg.ExternalEditor != "" {
+		existing["externalEditor"] = cfg.ExternalEditor
+	}
+	if cfg.Terminal.ShowImages != nil {
+		term, _ := existing["terminal"].(map[string]any)
+		if term == nil {
+			term = map[string]any{}
+		}
+		term["showImages"] = *cfg.Terminal.ShowImages
+		existing["terminal"] = term
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Markdown.Mermaid)) {
+	case "off", "final", "streaming":
+		md, _ := existing["markdown"].(map[string]any)
+		if md == nil {
+			md = map[string]any{}
+		}
+		md["mermaid"] = strings.ToLower(strings.TrimSpace(cfg.Markdown.Mermaid))
+		existing["markdown"] = md
 	}
 	b, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {

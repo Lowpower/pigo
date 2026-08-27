@@ -53,7 +53,7 @@ func lookup(name string) (Command, bool) {
 // Builtins is the built-in slash command list.
 func Builtins() []Command {
 	return []Command{
-		{Name: "settings", Description: "show settings path"},
+		{Name: "settings", Description: "open settings"},
 		{Name: "model", Description: "select model (opens selector UI)"},
 		{Name: "tree", Description: "navigate session tree (switch branches)"},
 		{Name: "thinking", Description: "set thinking level"},
@@ -74,7 +74,7 @@ func Builtins() []Command {
 		{Name: "logout", Description: "remove provider authentication"},
 		{Name: "new", Description: "start a new session"},
 		{Name: "compact", Description: "manually compact the session context"},
-		{Name: "resume", Description: "resume a different session"},
+		{Name: "resume", Description: "resume a session (opens selector UI)"},
 		{Name: "reload", Description: "reload keybindings, skills, prompts, themes, and context files"},
 		{Name: "quit", Aliases: []string{"exit", "q"}, Description: "quit pigo"},
 		{Name: "provider", Description: "show or set the provider"},

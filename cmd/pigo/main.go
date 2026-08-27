@@ -51,6 +51,8 @@ type cliFlags struct {
 	extension       []string
 	noExtensions    bool
 	theme           string
+	themePaths      []string
+	noThemes        bool
 	listModels      bool
 	listModelsQuery string
 	offline         bool
@@ -63,6 +65,7 @@ type cliFlags struct {
 	modelsFlag      string
 	promptTemplates []string
 	noPromptTpls    bool
+	tuiMode         string
 }
 
 func newRootCmd() *cobra.Command {
@@ -83,7 +86,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.prompt, "prompt", "", "prompt text (alias of positional args)")
 	cmd.Flags().StringVar(&f.configDir, "config-dir", "", "agent dir (default ~/.pigo/agent; env PIGO_CODING_AGENT_DIR)")
 	cmd.Flags().BoolVarP(&f.continueSession, "continue", "c", false, "continue the most recent session in this directory")
-	cmd.Flags().BoolVarP(&f.resume, "resume", "r", false, "resume a session (interactive picker; most recent if not a TTY)")
+	cmd.Flags().BoolVarP(&f.resume, "resume", "r", false, "resume a session (opens picker in interactive mode)")
 	cmd.Flags().StringVar(&f.sessionPath, "session", "", "session file path or id")
 	cmd.Flags().BoolVar(&f.noSession, "no-session", false, "do not persist a session")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "provider id")
@@ -99,7 +102,9 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.excludeTools, "exclude-tools", "", "comma-separated tool denylist")
 	cmd.Flags().StringArrayVarP(&f.extension, "extension", "e", nil, "extension command to spawn (repeatable)")
 	cmd.Flags().BoolVar(&f.noExtensions, "no-extensions", false, "skip extension auto-discovery (explicit -e still loads)")
-	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name")
+	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name for this run (does not write settings)")
+	cmd.Flags().StringArrayVar(&f.themePaths, "theme", nil, "load a theme file or directory (repeatable)")
+	cmd.Flags().BoolVar(&f.noThemes, "no-themes", false, "disable theme discovery")
 	cmd.Flags().BoolVar(&f.listModels, "list-models", false, "list known models and exit")
 	cmd.Flags().StringVar(&f.listModelsQuery, "list-models-query", "", "filter --list-models")
 	cmd.Flags().BoolVar(&f.offline, "offline", false, "skip network at startup (sets PIGO_OFFLINE=1)")
@@ -112,6 +117,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.modelsFlag, "models", "", "comma-separated model patterns for Ctrl+P cycling")
 	cmd.Flags().StringArrayVar(&f.promptTemplates, "prompt-template", nil, "load a prompt template file or directory")
 	cmd.Flags().BoolVar(&f.noPromptTpls, "no-prompt-templates", false, "disable prompt template discovery")
+	cmd.Flags().StringVar(&f.tuiMode, "tui-mode", "", "TUI layout: regular|fullscreen")
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
 	cmd.AddCommand(newAuthCmd(), newConfigCmd())
@@ -147,6 +153,14 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 	if f.theme != "" {
 		cfg.Theme = f.theme
+	}
+	if f.tuiMode != "" {
+		switch strings.ToLower(strings.TrimSpace(f.tuiMode)) {
+		case "regular", "fullscreen":
+			cfg.TUIMode = strings.ToLower(strings.TrimSpace(f.tuiMode))
+		default:
+			return fmt.Errorf("--tui-mode requires regular or fullscreen")
+		}
 	}
 	if f.apiKey != "" {
 		switch cfg.ResolvedProvider() {
@@ -254,23 +268,12 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			if err != nil {
 				return fmt.Errorf("session-id: %w", err)
 			}
-		case f.resume:
-			if mode == "interactive" && isTTY() {
-				path, err2 := tui.PickSession(cwd, agentDir)
-				if err2 != nil {
-					return fmt.Errorf("resume session: %w", err2)
-				}
-				if path == "" {
-					return fmt.Errorf("no session selected")
-				}
-				sess, err = session.Open(path)
-			} else {
-				sess, err = session.ContinueRecent(cwd, agentDir)
-			}
+		case f.continueSession:
+			sess, err = session.ContinueRecent(cwd, agentDir)
 			if err != nil {
 				return fmt.Errorf("resume session: %w", err)
 			}
-		case f.continueSession:
+		case f.resume:
 			sess, err = session.ContinueRecent(cwd, agentDir)
 			if err != nil {
 				return fmt.Errorf("resume session: %w", err)
@@ -320,6 +323,8 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		ContextWindow:  cfg.ContextWindow,
 		NoPromptTpls:   f.noPromptTpls,
 		PromptPaths:    f.promptTemplates,
+		ThemePaths:     f.themePaths,
+		NoThemes:       f.noThemes,
 		Models:         splitCSV(f.modelsFlag),
 		CLIProvider:    cliProvider,
 		CLIModel:       cliModel,
@@ -341,6 +346,9 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			if err := eng.PrintText(ctx, out, history, prompt); err != nil {
 				return err
 			}
+		}
+		if tui.ShouldOpenResumePicker(mode, f.resume, f.sessionID, f.sessionPath, f.fork, f.noSession) {
+			return tui.RunEngineResumePicker(cfg, eng)
 		}
 		return tui.RunEngine(cfg, eng)
 	case "text", "print":

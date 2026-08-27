@@ -82,7 +82,7 @@ func (m Model) confirmFork() (tea.Model, tea.Cmd) {
 	m.engine.AdoptSession(child)
 	m.reloadFromSession()
 	if text != "" {
-		m.textarea.SetValue(text)
+		m.editor.SetValue(text)
 	}
 	m.overlay = overlayNone
 	return note("Forked to new session " + child.ID() + "\n" + child.File())

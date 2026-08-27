@@ -181,6 +181,176 @@ func TestSaveDoesNotPersistSessionOnlyModel(t *testing.T) {
 	}
 }
 
+func TestExternalEditorCommand(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	cfg := Config{}
+	if got := cfg.ExternalEditorCommand(); got != "nano" && got != "notepad" {
+		t.Fatalf("default editor = %q", got)
+	}
+	t.Setenv("EDITOR", "vim")
+	if got := cfg.ExternalEditorCommand(); got != "vim" {
+		t.Fatalf("EDITOR = %q", got)
+	}
+	t.Setenv("VISUAL", "emacs")
+	if got := cfg.ExternalEditorCommand(); got != "emacs" {
+		t.Fatalf("VISUAL = %q", got)
+	}
+	cfg.ExternalEditor = "code --wait"
+	if got := cfg.ExternalEditorCommand(); got != "code --wait" {
+		t.Fatalf("settings override = %q", got)
+	}
+}
+
+func TestLoadTerminalShowImages(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ShowImages() {
+		t.Fatal("showImages should default to true")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"terminal":{"showImages":false}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ShowImages() {
+		t.Fatal("showImages=false should stick")
+	}
+}
+
+func TestSavePreservesTerminalShowImages(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"terminal":{"showImages":false,"keepMe":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"showImages": false`) {
+		t.Fatalf("lost showImages: %s", s)
+	}
+	if !strings.Contains(s, `"keepMe"`) {
+		t.Fatalf("lost extra terminal key: %s", s)
+	}
+}
+
+func TestLoadMarkdownMermaid(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MermaidMode() != "streaming" {
+		t.Fatalf("default mermaid = %q", cfg.MermaidMode())
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"markdown":{"mermaid":"off"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MermaidMode() != "off" {
+		t.Fatalf("loaded %q", cfg.MermaidMode())
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"markdown":{"mermaid":"sometimes"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MermaidMode() != "streaming" {
+		t.Fatalf("invalid should fall back, got %q", cfg.MermaidMode())
+	}
+}
+
+func TestSavePreservesMarkdownMermaid(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"markdown":{"mermaid":"final","keepMe":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"mermaid": "final"`) {
+		t.Fatalf("lost mermaid: %s", s)
+	}
+	if !strings.Contains(s, `"keepMe"`) {
+		t.Fatalf("lost extra markdown key: %s", s)
+	}
+}
+
+func TestLoadTuiMode(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TuiMode() != "regular" || cfg.FullscreenExit() != "transcript" {
+		t.Fatalf("defaults mode=%s exit=%s", cfg.TuiMode(), cfg.FullscreenExit())
+	}
+	dir := t.TempDir()
+	raw := `{"tuiMode":"fullscreen","fullscreenExitOutput":"resume-hint"}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TuiMode() != "fullscreen" || cfg.FullscreenExit() != "resume-hint" {
+		t.Fatalf("got mode=%s exit=%s", cfg.TuiMode(), cfg.FullscreenExit())
+	}
+}
+
+func TestLoadAndSaveExternalEditor(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"externalEditor":"hx"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ExternalEditor != "hx" {
+		t.Fatalf("loaded %q", cfg.ExternalEditor)
+	}
+	cfg.ExternalEditor = "nvim"
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"externalEditor": "nvim"`) {
+		t.Fatalf("saved: %s", b)
+	}
+}
+
 func TestChangelogSettings(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"lastChangelogVersion":"0.0.0","collapseChangelog":true,"enableInstallTelemetry":false}`), 0o644); err != nil {

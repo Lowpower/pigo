@@ -46,6 +46,8 @@ type Options struct {
 	ContextWindow  int
 	NoPromptTpls   bool
 	PromptPaths    []string
+	ThemePaths     []string // --theme files or directories
+	NoThemes       bool     // --no-themes: skip agentDir/cwd discovery
 	Models         []string // --models cycling list
 	CLIProvider    string
 	CLIModel       string

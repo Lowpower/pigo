@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func send(m tea.Model, msg tea.Msg) Model {
 }
 
 func TestNewlineKeybindingMatchesPi(t *testing.T) {
-	keys := New(testCfg()).textarea.KeyMap.InsertNewline.Keys()
+	keys := New(testCfg()).editor.ta.KeyMap.InsertNewline.Keys()
 	if !slices.Contains(keys, "shift+enter") || !slices.Contains(keys, "ctrl+j") {
 		t.Errorf("newline keys = %v, want shift+enter and ctrl+j", keys)
 	}
@@ -38,7 +39,7 @@ func TestNewlineKeybindingMatchesPi(t *testing.T) {
 
 func TestCtrlCClearsEditorWhenIdle(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("hello")
+	m.editor.SetValue("hello")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	got := next.(Model)
 	if got.quitting {
@@ -47,8 +48,8 @@ func TestCtrlCClearsEditorWhenIdle(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("first Ctrl+C must not quit")
 	}
-	if got.textarea.Value() != "" {
-		t.Fatalf("editor = %q, want empty", got.textarea.Value())
+	if got.editor.Value() != "" {
+		t.Fatalf("editor = %q, want empty", got.editor.Value())
 	}
 }
 
@@ -66,7 +67,7 @@ func TestCtrlCTwiceQuits(t *testing.T) {
 
 func TestSlashQuitExits(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("/quit")
+	m.editor.SetValue("/quit")
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if !next.(Model).quitting {
 		t.Error("expected quitting after /quit")
@@ -138,9 +139,9 @@ func TestCycleThinkingKey(t *testing.T) {
 func TestAltEnterQueuesFollowUpWhileRunning(t *testing.T) {
 	m := New(testCfg())
 	m.running = true
-	m.textarea.SetValue("later")
+	m.editor.SetValue("later")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
-	if len(m.queued) != 1 || m.queued[0] != "later" {
+	if len(m.queued) != 1 || m.queued[0].text != "later" {
 		t.Fatalf("queued = %v (engine-less follow-up should use m.queued)", m.queued)
 	}
 }
@@ -170,7 +171,7 @@ func TestCtrlLOpensModelPicker(t *testing.T) {
 
 func TestSlashModelOpensPicker(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("/model")
+	m.editor.SetValue("/model")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.modelPickerActive() {
 		t.Fatal("/model with no args should open the picker")
@@ -179,7 +180,7 @@ func TestSlashModelOpensPicker(t *testing.T) {
 
 func TestSlashModelExactMatchDoesNotOpenPicker(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("/model anthropic/claude-haiku-4")
+	m.editor.SetValue("/model anthropic/claude-haiku-4")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.modelPickerActive() {
 		t.Fatal("exact spec should apply without a picker")
@@ -299,7 +300,7 @@ func TestHotkeysReflectsOverride(t *testing.T) {
 	}
 	m := New(testCfg())
 	m.keys = keys.NewManager(dir)
-	m.textarea.SetValue("/hotkeys")
+	m.editor.SetValue("/hotkeys")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "ctrl+k") {
 		t.Fatalf("hotkeys = %+v", m.transcript)
@@ -318,7 +319,7 @@ func treeModel(t *testing.T) Model {
 
 func TestSlashTreeOpensOverlay(t *testing.T) {
 	m := treeModel(t)
-	m.textarea.SetValue("/tree")
+	m.editor.SetValue("/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.overlay != overlayTree {
 		t.Fatalf("overlay = %d", m.overlay)
@@ -333,7 +334,7 @@ func TestSlashTreeOpensOverlay(t *testing.T) {
 
 func TestTreeCtrlDDoesNotQuit(t *testing.T) {
 	m := treeModel(t)
-	m.textarea.SetValue("/tree")
+	m.editor.SetValue("/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	got := next.(Model)
@@ -348,7 +349,7 @@ func TestTreeCtrlDDoesNotQuit(t *testing.T) {
 func TestTreeEnterNavigatesUserIntoEditor(t *testing.T) {
 	m := treeModel(t)
 	m.cfg.BranchSummary.SkipPrompt = boolPtr(true)
-	m.textarea.SetValue("/tree")
+	m.editor.SetValue("/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	// cursor on leaf (assistant). Move up to user.
 	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
@@ -356,8 +357,8 @@ func TestTreeEnterNavigatesUserIntoEditor(t *testing.T) {
 	if m.overlay != overlayNone {
 		t.Fatalf("overlay = %d", m.overlay)
 	}
-	if !strings.Contains(m.textarea.Value(), "hello tree") {
-		t.Fatalf("editor = %q", m.textarea.Value())
+	if !strings.Contains(m.editor.Value(), "hello tree") {
+		t.Fatalf("editor = %q", m.editor.Value())
 	}
 }
 
@@ -373,7 +374,7 @@ func TestDoubleEscapeOpensTree(t *testing.T) {
 func TestTreeOpensWhileRunning(t *testing.T) {
 	m := treeModel(t)
 	m.running = true
-	m.textarea.SetValue("/tree")
+	m.editor.SetValue("/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.overlay != overlayTree {
 		t.Fatalf("overlay = %d", m.overlay)
@@ -389,8 +390,8 @@ func TestTreeConfirmAbortsThenNavigates(t *testing.T) {
 	ch := make(chan agent.Event)
 	close(ch)
 	m.agentEvents = ch
-	m.queued = []string{"later"}
-	m.textarea.SetValue("/tree")
+	m.queued = []queuedPrompt{{text: "later"}}
+	m.editor.SetValue("/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -403,8 +404,8 @@ func TestTreeConfirmAbortsThenNavigates(t *testing.T) {
 	if m.overlay != overlayNone {
 		t.Fatalf("overlay = %d", m.overlay)
 	}
-	if !strings.Contains(m.textarea.Value(), "later") {
-		t.Fatalf("queued not restored: %q", m.textarea.Value())
+	if !strings.Contains(m.editor.Value(), "later") {
+		t.Fatalf("queued not restored: %q", m.editor.Value())
 	}
 	leafBefore := m.engine.Opts.Session.LeafID()
 	m = send(m, agentClosedMsg{})
@@ -414,14 +415,14 @@ func TestTreeConfirmAbortsThenNavigates(t *testing.T) {
 	if m.engine.Opts.Session.LeafID() == leafBefore {
 		t.Fatal("leaf should move after abort completes")
 	}
-	if strings.TrimSpace(m.textarea.Value()) == "" {
+	if strings.TrimSpace(m.editor.Value()) == "" {
 		t.Fatal("restored queue should not be overwritten")
 	}
 }
 
 func TestCtrlXCopiesTreeSelection(t *testing.T) {
 	m := treeModel(t)
-	m.textarea.SetValue("/tree")
+	m.editor.SetValue("/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlX})
@@ -451,7 +452,7 @@ func TestDoubleEscapeForkOpensPicker(t *testing.T) {
 
 func TestSlashForkOpensPickerAndConfirms(t *testing.T) {
 	m := treeModel(t)
-	m.textarea.SetValue("/fork")
+	m.editor.SetValue("/fork")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.overlay != overlayFork {
 		t.Fatalf("overlay = %d", m.overlay)
@@ -464,74 +465,41 @@ func TestSlashForkOpensPickerAndConfirms(t *testing.T) {
 	if m.engine.Opts.Session.ID() == oldID {
 		t.Fatal("expected new forked session")
 	}
-	if !strings.Contains(m.textarea.Value(), "hello tree") {
-		t.Fatalf("editor = %q", m.textarea.Value())
+	if !strings.Contains(m.editor.Value(), "hello tree") {
+		t.Fatalf("editor = %q", m.editor.Value())
 	}
 }
 
-func TestResumePickerSortAndNamedFilter(t *testing.T) {
+func TestSlashThemeLoadsFromAgentDir(t *testing.T) {
 	agent := t.TempDir()
-	cwd := t.TempDir()
-	a := session.New(cwd, agent)
-	_, _ = a.AppendMessage("user", map[string]any{"role": "user", "content": "alpha chat"})
-	_, _ = a.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
-	a.SetName("Alpha")
-	b := session.New(cwd, agent)
-	_, _ = b.AppendMessage("user", map[string]any{"role": "user", "content": "beta chat"})
-	_, _ = b.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
+	if err := os.Mkdir(filepath.Join(agent, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"name":"disk","colors":{"accent":"#abcdef","error":"#ff0000","userMessageText":"#111111"}}`
+	if err := os.WriteFile(filepath.Join(agent, "themes", "disk.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	m := New(testCfg())
-	m.engine = &runtime.Engine{Opts: runtime.Options{Session: b, AgentDir: agent, Cwd: cwd}}
-	next, _ := m.openResumePicker(cwd)
-	got := next.(Model)
-	if got.resume.sortMode != sortThreaded {
-		t.Fatalf("sort = %s", got.resume.sortMode)
+	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: agent, Cwd: t.TempDir()}}
+	m.editor.SetValue("/theme disk")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.theme.Name != "disk" {
+		t.Fatalf("theme=%s", m.theme.Name)
 	}
-	got = send(got, tea.KeyMsg{Type: tea.KeyCtrlS})
-	if got.resume.sortMode != sortRecent {
-		t.Fatalf("sort after ctrl+s = %s", got.resume.sortMode)
-	}
-	got = send(got, tea.KeyMsg{Type: tea.KeyCtrlN})
-	if got.resume.nameFilter != nameNamed {
-		t.Fatalf("nameFilter = %s", got.resume.nameFilter)
-	}
-	if len(got.resume.rows) != 1 || got.resume.rows[0].session.Name != "Alpha" {
-		t.Fatalf("named rows = %+v", got.resume.rows)
-	}
-	got = send(got, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	if !strings.Contains(got.resume.query, "n") {
-		t.Fatalf("query should accept n, got %q", got.resume.query)
-	}
-}
-
-func TestSlashResumeOpensPicker(t *testing.T) {
-	agent := t.TempDir()
-	cwd := t.TempDir()
-	sess := session.New(cwd, agent)
-	_, _ = sess.AppendMessage("user", map[string]any{"role": "user", "content": "old chat"})
-	_, _ = sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
-	m := New(testCfg())
-	m.engine = &runtime.Engine{Opts: runtime.Options{Session: sess, AgentDir: agent, Cwd: cwd}}
-	m.textarea.SetValue("/resume")
-	// Summaries uses cwd from os.Getwd, so open picker via helper.
-	next, _ := m.openResumePicker(cwd)
-	got := next.(Model)
-	if got.overlay != overlayResume {
-		t.Fatalf("overlay = %d", got.overlay)
-	}
-	if !strings.Contains(got.View(), "Resume Session") {
-		t.Fatalf("view =\n%s", got.View())
+	if m.theme.Accent != "#abcdef" {
+		t.Fatalf("accent=%s", m.theme.Accent)
 	}
 }
 
 func TestSlashChangelogAndShare(t *testing.T) {
 	m := New(testCfg())
-	m.textarea.SetValue("/changelog")
+	m.editor.SetValue("/changelog")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "0.0.1") {
 		t.Fatalf("changelog = %+v", m.transcript)
 	}
 
-	m.textarea.SetValue("/share")
+	m.editor.SetValue("/share")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "no session") {
 		t.Fatalf("share without session = %+v", m.transcript)
