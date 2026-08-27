@@ -3,10 +3,13 @@ package session
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Lowpower/pigo/internal/theme"
 )
 
 func TestRenderHTMLThemedSessionData(t *testing.T) {
@@ -77,6 +80,135 @@ func TestExportHTMLFileOmitsAgentState(t *testing.T) {
 	if !strings.Contains(html, "--exportPageBg") {
 		t.Fatal("light theme missing export vars")
 	}
+}
+
+func TestRenderHTMLUsesDiskThemeColorTokens(t *testing.T) {
+	agent := t.TempDir()
+	themes := filepath.Join(agent, "themes")
+	if err := os.Mkdir(themes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{
+		"name": "mine",
+		"vars": {"bg": "#010203"},
+		"colors": {
+			"accent": "#abcdef",
+			"error": "#ff0000",
+			"text": "#eeeeee",
+			"userMessageBg": "#111111",
+			"uniqueExportToken": "#123456"
+		},
+		"export": {"pageBg": "bg", "cardBg": "#0a0b0c"}
+	}`
+	if err := os.WriteFile(filepath.Join(themes, "mine.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(t.TempDir(), agent)
+	_, _ = m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"})
+	html, err := RenderHTMLWith(m, HTMLOptions{ThemeName: "mine", AgentDir: agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(html, "--uniqueExportToken: #123456") {
+		t.Fatalf("missing custom token: %s", html[strings.Index(html, ":root"):strings.Index(html, ":root")+800])
+	}
+	if !strings.Contains(html, "--accent: #abcdef") {
+		t.Fatal("missing accent from disk theme")
+	}
+	if !strings.Contains(html, "--exportPageBg: #010203") {
+		t.Fatal("missing export.pageBg")
+	}
+}
+
+func TestRenderHTMLPreRendersCustomTools(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	_, _ = m.AppendMessage("assistant", map[string]any{
+		"role": "assistant",
+		"content": []any{
+			map[string]any{"type": "toolCall", "id": "c1", "name": "hello", "arguments": map[string]any{"name": "pigo"}},
+		},
+	})
+	_, _ = m.AppendMessage("toolResult", map[string]any{
+		"role": "toolResult", "toolCallId": "c1", "toolName": "hello",
+		"content": []any{map[string]any{"type": "text", "text": "Hello, pigo!"}},
+	})
+	html, err := RenderHTMLWith(m, HTMLOptions{ToolRenderer: stubToolRenderer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := decodeSessionData(t, html)
+	rt, _ := data["renderedTools"].(map[string]any)
+	got, _ := rt["c1"].(map[string]any)
+	if got["callHtml"] != "<div>CALL</div>" || got["resultHtmlExpanded"] != "<div>EXP</div>" {
+		t.Fatalf("renderedTools=%v", rt)
+	}
+}
+
+func TestBuiltinGrepIsPreRenderedButBashIsNot(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	_, _ = m.AppendMessage("assistant", map[string]any{
+		"role": "assistant",
+		"content": []any{
+			map[string]any{"type": "toolCall", "id": "g1", "name": "grep", "arguments": map[string]any{"pattern": "TODO", "path": "."}},
+			map[string]any{"type": "toolCall", "id": "b1", "name": "bash", "arguments": map[string]any{"command": "true"}},
+		},
+	})
+	_, _ = m.AppendMessage("toolResult", map[string]any{
+		"role": "toolResult", "toolCallId": "g1", "toolName": "grep", "content": "a.go:1:TODO",
+	})
+	_, _ = m.AppendMessage("toolResult", map[string]any{
+		"role": "toolResult", "toolCallId": "b1", "toolName": "bash", "content": "ok",
+	})
+	html, err := RenderHTMLWith(m, HTMLOptions{ToolRenderer: NewBuiltinToolHTMLRenderer(theme.Load("dark", "", ""))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := decodeSessionData(t, html)
+	rt, _ := data["renderedTools"].(map[string]any)
+	if _, ok := rt["b1"]; ok {
+		t.Fatalf("bash should stay on template.js, got %v", rt["b1"])
+	}
+	grep, _ := rt["g1"].(map[string]any)
+	if grep == nil || grep["callHtml"] == nil || grep["resultHtmlExpanded"] == nil {
+		t.Fatalf("grep missing pre-render: %v", rt)
+	}
+	if !strings.Contains(fmt.Sprint(grep["callHtml"]), "grep") {
+		t.Fatalf("callHtml=%v", grep["callHtml"])
+	}
+}
+
+func TestCLIExportOmitsRenderedToolsWithoutRenderer(t *testing.T) {
+	dir := t.TempDir()
+	m := New(t.TempDir(), dir)
+	_, _ = m.AppendMessage("assistant", map[string]any{
+		"role": "assistant",
+		"content": []any{
+			map[string]any{"type": "toolCall", "id": "g1", "name": "grep", "arguments": map[string]any{"pattern": "x"}},
+		},
+	})
+	src := filepath.Join(dir, "sess.jsonl")
+	if err := os.WriteFile(src, mustJSONL(t, m), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.html")
+	if _, err := ExportHTMLFileWith(src, HTMLOptions{OutputPath: out}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := decodeSessionData(t, string(b))
+	if _, ok := data["renderedTools"]; ok {
+		t.Fatalf("CLI file export should omit renderedTools: %v", data["renderedTools"])
+	}
+}
+
+type stubToolRenderer struct{}
+
+func (stubToolRenderer) RenderCall(string, string, any) string { return "<div>CALL</div>" }
+func (stubToolRenderer) RenderResult(string, string, []map[string]any, any, bool) (string, string) {
+	return "<div>COL</div>", "<div>EXP</div>"
 }
 
 func TestFormatTreeAndExportHTML(t *testing.T) {

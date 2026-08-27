@@ -24,6 +24,10 @@ type Theme struct {
 
 	// Colors is the resolved pi token map (accent, toolTitle, …). May be nil.
 	Colors map[string]string `json:"-"`
+
+	ExportPageBg string `json:"-"`
+	ExportCardBg string `json:"-"`
+	ExportInfoBg string `json:"-"`
 }
 
 // LoadOptions is how CLI flags and the TUI ask for a theme.
@@ -213,6 +217,11 @@ type fileTheme struct {
 	Accent    string              `json:"accent"`
 	Vars      map[string]colorVal `json:"vars"`
 	Colors    map[string]colorVal `json:"colors"`
+	Export    *struct {
+		PageBg colorVal `json:"pageBg"`
+		CardBg colorVal `json:"cardBg"`
+		InfoBg colorVal `json:"infoBg"`
+	} `json:"export"`
 }
 
 func parseThemeJSON(b []byte) (Theme, bool) {
@@ -270,6 +279,11 @@ func fromPi(raw fileTheme) Theme {
 	t.Error = colors["error"]
 	t.Muted = colors["muted"]
 	t.Accent = colors["accent"]
+	if raw.Export != nil {
+		t.ExportPageBg = resolveRef(string(raw.Export.PageBg), vars, nil)
+		t.ExportCardBg = resolveRef(string(raw.Export.CardBg), vars, nil)
+		t.ExportInfoBg = resolveRef(string(raw.Export.InfoBg), vars, nil)
+	}
 	return overlayBuiltin(t)
 }
 

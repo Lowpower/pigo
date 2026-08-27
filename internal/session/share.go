@@ -106,14 +106,14 @@ func Share(opts ShareOptions) (ShareResult, error) {
 	}
 
 	htmlPath := filepath.Join(dir, "session.html")
-	if _, err := ExportHTMLWith(opts.Session, HTMLOptions{
+	if _, err := ExportHTMLWith(opts.Session, WithBuiltinToolRenderer(HTMLOptions{
 		OutputPath:   htmlPath,
 		ThemeName:    opts.ThemeName,
 		Cwd:          opts.Cwd,
 		AgentDir:     opts.AgentDir,
 		SystemPrompt: opts.SystemPrompt,
 		Tools:        opts.Tools,
-	}); err != nil {
+	})); err != nil {
 		return ShareResult{}, fmt.Errorf("failed to export session: %w", err)
 	}
 	gistURL, err := shareGistCreate(htmlPath)

@@ -55,6 +55,8 @@ func (m *Model) refreshSettingsItems() {
 		{"tree-filter-mode", "Tree filter mode", "Default filter when opening /tree", m.cfg.TreeFilter()},
 		{"theme", "Theme", "Colour theme", m.theme.Name},
 		{"thinking", "Thinking level", "Reasoning level for the current session", thinkingValue(m.cfg.Thinking)},
+		{"collapse-changelog", "Collapse changelog", "Show condensed changelog after updates", boolText(m.cfg.CollapsedChangelog())},
+		{"install-telemetry", "Install telemetry", "Send an anonymous version/update ping after changelog-detected updates", boolText(m.cfg.InstallTelemetryEnabled())},
 		{"tui-mode", "TUI mode", "Interface layout; fullscreen uses the alternate screen", m.cfg.TuiMode()},
 		{"fullscreen-exit-output", "Fullscreen exit output", "Print the transcript or a resume hint when leaving fullscreen", m.cfg.FullscreenExit()},
 	}
@@ -109,7 +111,7 @@ func nextChoice(cur string, values []string) string {
 
 func (m Model) settingChoices(id string) []string {
 	switch id {
-	case "autocompact", "show-images":
+	case "autocompact", "show-images", "collapse-changelog", "install-telemetry":
 		return []string{"true", "false"}
 	case "steering-mode", "follow-up-mode":
 		return []string{"one-at-a-time", "all"}
@@ -159,6 +161,10 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.Theme
 	case "thinking":
 		return thinkingValue(m.cfg.Thinking)
+	case "collapse-changelog":
+		return boolText(m.cfg.CollapsedChangelog())
+	case "install-telemetry":
+		return boolText(m.cfg.InstallTelemetryEnabled())
 	case "tui-mode":
 		return m.cfg.TuiMode()
 	case "fullscreen-exit-output":
@@ -192,6 +198,12 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 		m.applyTheme(theme.LoadWith(m.themeOpts(value)))
 	case "thinking":
 		m.cfg.Thinking = value
+	case "collapse-changelog":
+		on := value == "true"
+		m.cfg.CollapseChangelog = &on
+	case "install-telemetry":
+		on := value == "true"
+		m.cfg.EnableInstallTelemetry = &on
 	case "tui-mode":
 		m.cfg.TUIMode = value
 		m.altScreen = value == "fullscreen"

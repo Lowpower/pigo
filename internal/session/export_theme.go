@@ -41,8 +41,9 @@ func resolveExportColors(themeName, cwd, agentDir string) exportColors {
 			name = "dark"
 		}
 	}
+	th := theme.Load(name, cwd, agentDir)
 	fileName := "dark.json"
-	if strings.EqualFold(name, "light") {
+	if strings.EqualFold(name, "light") || strings.EqualFold(th.Name, "light") {
 		fileName = "light.json"
 	}
 	raw, err := htmlFS.ReadFile("html/themes/" + fileName)
@@ -50,11 +51,28 @@ func resolveExportColors(themeName, cwd, agentDir string) exportColors {
 		raw, _ = htmlFS.ReadFile("html/themes/dark.json")
 	}
 	base := parseThemeFile(raw)
-	switch strings.ToLower(name) {
-	case "dark", "default", "light", "":
-		// built-in export palettes already match the TUI names
-	default:
-		overlayPigoTheme(base.CSS, theme.Load(name, cwd, agentDir))
+	isLight := fileName == "light.json"
+	if len(th.Colors) > 0 {
+		for k, v := range th.Colors {
+			if css := colorToCSS(v, isLight); css != "" {
+				base.CSS[k] = css
+			}
+		}
+		if v := optionalColorToCSS(th.ExportPageBg); v != "" {
+			base.PageBg = v
+		}
+		if v := optionalColorToCSS(th.ExportCardBg); v != "" {
+			base.CardBg = v
+		}
+		if v := optionalColorToCSS(th.ExportInfoBg); v != "" {
+			base.InfoBg = v
+		}
+	} else {
+		switch strings.ToLower(name) {
+		case "dark", "default", "light", "":
+		default:
+			overlayPigoTheme(base.CSS, th)
+		}
 	}
 
 	userBg := base.CSS["userMessageBg"]
@@ -84,6 +102,32 @@ func resolveExportColors(themeName, cwd, agentDir string) exportColors {
 		InfoBg:    infoBg,
 		ThemeVars: strings.Join(lines, "\n      "),
 	}
+}
+
+func optionalColorToCSS(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	return colorToCSS(v, false)
+}
+
+func colorToCSS(v string, isLight bool) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		if isLight {
+			return "#000000"
+		}
+		return "#e5e5e7"
+	}
+	if strings.HasPrefix(v, "#") || strings.HasPrefix(v, "rgb") {
+		return v
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return v
+	}
+	return ansi256ToHex(n)
 }
 
 func parseThemeFile(raw []byte) exportColors {

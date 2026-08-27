@@ -452,13 +452,13 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			if themeName == "" {
 				themeName = e.Opts.Config.Theme
 			}
-			opts := session.HTMLOptions{
+			opts := session.WithBuiltinToolRenderer(session.HTMLOptions{
 				OutputPath:   outPath,
 				ThemeName:    themeName,
 				Cwd:          e.Opts.Cwd,
 				AgentDir:     e.Opts.AgentDir,
 				SystemPrompt: e.System,
-			}
+			})
 			if e.Tools != nil {
 				opts.Tools = e.Tools.AITools()
 			}
