@@ -16,6 +16,7 @@ type Options struct {
 	Custom           string
 	Append           []string
 	NoContextFiles   bool
+	ProjectTrusted   bool
 	Skills           []skills.Skill
 	Tools            []ai.Tool
 	IncludeToolHints bool
@@ -48,7 +49,7 @@ func Build(opts Options) string {
 		b.WriteString(a)
 	}
 	if !opts.NoContextFiles {
-		if ctx := loadContextFiles(opts.Cwd); ctx != "" {
+		if ctx := loadContextFiles(opts.Cwd, opts.ProjectTrusted); ctx != "" {
 			b.WriteString("\n<project_context>\n")
 			b.WriteString(ctx)
 			b.WriteString("\n</project_context>\n")
@@ -79,7 +80,7 @@ func hasRead(tools []ai.Tool) bool {
 	return false
 }
 
-func loadContextFiles(cwd string) string {
+func loadContextFiles(cwd string, trusted bool) string {
 	if cwd == "" {
 		return ""
 	}
@@ -100,9 +101,11 @@ func loadContextFiles(cwd string) string {
 				chunks = append(chunks, "# "+p+"\n"+string(b))
 			}
 		}
-		p := filepath.Join(dir, ".pigo", "AGENTS.md")
-		if b, err := os.ReadFile(p); err == nil {
-			chunks = append(chunks, "# "+p+"\n"+string(b))
+		if trusted {
+			p := filepath.Join(dir, ".pigo", "AGENTS.md")
+			if b, err := os.ReadFile(p); err == nil {
+				chunks = append(chunks, "# "+p+"\n"+string(b))
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

@@ -27,6 +27,7 @@ import (
 	"github.com/Lowpower/pigo/internal/slash"
 	"github.com/Lowpower/pigo/internal/theme"
 	"github.com/Lowpower/pigo/internal/tools"
+	"github.com/Lowpower/pigo/internal/trust"
 )
 
 const maxEditorWidth = 100
@@ -146,6 +147,7 @@ func (m Model) themeOpts(name string) theme.LoadOptions {
 		opt.AgentDir = m.engine.Opts.AgentDir
 		opt.Extra = m.engine.Opts.ThemePaths
 		opt.NoDiscovery = m.engine.Opts.NoThemes
+		opt.NoProject = !m.engine.Opts.ProjectTrusted
 	}
 	return opt
 }
@@ -632,6 +634,27 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("logout error: " + err.Error())
 		}
 		return note("removed stored key for " + prov)
+	case "trust":
+		dir := config.DefaultConfigDir()
+		cwd := ""
+		if m.engine != nil {
+			dir = m.engine.Opts.AgentDir
+			cwd = m.engine.Opts.Cwd
+		}
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
+		want := true
+		if cmd.Rest == "never" || cmd.Rest == "no" || cmd.Rest == "off" {
+			want = false
+		}
+		if err := trust.Open(dir).Set(cwd, want); err != nil {
+			return note("trust error: " + err.Error())
+		}
+		if want {
+			return note("project trusted. restart pigo to load project resources")
+		}
+		return note("project marked untrusted. restart pigo to unload project resources")
 	case "reload":
 		if m.engine == nil {
 			return note("reload requires a runtime engine")
@@ -1025,6 +1048,9 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		m.keys = keys.NewManager(eng.Opts.AgentDir)
 		m.applyTheme(theme.LoadWith(m.themeOpts(cfg.Theme)))
 		m.refreshGit()
+		if trust.HasProjectResources(eng.Opts.Cwd) && !eng.Opts.ProjectTrusted {
+			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(trust.UntrustedHint)})
+		}
 	}
 	m.applyStartupChangelog()
 	if openResume {

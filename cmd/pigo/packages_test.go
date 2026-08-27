@@ -106,6 +106,9 @@ func TestConfigPrint(t *testing.T) {
 func TestConfigLocalRequiresTrust(t *testing.T) {
 	t.Setenv("PIGO_CODING_AGENT_DIR", t.TempDir())
 	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo", "extensions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(cwd)
 	root := newRootCmd()
 	var out bytes.Buffer

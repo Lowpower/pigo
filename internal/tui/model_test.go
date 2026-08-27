@@ -16,6 +16,7 @@ import (
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/session"
+	"github.com/Lowpower/pigo/internal/trust"
 )
 
 func testCfg() config.Config {
@@ -521,6 +522,23 @@ func TestStartupChangelogFirstInstallSilent(t *testing.T) {
 	}
 	if loaded.LastChangelogVersion == "" {
 		t.Fatal("expected lastChangelogVersion recorded")
+	}
+}
+
+func TestSlashTrustWritesStore(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: agent, Cwd: cwd}}
+	m.editor.SetValue("/trust")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	st := trust.Open(agent)
+	v, ok := st.Get(cwd)
+	if !ok || !v {
+		t.Fatalf("trust store = %v %v", v, ok)
+	}
+	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "restart") {
+		t.Fatalf("hint = %+v", m.transcript)
 	}
 }
 
