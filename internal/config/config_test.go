@@ -202,6 +202,52 @@ func TestExternalEditorCommand(t *testing.T) {
 	}
 }
 
+func TestLoadTerminalShowImages(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ShowImages() {
+		t.Fatal("showImages should default to true")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"terminal":{"showImages":false}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ShowImages() {
+		t.Fatal("showImages=false should stick")
+	}
+}
+
+func TestSavePreservesTerminalShowImages(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"terminal":{"showImages":false,"keepMe":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"showImages": false`) {
+		t.Fatalf("lost showImages: %s", s)
+	}
+	if !strings.Contains(s, `"keepMe"`) {
+		t.Fatalf("lost extra terminal key: %s", s)
+	}
+}
+
 func TestLoadAndSaveExternalEditor(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"externalEditor":"hx"}`), 0o644); err != nil {

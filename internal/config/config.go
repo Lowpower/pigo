@@ -35,6 +35,7 @@ type Config struct {
 	DoubleEscapeAction  string                `mapstructure:"doubleEscapeAction"`
 	TreeFilterMode      string                `mapstructure:"treeFilterMode"`
 	BranchSummary       BranchSummarySettings `mapstructure:"branchSummary"`
+	Terminal            TerminalSettings      `mapstructure:"terminal"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -55,6 +56,11 @@ type RetrySettings struct {
 type BranchSummarySettings struct {
 	SkipPrompt    *bool `mapstructure:"skipPrompt" json:"skipPrompt,omitempty"`
 	ReserveTokens int   `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
+}
+
+// TerminalSettings is pi settings.terminal.
+type TerminalSettings struct {
+	ShowImages *bool `mapstructure:"showImages" json:"showImages,omitempty"`
 }
 
 // ResourceKinds is the settings.json key order for discovered resources.
@@ -141,6 +147,14 @@ func (c Config) DoubleEscape() string {
 	default:
 		return "tree"
 	}
+}
+
+// ShowImages reports whether the TUI should inline tool-result images (default true).
+func (c Config) ShowImages() bool {
+	if c.Terminal.ShowImages == nil {
+		return true
+	}
+	return *c.Terminal.ShowImages
 }
 
 // TreeFilter is the initial /tree filter (default "default").
@@ -351,6 +365,14 @@ func Save(configDir string, cfg Config) error {
 	}
 	if cfg.ExternalEditor != "" {
 		existing["externalEditor"] = cfg.ExternalEditor
+	}
+	if cfg.Terminal.ShowImages != nil {
+		term, _ := existing["terminal"].(map[string]any)
+		if term == nil {
+			term = map[string]any{}
+		}
+		term["showImages"] = *cfg.Terminal.ShowImages
+		existing["terminal"] = term
 	}
 	b, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
