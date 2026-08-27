@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 )
 
 // Store is the auth.json credential store (pi AuthStorage / CredentialStore).
@@ -160,10 +159,10 @@ func (s *Store) withLock(fn func() (*Credential, error)) (*Credential, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockExclusive(f); err != nil {
 		return nil, err
 	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = unlockFile(f) }()
 	return fn()
 }
 

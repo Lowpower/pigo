@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -391,6 +392,12 @@ func TestSchemasAndRegistry(t *testing.T) {
 		if !names[want] {
 			t.Errorf("registry missing tool %q", want)
 		}
+	}
+	if runtime.GOOS != "windows" && names["powershell"] {
+		t.Errorf("powershell should be Windows-only")
+	}
+	if runtime.GOOS == "windows" && !names["powershell"] {
+		t.Errorf("windows registry missing powershell")
 	}
 
 	// read's schema must mark path required.

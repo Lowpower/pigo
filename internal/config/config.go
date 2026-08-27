@@ -43,6 +43,7 @@ type Config struct {
 	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
 	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
 	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
+	ShellPath              string                `mapstructure:"shellPath"`
 	DefaultTools           *[]string             `mapstructure:"defaultTools"`
 	DefaultProjectTrust    string                `mapstructure:"defaultProjectTrust"`
 
@@ -464,6 +465,9 @@ func Save(configDir string, cfg Config) error {
 	}
 	if cfg.NpmCommand != nil {
 		existing["npmCommand"] = cfg.NpmCommand
+	}
+	if cfg.ShellPath != "" {
+		existing["shellPath"] = cfg.ShellPath
 	}
 	if cfg.DefaultTools != nil {
 		existing["defaultTools"] = *cfg.DefaultTools

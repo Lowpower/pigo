@@ -10,11 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/protocol"
+	"github.com/Lowpower/pigo/internal/shell"
 )
 
 // APIVersion is the extension RPC version the host speaks.
@@ -69,7 +69,7 @@ func Spawn(ctx context.Context, name string, argv []string, opts Options) (*Host
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = append(os.Environ(), opts.Env...)
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	shell.Prepare(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -288,7 +288,7 @@ func (h *Host) Close() error {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		if h.cmd.Process != nil {
-			_ = syscall.Kill(-h.cmd.Process.Pid, syscall.SIGKILL)
+			_ = shell.KillTree(h.cmd.Process.Pid)
 		}
 		<-done
 	}
