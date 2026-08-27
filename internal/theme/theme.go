@@ -37,6 +37,7 @@ type LoadOptions struct {
 	AgentDir    string
 	Extra       []string // --theme paths (files or directories)
 	NoDiscovery bool     // --no-themes: skip agentDir/cwd discovery
+	NoProject   bool     // skip cwd/.pigo/themes (untrusted project)
 }
 
 var builtins = []Theme{
@@ -115,11 +116,12 @@ func collect(opt LoadOptions) []Theme {
 		out = append(out, t)
 	}
 	if !opt.NoDiscovery {
-		for _, dir := range []string{filepath.Join(opt.AgentDir, "themes"), filepath.Join(opt.Cwd, ".pigo", "themes")} {
+		dirs := []string{filepath.Join(opt.AgentDir, "themes")}
+		if !opt.NoProject && opt.Cwd != "" {
+			dirs = append(dirs, filepath.Join(opt.Cwd, ".pigo", "themes"))
+		}
+		for _, dir := range dirs {
 			if opt.AgentDir == "" && strings.HasPrefix(dir, "themes") {
-				continue
-			}
-			if opt.Cwd == "" && strings.Contains(dir, ".pigo") {
 				continue
 			}
 			for _, t := range loadDir(dir) {

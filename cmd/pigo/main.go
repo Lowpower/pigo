@@ -68,6 +68,8 @@ type cliFlags struct {
 	noPromptTpls    bool
 	tuiMode         string
 	noSandbox       bool
+	approve         bool
+	noApprove       bool
 }
 
 func newRootCmd() *cobra.Command {
@@ -121,6 +123,8 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&f.noPromptTpls, "no-prompt-templates", false, "disable prompt template discovery")
 	cmd.Flags().StringVar(&f.tuiMode, "tui-mode", "", "TUI layout: regular|fullscreen")
 	cmd.Flags().BoolVar(&f.noSandbox, "no-sandbox", false, "disable OS-level sandbox wrapping for bash")
+	cmd.Flags().BoolVarP(&f.approve, "approve", "a", false, "trust project-local files for this run")
+	cmd.Flags().BoolVar(&f.noApprove, "no-approve", false, "ignore project-local files for this run")
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
 	cmd.AddCommand(newAuthCmd(), newConfigCmd())
@@ -292,11 +296,16 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 
 	exts := f.extension
-	trusted := false
-	if !f.noExtensions && !f.noTools {
-		st := trust.Open(agentDir)
-		trusted = trust.Resolve(st, cwd, nil)
+	var override *bool
+	if f.approve {
+		v := true
+		override = &v
+	} else if f.noApprove {
+		v := false
+		override = &v
 	}
+	st := trust.Open(agentDir)
+	trusted := trust.Decide(st, cwd, trust.Options{Override: override, Default: cfg.ProjectTrustDefault()})
 
 	cliProvider := f.provider
 	cliModel := ""

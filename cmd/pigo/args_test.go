@@ -41,6 +41,19 @@ func TestInlineFiles(t *testing.T) {
 	}
 }
 
+func TestApproveFlagsParse(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	_ = cmd.Execute()
+	s := out.String()
+	if !strings.Contains(s, "--approve") || !strings.Contains(s, "--no-approve") {
+		t.Fatalf("help missing approve flags:\n%s", s)
+	}
+}
+
 func TestTuiModeFlagParse(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{"--help"})

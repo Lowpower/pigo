@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,6 +94,192 @@ func TestListFindGrep(t *testing.T) {
 	if strings.Contains(out, "b.txt") {
 		t.Fatalf("grep glob filter leaked non-go file: %q", out)
 	}
+}
+
+func TestGrepFindHonorGitignore(t *testing.T) {
+	dir := t.TempDir()
+	gitInit(t, dir)
+	mustWrite(t, filepath.Join(dir, ".gitignore"), "secret.txt\nbuild/\n*.tmp\n")
+	mustWrite(t, filepath.Join(dir, "visible.txt"), "needle-visible\n")
+	mustWrite(t, filepath.Join(dir, "secret.txt"), "needle-secret\n")
+	mustWrite(t, filepath.Join(dir, "build", "out.go"), "needle-build\n")
+	mustWrite(t, filepath.Join(dir, "scratch.tmp"), "needle-tmp\n")
+	mustWrite(t, filepath.Join(dir, "src", "ok.go"), "needle-ok\n")
+
+	out, isErr := run(t, grepTool{}, map[string]any{"path": dir, "pattern": "needle"})
+	if isErr {
+		t.Fatalf("grep error: %s", out)
+	}
+	if !strings.Contains(out, "visible.txt") || !strings.Contains(out, "src/ok.go") {
+		t.Fatalf("grep missed unignored files: %q", out)
+	}
+	if strings.Contains(out, "secret.txt") || strings.Contains(out, "build/") || strings.Contains(out, "scratch.tmp") {
+		t.Fatalf("grep leaked gitignored files: %q", out)
+	}
+
+	out, isErr = run(t, findTool{}, map[string]any{"path": dir, "pattern": "**/*"})
+	if isErr {
+		t.Fatalf("find error: %s", out)
+	}
+	if !strings.Contains(out, "visible.txt") || !strings.Contains(out, "src/ok.go") {
+		t.Fatalf("find missed unignored files: %q", out)
+	}
+	if strings.Contains(out, "secret.txt") || strings.Contains(out, "build/") || strings.Contains(out, "scratch.tmp") {
+		t.Fatalf("find leaked gitignored files: %q", out)
+	}
+}
+
+func TestGrepOutsideGitIgnoresGitignore(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".gitignore"), "secret.txt\n")
+	mustWrite(t, filepath.Join(dir, "secret.txt"), "needle-secret\n")
+
+	out, isErr := run(t, grepTool{}, map[string]any{"path": dir, "pattern": "needle"})
+	if isErr || !strings.Contains(out, "secret.txt") {
+		t.Fatalf("grep outside git should search gitignored files (rg default), got %q (isErr=%v)", out, isErr)
+	}
+}
+
+func TestFindOutsideGitHonorsGitignore(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".gitignore"), "secret.txt\n")
+	mustWrite(t, filepath.Join(dir, "secret.txt"), "x\n")
+	mustWrite(t, filepath.Join(dir, "visible.txt"), "x\n")
+
+	out, isErr := run(t, findTool{}, map[string]any{"path": dir, "pattern": "*.txt"})
+	if isErr {
+		t.Fatalf("find error: %s", out)
+	}
+	if !strings.Contains(out, "visible.txt") {
+		t.Fatalf("find missed visible.txt: %q", out)
+	}
+	if strings.Contains(out, "secret.txt") {
+		t.Fatalf("find outside git should still honor .gitignore (fd --no-require-git), got %q", out)
+	}
+}
+
+func TestFindNestedRepoStopsParentGitignore(t *testing.T) {
+	parent := t.TempDir()
+	gitInit(t, parent)
+	mustWrite(t, filepath.Join(parent, ".gitignore"), "hidden.txt\n")
+	mustWrite(t, filepath.Join(parent, "hidden.txt"), "parent-hidden\n")
+
+	nested := filepath.Join(parent, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, nested)
+	mustWrite(t, filepath.Join(nested, "hidden.txt"), "nested-visible\n")
+	mustWrite(t, filepath.Join(nested, "ok.txt"), "ok\n")
+
+	out, isErr := run(t, findTool{}, map[string]any{"path": nested, "pattern": "*.txt"})
+	if isErr {
+		t.Fatalf("find nested error: %s", out)
+	}
+	if !strings.Contains(out, "hidden.txt") || !strings.Contains(out, "ok.txt") {
+		t.Fatalf("nested repo should not inherit parent gitignore, got %q", out)
+	}
+
+	out, isErr = run(t, findTool{}, map[string]any{"path": parent, "pattern": "**/*.txt"})
+	if isErr {
+		t.Fatalf("find parent error: %s", out)
+	}
+	if containsLine(out, "hidden.txt") {
+		t.Fatalf("parent hidden.txt should stay ignored, got %q", out)
+	}
+	if !strings.Contains(out, "nested/hidden.txt") {
+		t.Fatalf("parent search should still see nested repo file, got %q", out)
+	}
+}
+
+func TestGrepExplicitPathReadsIgnoredFile(t *testing.T) {
+	dir := t.TempDir()
+	gitInit(t, dir)
+	mustWrite(t, filepath.Join(dir, ".gitignore"), "secret.txt\n")
+	secret := filepath.Join(dir, "secret.txt")
+	mustWrite(t, secret, "needle-secret\n")
+
+	out, isErr := run(t, grepTool{}, map[string]any{"path": secret, "pattern": "needle"})
+	if isErr || !strings.Contains(out, "needle-secret") {
+		t.Fatalf("grep on an explicit file should read it even if gitignored, got %q (isErr=%v)", out, isErr)
+	}
+}
+
+func TestGrepGitignoreNegation(t *testing.T) {
+	dir := t.TempDir()
+	gitInit(t, dir)
+	mustWrite(t, filepath.Join(dir, ".gitignore"), "*.log\n!keep.log\n")
+	mustWrite(t, filepath.Join(dir, "noise.log"), "needle-noise\n")
+	mustWrite(t, filepath.Join(dir, "keep.log"), "needle-keep\n")
+
+	out, isErr := run(t, grepTool{}, map[string]any{"path": dir, "pattern": "needle"})
+	if isErr {
+		t.Fatalf("grep error: %s", out)
+	}
+	if !strings.Contains(out, "keep.log") {
+		t.Fatalf("negated gitignore should re-include keep.log: %q", out)
+	}
+	if strings.Contains(out, "noise.log") {
+		t.Fatalf("grep leaked ignored *.log: %q", out)
+	}
+}
+
+func TestGrepGitInfoExclude(t *testing.T) {
+	dir := t.TempDir()
+	gitInit(t, dir)
+	mustWrite(t, filepath.Join(dir, ".git", "info", "exclude"), "local-only.txt\n")
+	mustWrite(t, filepath.Join(dir, "local-only.txt"), "needle-local\n")
+	mustWrite(t, filepath.Join(dir, "ok.txt"), "needle-ok\n")
+
+	out, isErr := run(t, grepTool{}, map[string]any{"path": dir, "pattern": "needle"})
+	if isErr {
+		t.Fatalf("grep error: %s", out)
+	}
+	if !strings.Contains(out, "ok.txt") {
+		t.Fatalf("grep missed ok.txt: %q", out)
+	}
+	if strings.Contains(out, "local-only.txt") {
+		t.Fatalf("grep leaked .git/info/exclude file: %q", out)
+	}
+}
+
+func TestGrepNestedGitignoreIsRelative(t *testing.T) {
+	dir := t.TempDir()
+	gitInit(t, dir)
+	mustWrite(t, filepath.Join(dir, "src", ".gitignore"), "/hidden.txt\n")
+	mustWrite(t, filepath.Join(dir, "src", "hidden.txt"), "needle-src\n")
+	mustWrite(t, filepath.Join(dir, "hidden.txt"), "needle-root\n")
+
+	out, isErr := run(t, grepTool{}, map[string]any{"path": dir, "pattern": "needle"})
+	if isErr {
+		t.Fatalf("grep error: %s", out)
+	}
+	if !strings.Contains(out, "hidden.txt:1:needle-root") {
+		t.Fatalf("root hidden.txt should not be ignored by src/.gitignore: %q", out)
+	}
+	if strings.Contains(out, "src/hidden.txt") {
+		t.Fatalf("src/.gitignore /hidden.txt should ignore src/hidden.txt: %q", out)
+	}
+}
+
+func gitInit(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("git", "init", "--quiet")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+}
+
+func containsLine(out, name string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBash(t *testing.T) {
