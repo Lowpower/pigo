@@ -143,7 +143,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	} else if opts.NoBuiltinTools {
 		reg = tools.NewRegistry()
 	} else {
-		reg = filterTools(reg, opts.ToolAllow, opts.ToolDeny)
+		reg = filterTools(reg, builtinAllow(opts), opts.ToolDeny)
 	}
 
 	if len(opts.CLIExtensions) == 0 && len(opts.Extensions) > 0 {
@@ -421,9 +421,6 @@ func (t extTool) Execute(ctx context.Context, args map[string]any) (string, bool
 
 func filterTools(reg *tools.Registry, allow, deny []string) *tools.Registry {
 	all := reg.List()
-	if len(allow) == 0 && len(deny) == 0 {
-		return reg
-	}
 	denySet := map[string]bool{}
 	for _, d := range deny {
 		denySet[d] = true
@@ -437,12 +434,19 @@ func filterTools(reg *tools.Registry, allow, deny []string) *tools.Registry {
 		if denySet[t.Name()] {
 			continue
 		}
-		if len(allowSet) > 0 && !allowSet[t.Name()] {
+		if !allowSet[t.Name()] {
 			continue
 		}
 		keep = append(keep, t)
 	}
 	return tools.NewRegistry(keep...)
+}
+
+func builtinAllow(opts Options) []string {
+	if len(opts.ToolAllow) > 0 {
+		return opts.ToolAllow
+	}
+	return opts.Config.InitialBuiltinTools()
 }
 
 // Close stops extension subprocesses.
@@ -647,7 +651,7 @@ func (e *Engine) Reload() {
 	} else if e.Opts.NoBuiltinTools {
 		reg = tools.NewRegistry()
 	} else {
-		reg = filterTools(reg, e.Opts.ToolAllow, e.Opts.ToolDeny)
+		reg = filterTools(reg, builtinAllow(e.Opts), e.Opts.ToolDeny)
 	}
 	if !e.Opts.NoTools {
 		specs := collectExtensionSpecs(ctx, e.Opts)

@@ -545,9 +545,76 @@ func TestDefaultLoadsBuiltinTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	if n := len(e.Tools.List()); n != 7 {
-		t.Fatalf("tools=%d, want 7 builtins", n)
+	got := toolNames(e)
+	want := []string{"read", "write", "edit", "bash"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("tools=%v, want default read/write/edit/bash (got %v)", got, want)
 	}
+}
+
+func TestDefaultToolsSetting(t *testing.T) {
+	ctx := context.Background()
+	only := []string{"grep", "find"}
+	e, err := New(ctx, Options{
+		Cwd:          t.TempDir(),
+		AgentDir:     t.TempDir(),
+		NoExtensions: true,
+		Config:       config.Config{DefaultTools: &only},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	got := toolNames(e)
+	if strings.Join(got, ",") != "grep,find" {
+		t.Fatalf("tools=%v", got)
+	}
+}
+
+func TestToolsFlagOverridesDefaultTools(t *testing.T) {
+	ctx := context.Background()
+	only := []string{"grep"}
+	e, err := New(ctx, Options{
+		Cwd:          t.TempDir(),
+		AgentDir:     t.TempDir(),
+		NoExtensions: true,
+		Config:       config.Config{DefaultTools: &only},
+		ToolAllow:    []string{"read"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	got := toolNames(e)
+	if strings.Join(got, ",") != "read" {
+		t.Fatalf("tools=%v", got)
+	}
+}
+
+func TestEmptyDefaultToolsDisablesBuiltins(t *testing.T) {
+	ctx := context.Background()
+	none := []string{}
+	e, err := New(ctx, Options{
+		Cwd:          t.TempDir(),
+		AgentDir:     t.TempDir(),
+		NoExtensions: true,
+		Config:       config.Config{DefaultTools: &none},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if n := len(e.Tools.List()); n != 0 {
+		t.Fatalf("tools=%d, empty defaultTools should disable builtins", n)
+	}
+}
+
+func toolNames(e *Engine) []string {
+	var names []string
+	for _, t := range e.Tools.List() {
+		names = append(names, t.Name())
+	}
+	return names
 }
 
 func TestNewPicksAuthenticatedOpenAI(t *testing.T) {

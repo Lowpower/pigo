@@ -42,6 +42,7 @@ type Config struct {
 	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
 	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
 	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
+	DefaultTools           *[]string             `mapstructure:"defaultTools"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -171,6 +172,20 @@ func (c Config) DoubleEscape() string {
 	default:
 		return "tree"
 	}
+}
+
+// DefaultBuiltinTools is the initial built-in selection when defaultTools is unset.
+func DefaultBuiltinTools() []string {
+	return []string{"read", "bash", "edit", "write"}
+}
+
+// InitialBuiltinTools is settings.defaultTools when set (including an empty list),
+// otherwise read/bash/edit/write.
+func (c Config) InitialBuiltinTools() []string {
+	if c.DefaultTools != nil {
+		return append([]string(nil), (*c.DefaultTools)...)
+	}
+	return DefaultBuiltinTools()
 }
 
 // ShowImages reports whether the TUI should inline tool-result images (default true).
@@ -344,12 +359,13 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		return
 	}
 	var extra struct {
-		Packages   []PackageEntry `json:"packages"`
-		Extensions []string       `json:"extensions"`
-		Skills     []string       `json:"skills"`
-		Prompts    []string       `json:"prompts"`
-		Themes     []string       `json:"themes"`
-		NpmCommand []string       `json:"npmCommand"`
+		Packages     []PackageEntry  `json:"packages"`
+		Extensions   []string        `json:"extensions"`
+		Skills       []string        `json:"skills"`
+		Prompts      []string        `json:"prompts"`
+		Themes       []string        `json:"themes"`
+		NpmCommand   []string        `json:"npmCommand"`
+		DefaultTools json.RawMessage `json:"defaultTools"`
 	}
 	if err := json.Unmarshal(b, &extra); err != nil {
 		return
@@ -360,6 +376,12 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 	cfg.Prompts = extra.Prompts
 	cfg.Themes = extra.Themes
 	cfg.NpmCommand = extra.NpmCommand
+	if extra.DefaultTools != nil {
+		var tools []string
+		if json.Unmarshal(extra.DefaultTools, &tools) == nil {
+			cfg.DefaultTools = &tools
+		}
+	}
 }
 
 // Save writes settings.json, merging with any existing file so extra keys
@@ -419,6 +441,9 @@ func Save(configDir string, cfg Config) error {
 	}
 	if cfg.NpmCommand != nil {
 		existing["npmCommand"] = cfg.NpmCommand
+	}
+	if cfg.DefaultTools != nil {
+		existing["defaultTools"] = *cfg.DefaultTools
 	}
 	if cfg.ExternalEditor != "" {
 		existing["externalEditor"] = cfg.ExternalEditor
