@@ -61,6 +61,29 @@ func TestSettingsEscapeCloses(t *testing.T) {
 	}
 }
 
+func TestSettingsCyclesDefaultProjectTrust(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
+	m := New(testCfg())
+	m.editor.SetValue("/settings")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("default project trust")})
+	if !strings.Contains(m.View(), "ask") {
+		t.Fatalf("expected default ask:\n%s", m.View())
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.cfg.ProjectTrustDefault() != "always" {
+		t.Fatalf("cycle = %s", m.cfg.ProjectTrustDefault())
+	}
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ProjectTrustDefault() != "always" {
+		t.Fatalf("saved = %s", loaded.ProjectTrustDefault())
+	}
+}
+
 func TestSettingsTogglesShowImages(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
@@ -87,12 +110,11 @@ func TestSettingsTogglesChangelogAndTelemetry(t *testing.T) {
 	m := New(testCfg())
 	m.editor.SetValue("/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("collapse changelog")})
 	view := m.View()
 	if !strings.Contains(view, "Collapse changelog") {
 		t.Fatalf("menu missing collapse changelog:\n%s", view)
 	}
-
-	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("collapse changelog")})
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.cfg.CollapsedChangelog() {
 		t.Fatal("collapse changelog should toggle on")

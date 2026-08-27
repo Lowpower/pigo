@@ -30,6 +30,30 @@ func TestBuildIncludesContextAndCwd(t *testing.T) {
 	}
 }
 
+func TestBuildSkipsUntrustedProjectAgents(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("root-agents"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "AGENTS.md"), []byte("project-secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	untrusted := Build(Options{Cwd: cwd})
+	if !strings.Contains(untrusted, "root-agents") {
+		t.Fatalf("missing root AGENTS.md:\n%s", untrusted)
+	}
+	if strings.Contains(untrusted, "project-secret") {
+		t.Fatalf("untrusted loaded .pigo/AGENTS.md:\n%s", untrusted)
+	}
+	trusted := Build(Options{Cwd: cwd, ProjectTrusted: true})
+	if !strings.Contains(trusted, "project-secret") {
+		t.Fatalf("trusted missing .pigo/AGENTS.md:\n%s", trusted)
+	}
+}
+
 func TestDiscoverTemplates(t *testing.T) {
 	agent := t.TempDir()
 	cwd := t.TempDir()
@@ -41,12 +65,28 @@ func TestDiscoverTemplates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "review.md"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := DiscoverTemplates(cwd, agent, nil, true)
+	got := DiscoverTemplates(cwd, agent, nil, true, true)
 	if len(got) != 1 || got[0].Name != "review" {
 		t.Fatalf("%+v", got)
 	}
 	expanded, ok := ExpandTemplate("/review src/", got)
 	if !ok || !strings.Contains(expanded, "Review src/") {
 		t.Fatalf("expanded=%q ok=%v", expanded, ok)
+	}
+
+	proj := filepath.Join(cwd, ".pigo", "prompts")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "secret.md"), []byte("---\ndescription: Secret\n---\n\nhidden\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skipped := DiscoverTemplates(cwd, agent, nil, true, false)
+	if len(skipped) != 1 || skipped[0].Name != "review" {
+		t.Fatalf("untrusted templates = %+v", skipped)
+	}
+	withProj := DiscoverTemplates(cwd, agent, nil, true, true)
+	if len(withProj) != 2 {
+		t.Fatalf("trusted templates = %+v", withProj)
 	}
 }
