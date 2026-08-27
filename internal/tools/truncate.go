@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// DefaultMaxLines and DefaultMaxBytes cap bash/powershell output (last N lines or bytes).
 const (
 	DefaultMaxLines = 2000
 	DefaultMaxBytes = 50 * 1024
@@ -134,9 +135,13 @@ func persistFullOutput(prefix, full string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
-	if _, err := f.WriteString(full); err != nil {
-		return "", err
+	_, werr := f.WriteString(full)
+	cerr := f.Close()
+	if werr != nil {
+		return "", werr
+	}
+	if cerr != nil {
+		return "", cerr
 	}
 	return f.Name(), nil
 }
