@@ -15,28 +15,30 @@ import (
 // Config holds the resolved pigo settings. Keys are defaultProvider /
 // defaultModel / theme, with aliases (provider / model) for the earlier scaffold.
 type Config struct {
-	Provider            string                `mapstructure:"provider"`
-	Model               string                `mapstructure:"model"`
-	DefaultProvider     string                `mapstructure:"defaultProvider"`
-	DefaultModel        string                `mapstructure:"defaultModel"`
-	Theme               string                `mapstructure:"theme"`
-	Thinking            string                `mapstructure:"thinking"`
-	ContextWindow       int                   `mapstructure:"contextWindow"`
-	CompactionOn        *bool                 `mapstructure:"compactionEnabled"`
-	ReserveTokens       int                   `mapstructure:"compactionReserveTokens"`
-	KeepRecentTokens    int                   `mapstructure:"compactionKeepRecentTokens"`
-	SteeringMode        string                `mapstructure:"steeringMode"`
-	FollowUpMode        string                `mapstructure:"followUpMode"`
-	Retry               RetrySettings         `mapstructure:"retry"`
-	ThinkingBudgets     map[string]int        `mapstructure:"thinkingBudgets"`
-	ModelThinkingLevels map[string]string     `mapstructure:"modelThinkingLevels"`
-	HTTPIdleTimeoutMs   *int                  `mapstructure:"httpIdleTimeoutMs"`
-	ExternalEditor      string                `mapstructure:"externalEditor"`
-	DoubleEscapeAction  string                `mapstructure:"doubleEscapeAction"`
-	TreeFilterMode      string                `mapstructure:"treeFilterMode"`
-	BranchSummary       BranchSummarySettings `mapstructure:"branchSummary"`
-	Terminal            TerminalSettings      `mapstructure:"terminal"`
-	Markdown            MarkdownSettings      `mapstructure:"markdown"`
+	Provider             string                `mapstructure:"provider"`
+	Model                string                `mapstructure:"model"`
+	DefaultProvider      string                `mapstructure:"defaultProvider"`
+	DefaultModel         string                `mapstructure:"defaultModel"`
+	Theme                string                `mapstructure:"theme"`
+	Thinking             string                `mapstructure:"thinking"`
+	ContextWindow        int                   `mapstructure:"contextWindow"`
+	CompactionOn         *bool                 `mapstructure:"compactionEnabled"`
+	ReserveTokens        int                   `mapstructure:"compactionReserveTokens"`
+	KeepRecentTokens     int                   `mapstructure:"compactionKeepRecentTokens"`
+	SteeringMode         string                `mapstructure:"steeringMode"`
+	FollowUpMode         string                `mapstructure:"followUpMode"`
+	Retry                RetrySettings         `mapstructure:"retry"`
+	ThinkingBudgets      map[string]int        `mapstructure:"thinkingBudgets"`
+	ModelThinkingLevels  map[string]string     `mapstructure:"modelThinkingLevels"`
+	HTTPIdleTimeoutMs    *int                  `mapstructure:"httpIdleTimeoutMs"`
+	ExternalEditor       string                `mapstructure:"externalEditor"`
+	DoubleEscapeAction   string                `mapstructure:"doubleEscapeAction"`
+	TreeFilterMode       string                `mapstructure:"treeFilterMode"`
+	BranchSummary        BranchSummarySettings `mapstructure:"branchSummary"`
+	Terminal             TerminalSettings      `mapstructure:"terminal"`
+	Markdown             MarkdownSettings      `mapstructure:"markdown"`
+	TUIMode              string                `mapstructure:"tuiMode"`
+	FullscreenExitOutput string                `mapstructure:"fullscreenExitOutput"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -171,6 +173,22 @@ func (c Config) MermaidMode() string {
 	default:
 		return "streaming"
 	}
+}
+
+// TuiMode is regular or fullscreen (default regular).
+func (c Config) TuiMode() string {
+	if strings.EqualFold(strings.TrimSpace(c.TUIMode), "fullscreen") {
+		return "fullscreen"
+	}
+	return "regular"
+}
+
+// FullscreenExit is transcript or resume-hint (default transcript).
+func (c Config) FullscreenExit() string {
+	if strings.EqualFold(strings.TrimSpace(c.FullscreenExitOutput), "resume-hint") {
+		return "resume-hint"
+	}
+	return "transcript"
 }
 
 // TreeFilter is the initial /tree filter (default "default").
@@ -358,6 +376,8 @@ func Save(configDir string, cfg Config) error {
 	existing["followUpMode"] = cfg.FollowUpMode
 	existing["doubleEscapeAction"] = cfg.DoubleEscape()
 	existing["treeFilterMode"] = cfg.TreeFilter()
+	existing["tuiMode"] = cfg.TuiMode()
+	existing["fullscreenExitOutput"] = cfg.FullscreenExit()
 	existing["retry"] = map[string]any{
 		"enabled":     cfg.RetryEnabled(),
 		"maxRetries":  cfg.RetryMaxRetries(),

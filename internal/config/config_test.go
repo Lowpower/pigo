@@ -304,6 +304,28 @@ func TestSavePreservesMarkdownMermaid(t *testing.T) {
 	}
 }
 
+func TestLoadTuiMode(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TuiMode() != "regular" || cfg.FullscreenExit() != "transcript" {
+		t.Fatalf("defaults mode=%s exit=%s", cfg.TuiMode(), cfg.FullscreenExit())
+	}
+	dir := t.TempDir()
+	raw := `{"tuiMode":"fullscreen","fullscreenExitOutput":"resume-hint"}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TuiMode() != "fullscreen" || cfg.FullscreenExit() != "resume-hint" {
+		t.Fatalf("got mode=%s exit=%s", cfg.TuiMode(), cfg.FullscreenExit())
+	}
+}
+
 func TestLoadAndSaveExternalEditor(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"externalEditor":"hx"}`), 0o644); err != nil {

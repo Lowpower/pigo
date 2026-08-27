@@ -55,6 +55,8 @@ func (m *Model) refreshSettingsItems() {
 		{"tree-filter-mode", "Tree filter mode", "Default filter when opening /tree", m.cfg.TreeFilter()},
 		{"theme", "Theme", "Colour theme", m.theme.Name},
 		{"thinking", "Thinking level", "Reasoning level for the current session", thinkingValue(m.cfg.Thinking)},
+		{"tui-mode", "TUI mode", "Interface layout; fullscreen uses the alternate screen", m.cfg.TuiMode()},
+		{"fullscreen-exit-output", "Fullscreen exit output", "Print the transcript or a resume hint when leaving fullscreen", m.cfg.FullscreenExit()},
 	}
 	items := make([]pickerItem, 0, len(rows))
 	for _, r := range rows {
@@ -125,6 +127,10 @@ func (m Model) settingChoices(id string) []string {
 		return names
 	case "thinking":
 		return append([]string{}, models.ThinkingLevels...)
+	case "tui-mode":
+		return []string{"regular", "fullscreen"}
+	case "fullscreen-exit-output":
+		return []string{"transcript", "resume-hint"}
 	default:
 		return nil
 	}
@@ -153,12 +159,17 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.Theme
 	case "thinking":
 		return thinkingValue(m.cfg.Thinking)
+	case "tui-mode":
+		return m.cfg.TuiMode()
+	case "fullscreen-exit-output":
+		return m.cfg.FullscreenExit()
 	default:
 		return ""
 	}
 }
 
-func (m *Model) applySetting(id, value string) {
+func (m *Model) applySetting(id, value string) tea.Cmd {
+	var cmd tea.Cmd
 	switch id {
 	case "autocompact":
 		on := value == "true"
@@ -181,8 +192,19 @@ func (m *Model) applySetting(id, value string) {
 		m.applyTheme(theme.LoadWith(m.themeOpts(value)))
 	case "thinking":
 		m.cfg.Thinking = value
+	case "tui-mode":
+		m.cfg.TUIMode = value
+		m.altScreen = value == "fullscreen"
+		if m.altScreen {
+			cmd = tea.EnterAltScreen
+		} else {
+			cmd = tea.ExitAltScreen
+		}
+	case "fullscreen-exit-output":
+		m.cfg.FullscreenExitOutput = value
 	}
 	m.persistSettings()
+	return cmd
 }
 
 func (m *Model) persistSettings() {
@@ -208,9 +230,9 @@ func (m Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		next := nextChoice(m.settingCurrent(it.ID), m.settingChoices(it.ID))
-		m.applySetting(it.ID, next)
+		cmd := m.applySetting(it.ID, next)
 		m.refreshSettingsItems()
-		return m, nil
+		return m, cmd
 	}
 	return m, nil
 }

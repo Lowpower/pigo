@@ -41,6 +41,19 @@ func TestInlineFiles(t *testing.T) {
 	}
 }
 
+func TestTuiModeFlagParse(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	_ = cmd.Execute()
+	s := out.String()
+	if !strings.Contains(s, "--tui-mode") {
+		t.Fatalf("help missing --tui-mode:\n%s", s)
+	}
+}
+
 func TestThemeFlagsParse(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{"--help"})

@@ -108,15 +108,17 @@ type Model struct {
 	pendingNav    *pendingNav
 	clipOSC       string
 	imgProto      string
+	altScreen     bool
 }
 
 // New builds the interactive model from the resolved config.
 func New(cfg config.Config) Model {
 	m := Model{
-		cfg:      cfg,
-		editor:   newPromptEditor(),
-		keys:     keys.NewManager(config.DefaultConfigDir()),
-		imgProto: detectImageProtocol(os.Getenv),
+		cfg:       cfg,
+		editor:    newPromptEditor(),
+		keys:      keys.NewManager(config.DefaultConfigDir()),
+		imgProto:  detectImageProtocol(os.Getenv),
+		altScreen: useAltScreen(cfg),
 	}
 	m.glam = newRenderer(80)
 	m.applyTheme(theme.Load(cfg.Theme, "", ""))
@@ -982,8 +984,47 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		next, _ := m.openSessionPicker()
 		m = next.(Model)
 	}
-	_, err := tea.NewProgram(m).Run()
-	return err
+	var opts []tea.ProgramOption
+	if useAltScreen(m.cfg) {
+		opts = append(opts, tea.WithAltScreen())
+		m.altScreen = true
+	}
+	final, err := tea.NewProgram(m, opts...).Run()
+	if err != nil {
+		return err
+	}
+	if fm, ok := final.(Model); ok && fm.altScreen {
+		if text := fullscreenExitText(fm); text != "" {
+			fmt.Print(text)
+			if !strings.HasSuffix(text, "\n") {
+				fmt.Println()
+			}
+		}
+	}
+	return nil
+}
+
+func useAltScreen(cfg config.Config) bool {
+	return cfg.TuiMode() == "fullscreen"
+}
+
+func fullscreenExitText(m Model) string {
+	if m.cfg.FullscreenExit() == "resume-hint" {
+		if m.engine != nil && m.engine.Opts.Session != nil {
+			s := m.engine.Opts.Session
+			return fmt.Sprintf("session %s\n%s\n", s.ID(), s.File())
+		}
+		return "pigo session ended\n"
+	}
+	var b strings.Builder
+	for _, e := range m.transcript {
+		if e.rendered == "" {
+			continue
+		}
+		b.WriteString(e.rendered)
+		b.WriteString("\n\n")
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
 func (m Model) keyIs(msg tea.KeyMsg, action string) bool {
