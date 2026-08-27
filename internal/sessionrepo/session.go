@@ -94,6 +94,12 @@ func (s *Session) FindEntries(query EntryQuery) ([]Entry, error) {
 
 // FindEntry returns the first matching entry.
 func (s *Session) FindEntry(query EntryQuery) (*Entry, error) {
+	if err := assertValidLimit(query); err != nil {
+		return nil, err
+	}
+	if err := assertValidCursor(query.Cursor); err != nil {
+		return nil, err
+	}
 	q := query
 	q.Limit = 1
 	q.HasLimit = true
@@ -130,6 +136,12 @@ func (s *Session) FindEntriesOnBranch(query EntryQuery) ([]Entry, error) {
 
 // FindEntryOnBranch returns the first branch match.
 func (s *Session) FindEntryOnBranch(query EntryQuery) (*Entry, error) {
+	if err := assertValidLimit(query); err != nil {
+		return nil, err
+	}
+	if err := assertValidCursor(query.Cursor); err != nil {
+		return nil, err
+	}
 	q := query
 	q.Limit = 1
 	q.HasLimit = true
@@ -257,7 +269,23 @@ func (s *Session) GetLog(opts LogOptions) ([]LogItem, error) {
 	if opts.HasAfter && opts.AfterSeq < 0 {
 		return nil, NewError(ErrInvalidQuery, "cursor sequence must be a non-negative integer")
 	}
-	return s.storage.GetLog(opts)
+	items, err := s.storage.GetLog(opts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]LogItem, len(items))
+	for i, item := range items {
+		out[i] = item
+		if item.Entry != nil {
+			e := cloneEntry(*item.Entry)
+			out[i].Entry = &e
+		}
+		if item.Record != nil {
+			r := cloneRecord(*item.Record)
+			out[i].Record = &r
+		}
+	}
+	return out, nil
 }
 
 func assertValidLimit(q EntryQuery) error {

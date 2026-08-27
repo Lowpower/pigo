@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"database/sql"
 	"encoding/json"
 	"sync"
 	"time"
@@ -47,7 +48,12 @@ func (s *storage) scheduleHeartbeat() {
 					return
 				}
 				now := nowMs()
-				ok, err := renewWriterLease(s.repo.db, s.meta.ID, s.lease, now, now+s.leaseOpt.ttlMs)
+				var ok bool
+				err := s.repo.withDB(func(db *sql.DB) error {
+					var e error
+					ok, e = renewWriterLease(db, s.meta.ID, s.lease, now, now+s.leaseOpt.ttlMs)
+					return e
+				})
 				if err == nil && !ok {
 					s.leaseErr = lostWriterError(s.meta.ID)
 				}
@@ -91,15 +97,30 @@ func (s *storage) enqueueWrite(fn func() error) error {
 }
 
 func (s *storage) GetMetadata() (sessionrepo.Metadata, error) {
-	row, err := readSessionRow(s.repo.db, s.meta.ID)
-	if err != nil {
-		return sessionrepo.Metadata{}, err
-	}
-	return decodeSessionMetadata(row, s.meta.Path)
+	var m sessionrepo.Metadata
+	err := s.repo.withDB(func(db *sql.DB) error {
+		row, err := readSessionRow(db, s.meta.ID)
+		if err != nil {
+			return err
+		}
+		decoded, err := decodeSessionMetadata(row, s.meta.Path)
+		if err != nil {
+			return err
+		}
+		m = decoded
+		return nil
+	})
+	return m, err
 }
 
 func (s *storage) GetLanes() ([]sessionrepo.LanePointer, error) {
-	return readLanes(s.repo.db, s.meta.ID)
+	var lanes []sessionrepo.LanePointer
+	err := s.repo.withDB(func(db *sql.DB) error {
+		var e error
+		lanes, e = readLanes(db, s.meta.ID)
+		return e
+	})
+	return lanes, err
 }
 
 func (s *storage) CreateLane(lane string, at *string) error {
@@ -259,124 +280,148 @@ func (s *storage) AppendRecord(record sessionrepo.Record) (sessionrepo.Record, e
 }
 
 func (s *storage) GetEntry(id string) (*sessionrepo.Entry, error) {
-	row, err := readEntryRow(s.repo.db, s.meta.ID, id)
-	if err != nil || row == nil {
-		return nil, err
-	}
-	e, err := decodeEntry(*row)
-	if err != nil {
-		return nil, err
-	}
-	return &e, nil
+	var entry *sessionrepo.Entry
+	err := s.repo.withDB(func(db *sql.DB) error {
+		row, err := readEntryRow(db, s.meta.ID, id)
+		if err != nil || row == nil {
+			return err
+		}
+		e, err := decodeEntry(*row)
+		if err != nil {
+			return err
+		}
+		entry = &e
+		return nil
+	})
+	return entry, err
 }
 
 func (s *storage) FindEntries(query sessionrepo.EntryQuery) ([]sessionrepo.Entry, error) {
-	sqlType := query.Type
-	if sqlType == "" && query.CustomType != "" {
-		sqlType = "custom"
-	}
-	sqlLimit := query.HasLimit
-	limit := query.Limit
-	if query.CustomType != "" {
-		sqlLimit = false
-	}
-	rows, err := readEntryRows(s.repo.db, s.meta.ID, entryReadOpts{
-		cursor: query.Cursor,
-		limit:  limit,
-		hasLim: sqlLimit,
-		order:  query.Order,
-		typ:    sqlType,
-	})
-	if err != nil {
-		return nil, err
-	}
 	var ents []sessionrepo.Entry
-	for _, row := range rows {
-		e, err := decodeEntry(row)
+	err := s.repo.withDB(func(db *sql.DB) error {
+		sqlType := query.Type
+		if sqlType == "" && query.CustomType != "" {
+			sqlType = "custom"
+		}
+		sqlLimit := query.HasLimit
+		limit := query.Limit
+		if query.CustomType != "" {
+			sqlLimit = false
+		}
+		rows, err := readEntryRows(db, s.meta.ID, entryReadOpts{
+			cursor: query.Cursor,
+			limit:  limit,
+			hasLim: sqlLimit,
+			order:  query.Order,
+			typ:    sqlType,
+		})
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if matchesEntryQuery(e, query) {
-			ents = append(ents, e)
+		ents = nil
+		for _, row := range rows {
+			e, err := decodeEntry(row)
+			if err != nil {
+				return err
+			}
+			if matchesEntryQuery(e, query) {
+				ents = append(ents, e)
+			}
 		}
-	}
-	if query.HasLimit && len(ents) > query.Limit {
-		ents = ents[:query.Limit]
-	}
-	return ents, nil
+		if query.HasLimit && len(ents) > query.Limit {
+			ents = ents[:query.Limit]
+		}
+		return nil
+	})
+	return ents, err
 }
 
 func (s *storage) FindEntriesOnBranch(query sessionrepo.EntryQuery) ([]sessionrepo.Entry, error) {
-	cached, err := readCachedBranch(s.repo.db, s.meta.ID, query.Start)
-	if err != nil {
-		return nil, err
-	}
-	if cached == nil {
-		ok, err := entryExists(s.repo.db, s.meta.ID, query.Start)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, sessionrepo.NewError(sessionrepo.ErrNotFound, "Entry not found: "+query.Start)
-		}
-		return nil, sessionrepo.NewError(sessionrepo.ErrInvalidEntry, "Branch cache missing entry "+query.Start)
-	}
-	rows, err := queryCachedBranchRows(s.repo.db, s.meta.ID, cached, query)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateCachedBranchRows(rows, query); err != nil {
-		return nil, err
-	}
 	var ents []sessionrepo.Entry
-	for _, row := range rows {
-		e, err := decodeEntry(row.entryRow)
+	err := s.repo.withDB(func(db *sql.DB) error {
+		cached, err := readCachedBranch(db, s.meta.ID, query.Start)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if matchesEntryQuery(e, query) {
-			ents = append(ents, e)
+		if cached == nil {
+			ok, err := entryExists(db, s.meta.ID, query.Start)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return sessionrepo.NewError(sessionrepo.ErrNotFound, "Entry not found: "+query.Start)
+			}
+			return sessionrepo.NewError(sessionrepo.ErrInvalidEntry, "Branch cache missing entry "+query.Start)
 		}
-	}
-	if query.HasLimit && len(ents) > query.Limit {
-		ents = ents[:query.Limit]
-	}
-	return ents, nil
+		rows, err := queryCachedBranchRows(db, s.meta.ID, cached, query)
+		if err != nil {
+			return err
+		}
+		if err := validateCachedBranchRows(rows, query); err != nil {
+			return err
+		}
+		ents = nil
+		for _, row := range rows {
+			e, err := decodeEntry(row.entryRow)
+			if err != nil {
+				return err
+			}
+			if matchesEntryQuery(e, query) {
+				ents = append(ents, e)
+			}
+		}
+		if query.HasLimit && len(ents) > query.Limit {
+			ents = ents[:query.Limit]
+		}
+		return nil
+	})
+	return ents, err
 }
 
 func (s *storage) FindRecords(query sessionrepo.RecordQuery) ([]sessionrepo.Record, error) {
-	rows, err := readRecordRows(s.repo.db, s.meta.ID, query)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]sessionrepo.Record, 0, len(rows))
-	for _, row := range rows {
-		r, err := decodeRecord(row.seq, row.timestamp, row.payload)
+	var out []sessionrepo.Record
+	err := s.repo.withDB(func(db *sql.DB) error {
+		rows, err := readRecordRows(db, s.meta.ID, query)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, r)
-	}
-	return out, nil
+		out = make([]sessionrepo.Record, 0, len(rows))
+		for _, row := range rows {
+			r, err := decodeRecord(row.seq, row.timestamp, row.payload)
+			if err != nil {
+				return err
+			}
+			out = append(out, r)
+		}
+		return nil
+	})
+	return out, err
 }
 
-func (s *storage) FindOpenOperations(lane string, _ sessionrepo.OpenOpOptions) ([]sessionrepo.Record, error) {
-	rows, err := readOpenOperationRows(s.repo.db, s.meta.ID, lane)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]sessionrepo.Record, 0, len(rows))
-	for _, row := range rows {
-		r, err := decodeRecord(row.seq, row.timestamp, row.payload)
+func (s *storage) FindOpenOperations(lane string, opts sessionrepo.OpenOpOptions) ([]sessionrepo.Record, error) {
+	var out []sessionrepo.Record
+	err := s.repo.withDB(func(db *sql.DB) error {
+		rows, err := readOpenOperationRows(db, s.meta.ID, lane)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if r.Type != "operation_started" {
-			return nil, sessionrepo.NewError(sessionrepo.ErrStorage, "Expected operation_started record")
+		out = make([]sessionrepo.Record, 0, len(rows))
+		for _, row := range rows {
+			r, err := decodeRecord(row.seq, row.timestamp, row.payload)
+			if err != nil {
+				return err
+			}
+			if r.Type != "operation_started" {
+				return sessionrepo.NewError(sessionrepo.ErrStorage, "Expected operation_started record")
+			}
+			out = append(out, r)
 		}
-		out = append(out, r)
-	}
-	return out, nil
+		if opts.HasLimit && len(out) > opts.Limit {
+			out = out[:opts.Limit]
+		}
+		return nil
+	})
+	return out, err
 }
 
 type logRow struct {
@@ -385,117 +430,126 @@ type logRow struct {
 }
 
 func (s *storage) GetLog(opts sessionrepo.LogOptions) ([]sessionrepo.LogItem, error) {
-	after := int64(0)
-	if opts.HasAfter {
-		after = opts.AfterSeq
-	}
-	var lim *int
-	if opts.HasLimit {
-		lim = &opts.Limit
-	}
-	entries, err := readEntryRows(s.repo.db, s.meta.ID, entryReadOpts{afterSeq: after, hasAfter: true, order: sessionrepo.OrderOldestFirst, limit: opts.Limit, hasLim: opts.HasLimit})
-	if err != nil {
-		return nil, err
-	}
-	recs, err := readRecordRows(s.repo.db, s.meta.ID, sessionrepo.RecordQuery{AfterSeq: after, HasAfterSeq: true, Order: sessionrepo.OrderOldestFirst, Limit: opts.Limit, HasLimit: opts.HasLimit})
-	if err != nil {
-		return nil, err
-	}
-	lanes, err := readLaneMoveRows(s.repo.db, s.meta.ID, after, lim)
-	if err != nil {
-		return nil, err
-	}
-	facts, err := readFactRows(s.repo.db, s.meta.ID, after, lim)
-	if err != nil {
-		return nil, err
-	}
-	var logRows []logRow
-	for _, row := range entries {
-		row := row
-		logRows = append(logRows, logRow{seq: row.seq, decode: func() (sessionrepo.LogItem, error) {
-			e, err := decodeEntry(row)
-			if err != nil {
-				return sessionrepo.LogItem{}, err
-			}
-			return sessionrepo.LogItem{Kind: "entry", Seq: row.seq, Entry: &e}, nil
-		}})
-	}
-	for _, row := range recs {
-		row := row
-		logRows = append(logRows, logRow{seq: row.seq, decode: func() (sessionrepo.LogItem, error) {
-			r, err := decodeRecord(row.seq, row.timestamp, row.payload)
-			if err != nil {
-				return sessionrepo.LogItem{}, err
-			}
-			return sessionrepo.LogItem{Kind: "record", Seq: row.seq, Record: &r}, nil
-		}})
-	}
-	for _, row := range lanes {
-		row := row
-		logRows = append(logRows, logRow{seq: row.seq, decode: func() (sessionrepo.LogItem, error) {
-			return sessionrepo.LogItem{Kind: "lane", Seq: row.seq, Lane: row.lane, LeafID: row.leafID}, nil
-		}})
-	}
-	for _, row := range facts {
-		row := row
-		logRows = append(logRows, logRow{seq: row.seq, decode: func() (sessionrepo.LogItem, error) {
-			if row.kind == "name" {
-				var name *string
+	var out []sessionrepo.LogItem
+	err := s.repo.withDB(func(db *sql.DB) error {
+		after := int64(0)
+		if opts.HasAfter {
+			after = opts.AfterSeq
+		}
+		var lim *int
+		if opts.HasLimit {
+			lim = &opts.Limit
+		}
+		entries, err := readEntryRows(db, s.meta.ID, entryReadOpts{afterSeq: after, hasAfter: true, order: sessionrepo.OrderOldestFirst, limit: opts.Limit, hasLim: opts.HasLimit})
+		if err != nil {
+			return err
+		}
+		recs, err := readRecordRows(db, s.meta.ID, sessionrepo.RecordQuery{AfterSeq: after, HasAfterSeq: true, Order: sessionrepo.OrderOldestFirst, Limit: opts.Limit, HasLimit: opts.HasLimit})
+		if err != nil {
+			return err
+		}
+		lanes, err := readLaneMoveRows(db, s.meta.ID, after, lim)
+		if err != nil {
+			return err
+		}
+		facts, err := readFactRows(db, s.meta.ID, after, lim)
+		if err != nil {
+			return err
+		}
+		var logRows []logRow
+		for _, row := range entries {
+			row := row
+			logRows = append(logRows, logRow{seq: row.seq, decode: func() (sessionrepo.LogItem, error) {
+				e, err := decodeEntry(row)
+				if err != nil {
+					return sessionrepo.LogItem{}, err
+				}
+				return sessionrepo.LogItem{Kind: "entry", Seq: row.seq, Entry: &e}, nil
+			}})
+		}
+		for _, row := range recs {
+			row := row
+			logRows = append(logRows, logRow{seq: row.seq, decode: func() (sessionrepo.LogItem, error) {
+				r, err := decodeRecord(row.seq, row.timestamp, row.payload)
+				if err != nil {
+					return sessionrepo.LogItem{}, err
+				}
+				return sessionrepo.LogItem{Kind: "record", Seq: row.seq, Record: &r}, nil
+			}})
+		}
+		for _, row := range lanes {
+			row := row
+			logRows = append(logRows, logRow{seq: row.seq, decode: func() (sessionrepo.LogItem, error) {
+				return sessionrepo.LogItem{Kind: "lane", Seq: row.seq, Lane: row.lane, LeafID: row.leafID}, nil
+			}})
+		}
+		for _, row := range facts {
+			row := row
+			logRows = append(logRows, logRow{seq: row.seq, decode: func() (sessionrepo.LogItem, error) {
+				if row.kind == "name" {
+					var name *string
+					if row.value != nil {
+						var parsed string
+						if err := json.Unmarshal([]byte(*row.value), &parsed); err != nil {
+							return sessionrepo.LogItem{}, err
+						}
+						name = &parsed
+					}
+					return sessionrepo.LogItem{Kind: "fact", Seq: row.seq, Fact: "name", Name: name}, nil
+				}
+				var label *string
 				if row.value != nil {
 					var parsed string
 					if err := json.Unmarshal([]byte(*row.value), &parsed); err != nil {
 						return sessionrepo.LogItem{}, err
 					}
-					name = &parsed
+					label = &parsed
 				}
-				return sessionrepo.LogItem{Kind: "fact", Seq: row.seq, Fact: "name", Name: name}, nil
-			}
-			var label *string
-			if row.value != nil {
-				var parsed string
-				if err := json.Unmarshal([]byte(*row.value), &parsed); err != nil {
-					return sessionrepo.LogItem{}, err
+				tid := ""
+				if row.key != nil {
+					tid = *row.key
 				}
-				label = &parsed
-			}
-			tid := ""
-			if row.key != nil {
-				tid = *row.key
-			}
-			return sessionrepo.LogItem{Kind: "fact", Seq: row.seq, Fact: "label", TargetID: tid, Label: label}, nil
-		}})
-	}
-	for i := 0; i < len(logRows); i++ {
-		for j := i + 1; j < len(logRows); j++ {
-			if logRows[i].seq > logRows[j].seq {
-				logRows[i], logRows[j] = logRows[j], logRows[i]
+				return sessionrepo.LogItem{Kind: "fact", Seq: row.seq, Fact: "label", TargetID: tid, Label: label}, nil
+			}})
+		}
+		for i := 0; i < len(logRows); i++ {
+			for j := i + 1; j < len(logRows); j++ {
+				if logRows[i].seq > logRows[j].seq {
+					logRows[i], logRows[j] = logRows[j], logRows[i]
+				}
 			}
 		}
-	}
-	if lim != nil && len(logRows) > *lim {
-		logRows = logRows[:*lim]
-	}
-	out := make([]sessionrepo.LogItem, 0, len(logRows))
-	for _, row := range logRows {
-		item, err := row.decode()
-		if err != nil {
-			return nil, err
+		if lim != nil && len(logRows) > *lim {
+			logRows = logRows[:*lim]
 		}
-		out = append(out, item)
-	}
-	return out, nil
+		out = make([]sessionrepo.LogItem, 0, len(logRows))
+		for _, row := range logRows {
+			item, err := row.decode()
+			if err != nil {
+				return err
+			}
+			out = append(out, item)
+		}
+		return nil
+	})
+	return out, err
 }
 
 func (s *storage) GetName() (*string, error) {
-	row, err := readLatestFact(s.repo.db, s.meta.ID, "name", nil)
-	if err != nil || row == nil || row.value == nil {
-		return nil, err
-	}
-	var parsed string
-	if err := json.Unmarshal([]byte(*row.value), &parsed); err != nil {
-		return nil, err
-	}
-	return &parsed, nil
+	var parsed *string
+	err := s.repo.withDB(func(db *sql.DB) error {
+		row, err := readLatestFact(db, s.meta.ID, "name", nil)
+		if err != nil || row == nil || row.value == nil {
+			return err
+		}
+		var name string
+		if err := json.Unmarshal([]byte(*row.value), &name); err != nil {
+			return err
+		}
+		parsed = &name
+		return nil
+	})
+	return parsed, err
 }
 
 func (s *storage) SetName(name *string) error {
@@ -521,15 +575,20 @@ func (s *storage) SetName(name *string) error {
 }
 
 func (s *storage) GetLabel(id string) (*string, error) {
-	row, err := readLatestFact(s.repo.db, s.meta.ID, "label", &id)
-	if err != nil || row == nil || row.value == nil {
-		return nil, err
-	}
-	var parsed string
-	if err := json.Unmarshal([]byte(*row.value), &parsed); err != nil {
-		return nil, err
-	}
-	return &parsed, nil
+	var parsed *string
+	err := s.repo.withDB(func(db *sql.DB) error {
+		row, err := readLatestFact(db, s.meta.ID, "label", &id)
+		if err != nil || row == nil || row.value == nil {
+			return err
+		}
+		var label string
+		if err := json.Unmarshal([]byte(*row.value), &label); err != nil {
+			return err
+		}
+		parsed = &label
+		return nil
+	})
+	return parsed, err
 }
 
 func (s *storage) SetLabel(id string, label *string) error {
@@ -562,5 +621,11 @@ func (s *storage) SetLabel(id string, label *string) error {
 }
 
 func (s *storage) GetStats() (sessionrepo.Stats, error) {
-	return readStats(s.repo.db, s.meta.ID)
+	var st sessionrepo.Stats
+	err := s.repo.withDB(func(db *sql.DB) error {
+		var e error
+		st, e = readStats(db, s.meta.ID)
+		return e
+	})
+	return st, err
 }

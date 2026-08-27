@@ -29,23 +29,16 @@ type resolvedLease struct {
 }
 
 func resolveLease(opts *WriterLeaseOptions) (resolvedLease, error) {
-	r := resolvedLease{ttlMs: defaultTTLMs, heartbeatMs: defaultHeartbeatMs}
 	if opts == nil {
-		return r, nil
+		return resolvedLease{ttlMs: defaultTTLMs, heartbeatMs: defaultHeartbeatMs}, nil
 	}
-	if opts.TTLMs != 0 {
-		r.ttlMs = opts.TTLMs
+	if opts.TTLMs <= 0 {
+		return resolvedLease{}, fmt.Errorf("writerLease.ttlMs must be positive")
 	}
-	if opts.HeartbeatIntervalMs != 0 {
-		r.heartbeatMs = opts.HeartbeatIntervalMs
+	if opts.HeartbeatIntervalMs <= 0 || opts.HeartbeatIntervalMs >= opts.TTLMs {
+		return resolvedLease{}, fmt.Errorf("writerLease.heartbeatIntervalMs must be positive and less than ttlMs")
 	}
-	if r.ttlMs <= 0 {
-		return r, fmt.Errorf("writerLease.ttlMs must be positive")
-	}
-	if r.heartbeatMs <= 0 || r.heartbeatMs >= r.ttlMs {
-		return r, fmt.Errorf("writerLease.heartbeatIntervalMs must be positive and less than ttlMs")
-	}
-	return r, nil
+	return resolvedLease{ttlMs: opts.TTLMs, heartbeatMs: opts.HeartbeatIntervalMs}, nil
 }
 
 type writerLease struct {
@@ -65,6 +58,7 @@ type Repository struct {
 	opts    Options
 	lease   resolvedLease
 	mu      sync.Mutex
+	dbMu    sync.Mutex
 	db      *sql.DB
 	absPath string
 	active  map[string]*storage
@@ -116,23 +110,31 @@ func (r *Repository) getDB() (*sql.DB, error) {
 	return db, nil
 }
 
-func (r *Repository) immediate(fn func() error) error {
+func (r *Repository) withDB(fn func(*sql.DB) error) error {
+	r.dbMu.Lock()
+	defer r.dbMu.Unlock()
 	db, err := r.getDB()
 	if err != nil {
 		return err
 	}
-	if _, err := db.Exec("BEGIN IMMEDIATE"); err != nil {
-		return err
-	}
-	if err := fn(); err != nil {
-		_, _ = db.Exec("ROLLBACK")
-		return err
-	}
-	if _, err := db.Exec("COMMIT"); err != nil {
-		_, _ = db.Exec("ROLLBACK")
-		return err
-	}
-	return nil
+	return fn(db)
+}
+
+func (r *Repository) immediate(fn func() error) error {
+	return r.withDB(func(db *sql.DB) error {
+		if _, err := db.Exec("BEGIN IMMEDIATE"); err != nil {
+			return err
+		}
+		if err := fn(); err != nil {
+			_, _ = db.Exec("ROLLBACK")
+			return err
+		}
+		if _, err := db.Exec("COMMIT"); err != nil {
+			_, _ = db.Exec("ROLLBACK")
+			return err
+		}
+		return nil
+	})
 }
 
 func nowMs() int64 { return time.Now().UnixMilli() }
