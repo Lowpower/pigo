@@ -141,36 +141,46 @@ END;`)
 	}
 }
 
-func TestRepositoryCorruptPayloads(t *testing.T) {
+func TestRepositoryCorruptMetadataJSON(t *testing.T) {
 	repo, cwd := fixture(t)
 	create(t, repo, "session-meta", cwd)
 	execSQL(t, repo.db, `UPDATE sessions SET metadata = ? WHERE id = ?`, "not json", "session-meta")
 	_, err := repo.List(sessionrepo.ListOptions{})
 	mustCode(t, err, sessionrepo.ErrStorage)
 	errContains(t, err, "metadata is not valid JSON")
+}
 
+func TestRepositoryCorruptMetadataNonObject(t *testing.T) {
+	repo, cwd := fixture(t)
 	create(t, repo, "session-meta-obj", cwd)
 	execSQL(t, repo.db, `UPDATE sessions SET metadata = ? WHERE id = ?`, "[]", "session-meta-obj")
-	_, err = repo.List(sessionrepo.ListOptions{CWD: cwd})
+	_, err := repo.List(sessionrepo.ListOptions{CWD: cwd})
 	mustCode(t, err, sessionrepo.ErrStorage)
 	errContains(t, err, "metadata must be an object")
+}
 
+func TestRepositoryCorruptNameJSON(t *testing.T) {
+	repo, cwd := fixture(t)
 	s := create(t, repo, "session-name", cwd)
 	nm := "valid name"
 	if err := s.SetName(&nm); err != nil {
 		t.Fatal(err)
 	}
 	execSQL(t, repo.db, `UPDATE facts SET value = ? WHERE session_id = ? AND kind = 'name'`, "not json", "session-name")
-	_, err = repo.List(sessionrepo.ListOptions{CWD: cwd})
+	_, err := repo.List(sessionrepo.ListOptions{CWD: cwd})
 	mustCode(t, err, sessionrepo.ErrStorage)
 	errContains(t, err, "name is not valid JSON")
+}
 
+func TestRepositoryCorruptNameNonString(t *testing.T) {
+	repo, cwd := fixture(t)
 	named := create(t, repo, "session-name-obj", cwd)
+	nm := "valid name"
 	if err := named.SetName(&nm); err != nil {
 		t.Fatal(err)
 	}
 	execSQL(t, repo.db, `UPDATE facts SET value = ? WHERE session_id = ? AND kind = 'name'`, "{}", "session-name-obj")
-	_, err = named.GetMetadata()
+	_, err := named.GetMetadata()
 	mustCode(t, err, sessionrepo.ErrStorage)
 	errContains(t, err, "name must be a string")
 }
