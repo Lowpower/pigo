@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/Lowpower/pigo/internal/sandbox"
 )
 
 // BashResult is the bang/RPC bash payload.
@@ -36,7 +38,8 @@ func (r BashResult) asData() map[string]any {
 
 // RunBash executes command with bash -c in cwd (pi user bang / RPC bash).
 func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) BashResult {
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	name, args := sandbox.Command(command, cwd, "")
+	cmd := exec.CommandContext(ctx, name, args...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}

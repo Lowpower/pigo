@@ -15,6 +15,7 @@ import (
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/runtime"
+	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/trust"
 	"github.com/Lowpower/pigo/internal/tui"
@@ -66,6 +67,7 @@ type cliFlags struct {
 	promptTemplates []string
 	noPromptTpls    bool
 	tuiMode         string
+	noSandbox       bool
 }
 
 func newRootCmd() *cobra.Command {
@@ -118,6 +120,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&f.promptTemplates, "prompt-template", nil, "load a prompt template file or directory")
 	cmd.Flags().BoolVar(&f.noPromptTpls, "no-prompt-templates", false, "disable prompt template discovery")
 	cmd.Flags().StringVar(&f.tuiMode, "tui-mode", "", "TUI layout: regular|fullscreen")
+	cmd.Flags().BoolVar(&f.noSandbox, "no-sandbox", false, "disable OS-level sandbox wrapping for bash")
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
 	cmd.AddCommand(newAuthCmd(), newConfigCmd())
@@ -137,6 +140,8 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	if agentDir == "" {
 		agentDir = config.DefaultConfigDir()
 	}
+	sandbox.SetAgentDir(agentDir)
+	sandbox.SetNoSandbox(f.noSandbox)
 	cfg, err := config.Load(agentDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
