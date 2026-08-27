@@ -11,7 +11,7 @@ import (
 
 type streamingExec struct{}
 
-func (streamingExec) Execute(ctx context.Context, call ToolCall) (string, bool) {
+func (streamingExec) Execute(ctx context.Context, _ ToolCall) (string, bool) {
 	if fn := tools.OutputUpdate(ctx); fn != nil {
 		fn("partial-out")
 	}
