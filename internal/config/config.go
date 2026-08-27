@@ -37,12 +37,14 @@ type Config struct {
 	BranchSummary          BranchSummarySettings `mapstructure:"branchSummary"`
 	Terminal               TerminalSettings      `mapstructure:"terminal"`
 	Markdown               MarkdownSettings      `mapstructure:"markdown"`
+	Images                 ImageSettings         `mapstructure:"images"`
 	TUIMode                string                `mapstructure:"tuiMode"`
 	FullscreenExitOutput   string                `mapstructure:"fullscreenExitOutput"`
 	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
 	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
 	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
 	ShellPath              string                `mapstructure:"shellPath"`
+	DefaultTools           *[]string             `mapstructure:"defaultTools"`
 	DefaultProjectTrust    string                `mapstructure:"defaultProjectTrust"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
@@ -69,6 +71,11 @@ type BranchSummarySettings struct {
 // TerminalSettings is settings.terminal.
 type TerminalSettings struct {
 	ShowImages *bool `mapstructure:"showImages" json:"showImages,omitempty"`
+}
+
+// ImageSettings is settings.images.
+type ImageSettings struct {
+	BlockImages *bool `mapstructure:"blockImages" json:"blockImages,omitempty"`
 }
 
 // MarkdownSettings is settings.markdown.
@@ -175,12 +182,31 @@ func (c Config) DoubleEscape() string {
 	}
 }
 
+// DefaultBuiltinTools is the initial built-in selection when defaultTools is unset.
+func DefaultBuiltinTools() []string {
+	return []string{"read", "bash", "edit", "write"}
+}
+
+// InitialBuiltinTools is settings.defaultTools when set (including an empty list),
+// otherwise read/bash/edit/write.
+func (c Config) InitialBuiltinTools() []string {
+	if c.DefaultTools != nil {
+		return append([]string(nil), (*c.DefaultTools)...)
+	}
+	return DefaultBuiltinTools()
+}
+
 // ShowImages reports whether the TUI should inline tool-result images (default true).
 func (c Config) ShowImages() bool {
 	if c.Terminal.ShowImages == nil {
 		return true
 	}
 	return *c.Terminal.ShowImages
+}
+
+// BlockImages reports whether images should be omitted from LLM requests (default false).
+func (c Config) BlockImages() bool {
+	return c.Images.BlockImages != nil && *c.Images.BlockImages
 }
 
 // ProjectTrustDefault is ask, always, or never (default ask).
@@ -356,12 +382,13 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		return
 	}
 	var extra struct {
-		Packages   []PackageEntry `json:"packages"`
-		Extensions []string       `json:"extensions"`
-		Skills     []string       `json:"skills"`
-		Prompts    []string       `json:"prompts"`
-		Themes     []string       `json:"themes"`
-		NpmCommand []string       `json:"npmCommand"`
+		Packages     []PackageEntry  `json:"packages"`
+		Extensions   []string        `json:"extensions"`
+		Skills       []string        `json:"skills"`
+		Prompts      []string        `json:"prompts"`
+		Themes       []string        `json:"themes"`
+		NpmCommand   []string        `json:"npmCommand"`
+		DefaultTools json.RawMessage `json:"defaultTools"`
 	}
 	if err := json.Unmarshal(b, &extra); err != nil {
 		return
@@ -372,6 +399,12 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 	cfg.Prompts = extra.Prompts
 	cfg.Themes = extra.Themes
 	cfg.NpmCommand = extra.NpmCommand
+	if extra.DefaultTools != nil {
+		var tools []string
+		if json.Unmarshal(extra.DefaultTools, &tools) == nil {
+			cfg.DefaultTools = &tools
+		}
+	}
 }
 
 // Save writes settings.json, merging with any existing file so extra keys
@@ -436,6 +469,9 @@ func Save(configDir string, cfg Config) error {
 	if cfg.ShellPath != "" {
 		existing["shellPath"] = cfg.ShellPath
 	}
+	if cfg.DefaultTools != nil {
+		existing["defaultTools"] = *cfg.DefaultTools
+	}
 	if cfg.ExternalEditor != "" {
 		existing["externalEditor"] = cfg.ExternalEditor
 	}
@@ -446,6 +482,14 @@ func Save(configDir string, cfg Config) error {
 		}
 		term["showImages"] = *cfg.Terminal.ShowImages
 		existing["terminal"] = term
+	}
+	if cfg.Images.BlockImages != nil {
+		images, _ := existing["images"].(map[string]any)
+		if images == nil {
+			images = map[string]any{}
+		}
+		images["blockImages"] = *cfg.Images.BlockImages
+		existing["images"] = images
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Markdown.Mermaid)) {
 	case "off", "final", "streaming":

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
+	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/shell"
 )
 
@@ -42,11 +44,10 @@ func (bashTool) Execute(ctx context.Context, args map[string]any) (string, bool)
 		defer cancel()
 	}
 
-	cfg, err := shell.GetConfig()
+	cmd, err := bashCmd(runCtx, p.Command, "")
 	if err != nil {
 		return err.Error(), true
 	}
-	cmd := shell.CommandContext(runCtx, cfg, p.Command)
 
 	out, err := cmd.CombinedOutput()
 	result := string(out)
@@ -62,4 +63,27 @@ func (bashTool) Execute(ctx context.Context, args map[string]any) (string, bool)
 		return result + "\n" + err.Error(), true
 	}
 	return result, false
+}
+
+func bashCmd(ctx context.Context, command, dir string) (*exec.Cmd, error) {
+	cfg, err := shell.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	cwd := dir
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	name, argv := sandbox.Command(command, cwd, "")
+	var cmd *exec.Cmd
+	if name == "bwrap" {
+		cmd = exec.CommandContext(ctx, name, argv...)
+		shell.PrepareContext(cmd)
+	} else {
+		cmd = shell.CommandContext(ctx, cfg, command)
+	}
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	return cmd, nil
 }

@@ -87,13 +87,19 @@ func loadContextFiles(cwd string, trusted bool) string {
 	var chunks []string
 	dir := cwd
 	for i := 0; i < 12; i++ {
-		for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
-			p := filepath.Join(dir, name)
-			b, err := os.ReadFile(p)
-			if err != nil {
-				continue
+		if p := filepath.Join(dir, "AGENTS.override.md"); fileExists(p) {
+			if b, err := os.ReadFile(p); err == nil {
+				chunks = append(chunks, "# "+p+"\n"+string(b))
 			}
-			chunks = append(chunks, "# "+p+"\n"+string(b))
+		} else {
+			for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+				p := filepath.Join(dir, name)
+				b, err := os.ReadFile(p)
+				if err != nil {
+					continue
+				}
+				chunks = append(chunks, "# "+p+"\n"+string(b))
+			}
 		}
 		if trusted {
 			p := filepath.Join(dir, ".pigo", "AGENTS.md")
@@ -111,4 +117,9 @@ func loadContextFiles(cwd string, trusted bool) string {
 		dir = parent
 	}
 	return strings.Join(chunks, "\n\n")
+}
+
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
 }

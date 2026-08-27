@@ -223,6 +223,27 @@ func TestLoadTerminalShowImages(t *testing.T) {
 	}
 }
 
+func TestLoadBlockImages(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BlockImages() {
+		t.Fatal("blockImages should default to false")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"images":{"blockImages":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.BlockImages() {
+		t.Fatal("blockImages=true should stick")
+	}
+}
+
 func TestSavePreservesTerminalShowImages(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"terminal":{"showImages":false,"keepMe":true}}`), 0o644); err != nil {
@@ -369,5 +390,50 @@ func TestChangelogSettings(t *testing.T) {
 	}
 	if fresh.LastChangelogVersion != "" || fresh.CollapsedChangelog() || !fresh.InstallTelemetryEnabled() {
 		t.Fatalf("defaults last=%q collapse=%v tel=%v", fresh.LastChangelogVersion, fresh.CollapsedChangelog(), fresh.InstallTelemetryEnabled())
+	}
+}
+
+func TestDefaultToolsLoadAndSave(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.InitialBuiltinTools(); strings.Join(got, ",") != "read,bash,edit,write" {
+		t.Fatalf("unset defaultTools = %v", got)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"defaultTools":["grep","find"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.InitialBuiltinTools(); strings.Join(got, ",") != "grep,find" {
+		t.Fatalf("loaded = %v", got)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"defaultTools"`) || !strings.Contains(string(b), `"grep"`) {
+		t.Fatalf("saved: %s", b)
+	}
+	emptyDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(emptyDir, "settings.json"), []byte(`{"defaultTools":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(emptyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DefaultTools == nil || len(*cfg.DefaultTools) != 0 {
+		t.Fatalf("empty list should be set, got %v", cfg.DefaultTools)
+	}
+	if n := len(cfg.InitialBuiltinTools()); n != 0 {
+		t.Fatalf("empty defaultTools should yield no builtins, n=%d", n)
 	}
 }

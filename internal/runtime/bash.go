@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/shell"
 )
 
@@ -42,7 +43,14 @@ func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) Bas
 		code := 1
 		return BashResult{Output: err.Error(), ExitCode: &code}
 	}
-	cmd := shell.CommandContext(ctx, cfg, command)
+	name, args := sandbox.Command(command, cwd, "")
+	var cmd *exec.Cmd
+	if name == "bwrap" {
+		cmd = exec.CommandContext(ctx, name, args...)
+		shell.PrepareContext(cmd)
+	} else {
+		cmd = shell.CommandContext(ctx, cfg, command)
+	}
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
