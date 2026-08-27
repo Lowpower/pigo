@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/Lowpower/pigo/internal/sandbox"
 )
 
 // bashTool executes a shell command. Unix-only in v1 (process group via setpgid);
@@ -42,7 +45,9 @@ func (bashTool) Execute(ctx context.Context, args map[string]any) (string, bool)
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, "bash", "-c", p.Command)
+	cwd, _ := os.Getwd()
+	name, argv := sandbox.Command(p.Command, cwd, "")
+	cmd := exec.CommandContext(runCtx, name, argv...)
 	// Run in its own process group so children are cleaned up on cancel/timeout.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
