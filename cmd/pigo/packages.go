@@ -55,7 +55,11 @@ func openPackageManager(f packageFlags) (*pkgmgr.Manager, error) {
 	cwd, _ := os.Getwd()
 	agentDir := config.DefaultConfigDir()
 	st := trust.Open(agentDir)
-	trusted := trust.Resolve(st, cwd, trustOverride(f))
+	cfg, err := config.Load(agentDir)
+	if err != nil {
+		cfg = config.Config{}
+	}
+	trusted := trust.Decide(st, cwd, trust.Options{Override: trustOverride(f), Default: cfg.ProjectTrustDefault()})
 	return pkgmgr.Open(cwd, agentDir, trusted)
 }
 
