@@ -16,6 +16,7 @@ import (
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/session"
+	"github.com/Lowpower/pigo/internal/shell"
 	"github.com/Lowpower/pigo/internal/trust"
 	"github.com/Lowpower/pigo/internal/tui"
 	"github.com/Lowpower/pigo/internal/version"
@@ -141,6 +142,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	shell.SetPath(cfg.ShellPath)
 	if f.provider != "" {
 		cfg.Provider, cfg.DefaultProvider = f.provider, f.provider
 	}

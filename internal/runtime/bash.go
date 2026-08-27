@@ -6,8 +6,9 @@ import (
 	"context"
 	"errors"
 	"os/exec"
-	"syscall"
 	"time"
+
+	"github.com/Lowpower/pigo/internal/shell"
 )
 
 // BashResult is the bang/RPC bash payload.
@@ -34,20 +35,17 @@ func (r BashResult) asData() map[string]any {
 	return data
 }
 
-// RunBash executes command with bash -c in cwd (pi user bang / RPC bash).
+// RunBash executes command with the resolved shell in cwd (pi user bang / RPC bash).
 func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) BashResult {
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cfg, err := shell.GetConfig()
+	if err != nil {
+		code := 1
+		return BashResult{Output: err.Error(), ExitCode: &code}
+	}
+	cmd := shell.CommandContext(ctx, cfg, command)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		code := 1

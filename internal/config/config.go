@@ -42,6 +42,7 @@ type Config struct {
 	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
 	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
 	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
+	ShellPath              string                `mapstructure:"shellPath"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -419,6 +420,9 @@ func Save(configDir string, cfg Config) error {
 	}
 	if cfg.NpmCommand != nil {
 		existing["npmCommand"] = cfg.NpmCommand
+	}
+	if cfg.ShellPath != "" {
+		existing["shellPath"] = cfg.ShellPath
 	}
 	if cfg.ExternalEditor != "" {
 		existing["externalEditor"] = cfg.ExternalEditor
