@@ -223,6 +223,27 @@ func TestLoadTerminalShowImages(t *testing.T) {
 	}
 }
 
+func TestLoadBlockImages(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BlockImages() {
+		t.Fatal("blockImages should default to false")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"images":{"blockImages":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.BlockImages() {
+		t.Fatal("blockImages=true should stick")
+	}
+}
+
 func TestSavePreservesTerminalShowImages(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"terminal":{"showImages":false,"keepMe":true}}`), 0o644); err != nil {

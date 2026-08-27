@@ -137,6 +137,13 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	if sf == nil {
 		sf, provider = ai.DefaultStreamFn()
 	}
+	if opts.Config.BlockImages() {
+		inner := sf
+		sf = func(ctx context.Context, req ai.Context, opt ai.Options) (*ai.EventStream, error) {
+			req.Messages = ai.BlockImages(req.Messages)
+			return inner(ctx, req, opt)
+		}
+	}
 	reg := tools.Default()
 	if opts.NoTools {
 		reg = tools.NewRegistry()

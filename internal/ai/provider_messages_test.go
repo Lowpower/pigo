@@ -1,6 +1,9 @@
 package ai
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestAnthropicWireMessagesPreservesToolPairing(t *testing.T) {
 	asst := &AssistantMessage{
@@ -93,5 +96,49 @@ func TestOpenAIWireMessagesIncludesUserImages(t *testing.T) {
 	url, _ := blocks[1]["image_url"].(map[string]any)
 	if url["url"] != "data:image/png;base64,AAA" {
 		t.Fatalf("url = %#v", url)
+	}
+}
+
+func TestAnthropicWireMessagesIncludesToolResultImages(t *testing.T) {
+	raw := `{"content":[{"type":"text","text":"Read image file [image/png]"},{"type":"image","data":"AAA","mimeType":"image/png"}]}`
+	wire := AnthropicWireMessages([]Message{{
+		Role:       RoleToolResult,
+		ToolCallID: "tu_1",
+		ToolName:   "read",
+		Content:    raw,
+	}})
+	trBlocks, _ := wire[0]["content"].([]map[string]any)
+	if len(trBlocks) != 1 {
+		t.Fatalf("tool result wrapper = %#v", wire[0]["content"])
+	}
+	inner, _ := trBlocks[0]["content"].([]map[string]any)
+	if len(inner) != 2 || inner[0]["type"] != "text" || inner[1]["type"] != "image" {
+		t.Fatalf("tool_result content = %#v", trBlocks[0]["content"])
+	}
+	src, _ := inner[1]["source"].(map[string]any)
+	if src["data"] != "AAA" || src["media_type"] != "image/png" {
+		t.Fatalf("image source = %#v", src)
+	}
+}
+
+func TestBlockImagesStripsToolAndUserImages(t *testing.T) {
+	raw := `{"content":[{"type":"text","text":"Read image file [image/png]"},{"type":"image","data":"AAA","mimeType":"image/png"}]}`
+	got := BlockImages([]Message{
+		{Role: RoleUser, Content: "look", Images: []ImageContent{{Type: "image", Data: "AAA", MimeType: "image/png"}}},
+		{Role: RoleToolResult, ToolCallID: "tu_1", Content: raw},
+	})
+	if len(got[0].Images) != 0 {
+		t.Fatalf("user images = %#v", got[0].Images)
+	}
+	if strings.Contains(got[1].Content, `"type":"image"`) {
+		t.Fatalf("tool content still has image JSON: %q", got[1].Content)
+	}
+	if !strings.Contains(got[1].Content, "Read image file") || !strings.Contains(got[1].Content, "blockImages") {
+		t.Fatalf("blocked tool content = %q", got[1].Content)
+	}
+	wire := AnthropicWireMessages(got[1:])
+	trBlocks, _ := wire[0]["content"].([]map[string]any)
+	if _, isSlice := trBlocks[0]["content"].([]map[string]any); isSlice {
+		t.Fatalf("blocked tool_result should be text, got %#v", trBlocks[0]["content"])
 	}
 }
