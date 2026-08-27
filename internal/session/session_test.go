@@ -30,6 +30,34 @@ func TestSessionDirOverride(t *testing.T) {
 	}
 }
 
+func TestListSessionFilesAtFiltersByCwd(t *testing.T) {
+	agent := t.TempDir()
+	custom := t.TempDir()
+	cwdA := t.TempDir()
+	cwdB := t.TempDir()
+	a := NewAt(cwdA, agent, custom)
+	if _, err := a.AppendMessage("user", map[string]any{"role": "user", "content": "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	b := NewAt(cwdB, agent, custom)
+	if _, err := b.AppendMessage("user", map[string]any{"role": "user", "content": "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ContinueRecentAt(cwdA, agent, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID() != a.ID() {
+		t.Fatalf("continue cwdA id=%s want %s (B=%s)", got.ID(), a.ID(), b.ID())
+	}
+}
+
 func TestSessionDirAndFilenameEncoding(t *testing.T) {
 	agentDir := t.TempDir()
 	m := New("/tmp/proj:x/sub", agentDir)

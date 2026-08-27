@@ -140,3 +140,55 @@ func TestListModelsEmptyWithoutAuth(t *testing.T) {
 		t.Fatalf("want empty list, got %q", out.String())
 	}
 }
+
+func TestResolvePromptInputFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "extra.md")
+	if err := os.WriteFile(p, []byte("from-file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolvePromptInput(p); got != "from-file" {
+		t.Fatalf("got %q", got)
+	}
+	if got := resolvePromptInput("literal text"); got != "literal text" {
+		t.Fatalf("literal %q", got)
+	}
+}
+
+func TestBuildInitialMessageJoinsStdin(t *testing.T) {
+	got, rest := buildInitialMessage("stdin-bit", "file-bit", []string{"one", "two"})
+	if got != "stdin-bitfile-bitone" {
+		t.Fatalf("initial=%q", got)
+	}
+	if len(rest) != 1 || rest[0] != "two" {
+		t.Fatalf("rest=%v", rest)
+	}
+}
+
+func TestSessionDirAndVerboseFlagsParse(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	_ = cmd.Execute()
+	s := out.String()
+	for _, want := range []string{"--session-dir", "--verbose", "PI_EXPERIMENTAL", "PIGO_CODING_AGENT_SESSION_DIR"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("help missing %s:\n%s", want, s)
+		}
+	}
+}
+
+func TestResolveSessionDirOrder(t *testing.T) {
+	t.Setenv("PIGO_CODING_AGENT_SESSION_DIR", "/from-env")
+	if got := resolveSessionDir("/flag", "/from-settings", ""); got != "/flag" {
+		t.Fatalf("flag should win, got %q", got)
+	}
+	if got := resolveSessionDir("", "/from-settings", ""); got != "/from-settings" {
+		t.Fatalf("settings=%q", got)
+	}
+	if got := resolveSessionDir("", "", ""); got != "/from-env" {
+		t.Fatalf("env=%q", got)
+	}
+}

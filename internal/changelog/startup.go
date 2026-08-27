@@ -55,7 +55,7 @@ func reportInstallTelemetry(cfg config.Config) {
 	if os.Getenv("PIGO_OFFLINE") != "" || os.Getenv("PI_OFFLINE") != "" {
 		return
 	}
-	if !cfg.InstallTelemetryEnabled() {
+	if !TelemetryAllowed(cfg) {
 		return
 	}
 	go func() {
@@ -76,4 +76,24 @@ func reportInstallTelemetry(cfg config.Config) {
 
 func userAgent(ver string) string {
 	return "pigo/" + ver + " (" + runtime.GOOS + "; " + runtime.Version() + "; " + runtime.GOARCH + ")"
+}
+
+func isTruthyEnvFlag(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// TelemetryAllowed reports whether install telemetry should run.
+// PIGO_TELEMETRY / PI_TELEMETRY override settings when set (1/true/yes vs 0/false/no).
+func TelemetryAllowed(cfg config.Config) bool {
+	for _, name := range []string{"PIGO_TELEMETRY", "PI_TELEMETRY"} {
+		if v, ok := os.LookupEnv(name); ok {
+			return isTruthyEnvFlag(v)
+		}
+	}
+	return cfg.InstallTelemetryEnabled()
 }

@@ -127,7 +127,7 @@ func (m *Manager) CreateBranchedSession(leafID, cwd, agentDir string) (*Manager,
 	if len(path) == 0 {
 		return nil, fmt.Errorf("entry %s not found", leafID)
 	}
-	child := New(cwd, agentDir)
+	child := NewAt(cwd, agentDir, m.dir)
 	child.header.ParentSession = m.file
 	copied := make([]*Entry, 0, len(path))
 	for i, e := range path {

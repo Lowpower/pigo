@@ -133,6 +133,9 @@ func StorageDir(cwd, agentDir, override string) string {
 // ID returns the session id.
 func (m *Manager) ID() string { return m.id }
 
+// Header returns the session header.
+func (m *Manager) Header() Header { return m.header }
+
 // File returns the session file path.
 func (m *Manager) File() string { return m.file }
 

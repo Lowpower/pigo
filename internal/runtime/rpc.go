@@ -155,7 +155,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 		case "new_session":
 			parent, _ := raw["parentSession"].(string)
 			if e.Opts.Session != nil {
-				e.Opts.Session = session.New(e.Opts.Cwd, e.Opts.AgentDir)
+				e.Opts.Session = session.NewAt(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SessionDir)
 				if parent != "" {
 					e.Opts.Session.SetParentSession(parent)
 				}

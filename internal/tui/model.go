@@ -19,6 +19,7 @@ import (
 	"github.com/Lowpower/pigo/internal/changelog"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/keys"
+	"github.com/Lowpower/pigo/internal/llama"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/runtime"
@@ -459,7 +460,8 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "session":
 		if m.engine != nil && m.engine.Opts.Session != nil {
-			return note("session " + m.engine.Opts.Session.ID() + "\n" + m.engine.Opts.Session.File())
+			stats := session.CollectStats(m.engine.Opts.Session, m.history, m.engine.Opts.ContextWindow)
+			return note(session.FormatInfo(stats, m.engine.Opts.Session.Name()))
 		}
 		return note("no session (started with --no-session)")
 	case "model":
@@ -511,7 +513,10 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		m.transcript = nil
 		if m.engine != nil {
 			cwd, _ := os.Getwd()
-			s := session.New(cwd, m.engine.Opts.AgentDir)
+			if m.engine.Opts.Cwd != "" {
+				cwd = m.engine.Opts.Cwd
+			}
+			s := session.NewAt(cwd, m.engine.Opts.AgentDir, m.engine.Opts.SessionDir)
 			m.engine.AdoptSession(s)
 		}
 		return note("started a new session")
@@ -698,6 +703,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: rendered})
 		return m, nil
 	case "skill":
+		if !m.cfg.SkillCommandsEnabled() {
+			return note("skill commands are disabled")
+		}
 		if m.engine == nil {
 			return note("no skills loaded")
 		}
@@ -707,13 +715,17 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("unknown skill: " + name)
 		}
 		return m.startTurn(body, nil)
+	case "llama":
+		return m.handleLlama(cmd.Rest)
 	default:
 		if m.engine != nil {
 			if expanded, ok := prompt.ExpandTemplate("/"+cmd.Name+" "+cmd.Rest, m.engine.Templates); ok {
 				return m.startTurn(expanded, nil)
 			}
-			if body, ok := skills.ExpandCommand(m.engine.Skills, cmd.Name, cmd.Rest); ok {
-				return m.startTurn(body, nil)
+			if m.cfg.SkillCommandsEnabled() {
+				if body, ok := skills.ExpandCommand(m.engine.Skills, cmd.Name, cmd.Rest); ok {
+					return m.startTurn(body, nil)
+				}
 			}
 		}
 		return note("/" + cmd.Name + " is not implemented")
@@ -1135,6 +1147,60 @@ func (m Model) handleClear() (tea.Model, tea.Cmd) {
 	m.editor.Reset()
 	m.complete.hide()
 	return m, nil
+}
+
+func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
+	note := func(s string) (tea.Model, tea.Cmd) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		return m, nil
+	}
+	url := strings.TrimSpace(os.Getenv("LLAMA_BASE_URL"))
+	key := strings.TrimSpace(os.Getenv("LLAMA_API_KEY"))
+	if m.engine != nil {
+		if p, ok := auth.Lookup(llama.ProviderID); ok {
+			if res, err := auth.Resolve(context.Background(), auth.Open(m.engine.Opts.AgentDir), p, auth.ResolveOpts{}); err == nil && res != nil {
+				if u := strings.TrimSpace(res.Env["LLAMA_BASE_URL"]); u != "" {
+					url = u
+				}
+				if res.Auth.APIKey != "" && res.Auth.APIKey != "local" {
+					key = res.Auth.APIKey
+				}
+			}
+		}
+	}
+	c, err := llama.NewClient(url, key)
+	if err != nil {
+		return note(err.Error())
+	}
+	args := strings.Fields(rest)
+	if len(args) == 0 {
+		models, err := c.List(false)
+		if err != nil {
+			return note(err.Error())
+		}
+		props, _ := c.Props()
+		return note(llama.FormatCatalog(models, props.ModelsAutoload))
+	}
+	switch args[0] {
+	case "load":
+		if len(args) < 2 {
+			return note("usage: /llama load <model>")
+		}
+		if err := c.Load(args[1]); err != nil {
+			return note(err.Error())
+		}
+		return note("loading " + args[1])
+	case "unload":
+		if len(args) < 2 {
+			return note("usage: /llama unload <model>")
+		}
+		if err := c.Unload(args[1]); err != nil {
+			return note(err.Error())
+		}
+		return note("unloading " + args[1])
+	default:
+		return note("usage: /llama | /llama load <model> | /llama unload <model>")
+	}
 }
 
 func lastAssistant(msgs []ai.Message) string {

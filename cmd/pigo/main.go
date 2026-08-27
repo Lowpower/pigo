@@ -13,6 +13,7 @@ import (
 
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/migrate"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/sandbox"
@@ -70,14 +71,26 @@ type cliFlags struct {
 	noSandbox       bool
 	approve         bool
 	noApprove       bool
+	sessionDir      string
+	verbose         bool
 }
 
 func newRootCmd() *cobra.Command {
 	var f cliFlags
 
 	cmd := &cobra.Command{
-		Use:          "pigo [prompt...]",
-		Short:        "pigo — a coding agent",
+		Use:   "pigo [prompt...]",
+		Short: "pigo — a coding agent",
+		Long: `pigo — a coding agent
+
+pigo does not implement pi's PI_EXPERIMENTAL server/client transport.
+
+Environment:
+  PIGO_CODING_AGENT_DIR           Agent config directory
+  PIGO_CODING_AGENT_SESSION_DIR   Session storage directory (overridden by --session-dir)
+  PI_TELEMETRY / PIGO_TELEMETRY   Override install telemetry (1/true/yes or 0/false/no)
+  PI_EXPERIMENTAL                 Not supported; server/client commands are not ported
+`,
 		SilenceUsage: true,
 		Args:         cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -96,8 +109,8 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.provider, "provider", "", "provider id")
 	cmd.Flags().StringVar(&f.model, "model", "", "model id")
 	cmd.Flags().StringVar(&f.thinking, "thinking", "", "thinking level: off|minimal|low|medium|high|xhigh|max")
-	cmd.Flags().StringVar(&f.systemPrompt, "system-prompt", "", "replace the default system prompt")
-	cmd.Flags().StringArrayVar(&f.appendSystem, "append-system-prompt", nil, "append text to the system prompt (repeatable)")
+	cmd.Flags().StringVar(&f.systemPrompt, "system-prompt", "", "replace the default system prompt (text or file path)")
+	cmd.Flags().StringArrayVar(&f.appendSystem, "append-system-prompt", nil, "append text or file contents to the system prompt (repeatable)")
 	cmd.Flags().BoolVarP(&f.noContextFiles, "no-context-files", "", false, "skip AGENTS.md / CLAUDE.md")
 	cmd.Flags().BoolVar(&f.noSkills, "no-skills", false, "disable skill discovery")
 	cmd.Flags().StringArrayVar(&f.skills, "skill", nil, "extra skill path (repeatable)")
@@ -125,6 +138,8 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&f.noSandbox, "no-sandbox", false, "disable OS-level sandbox wrapping for bash")
 	cmd.Flags().BoolVarP(&f.approve, "approve", "a", false, "trust project-local files for this run")
 	cmd.Flags().BoolVar(&f.noApprove, "no-approve", false, "ignore project-local files for this run")
+	cmd.Flags().StringVar(&f.sessionDir, "session-dir", "", "directory for session storage and lookup")
+	cmd.Flags().BoolVar(&f.verbose, "verbose", false, "force verbose startup (overrides quietStartup)")
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
 	cmd.AddCommand(newAuthCmd(), newConfigCmd())
@@ -171,6 +186,10 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			return fmt.Errorf("--tui-mode requires regular or fullscreen")
 		}
 	}
+	if f.verbose {
+		off := false
+		cfg.QuietStartupFlag = &off
+	}
 	if f.apiKey != "" {
 		switch cfg.ResolvedProvider() {
 		case "openai":
@@ -186,6 +205,11 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		}
 	}
 	auth.ApplyEnv(agentDir)
+	cwd, _ := os.Getwd()
+	mig := migrate.Run(cwd, agentDir)
+	for _, w := range mig.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", w)
+	}
 	offline := f.offline || os.Getenv("PIGO_OFFLINE") != ""
 	catalogURL := ""
 	if !offline {
@@ -206,7 +230,6 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		return nil
 	}
 
-	cwd, _ := os.Getwd()
 	if f.export != "" {
 		outPath := ""
 		if len(args) > 0 {
@@ -223,37 +246,66 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		return nil
 	}
 
-	msgs, files := splitPromptArgs(args)
-	prompt := strings.TrimSpace(strings.Join(msgs, " "))
-	if f.prompt != "" {
-		prompt = f.prompt
+	var override *bool
+	if f.approve {
+		v := true
+		override = &v
+	} else if f.noApprove {
+		v := false
+		override = &v
 	}
+	st := trust.Open(agentDir)
+	trusted := trust.Decide(st, cwd, trust.Options{Override: override, Default: cfg.ProjectTrustDefault()})
+	cfg = config.ApplyProject(cfg, cwd, trusted)
+	applyHTTPProxy(cfg.HTTPProxy)
+
+	sessionDir := resolveSessionDir(f.sessionDir, cfg.SessionDir, "")
+
+	msgs, files := splitPromptArgs(args)
+	if f.prompt != "" {
+		msgs = append([]string{f.prompt}, msgs...)
+	}
+	fileText := ""
 	if len(files) > 0 {
 		inline, err := inlineFiles(cwd, files)
 		if err != nil {
 			return err
 		}
-		if prompt == "" {
-			prompt = inline
-		} else {
-			prompt = inline + "\n" + prompt
-		}
+		fileText = inline
 	}
 
 	mode := f.mode
 	if mode == "" {
-		if f.print || prompt != "" || !isTTY() {
+		if f.print || !isTTY() {
 			mode = "text"
 		} else {
 			mode = "interactive"
 		}
 	}
 
+	stdinContent := ""
+	if mode != "rpc" {
+		stdinContent = readPipedStdin()
+		if stdinContent != "" && mode == "interactive" {
+			mode = "text"
+		}
+	}
+	prompt, restMsgs := buildInitialMessage(stdinContent, fileText, msgs)
+	if f.mode == "" && mode == "interactive" && prompt != "" {
+		mode = "text"
+	}
+
+	systemPrompt := resolvePromptInput(f.systemPrompt)
+	appendSystem := make([]string, 0, len(f.appendSystem))
+	for _, s := range f.appendSystem {
+		appendSystem = append(appendSystem, resolvePromptInput(s))
+	}
+
 	var sess *session.Manager
 	if !f.noSession {
 		switch {
 		case f.fork != "":
-			src, err2 := session.FindByID(cwd, agentDir, f.fork)
+			src, err2 := session.FindByIDAt(cwd, agentDir, f.fork, sessionDir)
 			if err2 != nil {
 				src, err2 = session.Open(f.fork)
 			}
@@ -267,28 +319,23 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		case f.sessionPath != "":
 			sess, err = session.Open(f.sessionPath)
 			if err != nil {
-				sess, err = session.FindByID(cwd, agentDir, f.sessionPath)
+				sess, err = session.FindByIDAt(cwd, agentDir, f.sessionPath, sessionDir)
 			}
 			if err != nil {
 				return fmt.Errorf("open session: %w", err)
 			}
 		case f.sessionID != "":
-			sess, err = session.FindByID(cwd, agentDir, f.sessionID)
+			sess, err = session.FindByIDAt(cwd, agentDir, f.sessionID, sessionDir)
 			if err != nil {
 				return fmt.Errorf("session-id: %w", err)
 			}
-		case f.continueSession:
-			sess, err = session.ContinueRecent(cwd, agentDir)
-			if err != nil {
-				return fmt.Errorf("resume session: %w", err)
-			}
-		case f.resume:
-			sess, err = session.ContinueRecent(cwd, agentDir)
+		case f.continueSession, f.resume:
+			sess, err = session.ContinueRecentAt(cwd, agentDir, sessionDir)
 			if err != nil {
 				return fmt.Errorf("resume session: %w", err)
 			}
 		default:
-			sess = session.New(cwd, agentDir)
+			sess = session.NewAt(cwd, agentDir, sessionDir)
 		}
 		if f.name != "" && sess != nil {
 			sess.SetName(f.name)
@@ -296,16 +343,6 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 
 	exts := f.extension
-	var override *bool
-	if f.approve {
-		v := true
-		override = &v
-	} else if f.noApprove {
-		v := false
-		override = &v
-	}
-	st := trust.Open(agentDir)
-	trusted := trust.Decide(st, cwd, trust.Options{Override: override, Default: cfg.ProjectTrustDefault()})
 
 	cliProvider := f.provider
 	cliModel := ""
@@ -317,13 +354,18 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		cliModel = id
 	}
 
+	modelPatterns := splitCSV(f.modelsFlag)
+	if len(modelPatterns) == 0 {
+		modelPatterns = cfg.EnabledModels
+	}
+
 	eng, err := runtime.New(cmd.Context(), runtime.Options{
 		Config:         cfg,
 		Cwd:            cwd,
 		AgentDir:       agentDir,
 		Session:        sess,
-		SystemPrompt:   f.systemPrompt,
-		AppendSystem:   f.appendSystem,
+		SystemPrompt:   systemPrompt,
+		AppendSystem:   appendSystem,
 		NoContextFiles: f.noContextFiles,
 		NoSkills:       f.noSkills,
 		SkillPaths:     f.skills,
@@ -339,12 +381,13 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		PromptPaths:    f.promptTemplates,
 		ThemePaths:     f.themePaths,
 		NoThemes:       f.noThemes,
-		Models:         splitCSV(f.modelsFlag),
+		Models:         modelPatterns,
 		CLIProvider:    cliProvider,
 		CLIModel:       cliModel,
 		CLIThinking:    f.thinking,
 		CatalogBaseURL: catalogURL,
 		Offline:        f.offline,
+		SessionDir:     sessionDir,
 	})
 	if err != nil {
 		return err
@@ -366,21 +409,49 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		}
 		return tui.RunEngine(cfg, eng)
 	case "text", "print":
-		if prompt == "" {
+		prompts := printPrompts(prompt, restMsgs)
+		if len(prompts) == 0 {
 			fmt.Fprintf(out, "provider=%s model=%s theme=%s\n", cfg.ResolvedProvider(), cfg.ResolvedModel(), cfg.Theme)
 			return nil
 		}
-		return eng.PrintText(ctx, out, history, prompt)
+		hist := history
+		for _, p := range prompts {
+			if err := eng.PrintText(ctx, out, hist, p); err != nil {
+				return err
+			}
+			hist = eng.History()
+		}
+		return nil
 	case "json":
-		if prompt == "" {
+		prompts := printPrompts(prompt, restMsgs)
+		if len(prompts) == 0 {
 			return fmt.Errorf("--mode json requires a prompt")
 		}
-		return eng.PrintJSON(ctx, out, history, prompt, nil)
+		if err := eng.WriteSessionHeader(out); err != nil {
+			return err
+		}
+		hist := history
+		for _, p := range prompts {
+			if err := eng.PrintJSON(ctx, out, hist, p, nil); err != nil {
+				return err
+			}
+			hist = eng.History()
+		}
+		return nil
 	case "rpc":
 		return eng.ServeRPC(ctx, cmd.InOrStdin(), out)
 	default:
 		return fmt.Errorf("unknown --mode %q (want: interactive|text|json|rpc)", mode)
 	}
+}
+
+func printPrompts(initial string, rest []string) []string {
+	var out []string
+	if initial != "" {
+		out = append(out, initial)
+	}
+	out = append(out, rest...)
+	return out
 }
 
 func splitCSV(s string) []string {

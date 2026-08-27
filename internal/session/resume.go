@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -77,6 +78,11 @@ func listSessionFilesAt(cwd, agentDir, sessionDir string) ([]string, error) {
 		path string
 		mod  time.Time
 	}
+	filterCwd := strings.TrimSpace(sessionDir) != "" && dir != StorageDir(cwd, agentDir, "")
+	resolvedCwd := cwd
+	if abs, err := filepath.Abs(cwd); err == nil {
+		resolvedCwd = abs
+	}
 	var files []fileInfo
 	for _, e := range ents {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
@@ -86,6 +92,19 @@ func listSessionFilesAt(cwd, agentDir, sessionDir string) ([]string, error) {
 		info, err := e.Info()
 		if err != nil {
 			continue
+		}
+		if filterCwd {
+			h, _, err := Load(p)
+			if err != nil {
+				continue
+			}
+			hc := h.Cwd
+			if abs, err := filepath.Abs(hc); err == nil {
+				hc = abs
+			}
+			if filepath.Clean(hc) != filepath.Clean(resolvedCwd) {
+				continue
+			}
 		}
 		files = append(files, fileInfo{path: p, mod: info.ModTime()})
 	}
@@ -105,7 +124,7 @@ func (m *Manager) Fork(cwd, agentDir string) (*Manager, error) {
 		leaf = m.entries[len(m.entries)-1].ID
 	}
 	if leaf == "" {
-		child := New(cwd, agentDir)
+		child := NewAt(cwd, agentDir, m.dir)
 		child.header.ParentSession = m.file
 		return child, nil
 	}
