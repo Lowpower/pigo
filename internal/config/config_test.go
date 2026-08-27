@@ -350,3 +350,24 @@ func TestLoadAndSaveExternalEditor(t *testing.T) {
 		t.Fatalf("saved: %s", b)
 	}
 }
+
+func TestChangelogSettings(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"lastChangelogVersion":"0.0.0","collapseChangelog":true,"enableInstallTelemetry":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LastChangelogVersion != "0.0.0" || !cfg.CollapsedChangelog() || cfg.InstallTelemetryEnabled() {
+		t.Fatalf("got last=%q collapse=%v tel=%v", cfg.LastChangelogVersion, cfg.CollapsedChangelog(), cfg.InstallTelemetryEnabled())
+	}
+	fresh, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.LastChangelogVersion != "" || fresh.CollapsedChangelog() || !fresh.InstallTelemetryEnabled() {
+		t.Fatalf("defaults last=%q collapse=%v tel=%v", fresh.LastChangelogVersion, fresh.CollapsedChangelog(), fresh.InstallTelemetryEnabled())
+	}
+}

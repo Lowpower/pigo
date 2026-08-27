@@ -15,30 +15,33 @@ import (
 // Config holds the resolved pigo settings. Keys are defaultProvider /
 // defaultModel / theme, with aliases (provider / model) for the earlier scaffold.
 type Config struct {
-	Provider             string                `mapstructure:"provider"`
-	Model                string                `mapstructure:"model"`
-	DefaultProvider      string                `mapstructure:"defaultProvider"`
-	DefaultModel         string                `mapstructure:"defaultModel"`
-	Theme                string                `mapstructure:"theme"`
-	Thinking             string                `mapstructure:"thinking"`
-	ContextWindow        int                   `mapstructure:"contextWindow"`
-	CompactionOn         *bool                 `mapstructure:"compactionEnabled"`
-	ReserveTokens        int                   `mapstructure:"compactionReserveTokens"`
-	KeepRecentTokens     int                   `mapstructure:"compactionKeepRecentTokens"`
-	SteeringMode         string                `mapstructure:"steeringMode"`
-	FollowUpMode         string                `mapstructure:"followUpMode"`
-	Retry                RetrySettings         `mapstructure:"retry"`
-	ThinkingBudgets      map[string]int        `mapstructure:"thinkingBudgets"`
-	ModelThinkingLevels  map[string]string     `mapstructure:"modelThinkingLevels"`
-	HTTPIdleTimeoutMs    *int                  `mapstructure:"httpIdleTimeoutMs"`
-	ExternalEditor       string                `mapstructure:"externalEditor"`
-	DoubleEscapeAction   string                `mapstructure:"doubleEscapeAction"`
-	TreeFilterMode       string                `mapstructure:"treeFilterMode"`
-	BranchSummary        BranchSummarySettings `mapstructure:"branchSummary"`
-	Terminal             TerminalSettings      `mapstructure:"terminal"`
-	Markdown             MarkdownSettings      `mapstructure:"markdown"`
-	TUIMode              string                `mapstructure:"tuiMode"`
-	FullscreenExitOutput string                `mapstructure:"fullscreenExitOutput"`
+	Provider               string                `mapstructure:"provider"`
+	Model                  string                `mapstructure:"model"`
+	DefaultProvider        string                `mapstructure:"defaultProvider"`
+	DefaultModel           string                `mapstructure:"defaultModel"`
+	Theme                  string                `mapstructure:"theme"`
+	Thinking               string                `mapstructure:"thinking"`
+	ContextWindow          int                   `mapstructure:"contextWindow"`
+	CompactionOn           *bool                 `mapstructure:"compactionEnabled"`
+	ReserveTokens          int                   `mapstructure:"compactionReserveTokens"`
+	KeepRecentTokens       int                   `mapstructure:"compactionKeepRecentTokens"`
+	SteeringMode           string                `mapstructure:"steeringMode"`
+	FollowUpMode           string                `mapstructure:"followUpMode"`
+	Retry                  RetrySettings         `mapstructure:"retry"`
+	ThinkingBudgets        map[string]int        `mapstructure:"thinkingBudgets"`
+	ModelThinkingLevels    map[string]string     `mapstructure:"modelThinkingLevels"`
+	HTTPIdleTimeoutMs      *int                  `mapstructure:"httpIdleTimeoutMs"`
+	ExternalEditor         string                `mapstructure:"externalEditor"`
+	DoubleEscapeAction     string                `mapstructure:"doubleEscapeAction"`
+	TreeFilterMode         string                `mapstructure:"treeFilterMode"`
+	BranchSummary          BranchSummarySettings `mapstructure:"branchSummary"`
+	Terminal               TerminalSettings      `mapstructure:"terminal"`
+	Markdown               MarkdownSettings      `mapstructure:"markdown"`
+	TUIMode                string                `mapstructure:"tuiMode"`
+	FullscreenExitOutput   string                `mapstructure:"fullscreenExitOutput"`
+	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
+	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
+	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -110,6 +113,19 @@ func (c Config) CompactionEnabled() bool {
 		return true
 	}
 	return *c.CompactionOn
+}
+
+// CollapsedChangelog reports whether startup changelog is condensed (default false).
+func (c Config) CollapsedChangelog() bool {
+	return c.CollapseChangelog != nil && *c.CollapseChangelog
+}
+
+// InstallTelemetryEnabled reports whether changelog-detected updates ping pi.dev (default true).
+func (c Config) InstallTelemetryEnabled() bool {
+	if c.EnableInstallTelemetry == nil {
+		return true
+	}
+	return *c.EnableInstallTelemetry
 }
 
 // RetryEnabled reports whether auto-retry is on (default true, like pi).
@@ -374,6 +390,9 @@ func Save(configDir string, cfg Config) error {
 	existing["compactionKeepRecentTokens"] = cfg.KeepRecentTokens
 	existing["steeringMode"] = cfg.SteeringMode
 	existing["followUpMode"] = cfg.FollowUpMode
+	existing["lastChangelogVersion"] = cfg.LastChangelogVersion
+	existing["collapseChangelog"] = cfg.CollapsedChangelog()
+	existing["enableInstallTelemetry"] = cfg.InstallTelemetryEnabled()
 	existing["doubleEscapeAction"] = cfg.DoubleEscape()
 	existing["treeFilterMode"] = cfg.TreeFilter()
 	existing["tuiMode"] = cfg.TuiMode()
