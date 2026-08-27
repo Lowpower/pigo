@@ -34,6 +34,9 @@ const maxEditorWidth = 100
 type entry struct {
 	role     string
 	rendered string
+	thinking string // raw thinking block (Ctrl+T)
+	toolOut  string // raw tool result (Ctrl+O)
+	isError  bool
 }
 
 // agentEventMsg / agentClosedMsg carry agent-loop events into the bubbletea loop.
@@ -59,10 +62,16 @@ type Model struct {
 	history    []ai.Message // raw user/assistant messages carried across turns
 	queued     []queuedPrompt
 
-	streaming       string // in-progress assistant text (plain)
-	streamingActive bool
-	running         bool
-	provider        string
+	streaming         string // in-progress assistant text (plain)
+	streamingThinking string
+	streamingActive   bool
+	running           bool
+	provider          string
+	hideThinking      bool
+	toolsExpanded     bool
+	usage             ai.Usage
+	gitCwd            string
+	gitBranch         string
 
 	agentEvents <-chan agent.Event
 	cancel      context.CancelFunc
@@ -108,6 +117,7 @@ func New(cfg config.Config) Model {
 	}
 	m.glam = newRenderer(80)
 	m.applyTheme(theme.Load(cfg.Theme, "", ""))
+	m.refreshGit()
 	return m
 }
 
@@ -254,6 +264,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.keyIs(msg, "app.thinking.cycle") {
 			return m.cycleThinking()
+		}
+		if m.keyIs(msg, "app.thinking.toggle") {
+			m.hideThinking = !m.hideThinking
+			state := "visible"
+			if m.hideThinking {
+				state = "hidden"
+			}
+			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("thinking blocks: " + state)})
+			return m, nil
+		}
+		if m.keyIs(msg, "app.tools.expand") {
+			m.toolsExpanded = !m.toolsExpanded
+			state := "collapsed"
+			if m.toolsExpanded {
+				state = "expanded"
+			}
+			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("tool output: " + state)})
+			return m, nil
 		}
 		if m.keyIs(msg, "app.model.select") {
 			return m.openModelPicker("")
@@ -642,6 +670,7 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	m.agentEvents = stream.Events()
 	m.running = true
 	m.streaming = ""
+	m.streamingThinking = ""
 	m.streamingActive = false
 	return m, waitForAgentEvent(m.agentEvents)
 }
@@ -663,17 +692,32 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 	switch ev.Type {
 	case agent.EventMessageStart:
 		m.streaming = ""
+		m.streamingThinking = ""
 		m.streamingActive = true
 
 	case agent.EventMessageUpdate:
 		if ev.AIEvent != nil && ev.AIEvent.Type == ai.EventTextDelta {
 			m.streaming += ev.AIEvent.Delta
 		}
+		if ev.AIEvent != nil && ev.AIEvent.Type == ai.EventThinkingDelta {
+			m.streamingThinking += ev.AIEvent.Delta
+		}
 
 	case agent.EventMessageEnd:
 		m.streamingActive = false
 		m.streaming = ""
+		m.streamingThinking = ""
 		if ev.Assistant != nil {
+			addUsage(&m.usage, ev.Assistant.Usage)
+			for _, c := range ev.Assistant.Content {
+				if c != nil && c.Type == ai.KindThinking && strings.TrimSpace(c.Thinking) != "" {
+					m.transcript = append(m.transcript, entry{
+						role:     "thinking",
+						thinking: c.Thinking,
+						rendered: m.metaStyle.Render(c.Thinking),
+					})
+				}
+			}
 			if text := ev.Assistant.Text(); text != "" {
 				m.transcript = append(m.transcript, entry{role: "assistant", rendered: m.renderMarkdown(text)})
 				m.history = append(m.history, ai.Message{Role: ai.RoleAssistant, Content: text})
@@ -687,7 +731,6 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 		})
 
 	case agent.EventToolEnd:
-		summary := firstLine(ev.Result)
 		style := m.toolStyle
 		mark := "→"
 		if ev.IsError {
@@ -696,7 +739,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 		}
 		m.transcript = append(m.transcript, entry{
 			role:     "tool",
-			rendered: style.Render(fmt.Sprintf("  %s %s", mark, summary)),
+			toolOut:  ev.Result,
+			isError:  ev.IsError,
+			rendered: style.Render(fmt.Sprintf("  %s %s", mark, firstLine(ev.Result))),
 		})
 
 	case agent.EventAgentEnd:
@@ -739,10 +784,41 @@ func (m Model) View() string {
 	b.WriteString("\n\n")
 
 	for _, e := range m.transcript {
-		b.WriteString(e.rendered)
+		switch e.role {
+		case "thinking":
+			if m.hideThinking {
+				b.WriteString(m.metaStyle.Render("Thinking…"))
+			} else if e.rendered != "" {
+				b.WriteString(e.rendered)
+			} else {
+				b.WriteString(m.metaStyle.Render(e.thinking))
+			}
+		case "tool":
+			if e.toolOut != "" {
+				style := m.toolStyle
+				mark := "→"
+				if e.isError {
+					style = m.errStyle
+					mark = "✗"
+				}
+				b.WriteString(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBody(e.toolOut, m.toolsExpanded))))
+			} else {
+				b.WriteString(e.rendered)
+			}
+		default:
+			b.WriteString(e.rendered)
+		}
 		b.WriteString("\n\n")
 	}
 
+	if m.streamingThinking != "" {
+		if m.hideThinking {
+			b.WriteString(m.metaStyle.Render("Thinking…"))
+		} else {
+			b.WriteString(m.metaStyle.Render(m.streamingThinking))
+		}
+		b.WriteString("\n\n")
+	}
 	if m.streamingActive && m.streaming != "" {
 		b.WriteString(m.streamStyle.Render(m.streaming))
 		b.WriteString("\n\n")
@@ -761,7 +837,7 @@ func (m Model) View() string {
 	if m.complete.active {
 		b.WriteString(m.complete.view())
 	}
-	b.WriteString(m.footerStyle.Render("Enter send · Tab complete · ! bash · Ctrl+G editor · Ctrl+L model · /help · Ctrl+D exit"))
+	b.WriteString(m.footerStyle.Render(m.footerText()))
 	return m.withClip(b.String())
 }
 
@@ -857,6 +933,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		m.reloadFromSession()
 		m.keys = keys.NewManager(eng.Opts.AgentDir)
 		m.applyTheme(theme.LoadWith(m.themeOpts(cfg.Theme)))
+		m.refreshGit()
 	}
 	if openResume {
 		next, _ := m.openSessionPicker()

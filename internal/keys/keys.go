@@ -405,6 +405,8 @@ var helpOrder = []string{
 	"app.model.cycleForward",
 	"app.model.cycleBackward",
 	"app.thinking.cycle",
+	"app.thinking.toggle",
+	"app.tools.expand",
 	"app.model.select",
 	"app.editor.external",
 	"app.clipboard.pasteImage",
