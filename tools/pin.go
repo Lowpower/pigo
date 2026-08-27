@@ -12,9 +12,6 @@ package tools
 import (
 	// LLM SDKs (official) — anthropic-sdk-go remains unused (raw HTTP/SSE adapter).
 	_ "github.com/anthropics/anthropic-sdk-go"
-
-	// sqlite — optional session backend (not wired yet)
-	_ "modernc.org/sqlite"
 	// openai-go, google.golang.org/genai, and aws-sdk-go-v2 are imported for real
 	// by the provider adapters.
 )
