@@ -21,10 +21,12 @@ type Config struct {
 	DefaultModel           string                `mapstructure:"defaultModel"`
 	Theme                  string                `mapstructure:"theme"`
 	Thinking               string                `mapstructure:"thinking"`
+	DefaultThinkingLevel   string                `mapstructure:"defaultThinkingLevel"`
 	ContextWindow          int                   `mapstructure:"contextWindow"`
 	CompactionOn           *bool                 `mapstructure:"compactionEnabled"`
 	ReserveTokens          int                   `mapstructure:"compactionReserveTokens"`
 	KeepRecentTokens       int                   `mapstructure:"compactionKeepRecentTokens"`
+	Compaction             CompactionSettings    `mapstructure:"compaction"`
 	SteeringMode           string                `mapstructure:"steeringMode"`
 	FollowUpMode           string                `mapstructure:"followUpMode"`
 	Retry                  RetrySettings         `mapstructure:"retry"`
@@ -44,7 +46,12 @@ type Config struct {
 	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
 	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
 	DefaultTools           *[]string             `mapstructure:"defaultTools"`
+	EnabledModels          []string              `mapstructure:"enabledModels"`
 	DefaultProjectTrust    string                `mapstructure:"defaultProjectTrust"`
+	SessionDir             string                `mapstructure:"sessionDir"`
+	QuietStartupFlag       *bool                 `mapstructure:"quietStartup"`
+	HTTPProxy              string                `mapstructure:"httpProxy"`
+	EnableSkillCommands    *bool                 `mapstructure:"enableSkillCommands"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -52,6 +59,13 @@ type Config struct {
 	Prompts    []string       `mapstructure:"-" json:"prompts,omitempty"`
 	Themes     []string       `mapstructure:"-" json:"themes,omitempty"`
 	NpmCommand []string       `mapstructure:"-" json:"npmCommand,omitempty"`
+}
+
+// CompactionSettings is pi settings.compaction.
+type CompactionSettings struct {
+	Enabled          *bool `mapstructure:"enabled" json:"enabled,omitempty"`
+	ReserveTokens    int   `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
+	KeepRecentTokens int   `mapstructure:"keepRecentTokens" json:"keepRecentTokens,omitempty"`
 }
 
 // RetrySettings is pi settings.retry (enabled default true, maxRetries 3, baseDelayMs 2000).
@@ -121,6 +135,31 @@ func (c Config) CompactionEnabled() bool {
 		return true
 	}
 	return *c.CompactionOn
+}
+
+func applyNestedCompaction(cfg *Config) {
+	if cfg.Compaction.Enabled != nil {
+		cfg.CompactionOn = cfg.Compaction.Enabled
+	}
+	if cfg.Compaction.ReserveTokens > 0 {
+		cfg.ReserveTokens = cfg.Compaction.ReserveTokens
+	}
+	if cfg.Compaction.KeepRecentTokens > 0 {
+		cfg.KeepRecentTokens = cfg.Compaction.KeepRecentTokens
+	}
+}
+
+// QuietStartup reports whether verbose startup listings are suppressed (default false).
+func (c Config) QuietStartup() bool {
+	return c.QuietStartupFlag != nil && *c.QuietStartupFlag
+}
+
+// SkillCommandsEnabled reports whether skills register as /skill:name (default true).
+func (c Config) SkillCommandsEnabled() bool {
+	if c.EnableSkillCommands == nil {
+		return true
+	}
+	return *c.EnableSkillCommands
 }
 
 // CollapsedChangelog reports whether startup changelog is condensed (default false).
@@ -364,6 +403,11 @@ func Load(configDir string) (Config, error) {
 	if cfg.ContextWindow <= 0 {
 		cfg.ContextWindow = 200000
 	}
+	if cfg.Thinking == "" && cfg.DefaultThinkingLevel != "" {
+		cfg.Thinking = cfg.DefaultThinkingLevel
+	}
+	applyThinkingAlias(configDir, &cfg)
+	applyNestedCompaction(&cfg)
 	fillPackagesFromFile(configDir, &cfg)
 	// Session current starts at the saved default (settings.json uses default*).
 	if cfg.DefaultProvider != "" {
@@ -373,6 +417,24 @@ func Load(configDir string) (Config, error) {
 		cfg.Model = cfg.DefaultModel
 	}
 	return cfg, nil
+}
+
+func applyThinkingAlias(configDir string, cfg *Config) {
+	if cfg.DefaultThinkingLevel == "" {
+		return
+	}
+	b, err := os.ReadFile(filepath.Join(configDir, "settings.json"))
+	if err != nil {
+		return
+	}
+	var raw map[string]any
+	if json.Unmarshal(b, &raw) != nil {
+		return
+	}
+	if _, ok := raw["thinking"]; ok {
+		return
+	}
+	cfg.Thinking = cfg.DefaultThinkingLevel
 }
 
 func fillPackagesFromFile(configDir string, cfg *Config) {
@@ -417,6 +479,15 @@ func Save(configDir string, cfg Config) error {
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &existing)
 	}
+	mergeSaveMap(existing, cfg)
+	b, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+func mergeSaveMap(existing map[string]any, cfg Config) {
 	dp, dm := cfg.DefaultProvider, cfg.DefaultModel
 	if dp == "" {
 		dp = cfg.Provider
@@ -429,6 +500,11 @@ func Save(configDir string, cfg Config) error {
 	existing["theme"] = cfg.Theme
 	existing["thinking"] = cfg.Thinking
 	existing["contextWindow"] = cfg.ContextWindow
+	existing["compaction"] = map[string]any{
+		"enabled":          cfg.CompactionEnabled(),
+		"reserveTokens":    cfg.ReserveTokens,
+		"keepRecentTokens": cfg.KeepRecentTokens,
+	}
 	existing["compactionEnabled"] = cfg.CompactionEnabled()
 	existing["compactionReserveTokens"] = cfg.ReserveTokens
 	existing["compactionKeepRecentTokens"] = cfg.KeepRecentTokens
@@ -468,6 +544,24 @@ func Save(configDir string, cfg Config) error {
 	if cfg.DefaultTools != nil {
 		existing["defaultTools"] = *cfg.DefaultTools
 	}
+	if cfg.EnabledModels != nil {
+		existing["enabledModels"] = cfg.EnabledModels
+	}
+	if cfg.SessionDir != "" {
+		existing["sessionDir"] = cfg.SessionDir
+	}
+	if cfg.QuietStartupFlag != nil {
+		existing["quietStartup"] = *cfg.QuietStartupFlag
+	}
+	if cfg.HTTPProxy != "" {
+		existing["httpProxy"] = cfg.HTTPProxy
+	}
+	if cfg.EnableSkillCommands != nil {
+		existing["enableSkillCommands"] = *cfg.EnableSkillCommands
+	}
+	if cfg.DefaultThinkingLevel != "" {
+		existing["defaultThinkingLevel"] = cfg.DefaultThinkingLevel
+	}
 	if cfg.ExternalEditor != "" {
 		existing["externalEditor"] = cfg.ExternalEditor
 	}
@@ -496,9 +590,4 @@ func Save(configDir string, cfg Config) error {
 		md["mermaid"] = strings.ToLower(strings.TrimSpace(cfg.Markdown.Mermaid))
 		existing["markdown"] = md
 	}
-	b, err := json.MarshalIndent(existing, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
 }

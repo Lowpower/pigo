@@ -437,3 +437,83 @@ func TestDefaultToolsLoadAndSave(t *testing.T) {
 		t.Fatalf("empty defaultTools should yield no builtins, n=%d", n)
 	}
 }
+
+func TestLoadNestedCompactionAndThinkingAlias(t *testing.T) {
+	dir := t.TempDir()
+	raw := `{"compaction":{"enabled":false,"reserveTokens":1,"keepRecentTokens":2},"defaultThinkingLevel":"high","sessionDir":"/tmp/sessions","quietStartup":true,"httpProxy":"http://127.0.0.1:9","enableSkillCommands":false,"enabledModels":["openai/*"]}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CompactionEnabled() || cfg.ReserveTokens != 1 || cfg.KeepRecentTokens != 2 {
+		t.Fatalf("compaction enabled=%v reserve=%d keep=%d", cfg.CompactionEnabled(), cfg.ReserveTokens, cfg.KeepRecentTokens)
+	}
+	if cfg.Thinking != "high" {
+		t.Fatalf("thinking=%q", cfg.Thinking)
+	}
+	if cfg.SessionDir != "/tmp/sessions" || !cfg.QuietStartup() || cfg.HTTPProxy != "http://127.0.0.1:9" {
+		t.Fatalf("sessionDir=%q quiet=%v proxy=%q", cfg.SessionDir, cfg.QuietStartup(), cfg.HTTPProxy)
+	}
+	if cfg.SkillCommandsEnabled() {
+		t.Fatal("enableSkillCommands=false")
+	}
+	if len(cfg.EnabledModels) != 1 || cfg.EnabledModels[0] != "openai/*" {
+		t.Fatalf("enabledModels=%v", cfg.EnabledModels)
+	}
+}
+
+func TestApplyProjectOverlayAndUntrusted(t *testing.T) {
+	agent := t.TempDir()
+	if err := os.WriteFile(filepath.Join(agent, "settings.json"), []byte(`{"theme":"dark","thinking":"low","keepMe":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	if err := os.Mkdir(filepath.Join(cwd, ".pi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pi", "settings.json"), []byte(`{"theme":"light","compaction":{"enabled":false}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base, err := Load(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trusted := ApplyProject(base, cwd, true)
+	if trusted.Theme != "light" || trusted.CompactionEnabled() {
+		t.Fatalf("trusted theme=%s compact=%v", trusted.Theme, trusted.CompactionEnabled())
+	}
+	untrusted := ApplyProject(base, cwd, false)
+	if untrusted.Theme != "dark" || !untrusted.CompactionEnabled() {
+		t.Fatalf("untrusted theme=%s compact=%v", untrusted.Theme, untrusted.CompactionEnabled())
+	}
+}
+
+func TestSaveWritesNestedCompactionAndKeepsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"keepMe":true,"compactionEnabled":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := false
+	cfg.CompactionOn = &off
+	cfg.ReserveTokens = 3
+	cfg.KeepRecentTokens = 4
+	cfg.SessionDir = "/s"
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"keepMe"`) || !strings.Contains(s, `"compaction"`) || !strings.Contains(s, `"sessionDir"`) {
+		t.Fatalf("saved: %s", s)
+	}
+}
