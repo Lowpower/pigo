@@ -1,6 +1,8 @@
 package sqlite
 
 import (
+	"database/sql"
+
 	"github.com/Lowpower/pigo/internal/sessionrepo"
 )
 
@@ -12,7 +14,10 @@ func (r *Repository) sessionFromLease(meta sessionrepo.Metadata, lease *writerLe
 
 func (r *Repository) claimSession(meta sessionrepo.Metadata) (*sessionrepo.Session, error) {
 	if st, ok := r.active[meta.ID]; ok {
-		if _, err := readLanes(r.db, meta.ID); err != nil {
+		if err := r.withDB(func(db *sql.DB) error {
+			_, err := readLanes(db, meta.ID)
+			return err
+		}); err != nil {
 			return nil, err
 		}
 		return sessionrepo.NewSession(st, nil), nil
@@ -61,15 +66,16 @@ func (r *Repository) Create(opts sessionrepo.CreateOptions) (*sessionrepo.Sessio
 	if r.closed {
 		return nil, sessionrepo.NewError(sessionrepo.ErrStorage, "repository is closed")
 	}
-	if _, err := r.getDB(); err != nil {
-		return nil, err
-	}
 	id := opts.ID
 	if id == "" {
 		id = sessionrepo.NewID()
 	}
-	exists, err := sessionExists(r.db, id)
-	if err != nil {
+	var exists bool
+	if err := r.withDB(func(db *sql.DB) error {
+		var e error
+		exists, e = sessionExists(db, id)
+		return e
+	}); err != nil {
 		return nil, err
 	}
 	if exists {
@@ -81,7 +87,7 @@ func (r *Repository) Create(opts sessionrepo.CreateOptions) (*sessionrepo.Sessio
 		parent = &opts.ParentSessionID
 	}
 	var lease *writerLease
-	err = r.immediate(func() error {
+	err := r.immediate(func() error {
 		if err := insertSessionRow(r.db, id, createdAt, opts.CWD, parent, opts.Metadata); err != nil {
 			return err
 		}
@@ -101,12 +107,19 @@ func (r *Repository) Create(opts sessionrepo.CreateOptions) (*sessionrepo.Sessio
 	if err != nil {
 		return nil, wrap(err, sessionrepo.ErrStorage, "Failed to create SQLite session "+id)
 	}
-	row, err := requireSessionRow(r.db, id)
-	if err != nil {
-		return nil, err
-	}
-	meta, err := decodeSessionMetadata(row, r.absPath)
-	if err != nil {
+	var meta sessionrepo.Metadata
+	if err := r.withDB(func(db *sql.DB) error {
+		row, err := requireSessionRow(db, id)
+		if err != nil {
+			return err
+		}
+		decoded, err := decodeSessionMetadata(row, r.absPath)
+		if err != nil {
+			return err
+		}
+		meta = decoded
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return r.sessionFromLease(meta, lease), nil
@@ -119,9 +132,6 @@ func (r *Repository) Open(meta sessionrepo.Metadata) (*sessionrepo.Session, erro
 	if r.closed {
 		return nil, sessionrepo.NewError(sessionrepo.ErrStorage, "repository is closed")
 	}
-	if _, err := r.getDB(); err != nil {
-		return nil, err
-	}
 	return r.claimSession(meta)
 }
 
@@ -130,9 +140,6 @@ func (r *Repository) RepairBranchCache(meta sessionrepo.Metadata) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.releaseStorages(meta.ID)
-	if _, err := r.getDB(); err != nil {
-		return err
-	}
 	return r.immediate(func() error {
 		lease, err := claimWriterLease(r.db, meta.ID, r.lease)
 		if err != nil {
@@ -155,22 +162,23 @@ func (r *Repository) List(opts sessionrepo.ListOptions) ([]sessionrepo.Metadata,
 	if !fileExists(r.absPath) {
 		return []sessionrepo.Metadata{}, nil
 	}
-	if _, err := r.getDB(); err != nil {
-		return nil, err
-	}
-	rows, err := readSessionRows(r.db, opts.CWD)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]sessionrepo.Metadata, 0, len(rows))
-	for i := range rows {
-		m, err := decodeSessionMetadata(&rows[i], r.absPath)
+	var out []sessionrepo.Metadata
+	err := r.withDB(func(db *sql.DB) error {
+		rows, err := readSessionRows(db, opts.CWD)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, m)
-	}
-	return out, nil
+		out = make([]sessionrepo.Metadata, 0, len(rows))
+		for i := range rows {
+			m, err := decodeSessionMetadata(&rows[i], r.absPath)
+			if err != nil {
+				return err
+			}
+			out = append(out, m)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // Delete removes a session. Missing sessions are a no-op.
@@ -178,9 +186,6 @@ func (r *Repository) Delete(meta sessionrepo.Metadata) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.releaseStorages(meta.ID)
-	if _, err := r.getDB(); err != nil {
-		return err
-	}
 	return r.immediate(func() error {
 		exists, err := sessionExists(r.db, meta.ID)
 		if err != nil {
@@ -224,71 +229,68 @@ func (r *Repository) Delete(meta sessionrepo.Metadata) error {
 func (r *Repository) Fork(source sessionrepo.Metadata, opts sessionrepo.ForkOptions) (*sessionrepo.Session, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, err := r.getDB(); err != nil {
-		return nil, err
-	}
-	srcRow, err := requireSessionRow(r.db, source.ID)
-	if err != nil {
-		return nil, err
-	}
-	sourceMeta, err := decodeSessionMetadata(srcRow, r.absPath)
-	if err != nil {
-		return nil, err
-	}
 	id := opts.ID
 	if id == "" {
 		id = sessionrepo.NewID()
 	}
-	exists, err := sessionExists(r.db, id)
-	if err != nil {
-		return nil, err
-	}
-	if exists {
-		return nil, sessionrepo.NewError(sessionrepo.ErrAlreadyExists, "Session already exists: "+id)
-	}
-
+	var sourceMeta sessionrepo.Metadata
 	var entries []entryRow
 	var lanes []sessionrepo.LanePointer
 	var branchTips []string
 	var branchForkTargetID *string
+	var latestName *factRow
+	var labelsToCopy []factRow
 
-	if opts.Scope == "tree" {
-		entries, err = readEntryRows(r.db, source.ID, entryReadOpts{order: sessionrepo.OrderOldestFirst})
+	err := r.withDB(func(db *sql.DB) error {
+		srcRow, err := requireSessionRow(db, source.ID)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		lanes, err = readLanes(r.db, source.ID)
+		sourceMeta, err = decodeSessionMetadata(srcRow, r.absPath)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		branchTips, err = readBranchTipIDs(r.db, source.ID)
+		exists, err := sessionExists(db, id)
 		if err != nil {
-			return nil, err
+			return err
 		}
-	} else {
-		var found bool
-		found, err = laneExists(r.db, source.ID, sessionrepo.MainLane)
+		if exists {
+			return sessionrepo.NewError(sessionrepo.ErrAlreadyExists, "Session already exists: "+id)
+		}
+		if opts.Scope == "tree" {
+			entries, err = readEntryRows(db, source.ID, entryReadOpts{order: sessionrepo.OrderOldestFirst})
+			if err != nil {
+				return err
+			}
+			lanes, err = readLanes(db, source.ID)
+			if err != nil {
+				return err
+			}
+			branchTips, err = readBranchTipIDs(db, source.ID)
+			return err
+		}
+		found, err := laneExists(db, source.ID, sessionrepo.MainLane)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !found {
-			return nil, sessionrepo.NewError(sessionrepo.ErrInvalidLane, "Lane not found: main")
+			return sessionrepo.NewError(sessionrepo.ErrInvalidLane, "Lane not found: main")
 		}
-		leaf, err := readLaneHead(r.db, source.ID, sessionrepo.MainLane)
+		leaf, err := readLaneHead(db, source.ID, sessionrepo.MainLane)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		selected := leaf
 		if opts.HasEntry {
 			selected = &opts.EntryID
 		}
 		if selected != nil {
-			target, err := readEntryRow(r.db, source.ID, *selected)
+			target, err := readEntryRow(db, source.ID, *selected)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			if target == nil || target.typ != "message" {
-				return nil, sessionrepo.NewError(sessionrepo.ErrInvalidForkTarget, "Fork target is not a message entry: "+*selected)
+				return sessionrepo.NewError(sessionrepo.ErrInvalidForkTarget, "Fork target is not a message entry: "+*selected)
 			}
 			position := opts.Position
 			if position == "" {
@@ -306,41 +308,51 @@ func (r *Repository) Fork(source sessionrepo.Metadata, opts sessionrepo.ForkOpti
 		}
 		lanes = []sessionrepo.LanePointer{{Lane: sessionrepo.MainLane, LeafID: branchForkTargetID}}
 		if branchForkTargetID != nil {
-			cached, err := readCachedBranch(r.db, source.ID, *branchForkTargetID)
+			cached, err := readCachedBranch(db, source.ID, *branchForkTargetID)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			if cached == nil {
-				return nil, sessionrepo.NewError(sessionrepo.ErrInvalidForkTarget, "Fork target is not on a cached branch: "+*branchForkTargetID)
+				return sessionrepo.NewError(sessionrepo.ErrInvalidForkTarget, "Fork target is not on a cached branch: "+*branchForkTargetID)
 			}
-			crows, err := queryCachedBranchRows(r.db, source.ID, cached, sessionrepo.EntryQuery{Order: sessionrepo.OrderOldestFirst})
+			crows, err := queryCachedBranchRows(db, source.ID, cached, sessionrepo.EntryQuery{Order: sessionrepo.OrderOldestFirst})
 			if err != nil {
-				return nil, err
+				return err
 			}
 			for _, cr := range crows {
 				entries = append(entries, cr.entryRow)
 			}
 			branchTips = append(branchTips, *branchForkTargetID)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	copied := map[string]struct{}{}
 	for _, e := range entries {
 		copied[e.id] = struct{}{}
 	}
-	latestName, err := readLatestFact(r.db, source.ID, "name", nil)
-	if err != nil {
-		return nil, err
-	}
-	latestLabels, err := readLatestLabelFacts(r.db, source.ID)
-	if err != nil {
-		return nil, err
-	}
-	var labelsToCopy []factRow
-	for _, lab := range latestLabels {
-		if opts.Scope == "tree" || (lab.key != nil && containsKey(copied, *lab.key)) {
-			labelsToCopy = append(labelsToCopy, lab)
+	err = r.withDB(func(db *sql.DB) error {
+		var e error
+		latestName, e = readLatestFact(db, source.ID, "name", nil)
+		if e != nil {
+			return e
 		}
+		latestLabels, e := readLatestLabelFacts(db, source.ID)
+		if e != nil {
+			return e
+		}
+		for _, lab := range latestLabels {
+			if opts.Scope == "tree" || (lab.key != nil && containsKey(copied, *lab.key)) {
+				labelsToCopy = append(labelsToCopy, lab)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	createdAt := nowMs()
 	meta := opts.Metadata
@@ -423,12 +435,16 @@ func (r *Repository) Fork(source sessionrepo.Metadata, opts sessionrepo.ForkOpti
 		}
 		return nil, sessionrepo.NewErrorCause(sessionrepo.ErrStorage, "Failed to fork SQLite session "+id, err)
 	}
-	row, err := requireSessionRow(r.db, id)
-	if err != nil {
-		return nil, err
-	}
-	decoded, err := decodeSessionMetadata(row, r.absPath)
-	if err != nil {
+	var decoded sessionrepo.Metadata
+	if err := r.withDB(func(db *sql.DB) error {
+		row, err := requireSessionRow(db, id)
+		if err != nil {
+			return err
+		}
+		var e error
+		decoded, e = decodeSessionMetadata(row, r.absPath)
+		return e
+	}); err != nil {
 		return nil, err
 	}
 	return r.sessionFromLease(decoded, lease), nil
@@ -448,6 +464,8 @@ func (r *Repository) Close() error {
 		st.release()
 		delete(r.active, id)
 	}
+	r.dbMu.Lock()
+	defer r.dbMu.Unlock()
 	if r.db != nil {
 		err := r.db.Close()
 		r.db = nil

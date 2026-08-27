@@ -44,6 +44,17 @@ func walkJSON(v reflect.Value, seen map[uintptr]struct{}) error {
 		}
 		return nil
 	case reflect.Slice, reflect.Array:
+		if v.Kind() == reflect.Slice {
+			if v.IsNil() || v.Len() == 0 {
+				return nil
+			}
+			if ptr := v.Pointer(); ptr != 0 {
+				if _, ok := seen[ptr]; ok {
+					return invalidPayload("contains a cycle")
+				}
+				seen[ptr] = struct{}{}
+			}
+		}
 		for i := 0; i < v.Len(); i++ {
 			if err := walkJSON(v.Index(i), seen); err != nil {
 				return err
@@ -51,8 +62,19 @@ func walkJSON(v reflect.Value, seen map[uintptr]struct{}) error {
 		}
 		return nil
 	case reflect.Map:
+		if v.IsNil() {
+			return nil
+		}
 		if v.Type().Key().Kind() != reflect.String {
 			return invalidPayload("contains a non-plain object")
+		}
+		if v.Len() > 0 {
+			if ptr := v.Pointer(); ptr != 0 {
+				if _, ok := seen[ptr]; ok {
+					return invalidPayload("contains a cycle")
+				}
+				seen[ptr] = struct{}{}
+			}
 		}
 		for _, key := range v.MapKeys() {
 			if err := walkJSON(v.MapIndex(key), seen); err != nil {
@@ -89,11 +111,21 @@ func cloneJSON[T any](v T) T {
 }
 
 func cloneEntry(e Entry) Entry {
-	return cloneJSON(e)
+	out := cloneJSON(e)
+	out.HasData = e.HasData
+	out.HasDetails = e.HasDetails
+	out.HasTokensBefore = e.HasTokensBefore
+	if e.Terminate != nil {
+		t := *e.Terminate
+		out.Terminate = &t
+	}
+	return out
 }
 
 func cloneRecord(r Record) Record {
-	return cloneJSON(r)
+	out := cloneJSON(r)
+	out.HasRunID = r.HasRunID || r.RunID != ""
+	return out
 }
 
 func cloneMeta(m Metadata) Metadata {
