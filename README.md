@@ -4,9 +4,34 @@ A CLI/TUI coding agent written in Go (agent loop, streaming LLM, built-in tools,
 TUI, session persistence, extensions). Remaining work is tracked as GitHub
 issues, not a phased migration plan.
 
+## Install
+
+Download the archive for your OS from
+[GitHub Releases](https://github.com/Lowpower/pigo/releases), extract it, and
+put `pigo` on your `PATH`.
+
+| OS | Arch | Asset |
+| --- | --- | --- |
+| Linux | amd64 | `pigo_*_linux_amd64.tar.gz` |
+| Linux | arm64 | `pigo_*_linux_arm64.tar.gz` |
+| macOS | amd64 | `pigo_*_darwin_amd64.tar.gz` |
+| macOS | arm64 | `pigo_*_darwin_arm64.tar.gz` |
+| Windows | amd64 | `pigo_*_windows_amd64.zip` |
+| Windows | arm64 | `pigo_*_windows_arm64.zip` |
+
+Pushing a `vX.Y.Z` tag runs GitHub Actions: pack all six binaries, smoke-test
+each on a matching hosted runner (`--version` / `--help`), then publish the
+Release.
+
+With a Go 1.27+ toolchain you can also install from source:
+
+```bash
+go install github.com/Lowpower/pigo/cmd/pigo@latest
+```
+
 ## Requirements
 
-- Go 1.27+
+- Go 1.27+ (only needed to build from source)
 
 ## Toolchain
 

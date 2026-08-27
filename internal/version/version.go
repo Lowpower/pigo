@@ -2,4 +2,5 @@
 package version
 
 // Version is the current pigo version (--version, changelog, telemetry).
-const Version = "0.0.1-dev"
+// Release binaries override this with -ldflags -X.
+var Version = "0.0.1-dev"
