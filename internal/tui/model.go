@@ -102,6 +102,7 @@ type Model struct {
 	overlay       overlayKind
 	tree          treeOverlay
 	fork          forkOverlay
+	settings      settingsPicker
 	lastEscape    time.Time
 	summaryCancel context.CancelFunc
 	pendingNav    *pendingNav
@@ -181,6 +182,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.sessionPickerActive() {
 			return m.handleSessionPickerKey(msg)
+		}
+		if m.settingsActive() {
+			return m.handleSettingsKey(msg)
 		}
 		if m.overlay != overlayNone {
 			switch m.overlay {
@@ -515,7 +519,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		m.history = out
 		return note("compacted history")
 	case "settings":
-		return note("settings dir: " + config.DefaultConfigDir())
+		return m.openSettings()
 	case "export":
 		if m.engine == nil || m.engine.Opts.Session == nil {
 			return note("no session to export")
@@ -765,6 +769,9 @@ func (m Model) View() string {
 	}
 	if m.sessionPickerActive() {
 		return m.sessions.view()
+	}
+	if m.settingsActive() {
+		return m.settings.view()
 	}
 	if m.modelPickerActive() {
 		return m.models.view()
