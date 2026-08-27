@@ -30,6 +30,36 @@ func TestBuildIncludesContextAndCwd(t *testing.T) {
 	}
 }
 
+func TestOverridePreferredOverAgentsAndClaude(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "svc")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("root-agents"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "AGENTS.md"), []byte("nested-agents"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "CLAUDE.md"), []byte("nested-claude"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "AGENTS.override.md"), []byte("nested-override"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Build(Options{Cwd: nested})
+	if !strings.Contains(got, "nested-override") {
+		t.Fatalf("missing override:\n%s", got)
+	}
+	if strings.Contains(got, "nested-agents") || strings.Contains(got, "nested-claude") {
+		t.Fatalf("override should replace AGENTS.md/CLAUDE.md in the same dir:\n%s", got)
+	}
+	if !strings.Contains(got, "root-agents") {
+		t.Fatalf("ancestor AGENTS.md should still layer:\n%s", got)
+	}
+}
+
 func TestBuildSkipsUntrustedProjectAgents(t *testing.T) {
 	cwd := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
