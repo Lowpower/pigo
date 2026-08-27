@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -466,6 +467,27 @@ func TestSlashForkOpensPickerAndConfirms(t *testing.T) {
 	}
 	if !strings.Contains(m.editor.Value(), "hello tree") {
 		t.Fatalf("editor = %q", m.editor.Value())
+	}
+}
+
+func TestSlashThemeLoadsFromAgentDir(t *testing.T) {
+	agent := t.TempDir()
+	if err := os.Mkdir(filepath.Join(agent, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"name":"disk","colors":{"accent":"#abcdef","error":"#ff0000","userMessageText":"#111111"}}`
+	if err := os.WriteFile(filepath.Join(agent, "themes", "disk.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: agent, Cwd: t.TempDir()}}
+	m.editor.SetValue("/theme disk")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.theme.Name != "disk" {
+		t.Fatalf("theme=%s", m.theme.Name)
+	}
+	if m.theme.Accent != "#abcdef" {
+		t.Fatalf("accent=%s", m.theme.Accent)
 	}
 }
 

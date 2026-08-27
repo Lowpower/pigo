@@ -101,22 +101,36 @@ type Model struct {
 
 // New builds the interactive model from the resolved config.
 func New(cfg config.Config) Model {
-	th := theme.Load(cfg.Theme, "", "")
 	m := Model{
-		cfg:         cfg,
-		theme:       th,
-		editor:      newPromptEditor(),
-		titleStyle:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(th.Accent)),
-		metaStyle:   lipgloss.NewStyle().Faint(true),
-		userStyle:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(th.User)),
-		toolStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color(th.Tool)),
-		errStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color(th.Error)),
-		streamStyle: lipgloss.NewStyle().Foreground(lipgloss.Color(th.Assistant)),
-		footerStyle: lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color(th.Muted)),
-		keys:        keys.NewManager(config.DefaultConfigDir()),
+		cfg:    cfg,
+		editor: newPromptEditor(),
+		keys:   keys.NewManager(config.DefaultConfigDir()),
 	}
 	m.glam = newRenderer(80)
+	m.applyTheme(theme.Load(cfg.Theme, "", ""))
 	return m
+}
+
+func (m *Model) applyTheme(th theme.Theme) {
+	m.theme = th
+	m.titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(th.Accent))
+	m.metaStyle = lipgloss.NewStyle().Faint(true)
+	m.userStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(th.User))
+	m.toolStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(th.Tool))
+	m.errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(th.Error))
+	m.streamStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(th.Assistant))
+	m.footerStyle = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color(th.Muted))
+}
+
+func (m Model) themeOpts(name string) theme.LoadOptions {
+	opt := theme.LoadOptions{Name: name}
+	if m.engine != nil {
+		opt.Cwd = m.engine.Opts.Cwd
+		opt.AgentDir = m.engine.Opts.AgentDir
+		opt.Extra = m.engine.Opts.ThemePaths
+		opt.NoDiscovery = m.engine.Opts.NoThemes
+	}
+	return opt
 }
 
 func newRenderer(width int) *glamour.TermRenderer {
@@ -418,7 +432,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 	case "theme":
 		if cmd.Rest != "" {
 			m.cfg.Theme = cmd.Rest
-			m.theme = theme.Load(cmd.Rest, "", "")
+			m.applyTheme(theme.LoadWith(m.themeOpts(cmd.Rest)))
 		}
 		return note("theme = " + m.theme.Name)
 	case "thinking":
@@ -842,6 +856,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		m.provider = eng.Provider
 		m.reloadFromSession()
 		m.keys = keys.NewManager(eng.Opts.AgentDir)
+		m.applyTheme(theme.LoadWith(m.themeOpts(cfg.Theme)))
 	}
 	if openResume {
 		next, _ := m.openSessionPicker()
