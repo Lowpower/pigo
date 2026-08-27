@@ -263,17 +263,13 @@ func (m *Manager) UserMessagesForForking() []map[string]string {
 			continue
 		}
 		var p struct {
-			Role    string `json:"role"`
-			Content any    `json:"content"`
+			Role string `json:"role"`
 		}
 		if json.Unmarshal(e.Message, &p) != nil || p.Role != "user" {
 			continue
 		}
-		text := ""
-		if s, ok := p.Content.(string); ok {
-			text = s
-		}
-		if text == "" {
+		text := userText(e)
+		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		out = append(out, map[string]string{"entryId": e.ID, "text": text})
