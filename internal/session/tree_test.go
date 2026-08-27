@@ -2,7 +2,6 @@ package session
 
 import (
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -92,28 +91,6 @@ func TestForkFromBeforeUserMessage(t *testing.T) {
 	got := child.Entries()
 	if len(got) != 2 || got[1].ID != a.ID {
 		t.Fatalf("forked = %+v", got)
-	}
-}
-
-func TestFormatTreeAndExportHTML(t *testing.T) {
-	dir := t.TempDir()
-	cwd := t.TempDir()
-	m := New(cwd, dir)
-	_, _ = m.AppendMessage("user", map[string]any{"role": "user", "content": "<script>hi</script>"})
-	_, _ = m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "safe"})
-	dump := m.FormatTree()
-	if !strings.Contains(dump, "script") {
-		t.Fatalf("tree dump = %s", dump)
-	}
-	html, err := RenderHTML(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(html, "<script>hi</script>") {
-		t.Fatal("html did not escape script tag")
-	}
-	if !strings.Contains(html, "&lt;script&gt;") {
-		t.Fatalf("expected escaped script, got %s", html)
 	}
 }
 

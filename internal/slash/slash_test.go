@@ -47,6 +47,16 @@ func TestHotkeysTextIncludesModelSelect(t *testing.T) {
 	}
 }
 
+func TestHelpListsShareAndChangelog(t *testing.T) {
+	text := HelpText()
+	if !contains(text, "/share") || !contains(text, "gist") {
+		t.Fatalf("help missing share:\n%s", text)
+	}
+	if !contains(text, "/changelog") {
+		t.Fatalf("help missing changelog:\n%s", text)
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || (len(sub) > 0 && indexOf(s, sub) >= 0))
 }

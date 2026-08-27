@@ -17,6 +17,7 @@ import (
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
+	"github.com/Lowpower/pigo/internal/changelog"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/keys"
 	"github.com/Lowpower/pigo/internal/models"
@@ -40,6 +41,7 @@ type entry struct {
 // agentEventMsg / agentClosedMsg carry agent-loop events into the bubbletea loop.
 type agentEventMsg struct{ ev agent.Event }
 type agentClosedMsg struct{}
+type shareDoneMsg struct{ text string }
 
 // Model is the interactive TUI: it drives the agent loop (internal/agent)
 // with real tools (internal/tools) and a provider (internal/ai), streaming the
@@ -232,6 +234,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startTurn(next)
 		}
 		return m, nil
+
+	case shareDoneMsg:
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg.text)})
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -409,7 +415,19 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		dest := strings.TrimSpace(cmd.Rest)
 		if dest == "" || strings.HasSuffix(strings.ToLower(dest), ".html") {
-			path, err := session.ExportHTML(m.engine.Opts.Session, dest)
+			opts := session.HTMLOptions{
+				OutputPath: dest,
+				ThemeName:  m.cfg.Theme,
+			}
+			if m.engine != nil {
+				opts.Cwd = m.engine.Opts.Cwd
+				opts.AgentDir = m.engine.Opts.AgentDir
+				opts.SystemPrompt = m.engine.System
+				if m.engine.Tools != nil {
+					opts.Tools = m.engine.Tools.AITools()
+				}
+			}
+			path, err := session.ExportHTMLWith(m.engine.Opts.Session, opts)
 			if err != nil {
 				return note("export error: " + err.Error())
 			}
@@ -525,6 +543,33 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		b64 := osc52(text)
 		return note(b64 + "copied last assistant message")
+	case "share":
+		if m.engine == nil || m.engine.Opts.Session == nil {
+			return note("no session to share")
+		}
+		opts := session.ShareOptions{
+			Session:      m.engine.Opts.Session,
+			ThemeName:    m.cfg.Theme,
+			Cwd:          m.engine.Opts.Cwd,
+			AgentDir:     m.engine.Opts.AgentDir,
+			SystemPrompt: m.engine.System,
+		}
+		if m.engine.Tools != nil {
+			opts.Tools = m.engine.Tools.AITools()
+		}
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Sharing session...")})
+		return m, func() tea.Msg {
+			res, err := session.Share(opts)
+			if err != nil {
+				return shareDoneMsg{text: err.Error()}
+			}
+			return shareDoneMsg{text: res.String()}
+		}
+	case "changelog":
+		body := changelog.FullMarkdown()
+		rendered := m.renderMarkdown("What's New\n\n" + body)
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: rendered})
+		return m, nil
 	case "skill":
 		if m.engine == nil {
 			return note("no skills loaded")
@@ -779,8 +824,24 @@ func RunEngine(cfg config.Config, eng *runtime.Engine) error {
 		m.reloadFromSession()
 		m.keys = keys.NewManager(eng.Opts.AgentDir)
 	}
+	m.applyStartupChangelog()
 	_, err := tea.NewProgram(m).Run()
 	return err
+}
+
+func (m *Model) applyStartupChangelog() {
+	if len(m.history) > 0 {
+		return
+	}
+	dir := config.DefaultConfigDir()
+	if m.engine != nil {
+		dir = m.engine.Opts.AgentDir
+	}
+	notice := changelog.StartupNotice(&m.cfg, dir)
+	if notice == "" {
+		return
+	}
+	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.renderMarkdown(notice)})
 }
 
 func (m Model) keyIs(msg tea.KeyMsg, action string) bool {

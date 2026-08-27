@@ -18,9 +18,8 @@ import (
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/trust"
 	"github.com/Lowpower/pigo/internal/tui"
+	"github.com/Lowpower/pigo/internal/version"
 )
-
-var version = "0.0.1-dev"
 
 func main() {
 	os.Args = append([]string{os.Args[0]}, expandShortFlags(os.Args[1:])...)
@@ -122,7 +121,7 @@ func newRootCmd() *cobra.Command {
 
 func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	if v, _ := cmd.Flags().GetBool("version"); v {
-		fmt.Fprintf(cmd.OutOrStdout(), "pigo %s\n", version)
+		fmt.Fprintf(cmd.OutOrStdout(), "pigo %s\n", version.Version)
 		return nil
 	}
 	if f.offline {
@@ -190,7 +189,10 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		if len(args) > 0 {
 			outPath = args[0]
 		}
-		path, err := session.ExportHTMLFile(f.export, outPath)
+		path, err := session.ExportHTMLFileWith(f.export, session.HTMLOptions{
+			OutputPath: outPath,
+			ThemeName:  cfg.Theme,
+		})
 		if err != nil {
 			return err
 		}

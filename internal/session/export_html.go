@@ -1,24 +1,50 @@
 package session
 
 import (
+	"encoding/base64"
 	"encoding/json"
-	"html"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/ai"
 )
+
+// HTMLOptions configures themed HTML export.
+type HTMLOptions struct {
+	OutputPath   string
+	ThemeName    string
+	Cwd          string
+	AgentDir     string
+	SystemPrompt string
+	Tools        []ai.Tool
+}
+
+type htmlSessionData struct {
+	Header       Header    `json:"header"`
+	Entries      []Entry   `json:"entries"`
+	LeafID       *string   `json:"leafId"`
+	SystemPrompt string    `json:"systemPrompt,omitempty"`
+	Tools        []ai.Tool `json:"tools,omitempty"`
+}
 
 // ExportHTML writes a self-contained HTML dump of the session (--export /
 // /export when the path ends in .html).
 func ExportHTML(m *Manager, outputPath string) (string, error) {
+	return ExportHTMLWith(m, HTMLOptions{OutputPath: outputPath})
+}
+
+// ExportHTMLWith writes themed HTML using opts.
+func ExportHTMLWith(m *Manager, opts HTMLOptions) (string, error) {
 	if m == nil {
 		return "", os.ErrInvalid
 	}
+	outputPath := opts.OutputPath
 	if outputPath == "" {
 		base := strings.TrimSuffix(filepath.Base(m.file), ".jsonl")
 		outputPath = "pigo-session-" + base + ".html"
 	}
-	b, err := RenderHTML(m)
+	b, err := RenderHTMLWith(m, opts)
 	if err != nil {
 		return "", err
 	}
@@ -28,66 +54,107 @@ func ExportHTML(m *Manager, outputPath string) (string, error) {
 	return outputPath, nil
 }
 
-// ExportHTMLFile loads a session JSONL and writes HTML.
+// ExportHTMLFile loads a session JSONL and writes HTML (no AgentState).
 func ExportHTMLFile(inputPath, outputPath string) (string, error) {
+	return ExportHTMLFileWith(inputPath, HTMLOptions{OutputPath: outputPath})
+}
+
+// ExportHTMLFileWith loads a session JSONL and writes themed HTML.
+func ExportHTMLFileWith(inputPath string, opts HTMLOptions) (string, error) {
 	m, err := Open(inputPath)
 	if err != nil {
 		return "", err
 	}
-	return ExportHTML(m, outputPath)
+	return ExportHTMLWith(m, opts)
 }
 
 // RenderHTML returns the HTML document for m.
 func RenderHTML(m *Manager) (string, error) {
-	var b strings.Builder
-	b.WriteString(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">`)
-	b.WriteString(`<title>pigo session `)
-	b.WriteString(html.EscapeString(m.id))
-	b.WriteString(`</title><style>
-body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:52rem;margin:2rem auto;background:#18181e;color:#e8e8e8;padding:0 1rem}
-h1{font-size:1.1rem;color:#bbb}
-.meta{color:#888;font-size:.85rem;margin-bottom:1.5rem}
-.msg{padding:.9rem 1rem;margin:.75rem 0;border-radius:8px;background:#2a2a32;border-left:4px solid #555}
-.user{border-left-color:#6c8}
-.assistant{border-left-color:#8af}
-.toolResult,.tool{border-left-color:#fc6}
-.compaction{border-left-color:#a8f;opacity:.9}
-.role{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#aaa;margin-bottom:.4rem}
-pre{white-space:pre-wrap;word-break:break-word;margin:0;font-family:ui-monospace,monospace;font-size:.9rem}
-</style></head><body>`)
-	b.WriteString("<h1>session ")
-	b.WriteString(html.EscapeString(m.id))
-	b.WriteString("</h1><div class=\"meta\">")
-	b.WriteString(html.EscapeString(m.header.Cwd))
-	if m.header.Name != "" {
-		b.WriteString(" · ")
-		b.WriteString(html.EscapeString(m.header.Name))
+	return RenderHTMLWith(m, HTMLOptions{})
+}
+
+// RenderHTMLWith returns the themed HTML document for m.
+func RenderHTMLWith(m *Manager, opts HTMLOptions) (string, error) {
+	if m == nil {
+		return "", os.ErrInvalid
 	}
-	b.WriteString("</div>\n")
-	for _, e := range m.Entries() {
-		role := entryRole(&e)
-		class := role
-		if class == "" {
-			class = e.Type
-		}
-		b.WriteString(`<div class="msg `)
-		b.WriteString(html.EscapeString(class))
-		b.WriteString(`"><div class="role">`)
-		b.WriteString(html.EscapeString(class))
-		b.WriteString(`</div><pre>`)
-		body := userText(&e)
-		if body == "" {
-			body = strings.TrimSpace(string(e.Message))
-			var pretty any
-			if json.Unmarshal(e.Message, &pretty) == nil {
-				if raw, err := json.MarshalIndent(pretty, "", "  "); err == nil {
-					body = string(raw)
-				}
-			}
-		}
-		b.WriteString(html.EscapeString(body))
-		b.WriteString("</pre></div>\n")
+	tmpl, err := htmlFS.ReadFile("html/template.html")
+	if err != nil {
+		return "", err
 	}
-	b.WriteString("</body></html>\n")
-	return b.String(), nil
+	cssTmpl, err := htmlFS.ReadFile("html/template.css")
+	if err != nil {
+		return "", err
+	}
+	js, err := htmlFS.ReadFile("html/template.js")
+	if err != nil {
+		return "", err
+	}
+	marked, err := htmlFS.ReadFile("html/vendor/marked.min.js")
+	if err != nil {
+		return "", err
+	}
+	hljs, err := htmlFS.ReadFile("html/vendor/highlight.min.js")
+	if err != nil {
+		return "", err
+	}
+
+	data := htmlSessionData{
+		Header:       m.header,
+		Entries:      htmlEntries(m.Entries()),
+		SystemPrompt: opts.SystemPrompt,
+		Tools:        opts.Tools,
+	}
+	if m.leafID != "" {
+		id := m.leafID
+		data.LeafID = &id
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return "", err
+	}
+	colors := resolveExportColors(opts.ThemeName, opts.Cwd, opts.AgentDir)
+	css := string(cssTmpl)
+	css = strings.Replace(css, "{{THEME_VARS}}", colors.ThemeVars, 1)
+	css = strings.Replace(css, "{{BODY_BG}}", colors.PageBg, 1)
+	css = strings.Replace(css, "{{CONTAINER_BG}}", colors.CardBg, 1)
+	css = strings.Replace(css, "{{INFO_BG}}", colors.InfoBg, 1)
+
+	html := string(tmpl)
+	html = strings.Replace(html, "{{CSS}}", css, 1)
+	html = strings.Replace(html, "{{JS}}", string(js), 1)
+	html = strings.Replace(html, "{{SESSION_DATA}}", base64.StdEncoding.EncodeToString(raw), 1)
+	html = strings.Replace(html, "{{MARKED_JS}}", string(marked), 1)
+	html = strings.Replace(html, "{{HIGHLIGHT_JS}}", string(hljs), 1)
+	return html, nil
+}
+
+func htmlEntries(entries []Entry) []Entry {
+	out := make([]Entry, len(entries))
+	copy(out, entries)
+	for i := range out {
+		out[i].Message = normalizeHTMLMessage(out[i].Message)
+	}
+	return out
+}
+
+func normalizeHTMLMessage(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var msg map[string]any
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return raw
+	}
+	role, _ := msg["role"].(string)
+	if role == "assistant" {
+		if s, ok := msg["content"].(string); ok {
+			msg["content"] = []any{map[string]any{"type": "text", "text": s}}
+		}
+	}
+	b, err := json.Marshal(msg)
+	if err != nil {
+		return raw
+	}
+	return b
 }

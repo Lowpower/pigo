@@ -448,7 +448,21 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				break
 			}
 			outPath, _ := raw["outputPath"].(string)
-			path, err := session.ExportHTML(e.Opts.Session, outPath)
+			themeName, _ := raw["themeName"].(string)
+			if themeName == "" {
+				themeName = e.Opts.Config.Theme
+			}
+			opts := session.HTMLOptions{
+				OutputPath:   outPath,
+				ThemeName:    themeName,
+				Cwd:          e.Opts.Cwd,
+				AgentDir:     e.Opts.AgentDir,
+				SystemPrompt: e.System,
+			}
+			if e.Tools != nil {
+				opts.Tools = e.Tools.AITools()
+			}
+			path, err := session.ExportHTMLWith(e.Opts.Session, opts)
 			if err != nil {
 				reply(id, "export_html", false, nil, err.Error())
 				break

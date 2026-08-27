@@ -523,4 +523,37 @@ func TestSlashResumeOpensPicker(t *testing.T) {
 	}
 }
 
+func TestSlashChangelogAndShare(t *testing.T) {
+	m := New(testCfg())
+	m.textarea.SetValue("/changelog")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "0.0.1") {
+		t.Fatalf("changelog = %+v", m.transcript)
+	}
+
+	m.textarea.SetValue("/share")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "no session") {
+		t.Fatalf("share without session = %+v", m.transcript)
+	}
+}
+
+func TestStartupChangelogFirstInstallSilent(t *testing.T) {
+	t.Setenv("PIGO_OFFLINE", "1")
+	dir := t.TempDir()
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: dir}}
+	m.applyStartupChangelog()
+	if len(m.transcript) != 0 {
+		t.Fatalf("first install should be silent, got %+v", m.transcript)
+	}
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.LastChangelogVersion == "" {
+		t.Fatal("expected lastChangelogVersion recorded")
+	}
+}
+
 func boolPtr(v bool) *bool { return &v }
