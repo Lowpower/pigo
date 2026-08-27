@@ -24,7 +24,7 @@ type Template struct {
 //  1. agentDir/prompts/*.md
 //  2. cwd/.pigo/prompts/*.md
 //  3. extra files or directories
-func DiscoverTemplates(cwd, agentDir string, extra []string, includeDefaults bool) []Template {
+func DiscoverTemplates(cwd, agentDir string, extra []string, includeDefaults, includeProject bool) []Template {
 	var out []Template
 	seen := map[string]bool{}
 	add := func(list []Template) {
@@ -39,7 +39,9 @@ func DiscoverTemplates(cwd, agentDir string, extra []string, includeDefaults boo
 	}
 	if includeDefaults {
 		add(loadDir(filepath.Join(agentDir, "prompts"), "user"))
-		add(loadDir(filepath.Join(cwd, ".pigo", "prompts"), "project"))
+		if includeProject && cwd != "" {
+			add(loadDir(filepath.Join(cwd, ".pigo", "prompts"), "project"))
+		}
 	}
 	for _, p := range extra {
 		info, err := os.Stat(p)

@@ -51,6 +51,7 @@ func (m *Model) refreshSettingsItems() {
 		{"follow-up-mode", "Follow-up mode", "Queued follow-ups when the agent is idle", oneOrAll(m.cfg.FollowUpMode)},
 		{"mermaid-rendering", "Mermaid diagrams", "Render Mermaid code blocks as Unicode diagrams", m.cfg.MermaidMode()},
 		{"show-images", "Show images", "Inline tool-result images when the terminal supports it", boolText(m.cfg.ShowImages())},
+		{"default-project-trust", "Default project trust", "When a project has local resources and no saved decision", m.cfg.ProjectTrustDefault()},
 		{"double-escape-action", "Double-escape action", "Action when pressing Escape twice with empty editor", m.cfg.DoubleEscape()},
 		{"tree-filter-mode", "Tree filter mode", "Default filter when opening /tree", m.cfg.TreeFilter()},
 		{"theme", "Theme", "Colour theme", m.theme.Name},
@@ -119,6 +120,8 @@ func (m Model) settingChoices(id string) []string {
 		return []string{"off", "final", "streaming"}
 	case "double-escape-action":
 		return []string{"tree", "fork", "none"}
+	case "default-project-trust":
+		return []string{"ask", "always", "never"}
 	case "tree-filter-mode":
 		return []string{"default", "no-tools", "user-only", "labeled-only", "all"}
 	case "theme":
@@ -150,6 +153,8 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.MermaidMode()
 	case "show-images":
 		return boolText(m.cfg.ShowImages())
+	case "default-project-trust":
+		return m.cfg.ProjectTrustDefault()
 	case "double-escape-action":
 		return m.cfg.DoubleEscape()
 	case "tree-filter-mode":
@@ -189,6 +194,8 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 	case "show-images":
 		on := value == "true"
 		m.cfg.Terminal.ShowImages = &on
+	case "default-project-trust":
+		m.cfg.DefaultProjectTrust = value
 	case "double-escape-action":
 		m.cfg.DoubleEscapeAction = value
 	case "tree-filter-mode":
