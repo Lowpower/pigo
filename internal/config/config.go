@@ -36,6 +36,7 @@ type Config struct {
 	TreeFilterMode      string                `mapstructure:"treeFilterMode"`
 	BranchSummary       BranchSummarySettings `mapstructure:"branchSummary"`
 	Terminal            TerminalSettings      `mapstructure:"terminal"`
+	Markdown            MarkdownSettings      `mapstructure:"markdown"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -58,9 +59,14 @@ type BranchSummarySettings struct {
 	ReserveTokens int   `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
 }
 
-// TerminalSettings is pi settings.terminal.
+// TerminalSettings is settings.terminal.
 type TerminalSettings struct {
 	ShowImages *bool `mapstructure:"showImages" json:"showImages,omitempty"`
+}
+
+// MarkdownSettings is settings.markdown.
+type MarkdownSettings struct {
+	Mermaid string `mapstructure:"mermaid" json:"mermaid,omitempty"`
 }
 
 // ResourceKinds is the settings.json key order for discovered resources.
@@ -155,6 +161,16 @@ func (c Config) ShowImages() bool {
 		return true
 	}
 	return *c.Terminal.ShowImages
+}
+
+// MermaidMode is off, final, or streaming (default streaming).
+func (c Config) MermaidMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Markdown.Mermaid)) {
+	case "off", "final", "streaming":
+		return strings.ToLower(strings.TrimSpace(c.Markdown.Mermaid))
+	default:
+		return "streaming"
+	}
 }
 
 // TreeFilter is the initial /tree filter (default "default").
@@ -373,6 +389,15 @@ func Save(configDir string, cfg Config) error {
 		}
 		term["showImages"] = *cfg.Terminal.ShowImages
 		existing["terminal"] = term
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Markdown.Mermaid)) {
+	case "off", "final", "streaming":
+		md, _ := existing["markdown"].(map[string]any)
+		if md == nil {
+			md = map[string]any{}
+		}
+		md["mermaid"] = strings.ToLower(strings.TrimSpace(cfg.Markdown.Mermaid))
+		existing["markdown"] = md
 	}
 	b, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {

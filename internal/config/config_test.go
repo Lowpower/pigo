@@ -248,6 +248,62 @@ func TestSavePreservesTerminalShowImages(t *testing.T) {
 	}
 }
 
+func TestLoadMarkdownMermaid(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MermaidMode() != "streaming" {
+		t.Fatalf("default mermaid = %q", cfg.MermaidMode())
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"markdown":{"mermaid":"off"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MermaidMode() != "off" {
+		t.Fatalf("loaded %q", cfg.MermaidMode())
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"markdown":{"mermaid":"sometimes"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MermaidMode() != "streaming" {
+		t.Fatalf("invalid should fall back, got %q", cfg.MermaidMode())
+	}
+}
+
+func TestSavePreservesMarkdownMermaid(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"markdown":{"mermaid":"final","keepMe":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"mermaid": "final"`) {
+		t.Fatalf("lost mermaid: %s", s)
+	}
+	if !strings.Contains(s, `"keepMe"`) {
+		t.Fatalf("lost extra markdown key: %s", s)
+	}
+}
+
 func TestLoadAndSaveExternalEditor(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"externalEditor":"hx"}`), 0o644); err != nil {

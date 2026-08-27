@@ -836,7 +836,7 @@ func (m Model) View() string {
 		b.WriteString("\n\n")
 	}
 	if m.streamingActive && m.streaming != "" {
-		b.WriteString(m.streamStyle.Render(m.streaming))
+		b.WriteString(m.streamStyle.Render(transformMermaid(m.streaming, m.mermaidOpts(true))))
 		b.WriteString("\n\n")
 	}
 	if m.running {
@@ -915,7 +915,27 @@ func (m Model) providerLabel() string {
 	return "(none yet)"
 }
 
+func (m Model) mermaidWidth() int {
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+	if w > maxEditorWidth {
+		w = maxEditorWidth
+	}
+	wrap := w - 2
+	if wrap < 20 {
+		wrap = 20
+	}
+	return wrap
+}
+
+func (m Model) mermaidOpts(streaming bool) mermaidOpts {
+	return mermaidOpts{mode: m.cfg.MermaidMode(), width: m.mermaidWidth(), streaming: streaming}
+}
+
 func (m Model) renderMarkdown(s string) string {
+	s = transformMermaid(s, m.mermaidOpts(false))
 	if m.glam == nil {
 		return s
 	}
