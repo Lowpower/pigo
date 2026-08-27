@@ -16,10 +16,35 @@ func AnthropicWireMessages(msgs []Message) []map[string]any {
 			continue
 		}
 		if m.Role == RoleToolResult || m.ToolCallID != "" {
+			text, imgs := ParseToolContent(m.Content)
+			if len(imgs) == 0 {
+				imgs = m.Images
+				text = m.Content
+			}
+			var inner any
+			if len(imgs) == 0 {
+				inner = text
+			} else {
+				blocks := make([]map[string]any, 0, 1+len(imgs))
+				if text != "" {
+					blocks = append(blocks, map[string]any{"type": "text", "text": text})
+				}
+				for _, img := range imgs {
+					blocks = append(blocks, map[string]any{
+						"type": "image",
+						"source": map[string]any{
+							"type":       "base64",
+							"media_type": img.MimeType,
+							"data":       img.Data,
+						},
+					})
+				}
+				inner = blocks
+			}
 			block := map[string]any{
 				"type":        "tool_result",
 				"tool_use_id": m.ToolCallID,
-				"content":     m.Content,
+				"content":     inner,
 			}
 			if m.IsError {
 				block["is_error"] = true
@@ -116,10 +141,14 @@ func OpenAIWireMessages(msgs []Message) []map[string]any {
 			continue
 		}
 		if m.Role == RoleToolResult || m.ToolCallID != "" {
+			text, _ := ParseToolContent(m.Content)
+			if text == "" {
+				text = m.Content
+			}
 			out = append(out, map[string]any{
 				"role":         "tool",
 				"tool_call_id": m.ToolCallID,
-				"content":      m.Content,
+				"content":      text,
 			})
 			continue
 		}

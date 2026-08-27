@@ -37,6 +37,7 @@ type Config struct {
 	BranchSummary          BranchSummarySettings `mapstructure:"branchSummary"`
 	Terminal               TerminalSettings      `mapstructure:"terminal"`
 	Markdown               MarkdownSettings      `mapstructure:"markdown"`
+	Images                 ImageSettings         `mapstructure:"images"`
 	TUIMode                string                `mapstructure:"tuiMode"`
 	FullscreenExitOutput   string                `mapstructure:"fullscreenExitOutput"`
 	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
@@ -67,6 +68,11 @@ type BranchSummarySettings struct {
 // TerminalSettings is settings.terminal.
 type TerminalSettings struct {
 	ShowImages *bool `mapstructure:"showImages" json:"showImages,omitempty"`
+}
+
+// ImageSettings is settings.images.
+type ImageSettings struct {
+	BlockImages *bool `mapstructure:"blockImages" json:"blockImages,omitempty"`
 }
 
 // MarkdownSettings is settings.markdown.
@@ -179,6 +185,11 @@ func (c Config) ShowImages() bool {
 		return true
 	}
 	return *c.Terminal.ShowImages
+}
+
+// BlockImages reports whether images should be omitted from LLM requests (default false).
+func (c Config) BlockImages() bool {
+	return c.Images.BlockImages != nil && *c.Images.BlockImages
 }
 
 // MermaidMode is off, final, or streaming (default streaming).
@@ -430,6 +441,14 @@ func Save(configDir string, cfg Config) error {
 		}
 		term["showImages"] = *cfg.Terminal.ShowImages
 		existing["terminal"] = term
+	}
+	if cfg.Images.BlockImages != nil {
+		images, _ := existing["images"].(map[string]any)
+		if images == nil {
+			images = map[string]any{}
+		}
+		images["blockImages"] = *cfg.Images.BlockImages
+		existing["images"] = images
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Markdown.Mermaid)) {
 	case "off", "final", "streaming":

@@ -1,17 +1,99 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/image/bmp"
 )
 
 func run(t *testing.T, tool Tool, args map[string]any) (string, bool) {
 	t.Helper()
 	return tool.Execute(context.Background(), args)
 }
+
+func TestReadImageReturnsContentBlocks(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "dot.png")
+	data, err := decodeTestPNG()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, isErr := run(t, readTool{}, map[string]any{"path": file})
+	if isErr {
+		t.Fatalf("read image error: %s", out)
+	}
+	if !strings.Contains(out, `"type":"image"`) || !strings.Contains(out, `"mimeType":"image/png"`) {
+		t.Fatalf("read image should return image content JSON, got %q", out)
+	}
+	if !strings.Contains(out, "Read image file") {
+		t.Fatalf("read image missing text note: %q", out)
+	}
+}
+
+func TestReadBMPConvertsToPNG(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "dot.bmp")
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	if err := bmp.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, isErr := run(t, readTool{}, map[string]any{"path": file})
+	if isErr {
+		t.Fatalf("read bmp error: %s", out)
+	}
+	if !strings.Contains(out, `"mimeType":"image/png"`) {
+		t.Fatalf("BMP should convert to PNG, got %q", out)
+	}
+	if !strings.Contains(out, "converted from image/bmp") {
+		t.Fatalf("missing conversion hint: %q", out)
+	}
+}
+
+func TestReadResizesOversizeImage(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "wide.png")
+	img := image.NewRGBA(image.Rect(0, 0, 2001, 10))
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, isErr := run(t, readTool{}, map[string]any{"path": file})
+	if isErr {
+		t.Fatalf("read oversize error: %s", out)
+	}
+	if !strings.Contains(out, "resized from 2001x10") {
+		t.Fatalf("expected resize hint, got %q", out)
+	}
+}
+
+func decodeTestPNG() ([]byte, error) {
+	return base64.StdEncoding.DecodeString(testPNG1x1)
+}
+
+const testPNG1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
 func TestWriteReadEdit(t *testing.T) {
 	dir := t.TempDir()

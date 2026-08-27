@@ -80,3 +80,23 @@ func TestSettingsTogglesShowImages(t *testing.T) {
 		t.Fatalf("saved: %s", b)
 	}
 }
+
+func TestSettingsTogglesBlockImages(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
+	m := New(testCfg())
+	m.editor.SetValue("/settings")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("block images")})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.cfg.BlockImages() {
+		t.Fatal("block images should toggle on")
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"blockImages": true`) {
+		t.Fatalf("saved: %s", b)
+	}
+}

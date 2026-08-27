@@ -51,6 +51,7 @@ func (m *Model) refreshSettingsItems() {
 		{"follow-up-mode", "Follow-up mode", "Queued follow-ups when the agent is idle", oneOrAll(m.cfg.FollowUpMode)},
 		{"mermaid-rendering", "Mermaid diagrams", "Render Mermaid code blocks as Unicode diagrams", m.cfg.MermaidMode()},
 		{"show-images", "Show images", "Inline tool-result images when the terminal supports it", boolText(m.cfg.ShowImages())},
+		{"block-images", "Block images", "Omit images from requests sent to the model", boolText(m.cfg.BlockImages())},
 		{"double-escape-action", "Double-escape action", "Action when pressing Escape twice with empty editor", m.cfg.DoubleEscape()},
 		{"tree-filter-mode", "Tree filter mode", "Default filter when opening /tree", m.cfg.TreeFilter()},
 		{"theme", "Theme", "Colour theme", m.theme.Name},
@@ -109,7 +110,7 @@ func nextChoice(cur string, values []string) string {
 
 func (m Model) settingChoices(id string) []string {
 	switch id {
-	case "autocompact", "show-images":
+	case "autocompact", "show-images", "block-images":
 		return []string{"true", "false"}
 	case "steering-mode", "follow-up-mode":
 		return []string{"one-at-a-time", "all"}
@@ -148,6 +149,8 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.MermaidMode()
 	case "show-images":
 		return boolText(m.cfg.ShowImages())
+	case "block-images":
+		return boolText(m.cfg.BlockImages())
 	case "double-escape-action":
 		return m.cfg.DoubleEscape()
 	case "tree-filter-mode":
@@ -183,6 +186,9 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 	case "show-images":
 		on := value == "true"
 		m.cfg.Terminal.ShowImages = &on
+	case "block-images":
+		on := value == "true"
+		m.cfg.Images.BlockImages = &on
 	case "double-escape-action":
 		m.cfg.DoubleEscapeAction = value
 	case "tree-filter-mode":
