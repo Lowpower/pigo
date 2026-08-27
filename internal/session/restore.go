@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/compaction"
 )
 
 // RestoreAIMessages rebuilds provider-facing ai.Messages from session entries,
@@ -14,10 +15,20 @@ import (
 func RestoreAIMessages(entries []Entry) []ai.Message {
 	out := make([]ai.Message, 0, len(entries))
 	for _, e := range entries {
+		if e.Type == "custom" {
+			continue
+		}
+		if e.Type == "custom_message" {
+			text := customMessageText(e)
+			if text != "" {
+				out = append(out, ai.Message{Role: ai.RoleUser, Content: text})
+			}
+			continue
+		}
 		if e.Type == "branch_summary" {
 			text := e.Summary
 			if text != "" {
-				out = append(out, ai.Message{Role: ai.RoleUser, Content: text})
+				out = append(out, ai.Message{Role: ai.RoleUser, Content: compaction.BranchSummaryPrefix + text + compaction.BranchSummarySuffix})
 			}
 			continue
 		}
@@ -31,7 +42,7 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 				text = p.Summary
 			}
 			if text != "" {
-				out = append(out, ai.Message{Role: ai.RoleUser, Content: "[Conversation summary — earlier messages were compacted]\n\n" + text})
+				out = append(out, ai.Message{Role: ai.RoleUser, Content: compaction.SummaryPrefix + text + compaction.SummarySuffix})
 			}
 			continue
 		}
@@ -116,15 +127,39 @@ func parseUserContent(v any) (string, []ai.ImageContent) {
 	return text, images
 }
 
+func customMessageText(e Entry) string {
+	if e.Summary != "" {
+		return e.Summary
+	}
+	if len(e.Content) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(e.Content, &s) == nil {
+		return s
+	}
+	text, _ := parseUserContent(func() any {
+		var v any
+		_ = json.Unmarshal(e.Content, &v)
+		return v
+	}())
+	return text
+}
+
 // FindByID opens the session whose id equals or is prefixed by id for cwd.
 func FindByID(cwd, agentDir, id string) (*Manager, error) {
+	return FindByIDAt(cwd, agentDir, id, "")
+}
+
+// FindByIDAt is FindByID using an optional session directory override.
+func FindByIDAt(cwd, agentDir, id, sessionDir string) (*Manager, error) {
 	if id == "" {
 		return nil, os.ErrNotExist
 	}
 	if strings.HasSuffix(id, ".jsonl") || strings.Contains(id, string(filepath.Separator)) {
 		return Open(id)
 	}
-	paths, err := listSessionFiles(cwd, agentDir)
+	paths, err := listSessionFilesAt(cwd, agentDir, sessionDir)
 	if err != nil {
 		return nil, err
 	}

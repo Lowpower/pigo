@@ -7,6 +7,29 @@ import (
 	"testing"
 )
 
+func TestSessionDirOverride(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	custom := t.TempDir()
+	m := NewAt(cwd, agent, custom)
+	if filepath.Dir(m.File()) != custom {
+		t.Fatalf("dir=%s want %s", filepath.Dir(m.File()), custom)
+	}
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ContinueRecentAt(cwd, agent, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID() != m.ID() {
+		t.Fatalf("continue id=%s want %s", got.ID(), m.ID())
+	}
+}
+
 func TestSessionDirAndFilenameEncoding(t *testing.T) {
 	agentDir := t.TempDir()
 	m := New("/tmp/proj:x/sub", agentDir)

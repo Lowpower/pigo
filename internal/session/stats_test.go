@@ -1,6 +1,7 @@
 package session
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/ai"
@@ -53,7 +54,7 @@ func TestCollectStatsIncludesToolResultUsage(t *testing.T) {
 
 func TestCollectStatsIncludesCompactionUsage(t *testing.T) {
 	m := New(t.TempDir(), t.TempDir())
-	e, err := m.AppendCompaction("summary")
+	e, err := m.AppendCompaction("summary", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,5 +76,23 @@ func TestCollectStatsIncludesBranchSummaryUsage(t *testing.T) {
 	got := CollectStats(m, nil, 0)
 	if got.Cost != 1 || got.Tokens.Input != 40 {
 		t.Fatalf("got cost=%v tokens=%+v", got.Cost, got.Tokens)
+	}
+}
+
+func TestFormatInfoIncludesTotals(t *testing.T) {
+	tok := 12
+	pct := 6.0
+	s := Stats{
+		SessionFile: "/tmp/s.jsonl", SessionID: "abc",
+		UserMessages: 1, AssistantMessages: 1, ToolCalls: 2, ToolResults: 2, TotalMessages: 2,
+		Tokens: TokenTotals{Input: 10, Output: 5, CacheRead: 2, CacheWrite: 1, Total: 18},
+		Cost:   1.25,
+		ContextUsage: &ContextUsage{Tokens: &tok, ContextWindow: 200, Percent: &pct},
+	}
+	got := FormatInfo(s, "demo")
+	for _, want := range []string{"Name: demo", "File: /tmp/s.jsonl", "ID: abc", "Total: 2", "Input: 13", "Output: 5", "$1.250", "12 / 200"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
 	}
 }

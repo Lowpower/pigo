@@ -92,8 +92,25 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`
 
+// SummaryPrefix / SummarySuffix wrap a compaction summary for the LLM.
+const SummaryPrefix = `The conversation history before this point was compacted into the following summary:
+
+<summary>
+`
+
+const SummarySuffix = `
+</summary>`
+
+// BranchSummaryPrefix / BranchSummarySuffix wrap a branch summary for the LLM.
+const BranchSummaryPrefix = `The following is a summary of a branch that this conversation came back from:
+
+<summary>
+`
+
+const BranchSummarySuffix = `</summary>`
+
 // SummaryMarker prefixes the synthetic message that replaces compacted history.
-const SummaryMarker = "[Conversation summary — earlier messages were compacted]"
+const SummaryMarker = SummaryPrefix
 
 // Summarize asks the model to summarize the given messages using StreamFn,
 // returning the assistant's text.
@@ -137,7 +154,7 @@ func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Messag
 		return msgs, "", err
 	}
 	compacted := make([]ai.Message, 0, len(msgs)-cut+1)
-	compacted = append(compacted, ai.Message{Role: ai.RoleUser, Content: SummaryMarker + "\n\n" + summary})
+	compacted = append(compacted, ai.Message{Role: ai.RoleUser, Content: SummaryPrefix + summary + SummarySuffix})
 	compacted = append(compacted, msgs[cut:]...)
 	return compacted, summary, nil
 }

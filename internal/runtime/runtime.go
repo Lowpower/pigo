@@ -292,7 +292,9 @@ func (e *Engine) CompactNow(ctx context.Context, msgs []ai.Message, customInstru
 		return msgs, "", err
 	}
 	if summary != "" && e.Opts.Session != nil {
-		if entry, err := e.Opts.Session.AppendCompaction(summary); err == nil && entry != nil {
+		keep := session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, compaction.FindCutIndex(msgs, s.KeepRecentTokens))
+		tokens := compaction.EstimateContextTokens(msgs)
+		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokens); err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 		}
 	}
@@ -508,7 +510,9 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 		return msgs, "", err
 	}
 	if summary != "" && e.Opts.Session != nil {
-		if entry, err := e.Opts.Session.AppendCompaction(summary); err == nil && entry != nil {
+		keep := session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, compaction.FindCutIndex(msgs, s.KeepRecentTokens))
+		tokens := compaction.EstimateContextTokens(msgs)
+		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokens); err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 		}
 	}

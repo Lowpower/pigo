@@ -40,12 +40,17 @@ func Open(path string) (*Manager, error) {
 // ContinueRecent opens the most recently modified session for cwd, or starts a
 // new one if none exist (--continue).
 func ContinueRecent(cwd, agentDir string) (*Manager, error) {
-	paths, err := listSessionFiles(cwd, agentDir)
+	return ContinueRecentAt(cwd, agentDir, "")
+}
+
+// ContinueRecentAt is ContinueRecent using an optional session directory override.
+func ContinueRecentAt(cwd, agentDir, sessionDir string) (*Manager, error) {
+	paths, err := listSessionFilesAt(cwd, agentDir, sessionDir)
 	if err != nil {
 		return nil, err
 	}
 	if len(paths) == 0 {
-		return New(cwd, agentDir), nil
+		return NewAt(cwd, agentDir, sessionDir), nil
 	}
 	return Open(paths[0])
 }
@@ -56,11 +61,11 @@ func List(cwd, agentDir string) ([]string, error) {
 }
 
 func listSessionFiles(cwd, agentDir string) ([]string, error) {
-	resolved, err := filepath.Abs(cwd)
-	if err != nil {
-		resolved = cwd
-	}
-	dir := sessionDir(agentDir, resolved)
+	return listSessionFilesAt(cwd, agentDir, "")
+}
+
+func listSessionFilesAt(cwd, agentDir, sessionDir string) ([]string, error) {
+	dir := StorageDir(cwd, agentDir, sessionDir)
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -108,16 +113,56 @@ func (m *Manager) Fork(cwd, agentDir string) (*Manager, error) {
 }
 
 // AppendCompaction records a compaction summary entry.
-func (m *Manager) AppendCompaction(summary string) (*Entry, error) {
-	raw, err := json.Marshal(map[string]any{
-		"type":      "compaction",
-		"summary":   summary,
-		"timestamp": isoNow(),
-	})
+func (m *Manager) AppendCompaction(summary, firstKeptEntryID string, tokensBefore int) (*Entry, error) {
+	tok := tokensBefore
+	e := &Entry{
+		Type:             "compaction",
+		ID:               newUUID(),
+		Timestamp:        isoNow(),
+		Summary:          summary,
+		FirstKeptEntryID: firstKeptEntryID,
+		TokensBefore:     &tok,
+		role:             "assistant",
+	}
+	return m.appendEntry(e)
+}
+
+// AppendCustomEntry records an extension custom entry (not sent to the LLM).
+func (m *Manager) AppendCustomEntry(customType string, data any) (*Entry, error) {
+	var raw json.RawMessage
+	if data != nil {
+		b, err := json.Marshal(data)
+		if err != nil {
+			return nil, err
+		}
+		raw = b
+	}
+	e := &Entry{
+		Type:       "custom",
+		ID:         newUUID(),
+		Timestamp:  isoNow(),
+		CustomType: customType,
+		Data:       raw,
+	}
+	return m.appendEntry(e)
+}
+
+// AppendCustomMessage records a custom_message that participates in LLM context.
+func (m *Manager) AppendCustomMessage(customType, content string, display bool) (*Entry, error) {
+	raw, err := json.Marshal(content)
 	if err != nil {
 		return nil, err
 	}
-	e := &Entry{Type: "compaction", ID: newUUID(), Timestamp: isoNow(), Message: raw, role: "assistant"}
+	d := display
+	e := &Entry{
+		Type:       "custom_message",
+		ID:         newUUID(),
+		Timestamp:  isoNow(),
+		CustomType: customType,
+		Content:    raw,
+		Display:    &d,
+		Summary:    content,
+	}
 	return m.appendEntry(e)
 }
 
