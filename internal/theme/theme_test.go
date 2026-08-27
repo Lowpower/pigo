@@ -80,6 +80,24 @@ func TestLoadPiSchema(t *testing.T) {
 	}
 }
 
+func TestLoadPiExportColors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "exp.json")
+	body := `{
+		"name": "exp",
+		"vars": {"bg": "#112233"},
+		"colors": {"accent": "#00aaff", "error": "#ff0000", "text": "#eeeeee"},
+		"export": {"pageBg": "bg", "cardBg": "#223344", "infoBg": 52}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	th := LoadWith(LoadOptions{Name: "exp", Extra: []string{path}})
+	if th.ExportPageBg != "#112233" || th.ExportCardBg != "#223344" || th.ExportInfoBg != "52" {
+		t.Fatalf("export %+v", th)
+	}
+}
+
 func TestNoDiscoverySkipsAgentDir(t *testing.T) {
 	dir := t.TempDir()
 	themes := filepath.Join(dir, "themes")

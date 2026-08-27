@@ -546,6 +546,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 					opts.Tools = m.engine.Tools.AITools()
 				}
 			}
+			opts = session.WithBuiltinToolRenderer(opts)
 			path, err := session.ExportHTMLWith(m.engine.Opts.Session, opts)
 			if err != nil {
 				return note("export error: " + err.Error())

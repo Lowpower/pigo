@@ -18,14 +18,16 @@ type HTMLOptions struct {
 	AgentDir     string
 	SystemPrompt string
 	Tools        []ai.Tool
+	ToolRenderer ToolHTMLRenderer
 }
 
 type htmlSessionData struct {
-	Header       Header    `json:"header"`
-	Entries      []Entry   `json:"entries"`
-	LeafID       *string   `json:"leafId"`
-	SystemPrompt string    `json:"systemPrompt,omitempty"`
-	Tools        []ai.Tool `json:"tools,omitempty"`
+	Header        Header                      `json:"header"`
+	Entries       []Entry                     `json:"entries"`
+	LeafID        *string                     `json:"leafId"`
+	SystemPrompt  string                      `json:"systemPrompt,omitempty"`
+	Tools         []ai.Tool                   `json:"tools,omitempty"`
+	RenderedTools map[string]RenderedToolHTML `json:"renderedTools,omitempty"`
 }
 
 // ExportHTML writes a self-contained HTML dump of the session (--export /
@@ -99,11 +101,13 @@ func RenderHTMLWith(m *Manager, opts HTMLOptions) (string, error) {
 		return "", err
 	}
 
+	entries := htmlEntries(m.Entries())
 	data := htmlSessionData{
-		Header:       m.header,
-		Entries:      htmlEntries(m.Entries()),
-		SystemPrompt: opts.SystemPrompt,
-		Tools:        opts.Tools,
+		Header:        m.header,
+		Entries:       entries,
+		SystemPrompt:  opts.SystemPrompt,
+		Tools:         opts.Tools,
+		RenderedTools: preRenderCustomTools(entries, opts.ToolRenderer),
 	}
 	if m.leafID != "" {
 		id := m.leafID

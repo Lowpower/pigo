@@ -80,3 +80,44 @@ func TestSettingsTogglesShowImages(t *testing.T) {
 		t.Fatalf("saved: %s", b)
 	}
 }
+
+func TestSettingsTogglesChangelogAndTelemetry(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
+	m := New(testCfg())
+	m.editor.SetValue("/settings")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	view := m.View()
+	if !strings.Contains(view, "Collapse changelog") {
+		t.Fatalf("menu missing collapse changelog:\n%s", view)
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("collapse changelog")})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.cfg.CollapsedChangelog() {
+		t.Fatal("collapse changelog should toggle on")
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m.editor.SetValue("/settings")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("install telemetry")})
+	if !strings.Contains(m.View(), "Install telemetry") {
+		t.Fatalf("menu missing install telemetry:\n%s", m.View())
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.cfg.InstallTelemetryEnabled() {
+		t.Fatal("install telemetry should toggle off")
+	}
+
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.CollapsedChangelog() {
+		t.Fatal("saved collapseChangelog")
+	}
+	if loaded.InstallTelemetryEnabled() {
+		t.Fatal("saved enableInstallTelemetry")
+	}
+}
