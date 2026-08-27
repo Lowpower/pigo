@@ -62,7 +62,8 @@ variables.
 ## Layout
 
 ```
-cmd/pigo/          # entrypoint (cobra)
+cmd/pigo/            # entrypoint (cobra)
+examples/extensions/ # sample extension (hello tool)
 internal/
 ├── ai/            # StreamFn + provider adapters
 ├── agent/         # agent loop, tool scheduling, cancellation
