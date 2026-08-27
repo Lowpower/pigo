@@ -66,6 +66,7 @@ type cliFlags struct {
 	modelsFlag      string
 	promptTemplates []string
 	noPromptTpls    bool
+	tuiMode         string
 }
 
 func newRootCmd() *cobra.Command {
@@ -117,6 +118,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.modelsFlag, "models", "", "comma-separated model patterns for Ctrl+P cycling")
 	cmd.Flags().StringArrayVar(&f.promptTemplates, "prompt-template", nil, "load a prompt template file or directory")
 	cmd.Flags().BoolVar(&f.noPromptTpls, "no-prompt-templates", false, "disable prompt template discovery")
+	cmd.Flags().StringVar(&f.tuiMode, "tui-mode", "", "TUI layout: regular|fullscreen")
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
 	cmd.AddCommand(newAuthCmd(), newConfigCmd())
@@ -152,6 +154,14 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 	if f.theme != "" {
 		cfg.Theme = f.theme
+	}
+	if f.tuiMode != "" {
+		switch strings.ToLower(strings.TrimSpace(f.tuiMode)) {
+		case "regular", "fullscreen":
+			cfg.TUIMode = strings.ToLower(strings.TrimSpace(f.tuiMode))
+		default:
+			return fmt.Errorf("--tui-mode requires regular or fullscreen")
+		}
 	}
 	if f.apiKey != "" {
 		switch cfg.ResolvedProvider() {
