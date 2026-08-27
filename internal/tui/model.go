@@ -106,14 +106,16 @@ type Model struct {
 	summaryCancel context.CancelFunc
 	pendingNav    *pendingNav
 	clipOSC       string
+	imgProto      string
 }
 
 // New builds the interactive model from the resolved config.
 func New(cfg config.Config) Model {
 	m := Model{
-		cfg:    cfg,
-		editor: newPromptEditor(),
-		keys:   keys.NewManager(config.DefaultConfigDir()),
+		cfg:      cfg,
+		editor:   newPromptEditor(),
+		keys:     keys.NewManager(config.DefaultConfigDir()),
+		imgProto: detectImageProtocol(os.Getenv),
 	}
 	m.glam = newRenderer(80)
 	m.applyTheme(theme.Load(cfg.Theme, "", ""))
@@ -801,7 +803,21 @@ func (m Model) View() string {
 					style = m.errStyle
 					mark = "✗"
 				}
-				b.WriteString(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBody(e.toolOut, m.toolsExpanded))))
+				text, imgs := splitToolImages(e.toolOut)
+				if text != "" || len(imgs) == 0 {
+					b.WriteString(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBody(text, m.toolsExpanded))))
+				} else {
+					b.WriteString(style.Render("  " + mark))
+				}
+				for _, img := range imgs {
+					b.WriteByte('\n')
+					out := m.renderInlineImage(img)
+					if strings.HasPrefix(out, "\x1b") {
+						b.WriteString(out)
+					} else {
+						b.WriteString(style.Render(out))
+					}
+				}
 			} else {
 				b.WriteString(e.rendered)
 			}
