@@ -14,6 +14,10 @@ import (
 	"github.com/Lowpower/pigo/internal/slash"
 )
 
+type bashChunkMsg struct {
+	text string
+}
+
 type bashDoneMsg struct {
 	command string
 	exclude bool
@@ -91,6 +95,19 @@ func (m Model) applyCompletion() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func waitBashEvent(ch <-chan tea.Msg) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
 func (m Model) startBash(command string, exclude bool) (tea.Model, tea.Cmd) {
 	if m.bashRunning {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("a bash command is already running (Esc to cancel)")})
@@ -99,16 +116,26 @@ func (m Model) startBash(command string, exclude bool) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.bashCancel = cancel
 	m.bashRunning = true
+	m.bashCommand = command
+	m.bashLive = ""
+	ch := make(chan tea.Msg, 32)
+	m.bashEvents = ch
 	cwd := m.cwd()
-	return m, func() tea.Msg {
-		res := runtime.RunBash(ctx, cwd, command, nil)
-		return bashDoneMsg{command: command, exclude: exclude, result: res}
-	}
+	go func() {
+		res := runtime.RunBash(ctx, cwd, command, func(delta string) {
+			ch <- bashChunkMsg{text: delta}
+		})
+		ch <- bashDoneMsg{command: command, exclude: exclude, result: res}
+	}()
+	return m, waitBashEvent(ch)
 }
 
 func (m Model) handleBashDone(msg bashDoneMsg) (tea.Model, tea.Cmd) {
 	m.bashRunning = false
 	m.bashCancel = nil
+	m.bashEvents = nil
+	m.bashLive = ""
+	m.bashCommand = ""
 	header := "$ " + msg.command
 	if msg.exclude {
 		header = "!! " + msg.command

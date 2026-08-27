@@ -45,6 +45,7 @@ const (
 	EventMessageUpdate EventType = "message_update"
 	EventMessageEnd    EventType = "message_end"
 	EventToolStart     EventType = "tool_execution_start"
+	EventToolUpdate    EventType = "tool_execution_update"
 	EventToolEnd       EventType = "tool_execution_end"
 )
 
@@ -57,7 +58,7 @@ type Event struct {
 	// message_update: the underlying provider event.
 	AIEvent *ai.Event
 
-	// tool_execution_start / tool_execution_end.
+	// tool_execution_start / tool_execution_update / tool_execution_end.
 	ToolCallID string
 	ToolName   string
 	Args       map[string]any

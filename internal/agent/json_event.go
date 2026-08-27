@@ -36,6 +36,16 @@ func ToJSON(ev Event) (any, error) {
 			"toolName":   ev.ToolName,
 			"args":       ev.Args,
 		}, nil
+	case EventToolUpdate:
+		return map[string]any{
+			"type":       "tool_execution_update",
+			"toolCallId": ev.ToolCallID,
+			"toolName":   ev.ToolName,
+			"args":       ev.Args,
+			"partialResult": map[string]any{
+				"content": []map[string]any{{"type": "text", "text": ev.Result}},
+			},
+		}, nil
 	case EventToolEnd:
 		return map[string]any{
 			"type":       "tool_execution_end",

@@ -2,7 +2,6 @@
 package runtime
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"os/exec"
@@ -54,33 +53,7 @@ func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) Bas
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		code := 1
-		return BashResult{Output: err.Error(), ExitCode: &code}
-	}
-	cmd.Stderr = cmd.Stdout
-	if err := cmd.Start(); err != nil {
-		code := 1
-		return BashResult{Output: err.Error(), ExitCode: &code}
-	}
-
-	var output []byte
-	r := bufio.NewReader(stdout)
-	buf := make([]byte, 4096)
-	for {
-		n, readErr := r.Read(buf)
-		if n > 0 {
-			output = append(output, buf[:n]...)
-			if onChunk != nil {
-				onChunk(string(buf[:n]))
-			}
-		}
-		if readErr != nil {
-			break
-		}
-	}
-	waitErr := cmd.Wait()
+	output, waitErr := shell.WaitStream(cmd, onChunk)
 	cancelled := ctx.Err() != nil
 	if cancelled {
 		return BashResult{Output: string(output), Cancelled: true, Truncated: false}

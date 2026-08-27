@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/shell"
 )
+
+const bashUpdateThrottle = 100 * time.Millisecond
 
 // bashTool executes a shell command via shell.GetConfig (Git Bash / PATH / WSL).
 type bashTool struct{}
@@ -49,8 +52,33 @@ func (bashTool) Execute(ctx context.Context, args map[string]any) (string, bool)
 		return err.Error(), true
 	}
 
-	out, err := cmd.CombinedOutput()
+	onUpdate := OutputUpdate(ctx)
+	var mu sync.Mutex
+	acc := ""
+	lastEmit := time.Time{}
+	emit := func(force bool) {
+		if onUpdate == nil {
+			return
+		}
+		mu.Lock()
+		snap := acc
+		if !force && !lastEmit.IsZero() && time.Since(lastEmit) < bashUpdateThrottle {
+			mu.Unlock()
+			return
+		}
+		lastEmit = time.Now()
+		mu.Unlock()
+		onUpdate(snap)
+	}
+
+	out, err := shell.WaitStream(cmd, func(chunk string) {
+		mu.Lock()
+		acc += chunk
+		mu.Unlock()
+		emit(false)
+	})
 	result := string(out)
+	emit(true)
 
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		return result + fmt.Sprintf("\n[timed out after %ds]", p.Timeout), true

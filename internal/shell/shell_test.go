@@ -147,6 +147,22 @@ func TestIsLegacyWSLBash(t *testing.T) {
 	}
 }
 
+func TestWaitStreamChunks(t *testing.T) {
+	cfg, err := GetConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := CommandContext(t.Context(), cfg, "printf hello-wait-stream")
+	var got string
+	out, err := WaitStream(cmd, func(chunk string) { got += chunk })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "hello-wait-stream") || !strings.Contains(got, "hello-wait-stream") {
+		t.Fatalf("out=%q chunk=%q", out, got)
+	}
+}
+
 type fakeFileInfo struct{}
 
 func (fakeFileInfo) Name() string       { return "bash.exe" }
