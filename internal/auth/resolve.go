@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/Lowpower/pigo/internal/llama"
 )
 
 const (
@@ -96,6 +99,14 @@ func resolveStoredOAuth(ctx context.Context, s *Store, p Provider, stored Creden
 }
 
 func resolveAPIKey(p Provider, cred *Credential) (*Result, error) {
+	r, err := resolveAPIKeyInner(p, cred)
+	if p.ID == llama.ProviderID {
+		return llamaResult(cred, r), nil
+	}
+	return r, err
+}
+
+func resolveAPIKeyInner(p Provider, cred *Credential) (*Result, error) {
 	var key string
 	var env map[string]string
 	if cred != nil {
@@ -125,6 +136,60 @@ func resolveAPIKey(p Provider, cred *Credential) (*Result, error) {
 		source = p.APIKey.Name
 	}
 	return &Result{Auth: ModelAuth{APIKey: key}, Source: source, Env: env}, nil
+}
+
+func llamaResult(cred *Credential, existing *Result) *Result {
+	url := strings.TrimSpace(os.Getenv("LLAMA_BASE_URL"))
+	key := ""
+	env := map[string]string{}
+	source := "LLAMA_BASE_URL"
+	if existing != nil {
+		key = existing.Auth.APIKey
+		if existing.Env != nil {
+			env = existing.Env
+		}
+		if existing.Source != "" {
+			source = existing.Source
+		}
+	}
+	if cred != nil {
+		if cred.Key != "" {
+			key = cred.Key
+		}
+		if cred.Env != nil {
+			if env == nil {
+				env = map[string]string{}
+			}
+			for k, v := range cred.Env {
+				env[k] = v
+			}
+			if v := strings.TrimSpace(cred.Env["LLAMA_BASE_URL"]); v != "" {
+				url = v
+			}
+		}
+	}
+	if url == "" {
+		return nil
+	}
+	if key == "" {
+		key = os.Getenv("LLAMA_API_KEY")
+	}
+	if key == "" {
+		key = "local"
+	}
+	norm, err := llama.NormalizeServerURL(url)
+	if err != nil {
+		return nil
+	}
+	if env == nil {
+		env = map[string]string{}
+	}
+	env["LLAMA_BASE_URL"] = norm
+	return &Result{
+		Auth:   ModelAuth{APIKey: key, BaseURL: llama.InferenceURL(norm)},
+		Env:    env,
+		Source: source,
+	}
 }
 
 func bedrockAmbientAuth() *Result {
