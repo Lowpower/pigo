@@ -9,6 +9,7 @@ import (
 
 	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/shell"
+	"github.com/Lowpower/pigo/internal/tools"
 )
 
 // BashResult is the bang/RPC bash payload.
@@ -54,9 +55,10 @@ func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) Bas
 		cmd.Dir = cwd
 	}
 	output, waitErr := shell.WaitStream(cmd, onChunk)
+	text, path, truncated := tools.BoundOutput(string(output), "pigo-bash")
 	cancelled := ctx.Err() != nil
 	if cancelled {
-		return BashResult{Output: string(output), Cancelled: true, Truncated: false}
+		return BashResult{Output: text, Cancelled: true, Truncated: truncated, FullOutputPath: path}
 	}
 	code := 0
 	if waitErr != nil {
@@ -70,7 +72,7 @@ func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) Bas
 			}
 		}
 	}
-	return BashResult{Output: string(output), ExitCode: &code, Cancelled: false, Truncated: false}
+	return BashResult{Output: text, ExitCode: &code, Cancelled: false, Truncated: truncated, FullOutputPath: path}
 }
 
 // PersistBash writes a bashExecution session entry. excludeFromContext skips LLM history.

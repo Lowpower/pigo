@@ -4,9 +4,7 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
 	"time"
 
 	"github.com/Lowpower/pigo/internal/shell"
@@ -24,7 +22,7 @@ type powershellParams struct {
 func (powershellTool) Name() string { return "powershell" }
 
 func (powershellTool) Description() string {
-	return "Execute a PowerShell command in the current working directory. Returns combined stdout and stderr. Optionally provide a timeout in seconds."
+	return fmt.Sprintf("Execute a PowerShell command in the current working directory. Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.", DefaultMaxLines, DefaultMaxBytes/1024)
 }
 
 func (powershellTool) Schema() map[string]any { return schemaFor(&powershellParams{}) }
@@ -48,19 +46,7 @@ func (powershellTool) Execute(ctx context.Context, args map[string]any) (string,
 		return err.Error(), true
 	}
 	cmd := shell.CommandContext(runCtx, cfg, powershellUTF8+p.Command)
-	out, err := cmd.CombinedOutput()
-	result := string(out)
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		return result + fmt.Sprintf("\n[timed out after %ds]", p.Timeout), true
-	}
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return result + fmt.Sprintf("\n[exit code %d]", exitErr.ExitCode()), true
-		}
-		return result + "\n" + err.Error(), true
-	}
-	return result, false
+	return runStreamed(runCtx, cmd, p.Timeout, "pigo-powershell")
 }
 
 func extraPlatformTools() []Tool { return []Tool{powershellTool{}} }
