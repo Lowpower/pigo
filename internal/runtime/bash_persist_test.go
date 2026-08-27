@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/session"
@@ -30,5 +32,28 @@ func TestPersistBashWritesSessionAndExcludeFlag(t *testing.T) {
 	}
 	if payload["output"] != "secret" {
 		t.Fatalf("output=%#v", payload["output"])
+	}
+}
+
+func TestRunBashTruncatesLongOutput(t *testing.T) {
+	res := RunBash(t.Context(), t.TempDir(), "seq 1 2100", nil)
+	if res.FullOutputPath != "" {
+		t.Cleanup(func() { _ = os.Remove(res.FullOutputPath) })
+	}
+	if res.ExitCode == nil || *res.ExitCode != 0 {
+		t.Fatalf("exit=%v out=%q", res.ExitCode, res.Output)
+	}
+	if !res.Truncated || res.FullOutputPath == "" {
+		t.Fatalf("truncated=%v path=%q", res.Truncated, res.FullOutputPath)
+	}
+	if !strings.Contains(res.Output, "2100") {
+		t.Fatalf("missing tail: %q", res.Output[max(0, len(res.Output)-80):])
+	}
+	full, err := os.ReadFile(res.FullOutputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(full), "1\n") || !strings.Contains(string(full), "2100") {
+		t.Fatalf("temp file missing head/tail, len=%d", len(full))
 	}
 }

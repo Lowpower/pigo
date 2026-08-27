@@ -2,7 +2,6 @@
 package runtime
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"os/exec"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/shell"
+	"github.com/Lowpower/pigo/internal/tools"
 )
 
 // BashResult is the bang/RPC bash payload.
@@ -54,36 +54,11 @@ func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) Bas
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		code := 1
-		return BashResult{Output: err.Error(), ExitCode: &code}
-	}
-	cmd.Stderr = cmd.Stdout
-	if err := cmd.Start(); err != nil {
-		code := 1
-		return BashResult{Output: err.Error(), ExitCode: &code}
-	}
-
-	var output []byte
-	r := bufio.NewReader(stdout)
-	buf := make([]byte, 4096)
-	for {
-		n, readErr := r.Read(buf)
-		if n > 0 {
-			output = append(output, buf[:n]...)
-			if onChunk != nil {
-				onChunk(string(buf[:n]))
-			}
-		}
-		if readErr != nil {
-			break
-		}
-	}
-	waitErr := cmd.Wait()
+	output, waitErr := shell.WaitStream(cmd, onChunk)
+	text, path, truncated := tools.BoundOutput(string(output), "pigo-bash")
 	cancelled := ctx.Err() != nil
 	if cancelled {
-		return BashResult{Output: string(output), Cancelled: true, Truncated: false}
+		return BashResult{Output: text, Cancelled: true, Truncated: truncated, FullOutputPath: path}
 	}
 	code := 0
 	if waitErr != nil {
@@ -97,7 +72,7 @@ func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) Bas
 			}
 		}
 	}
-	return BashResult{Output: string(output), ExitCode: &code, Cancelled: false, Truncated: false}
+	return BashResult{Output: text, ExitCode: &code, Cancelled: false, Truncated: truncated, FullOutputPath: path}
 }
 
 // PersistBash writes a bashExecution session entry. excludeFromContext skips LLM history.
