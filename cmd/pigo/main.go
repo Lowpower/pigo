@@ -52,6 +52,8 @@ type cliFlags struct {
 	extension       []string
 	noExtensions    bool
 	theme           string
+	themePaths      []string
+	noThemes        bool
 	listModels      bool
 	listModelsQuery string
 	offline         bool
@@ -100,7 +102,9 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.excludeTools, "exclude-tools", "", "comma-separated tool denylist")
 	cmd.Flags().StringArrayVarP(&f.extension, "extension", "e", nil, "extension command to spawn (repeatable)")
 	cmd.Flags().BoolVar(&f.noExtensions, "no-extensions", false, "skip extension auto-discovery (explicit -e still loads)")
-	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name")
+	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name for this run (does not write settings)")
+	cmd.Flags().StringArrayVar(&f.themePaths, "theme", nil, "load a theme file or directory (repeatable)")
+	cmd.Flags().BoolVar(&f.noThemes, "no-themes", false, "disable theme discovery")
 	cmd.Flags().BoolVar(&f.listModels, "list-models", false, "list known models and exit")
 	cmd.Flags().StringVar(&f.listModelsQuery, "list-models-query", "", "filter --list-models")
 	cmd.Flags().BoolVar(&f.offline, "offline", false, "skip network at startup (sets PIGO_OFFLINE=1)")
@@ -307,6 +311,8 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		ContextWindow:  cfg.ContextWindow,
 		NoPromptTpls:   f.noPromptTpls,
 		PromptPaths:    f.promptTemplates,
+		ThemePaths:     f.themePaths,
+		NoThemes:       f.noThemes,
 		Models:         splitCSV(f.modelsFlag),
 		CLIProvider:    cliProvider,
 		CLIModel:       cliModel,

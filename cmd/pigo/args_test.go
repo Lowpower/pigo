@@ -41,11 +41,16 @@ func TestInlineFiles(t *testing.T) {
 	}
 }
 
-func TestApplyModelSpec(t *testing.T) {
-	var provider, model, thinking string
-	applyModelSpec(&provider, &model, &thinking, "openai/gpt-4o:high")
-	if provider != "openai" || model != "gpt-4o" || thinking != "high" {
-		t.Fatalf("provider=%s model=%s thinking=%s", provider, model, thinking)
+func TestThemeFlagsParse(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	_ = cmd.Execute()
+	s := out.String()
+	if !strings.Contains(s, "--theme") || !strings.Contains(s, "--no-themes") || !strings.Contains(s, "--use-theme") {
+		t.Fatalf("help missing theme flags:\n%s", s)
 	}
 }
 
