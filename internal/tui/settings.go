@@ -184,41 +184,47 @@ func (m Model) settingCurrent(id string) string {
 
 func (m *Model) applySetting(id, value string) tea.Cmd {
 	var cmd tea.Cmd
+	patch := func(fn func(*config.Config)) {
+		fn(&m.cfg)
+		if m.engine != nil && m.engine.Opts.UserConfig != nil {
+			fn(m.engine.Opts.UserConfig)
+		}
+	}
 	switch id {
 	case "autocompact":
 		on := value == "true"
-		m.cfg.CompactionOn = &on
+		patch(func(c *config.Config) { c.CompactionOn = &on })
 	case "steering-mode":
-		m.cfg.SteeringMode = value
+		patch(func(c *config.Config) { c.SteeringMode = value })
 	case "follow-up-mode":
-		m.cfg.FollowUpMode = value
+		patch(func(c *config.Config) { c.FollowUpMode = value })
 	case "mermaid-rendering":
-		m.cfg.Markdown.Mermaid = value
+		patch(func(c *config.Config) { c.Markdown.Mermaid = value })
 	case "show-images":
 		on := value == "true"
-		m.cfg.Terminal.ShowImages = &on
+		patch(func(c *config.Config) { c.Terminal.ShowImages = &on })
 	case "block-images":
 		on := value == "true"
-		m.cfg.Images.BlockImages = &on
+		patch(func(c *config.Config) { c.Images.BlockImages = &on })
 	case "default-project-trust":
-		m.cfg.DefaultProjectTrust = value
+		patch(func(c *config.Config) { c.DefaultProjectTrust = value })
 	case "double-escape-action":
-		m.cfg.DoubleEscapeAction = value
+		patch(func(c *config.Config) { c.DoubleEscapeAction = value })
 	case "tree-filter-mode":
-		m.cfg.TreeFilterMode = value
+		patch(func(c *config.Config) { c.TreeFilterMode = value })
 	case "theme":
-		m.cfg.Theme = value
+		patch(func(c *config.Config) { c.Theme = value })
 		m.applyTheme(theme.LoadWith(m.themeOpts(value)))
 	case "thinking":
-		m.cfg.Thinking = value
+		patch(func(c *config.Config) { c.Thinking = value })
 	case "collapse-changelog":
 		on := value == "true"
-		m.cfg.CollapseChangelog = &on
+		patch(func(c *config.Config) { c.CollapseChangelog = &on })
 	case "install-telemetry":
 		on := value == "true"
-		m.cfg.EnableInstallTelemetry = &on
+		patch(func(c *config.Config) { c.EnableInstallTelemetry = &on })
 	case "tui-mode":
-		m.cfg.TUIMode = value
+		patch(func(c *config.Config) { c.TUIMode = value })
 		m.altScreen = value == "fullscreen"
 		if m.altScreen {
 			cmd = tea.EnterAltScreen
@@ -226,13 +232,21 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 			cmd = tea.ExitAltScreen
 		}
 	case "fullscreen-exit-output":
-		m.cfg.FullscreenExitOutput = value
+		patch(func(c *config.Config) { c.FullscreenExitOutput = value })
 	}
 	m.persistSettings()
 	return cmd
 }
 
 func (m *Model) persistSettings() {
+	if m.engine != nil && m.engine.Opts.UserConfig != nil {
+		if m.engine.Opts.AgentDir != "" {
+			_ = config.Save(m.engine.Opts.AgentDir, *m.engine.Opts.UserConfig)
+		}
+		m.engine.RefreshSessionConfig()
+		m.cfg = m.engine.Opts.Config
+		return
+	}
 	if m.engine != nil {
 		m.engine.Opts.Config = m.cfg
 		if m.engine.Opts.AgentDir != "" {

@@ -67,7 +67,7 @@ func (s *Store) read() map[string]bool {
 
 var trustRequiring = []string{
 	"settings.json", "extensions", "skills", "prompts", "themes",
-	"SYSTEM.md", "APPEND_SYSTEM.md", "npm", "git",
+	"SYSTEM.md", "APPEND_SYSTEM.md", "npm", "git", "sandbox.json",
 }
 
 // HasProjectResources reports whether cwd has project-local resources that
