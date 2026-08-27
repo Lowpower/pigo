@@ -53,7 +53,7 @@ func lookup(name string) (Command, bool) {
 // Builtins is the built-in slash command list.
 func Builtins() []Command {
 	return []Command{
-		{Name: "settings", Description: "show settings path"},
+		{Name: "settings", Description: "open settings"},
 		{Name: "model", Description: "select model (opens selector UI)"},
 		{Name: "tree", Description: "navigate session tree (switch branches)"},
 		{Name: "thinking", Description: "set thinking level"},

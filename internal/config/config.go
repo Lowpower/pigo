@@ -356,6 +356,8 @@ func Save(configDir string, cfg Config) error {
 	existing["compactionKeepRecentTokens"] = cfg.KeepRecentTokens
 	existing["steeringMode"] = cfg.SteeringMode
 	existing["followUpMode"] = cfg.FollowUpMode
+	existing["doubleEscapeAction"] = cfg.DoubleEscape()
+	existing["treeFilterMode"] = cfg.TreeFilter()
 	existing["retry"] = map[string]any{
 		"enabled":     cfg.RetryEnabled(),
 		"maxRetries":  cfg.RetryMaxRetries(),
