@@ -1,3 +1,4 @@
+// Package llama is a llama.cpp router HTTP client used by /llama and the catalog.
 package llama
 
 import (

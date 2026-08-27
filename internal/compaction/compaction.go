@@ -98,15 +98,17 @@ const SummaryPrefix = `The conversation history before this point was compacted 
 <summary>
 `
 
+// SummarySuffix closes the compaction summary wrapper.
 const SummarySuffix = `
 </summary>`
 
-// BranchSummaryPrefix / BranchSummarySuffix wrap a branch summary for the LLM.
+// BranchSummaryPrefix wraps a branch summary for the LLM.
 const BranchSummaryPrefix = `The following is a summary of a branch that this conversation came back from:
 
 <summary>
 `
 
+// BranchSummarySuffix closes the branch summary wrapper.
 const BranchSummarySuffix = `</summary>`
 
 // SummaryMarker prefixes the synthetic message that replaces compacted history.

@@ -234,7 +234,7 @@ func BuildContextEntries(path []Entry) []Entry {
 }
 
 // FirstKeptEntryID maps a cut index in restored messages back to a session entry id.
-func FirstKeptEntryID(entries []Entry, msgs []ai.Message, cut int) string {
+func FirstKeptEntryID(entries []Entry, _ []ai.Message, cut int) string {
 	if cut < 0 {
 		cut = 0
 	}

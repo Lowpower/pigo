@@ -94,8 +94,8 @@ func TestTelemetryEnvOverridesSettings(t *testing.T) {
 	cfgOff := config.Config{EnableInstallTelemetry: &off}
 
 	t.Setenv("PI_TELEMETRY", "0")
-	os.Unsetenv("PI_TELEMETRY")
-	os.Unsetenv("PIGO_TELEMETRY")
+	_ = os.Unsetenv("PI_TELEMETRY")
+	_ = os.Unsetenv("PIGO_TELEMETRY")
 	if !TelemetryAllowed(cfgOn) {
 		t.Fatal("settings on should allow telemetry")
 	}

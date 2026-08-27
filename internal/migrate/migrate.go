@@ -1,3 +1,4 @@
+// Package migrate applies one-time agent-dir layout migrations at startup.
 package migrate
 
 import (
