@@ -42,7 +42,7 @@ func TestSlashScopedModelsPreservesExplicitEmptySelection(t *testing.T) {
 	}
 }
 
-func TestSlashScopedModelsIncludesUnavailableConfiguredIDs(t *testing.T) {
+func TestSlashScopedModelsSessionIgnoresSettingsUnmatched(t *testing.T) {
 	cfg := testCfg()
 	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4", "missing/model"}
 	m := New(cfg)
@@ -50,6 +50,23 @@ func TestSlashScopedModelsIncludesUnavailableConfiguredIDs(t *testing.T) {
 		Scoped: []models.Spec{{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4"}}},
 		Opts:   runtime.Options{Config: cfg, Offline: true},
 	}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	for _, id := range m.scoped.enabled.ids {
+		if id == "missing/model" {
+			t.Fatalf("session scope should not reattach settings unmatched: %v", m.scoped.enabled.ids)
+		}
+	}
+	if len(m.scoped.enabled.ids) != 1 || m.scoped.enabled.ids[0] != "anthropic/claude-sonnet-4" {
+		t.Fatalf("session scope = %v", m.scoped.enabled.ids)
+	}
+}
+
+func TestSlashScopedModelsEmptySessionShowsSettingsUnmatched(t *testing.T) {
+	cfg := testCfg()
+	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4", "missing/model"}
+	m := New(cfg)
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: cfg, Offline: true}}
 	m.editor.SetValue("/scoped-models")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -60,17 +77,37 @@ func TestSlashScopedModelsIncludesUnavailableConfiguredIDs(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("unavailable configured id missing from picker: %v", m.scoped.enabled.ids)
+		t.Fatalf("empty session should show settings unmatched: %v", m.scoped.enabled.ids)
 	}
 	view := m.View()
-	if !strings.Contains(view, "missing/model") || !strings.Contains(view, "[unavailable]") {
-		t.Fatalf("expected unavailable row in view:\n%s", view)
-	}
 	if strings.Contains(view, "missing/model ✓") {
 		t.Fatalf("unavailable row must show ✗, not ✓:\n%s", view)
 	}
-	if !strings.Contains(view, "missing/model ✗") {
+	if !strings.Contains(view, "missing/model ✗") || !strings.Contains(view, "[unavailable]") {
 		t.Fatalf("unavailable row missing ✗:\n%s", view)
+	}
+}
+
+func TestSlashScopedModelsEscReopenKeepsSessionDoesNotReattachUnmatched(t *testing.T) {
+	cfg := testCfg()
+	cfg.EnabledModels = []string{"missing/model"}
+	m := New(cfg)
+	m.engine = &runtime.Engine{
+		Scoped: []models.Spec{{Model: models.Model{Provider: "openai", ID: "gpt-4o"}}},
+		Opts:   runtime.Options{Config: cfg, Offline: true},
+	}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.engine.Scoped) != 1 || m.engine.Scoped[0].ID != "gpt-4o" {
+		t.Fatalf("esc/reopen rolled back session: %+v", m.engine.Scoped)
+	}
+	for _, id := range m.scoped.enabled.ids {
+		if id == "missing/model" {
+			t.Fatalf("reopen reattached settings unmatched: %v", m.scoped.enabled.ids)
+		}
 	}
 }
 
@@ -98,7 +135,7 @@ func TestSlashScopedModelsCLIDoesNotMixSettingsUnmatched(t *testing.T) {
 	}
 }
 
-func TestSlashScopedModelsCLIKeepsItsOwnUnmatched(t *testing.T) {
+func TestSlashScopedModelsCLISessionDoesNotReattachUnmatched(t *testing.T) {
 	cfg := testCfg()
 	cfg.EnabledModels = []string{"missing/settings"}
 	m := New(cfg)
@@ -116,11 +153,11 @@ func TestSlashScopedModelsCLIKeepsItsOwnUnmatched(t *testing.T) {
 	for _, id := range m.scoped.enabled.ids {
 		got[id] = true
 	}
-	if !got["openai/gpt-4o"] || !got["missing/cli"] {
-		t.Fatalf("CLI unmatched dropped: %v", m.scoped.enabled.ids)
+	if !got["openai/gpt-4o"] {
+		t.Fatalf("CLI session scope missing: %v", m.scoped.enabled.ids)
 	}
-	if got["missing/settings"] {
-		t.Fatalf("settings unmatched leaked into CLI scope: %v", m.scoped.enabled.ids)
+	if got["missing/cli"] || got["missing/settings"] {
+		t.Fatalf("non-empty session should not reattach unmatched: %v", m.scoped.enabled.ids)
 	}
 }
 
@@ -285,10 +322,7 @@ func TestScopedModelsCtrlSKeepsUnavailableIDs(t *testing.T) {
 	cfg := testCfg()
 	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4", "missing/model"}
 	m := New(cfg)
-	m.engine = &runtime.Engine{
-		Scoped: []models.Spec{{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4"}}},
-		Opts:   runtime.Options{AgentDir: dir, Config: cfg},
-	}
+	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: dir, Config: cfg}}
 	m.editor.SetValue("/scoped-models")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlA})
