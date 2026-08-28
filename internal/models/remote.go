@@ -149,7 +149,9 @@ func RefreshAll(ctx context.Context, store CatalogStore, baseURL string, force b
 		spec, _ := LookupProvider(id)
 		if spec.RefreshModels != nil {
 			if err := spec.RefreshModels(store); err != nil {
+				mu.Lock()
 				failed = append(failed, id)
+				mu.Unlock()
 			}
 			continue
 		}
