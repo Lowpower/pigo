@@ -135,24 +135,36 @@ func DefaultCatalogBaseURL() string {
 }
 
 // RefreshAll revalidates remote catalogs for every registered provider.
-func RefreshAll(ctx context.Context, store CatalogStore, baseURL string, force bool) {
+// It returns provider ids whose refresh failed.
+func RefreshAll(ctx context.Context, store CatalogStore, baseURL string, force bool) []string {
 	if store == nil || baseURL == "" {
-		return
+		return nil
 	}
-	var wg sync.WaitGroup
+	var (
+		mu     sync.Mutex
+		failed []string
+		wg     sync.WaitGroup
+	)
 	for _, id := range ProviderIDs() {
 		spec, _ := LookupProvider(id)
 		if spec.RefreshModels != nil {
-			_ = spec.RefreshModels(store)
+			if err := spec.RefreshModels(store); err != nil {
+				failed = append(failed, id)
+			}
 			continue
 		}
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			_ = RefreshProvider(ctx, store, baseURL, id, force)
+			if err := RefreshProvider(ctx, store, baseURL, id, force); err != nil {
+				mu.Lock()
+				failed = append(failed, id)
+				mu.Unlock()
+			}
 		}(id)
 	}
 	wg.Wait()
+	return failed
 }
 
 // RefreshProvider fetches one provider catalog (ETag/304/404/501).

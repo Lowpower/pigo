@@ -64,6 +64,11 @@ func (m Model) String() string { return m.Provider + "/" + m.ID }
 
 // ResolvePatterns maps --models patterns onto the catalog (globs + substring).
 func ResolvePatterns(patterns []string) []Spec {
+	return ResolvePatternsIn(patterns, Catalog())
+}
+
+// ResolvePatternsIn maps patterns onto list (same matching as ResolvePatterns).
+func ResolvePatternsIn(patterns []string, list []Model) []Spec {
 	if len(patterns) == 0 {
 		return nil
 	}
@@ -82,7 +87,7 @@ func ResolvePatterns(patterns []string) []Spec {
 			}
 		}
 		g, gerr := glob.Compile(strings.ToLower(pattern))
-		for _, m := range Catalog() {
+		for _, m := range list {
 			hay := strings.ToLower(m.Provider + "/" + m.ID)
 			match := strings.Contains(hay, strings.ToLower(pattern)) ||
 				strings.Contains(strings.ToLower(m.ID), strings.ToLower(pattern))
@@ -98,6 +103,21 @@ func ResolvePatterns(patterns []string) []Spec {
 			}
 			seen[key] = true
 			out = append(out, Spec{Model: m, Thinking: thinking})
+		}
+	}
+	return out
+}
+
+// UnmatchedPatterns returns patterns that resolve to no models in list.
+func UnmatchedPatterns(patterns []string, list []Model) []string {
+	var out []string
+	for _, raw := range patterns {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if len(ResolvePatternsIn([]string{raw}, list)) == 0 {
+			out = append(out, raw)
 		}
 	}
 	return out
