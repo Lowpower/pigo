@@ -734,6 +734,55 @@ func TestNewScopedFromSettingsWhenCLIEmpty(t *testing.T) {
 	}
 }
 
+func TestNewPrefersUserConfigEnabledModels(t *testing.T) {
+	dir := t.TempDir()
+	e, err := New(context.Background(), Options{
+		AgentDir:     dir,
+		Cwd:          t.TempDir(),
+		Offline:      true,
+		NoTools:      true,
+		NoSkills:     true,
+		NoExtensions: true,
+		Config: config.Config{
+			Provider:      "anthropic",
+			Model:         "claude-sonnet-4",
+			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
+		},
+		UserConfig: &config.Config{
+			EnabledModels: []string{"openai/gpt-4o"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if len(e.Scoped) != 1 || e.Scoped[0].ID != "gpt-4o" {
+		t.Fatalf("user settings should win over overlay config, got %+v", e.Scoped)
+	}
+
+	e2, err := New(context.Background(), Options{
+		AgentDir:     dir,
+		Cwd:          t.TempDir(),
+		Offline:      true,
+		NoTools:      true,
+		NoSkills:     true,
+		NoExtensions: true,
+		Config: config.Config{
+			Provider:      "anthropic",
+			Model:         "claude-sonnet-4",
+			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
+		},
+		UserConfig: &config.Config{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e2.Close()
+	if len(e2.Scoped) != 0 {
+		t.Fatalf("nil user enabledModels is implicit-all, got %+v", e2.Scoped)
+	}
+}
+
 func TestNewCLIModelsReplaceSettings(t *testing.T) {
 	dir := t.TempDir()
 	e, err := New(context.Background(), Options{

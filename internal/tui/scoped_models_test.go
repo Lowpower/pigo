@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/models"
@@ -179,6 +181,26 @@ func TestScopedRefreshTimeoutCopy(t *testing.T) {
 	}
 }
 
+func TestScopedRefreshStatusIsMuted(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, Offline: true}}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.scoped.refreshStatus = "Refreshing model catalogs…"
+	plain := "Refreshing model catalogs…"
+	want := m.footerStyle.Render(plain)
+	if want == plain {
+		t.Fatal("expected footerStyle to emit ANSI in this test")
+	}
+	view := m.View()
+	if !strings.Contains(view, want) {
+		t.Fatalf("refresh status not muted:\n%s", view)
+	}
+}
+
 func TestScopedRefreshDoesNotClobberDirty(t *testing.T) {
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, CatalogBaseURL: "http://example"}}
@@ -228,5 +250,109 @@ func TestScopedRefreshDropsPriorGenerationAfterReopen(t *testing.T) {
 	m = next.(Model)
 	if m.scoped.refreshStatus != before {
 		t.Fatalf("stale refresh changed status from %q to %q", before, m.scoped.refreshStatus)
+	}
+}
+
+func openScopedPicker(t *testing.T) Model {
+	t.Helper()
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, Offline: true}}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.scopedModelsActive() {
+		t.Fatal("expected scoped-models picker")
+	}
+	return m
+}
+
+func TestScopedModelsCtrlAEnablesAll(t *testing.T) {
+	m := openScopedPicker(t)
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.scoped.enabled.all {
+		t.Fatal("toggle from all should become a singleton")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlA})
+	if !m.scoped.enabled.all {
+		t.Fatalf("ctrl+a should restore all, got %+v", m.scoped.enabled)
+	}
+	if !m.scoped.dirty {
+		t.Fatal("ctrl+a should mark dirty")
+	}
+	if len(m.engine.Scoped) != 0 {
+		t.Fatalf("implicit-all should clear Engine.Scoped, got %+v", m.engine.Scoped)
+	}
+}
+
+func TestScopedModelsCtrlXClearsAll(t *testing.T) {
+	m := openScopedPicker(t)
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	if m.scoped.enabled.all || len(m.scoped.enabled.ids) != 0 {
+		t.Fatalf("ctrl+x should clear checks, got %+v", m.scoped.enabled)
+	}
+	if !m.scopedModelsActive() {
+		t.Fatal("ctrl+x must not close the picker")
+	}
+	if !strings.Contains(m.View(), "✗") {
+		t.Fatalf("cleared picker should show ✗\n%s", m.View())
+	}
+}
+
+func TestScopedModelsCtrlPTogglesCurrentProvider(t *testing.T) {
+	m := openScopedPicker(t)
+	first, ok := m.scoped.current()
+	if !ok {
+		t.Fatal("no selected row")
+	}
+	prov, _, ok := strings.Cut(first.ID, "/")
+	if !ok {
+		t.Fatalf("id = %s", first.ID)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	if m.scoped.enabled.all {
+		t.Fatal("ctrl+p from all should drop the current provider")
+	}
+	for _, id := range m.scoped.enabled.ids {
+		if strings.HasPrefix(id, prov+"/") {
+			t.Fatalf("provider %s still enabled: %v", prov, m.scoped.enabled.ids)
+		}
+	}
+	if len(m.scoped.enabled.ids) == 0 {
+		t.Fatal("other providers should stay enabled")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	if !m.scoped.enabled.all {
+		t.Fatalf("second ctrl+p should restore all, got %+v", m.scoped.enabled)
+	}
+}
+
+func TestScopedModelsAltArrowsReorderSession(t *testing.T) {
+	m := openScopedPicker(t)
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	first := m.engine.Scoped[0].Provider + "/" + m.engine.Scoped[0].ID
+	m = send(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.engine.Scoped) != 2 {
+		t.Fatalf("want two scoped models, got %+v", m.engine.Scoped)
+	}
+	second := m.engine.Scoped[1].Provider + "/" + m.engine.Scoped[1].ID
+	if first == second {
+		t.Fatal("expected two distinct models")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	got := []string{
+		m.engine.Scoped[0].Provider + "/" + m.engine.Scoped[0].ID,
+		m.engine.Scoped[1].Provider + "/" + m.engine.Scoped[1].ID,
+	}
+	want := []string{second, first}
+	if got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("alt+up order = %v, want %v", got, want)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyDown, Alt: true})
+	got = []string{
+		m.engine.Scoped[0].Provider + "/" + m.engine.Scoped[0].ID,
+		m.engine.Scoped[1].Provider + "/" + m.engine.Scoped[1].ID,
+	}
+	if got[0] != first || got[1] != second {
+		t.Fatalf("alt+down should restore original order, got %v", got)
 	}
 }

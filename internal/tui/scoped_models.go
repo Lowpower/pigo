@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Lowpower/pigo/internal/models"
 )
@@ -38,6 +39,7 @@ type scopedModelsPicker struct {
 	openedEmptyScoped bool
 	gen               int
 	cancel            context.CancelFunc
+	muted             lipgloss.Style
 }
 
 func (m Model) scopedModelsActive() bool { return m.scoped.active }
@@ -94,6 +96,7 @@ func (m Model) openScopedModels() (tea.Model, tea.Cmd) {
 		allIDs:            allIDs,
 		openedEmptyScoped: openedEmpty,
 		gen:               m.scopedGen,
+		muted:             m.footerStyle,
 	}
 	p.rebuild()
 	m.scoped = p
@@ -253,7 +256,7 @@ func (p scopedModelsPicker) view() string {
 		b.WriteString("  (no matches)\n")
 		if p.refreshStatus != "" {
 			b.WriteString("\n")
-			b.WriteString(p.refreshStatus)
+			b.WriteString(p.muted.Render(p.refreshStatus))
 		}
 		if p.hint != "" {
 			b.WriteString("\n")
@@ -296,7 +299,7 @@ func (p scopedModelsPicker) view() string {
 	}
 	if p.refreshStatus != "" {
 		b.WriteString("\n")
-		b.WriteString(p.refreshStatus)
+		b.WriteString(p.muted.Render(p.refreshStatus))
 	}
 	if p.hint != "" {
 		b.WriteString("\n")
