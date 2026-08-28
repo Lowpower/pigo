@@ -383,11 +383,6 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		cliModel = id
 	}
 
-	modelPatterns := splitCSV(f.modelsFlag)
-	if len(modelPatterns) == 0 {
-		modelPatterns = cfg.EnabledModels
-	}
-
 	eng, err := runtime.New(cmd.Context(), runtime.Options{
 		Config:         cfg,
 		UserConfig:     &userCfg,
@@ -411,7 +406,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		PromptPaths:    f.promptTemplates,
 		ThemePaths:     f.themePaths,
 		NoThemes:       f.noThemes,
-		Models:         modelPatterns,
+		Models:         splitCSV(f.modelsFlag),
 		CLIProvider:    cliProvider,
 		CLIModel:       cliModel,
 		CLIThinking:    f.thinking,

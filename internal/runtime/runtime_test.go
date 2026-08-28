@@ -15,6 +15,7 @@ import (
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/tools"
 )
@@ -707,6 +708,159 @@ func TestApplyModelDoesNotOverwriteSavedDefault(t *testing.T) {
 	}
 	if e.Opts.Config.DefaultModel != "claude-sonnet-4" {
 		t.Fatalf("default should stay, got %s", e.Opts.Config.DefaultModel)
+	}
+}
+
+func TestNewScopedFromSettingsWhenCLIEmpty(t *testing.T) {
+	dir := t.TempDir()
+	e, err := New(context.Background(), Options{
+		AgentDir:     dir,
+		Cwd:          t.TempDir(),
+		Offline:      true,
+		NoTools:      true,
+		NoSkills:     true,
+		NoExtensions: true,
+		Config: config.Config{
+			Provider: "anthropic", Model: "claude-sonnet-4",
+			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if len(e.Scoped) != 2 || e.Scoped[0].ID != "claude-sonnet-4" || e.Scoped[1].ID != "claude-haiku-4" {
+		t.Fatalf("%+v", e.Scoped)
+	}
+}
+
+func TestNewPrefersUserConfigEnabledModels(t *testing.T) {
+	dir := t.TempDir()
+	e, err := New(context.Background(), Options{
+		AgentDir:     dir,
+		Cwd:          t.TempDir(),
+		Offline:      true,
+		NoTools:      true,
+		NoSkills:     true,
+		NoExtensions: true,
+		Config: config.Config{
+			Provider:      "anthropic",
+			Model:         "claude-sonnet-4",
+			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
+		},
+		UserConfig: &config.Config{
+			EnabledModels: []string{"openai/gpt-4o"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if len(e.Scoped) != 1 || e.Scoped[0].ID != "gpt-4o" {
+		t.Fatalf("user settings should win over overlay config, got %+v", e.Scoped)
+	}
+
+	e2, err := New(context.Background(), Options{
+		AgentDir:     dir,
+		Cwd:          t.TempDir(),
+		Offline:      true,
+		NoTools:      true,
+		NoSkills:     true,
+		NoExtensions: true,
+		Config: config.Config{
+			Provider:      "anthropic",
+			Model:         "claude-sonnet-4",
+			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
+		},
+		UserConfig: &config.Config{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e2.Close()
+	if len(e2.Scoped) != 0 {
+		t.Fatalf("nil user enabledModels is implicit-all, got %+v", e2.Scoped)
+	}
+}
+
+func TestNewCLIModelsReplaceSettings(t *testing.T) {
+	dir := t.TempDir()
+	e, err := New(context.Background(), Options{
+		AgentDir:     dir,
+		Cwd:          t.TempDir(),
+		Offline:      true,
+		NoTools:      true,
+		NoSkills:     true,
+		NoExtensions: true,
+		Models:       []string{"openai/gpt-4o"},
+		Config: config.Config{
+			Provider: "anthropic", Model: "claude-sonnet-4",
+			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if len(e.Scoped) != 1 || e.Scoped[0].ID != "gpt-4o" {
+		t.Fatalf("%+v", e.Scoped)
+	}
+}
+
+func TestSetScopedModelsAndCycleOrder(t *testing.T) {
+	e := &Engine{Opts: Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}}}
+	e.SetScopedModels([]models.Spec{
+		{Model: models.Model{Provider: "openai", ID: "gpt-4o"}},
+		{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4"}},
+		{Model: models.Model{Provider: "anthropic", ID: "claude-haiku-4"}},
+	})
+	next, ok := e.CycleModel(false)
+	if !ok || next.ID != "claude-haiku-4" {
+		t.Fatalf("cycle from sonnet in custom order = %+v ok=%v", next, ok)
+	}
+}
+
+func TestPersistEnabledModels(t *testing.T) {
+	dir := t.TempDir()
+	e := &Engine{Opts: Options{AgentDir: dir, Config: config.Config{Theme: "default"}}}
+	ids := []string{"openai/gpt-4o"}
+	if err := e.PersistEnabledModels(&ids); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.EnabledModels) != 1 || loaded.EnabledModels[0] != "openai/gpt-4o" {
+		t.Fatalf("%v", loaded.EnabledModels)
+	}
+	ids = []string{}
+	if err := e.PersistEnabledModels(&ids); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.EnabledModels == nil || len(loaded.EnabledModels) != 0 {
+		t.Fatalf("empty selection: %#v", loaded.EnabledModels)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"enabledModels"`) {
+		t.Fatalf("empty selection key missing: %s", b)
+	}
+	if err := e.PersistEnabledModels(nil); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.EnabledModels != nil {
+		t.Fatalf("clear: %v", loaded.EnabledModels)
 	}
 }
 

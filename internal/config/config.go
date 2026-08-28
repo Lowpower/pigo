@@ -444,13 +444,14 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		return
 	}
 	var extra struct {
-		Packages     []PackageEntry  `json:"packages"`
-		Extensions   []string        `json:"extensions"`
-		Skills       []string        `json:"skills"`
-		Prompts      []string        `json:"prompts"`
-		Themes       []string        `json:"themes"`
-		NpmCommand   []string        `json:"npmCommand"`
-		DefaultTools json.RawMessage `json:"defaultTools"`
+		Packages      []PackageEntry  `json:"packages"`
+		Extensions    []string        `json:"extensions"`
+		Skills        []string        `json:"skills"`
+		Prompts       []string        `json:"prompts"`
+		Themes        []string        `json:"themes"`
+		NpmCommand    []string        `json:"npmCommand"`
+		DefaultTools  json.RawMessage `json:"defaultTools"`
+		EnabledModels json.RawMessage `json:"enabledModels"`
 	}
 	if err := json.Unmarshal(b, &extra); err != nil {
 		return
@@ -465,6 +466,14 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		var tools []string
 		if json.Unmarshal(extra.DefaultTools, &tools) == nil {
 			cfg.DefaultTools = &tools
+		}
+	}
+	if extra.EnabledModels == nil {
+		cfg.EnabledModels = nil
+	} else {
+		var ids []string
+		if json.Unmarshal(extra.EnabledModels, &ids) == nil {
+			cfg.EnabledModels = ids
 		}
 	}
 }
@@ -519,6 +528,11 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	existing["tuiMode"] = cfg.TuiMode()
 	existing["fullscreenExitOutput"] = cfg.FullscreenExit()
 	existing["defaultProjectTrust"] = cfg.ProjectTrustDefault()
+	if cfg.EnabledModels == nil {
+		delete(existing, "enabledModels")
+	} else {
+		existing["enabledModels"] = cfg.EnabledModels
+	}
 	existing["retry"] = map[string]any{
 		"enabled":     cfg.RetryEnabled(),
 		"maxRetries":  cfg.RetryMaxRetries(),
@@ -547,9 +561,6 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	}
 	if cfg.DefaultTools != nil {
 		existing["defaultTools"] = *cfg.DefaultTools
-	}
-	if cfg.EnabledModels != nil {
-		existing["enabledModels"] = cfg.EnabledModels
 	}
 	if cfg.SessionDir != "" {
 		existing["sessionDir"] = cfg.SessionDir

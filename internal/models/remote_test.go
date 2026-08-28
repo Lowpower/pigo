@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -71,6 +74,44 @@ func TestRefreshProvider404ClearsOverlay(t *testing.T) {
 	e, ok, _ := store.Read("openai")
 	if !ok || e.ETag != "" || len(e.Models) != 0 {
 		t.Fatalf("store after 404 = %+v ok=%v", e, ok)
+	}
+}
+
+func TestRefreshAllReturnsFailedProviders(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/openai") {
+			w.Header().Set("etag", `"ok"`)
+			_ = json.NewEncoder(w).Encode(map[string]Model{
+				"extra": {ID: "extra", API: "openai-responses"},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	failed := RefreshAll(context.Background(), &MemoryStore{}, srv.URL, true)
+	var want []string
+	for _, id := range ProviderIDs() {
+		spec, _ := LookupProvider(id)
+		if id == "openai" || spec.RefreshModels != nil {
+			continue
+		}
+		want = append(want, id)
+	}
+	sort.Strings(failed)
+	sort.Strings(want)
+	if !reflect.DeepEqual(failed, want) {
+		t.Fatalf("failed = %v, want %v", failed, want)
+	}
+	if _, ok := Lookup("openai", "extra"); !ok {
+		t.Fatal("successful openai refresh should keep overlay")
+	}
+}
+
+func TestRefreshAllEmptyBaseURL(t *testing.T) {
+	if got := RefreshAll(context.Background(), &MemoryStore{}, "", true); got != nil {
+		t.Fatalf("%v", got)
 	}
 }
 
