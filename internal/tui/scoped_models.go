@@ -64,17 +64,8 @@ func (m Model) openScopedModels() (tea.Model, tea.Cmd) {
 	var en enabledIDs
 	if m.engine != nil && len(m.engine.Scoped) > 0 {
 		ids := make([]string, 0, len(m.engine.Scoped))
-		seen := make(map[string]bool, len(m.engine.Scoped))
 		for _, s := range m.engine.Scoped {
-			id := s.Provider + "/" + s.ID
-			ids = append(ids, id)
-			seen[id] = true
-		}
-		for _, id := range models.UnmatchedPatterns(patterns, avail) {
-			if !seen[id] {
-				ids = append(ids, id)
-				seen[id] = true
-			}
+			ids = append(ids, s.Provider+"/"+s.ID)
 		}
 		en = enabledIDs{ids: ids}
 	} else if patterns == nil {
