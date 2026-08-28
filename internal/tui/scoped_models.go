@@ -88,7 +88,8 @@ func (m Model) openScopedModels() (tea.Model, tea.Cmd) {
 	}
 	p.rebuild()
 	m.scoped = p
-	return m, m.startScopedRefresh()
+	cmd := m.startScopedRefresh()
+	return m, cmd
 }
 
 func (m *Model) startScopedRefresh() tea.Cmd {

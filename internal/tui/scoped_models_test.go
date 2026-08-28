@@ -26,6 +26,27 @@ func TestSlashScopedModelsOpensPicker(t *testing.T) {
 	}
 }
 
+func TestSlashScopedModelsStartsRefresh(t *testing.T) {
+	t.Setenv("PIGO_OFFLINE", "")
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, CatalogBaseURL: "http://example"}}
+	m.editor.SetValue("/scoped-models")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected catalog refresh command")
+	}
+	if m.scoped.refreshStatus != "Refreshing model catalogs…" {
+		t.Fatalf("refresh status = %q", m.scoped.refreshStatus)
+	}
+	if m.scoped.cancel == nil {
+		t.Fatal("expected refresh cancel function")
+	}
+	m.scoped.cancel()
+}
+
 func TestScopedModelsEnterDoesNotWriteSettings(t *testing.T) {
 	dir := t.TempDir()
 	m := New(testCfg())
