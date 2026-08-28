@@ -2,14 +2,14 @@
 package runtime
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/Lowpower/pigo/internal/sandbox"
+	"github.com/Lowpower/pigo/internal/shell"
+	"github.com/Lowpower/pigo/internal/tools"
 )
 
 // BashResult is the bang/RPC bash payload.
@@ -36,51 +36,29 @@ func (r BashResult) asData() map[string]any {
 	return data
 }
 
-// RunBash executes command with bash -c in cwd (pi user bang / RPC bash).
+// RunBash executes command with the resolved shell in cwd (pi user bang / RPC bash).
 func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) BashResult {
-	name, args := sandbox.Command(command, cwd, "")
-	cmd := exec.CommandContext(ctx, name, args...)
-	if cwd != "" {
-		cmd.Dir = cwd
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-
-	stdout, err := cmd.StdoutPipe()
+	cfg, err := shell.GetConfig()
 	if err != nil {
 		code := 1
 		return BashResult{Output: err.Error(), ExitCode: &code}
 	}
-	cmd.Stderr = cmd.Stdout
-	if err := cmd.Start(); err != nil {
-		code := 1
-		return BashResult{Output: err.Error(), ExitCode: &code}
+	name, args := sandbox.Command(command, cwd, "")
+	var cmd *exec.Cmd
+	if name == "bwrap" {
+		cmd = exec.CommandContext(ctx, name, args...)
+		shell.PrepareContext(cmd)
+	} else {
+		cmd = shell.CommandContext(ctx, cfg, command)
 	}
-
-	var output []byte
-	r := bufio.NewReader(stdout)
-	buf := make([]byte, 4096)
-	for {
-		n, readErr := r.Read(buf)
-		if n > 0 {
-			output = append(output, buf[:n]...)
-			if onChunk != nil {
-				onChunk(string(buf[:n]))
-			}
-		}
-		if readErr != nil {
-			break
-		}
+	if cwd != "" {
+		cmd.Dir = cwd
 	}
-	waitErr := cmd.Wait()
+	output, waitErr := shell.WaitStream(cmd, onChunk)
+	text, path, truncated := tools.BoundOutput(string(output), "pigo-bash")
 	cancelled := ctx.Err() != nil
 	if cancelled {
-		return BashResult{Output: string(output), Cancelled: true, Truncated: false}
+		return BashResult{Output: text, Cancelled: true, Truncated: truncated, FullOutputPath: path}
 	}
 	code := 0
 	if waitErr != nil {
@@ -94,7 +72,7 @@ func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) Bas
 			}
 		}
 	}
-	return BashResult{Output: string(output), ExitCode: &code, Cancelled: false, Truncated: false}
+	return BashResult{Output: text, ExitCode: &code, Cancelled: false, Truncated: truncated, FullOutputPath: path}
 }
 
 // PersistBash writes a bashExecution session entry. excludeFromContext skips LLM history.

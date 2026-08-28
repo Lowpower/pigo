@@ -37,11 +37,11 @@ func NewRegistry(ts ...Tool) *Registry {
 	return r
 }
 
-// Default returns a registry with all seven built-in tools.
+// Default returns a registry with the built-in tools. powershell is Windows-only.
 func Default() *Registry {
-	return NewRegistry(
-		readTool{}, writeTool{}, editTool{}, bashTool{}, grepTool{}, findTool{}, listTool{},
-	)
+	ts := []Tool{readTool{}, writeTool{}, editTool{}, bashTool{}, grepTool{}, findTool{}, listTool{}}
+	ts = append(ts, extraPlatformTools()...)
+	return NewRegistry(ts...)
 }
 
 // AITools returns the tools as provider-neutral ai.Tool definitions.

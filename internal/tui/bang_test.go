@@ -5,9 +5,31 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+func drainBash(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for cmd != nil && time.Now().Before(deadline) {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		var next tea.Model
+		next, cmd = m.Update(msg)
+		m = next.(Model)
+		if _, ok := msg.(bashDoneMsg); ok {
+			return m
+		}
+	}
+	if m.bashRunning {
+		t.Fatal("bash did not finish")
+	}
+	return m
+}
 
 func TestParseBang(t *testing.T) {
 	cmd, excl, ok := parseBang("!ls -la")
@@ -34,7 +56,7 @@ func TestBangPrintfShowsOutput(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected bash command")
 	}
-	m = send(m, cmd())
+	m = drainBash(t, m, cmd)
 	if m.bashRunning {
 		t.Fatal("bash should have finished")
 	}
@@ -46,11 +68,44 @@ func TestBangPrintfShowsOutput(t *testing.T) {
 	}
 }
 
+func TestBangShowsLiveOutputWhileRunning(t *testing.T) {
+	m := editorModel()
+	m.editor.SetValue("!printf live-chunk; sleep 0.4")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("expected bash command")
+	}
+	if !m.bashRunning {
+		t.Fatal("bash should be running")
+	}
+	sawLive := false
+	deadline := time.Now().Add(3 * time.Second)
+	for cmd != nil && time.Now().Before(deadline) {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		var nxt tea.Model
+		nxt, cmd = m.Update(msg)
+		m = nxt.(Model)
+		if _, ok := msg.(bashChunkMsg); ok && m.bashRunning && strings.Contains(m.View(), "live-chunk") {
+			sawLive = true
+		}
+		if _, ok := msg.(bashDoneMsg); ok {
+			break
+		}
+	}
+	if !sawLive {
+		t.Fatalf("expected live output in view while bash was running; view=\n%s", m.View())
+	}
+}
+
 func TestBangExcludeSkipsLLMHistory(t *testing.T) {
 	m := editorModel()
 	m.editor.SetValue("!!printf secret")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = send(next.(Model), cmd())
+	m = drainBash(t, next.(Model), cmd)
 	if len(m.history) != 0 {
 		t.Fatalf("excluded bang should not enter LLM history: %+v", m.history)
 	}
@@ -126,7 +181,7 @@ func TestBangRunsWhileAgentStreaming(t *testing.T) {
 	if m.running && len(m.transcript) > 0 && strings.Contains(m.transcript[len(m.transcript)-1].rendered, "steering") {
 		t.Fatal("bang must not be treated as steer")
 	}
-	m = send(m, cmd())
+	m = drainBash(t, next.(Model), cmd)
 	if len(m.history) != 1 || !strings.Contains(m.history[0].Content, "hello") {
 		t.Fatalf("history=%+v", m.history)
 	}

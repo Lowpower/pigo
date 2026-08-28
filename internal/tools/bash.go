@@ -2,18 +2,16 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/Lowpower/pigo/internal/sandbox"
+	"github.com/Lowpower/pigo/internal/shell"
 )
 
-// bashTool executes a shell command. Unix-only in v1 (process group via setpgid);
-// Windows support is a documented follow-up.
+// bashTool executes a shell command via shell.GetConfig (Git Bash / PATH / WSL).
 type bashTool struct{}
 
 type bashParams struct {
@@ -24,7 +22,7 @@ type bashParams struct {
 func (bashTool) Name() string { return "bash" }
 
 func (bashTool) Description() string {
-	return "Execute a bash command in the current working directory. Returns combined stdout and stderr. Optionally provide a timeout in seconds."
+	return fmt.Sprintf("Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.", DefaultMaxLines, DefaultMaxBytes/1024)
 }
 
 func (bashTool) Schema() map[string]any { return schemaFor(&bashParams{}) }
@@ -45,31 +43,32 @@ func (bashTool) Execute(ctx context.Context, args map[string]any) (string, bool)
 		defer cancel()
 	}
 
-	cwd, _ := os.Getwd()
-	name, argv := sandbox.Command(p.Command, cwd, "")
-	cmd := exec.CommandContext(runCtx, name, argv...)
-	// Run in its own process group so children are cleaned up on cancel/timeout.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			// Kill the whole process group (negative pid).
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-
-	out, err := cmd.CombinedOutput()
-	result := string(out)
-
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		return result + fmt.Sprintf("\n[timed out after %ds]", p.Timeout), true
-	}
+	cmd, err := bashCmd(runCtx, p.Command, "")
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return result + fmt.Sprintf("\n[exit code %d]", exitErr.ExitCode()), true
-		}
-		return result + "\n" + err.Error(), true
+		return err.Error(), true
 	}
-	return result, false
+	return runStreamed(runCtx, cmd, p.Timeout, "pigo-bash")
+}
+
+func bashCmd(ctx context.Context, command, dir string) (*exec.Cmd, error) {
+	cfg, err := shell.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	cwd := dir
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	name, argv := sandbox.Command(command, cwd, "")
+	var cmd *exec.Cmd
+	if name == "bwrap" {
+		cmd = exec.CommandContext(ctx, name, argv...)
+		shell.PrepareContext(cmd)
+	} else {
+		cmd = shell.CommandContext(ctx, cfg, command)
+	}
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	return cmd, nil
 }

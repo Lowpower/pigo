@@ -30,6 +30,19 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHasProjectResourcesSandboxJSON(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "sandbox.json"), []byte(`{"enabled":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !HasProjectResources(cwd) {
+		t.Fatal("expected .pigo/sandbox.json to require trust")
+	}
+}
+
 func TestHasProjectResources(t *testing.T) {
 	cwd := t.TempDir()
 	if HasProjectResources(cwd) {

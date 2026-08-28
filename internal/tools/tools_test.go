@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -375,6 +376,28 @@ func TestBash(t *testing.T) {
 	}
 }
 
+func TestBashTruncatesLongOutput(t *testing.T) {
+	out, isErr := run(t, bashTool{}, map[string]any{
+		"command": "seq 1 2100",
+	})
+	if isErr {
+		t.Fatalf("seq error: %s", out)
+	}
+	if !strings.Contains(out, "Full output:") {
+		t.Fatalf("expected truncation footer, got %q", out[max(0, len(out)-300):])
+	}
+	if strings.HasPrefix(strings.TrimSpace(out), "1\n") {
+		t.Fatalf("should keep the tail, not the head: %q", out[:80])
+	}
+	if !strings.Contains(out, "2100") {
+		t.Fatalf("missing last line: %q", out[max(0, len(out)-200):])
+	}
+	if i := strings.LastIndex(out, "Full output: "); i >= 0 {
+		path := strings.TrimSuffix(out[i+len("Full output: "):], "]")
+		t.Cleanup(func() { _ = os.Remove(path) })
+	}
+}
+
 func TestSchemasAndRegistry(t *testing.T) {
 	reg := Default()
 	names := map[string]bool{}
@@ -391,6 +414,12 @@ func TestSchemasAndRegistry(t *testing.T) {
 		if !names[want] {
 			t.Errorf("registry missing tool %q", want)
 		}
+	}
+	if runtime.GOOS != "windows" && names["powershell"] {
+		t.Errorf("powershell should be Windows-only")
+	}
+	if runtime.GOOS == "windows" && !names["powershell"] {
+		t.Errorf("windows registry missing powershell")
 	}
 
 	// read's schema must mark path required.

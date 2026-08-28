@@ -18,6 +18,7 @@ import (
 	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/session"
+	"github.com/Lowpower/pigo/internal/shell"
 	"github.com/Lowpower/pigo/internal/trust"
 	"github.com/Lowpower/pigo/internal/tui"
 	"github.com/Lowpower/pigo/internal/version"
@@ -161,10 +162,12 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 	sandbox.SetAgentDir(agentDir)
 	sandbox.SetNoSandbox(f.noSandbox)
-	cfg, err := config.Load(agentDir)
+	fileCfg, err := config.Load(agentDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	cfg := fileCfg
+	shell.SetPath(cfg.ShellPath)
 	if f.provider != "" {
 		cfg.Provider, cfg.DefaultProvider = f.provider, f.provider
 	}
@@ -255,9 +258,35 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		override = &v
 	}
 	st := trust.Open(agentDir)
-	trusted := trust.Decide(st, cwd, trust.Options{Override: override, Default: cfg.ProjectTrustDefault()})
-	cfg = config.ApplyProject(cfg, cwd, trusted)
+	trusted := trust.Decide(st, cwd, trust.Options{Override: override, Default: fileCfg.ProjectTrustDefault()})
+	cfg = config.ApplyProject(fileCfg, cwd, trusted)
+	if f.provider != "" {
+		cfg.Provider, cfg.DefaultProvider = f.provider, f.provider
+	}
+	if f.model != "" {
+		applyModelSpec(&cfg.DefaultProvider, &cfg.DefaultModel, &cfg.Thinking, f.model)
+		cfg.Provider, cfg.Model = cfg.DefaultProvider, cfg.DefaultModel
+	}
+	if f.thinking != "" {
+		cfg.Thinking = f.thinking
+	}
+	if f.theme != "" {
+		cfg.Theme = f.theme
+	}
+	if f.tuiMode != "" {
+		switch strings.ToLower(strings.TrimSpace(f.tuiMode)) {
+		case "regular", "fullscreen":
+			cfg.TUIMode = strings.ToLower(strings.TrimSpace(f.tuiMode))
+		}
+	}
+	if f.verbose {
+		off := false
+		cfg.QuietStartupFlag = &off
+	}
 	applyHTTPProxy(cfg.HTTPProxy)
+	shell.SetPath(cfg.ShellPath)
+	sandbox.SetProjectTrusted(trusted)
+	userCfg := fileCfg
 
 	sessionDir := resolveSessionDir(f.sessionDir, cfg.SessionDir, "")
 
@@ -361,6 +390,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 
 	eng, err := runtime.New(cmd.Context(), runtime.Options{
 		Config:         cfg,
+		UserConfig:     &userCfg,
 		Cwd:            cwd,
 		AgentDir:       agentDir,
 		Session:        sess,

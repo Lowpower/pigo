@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -549,6 +551,35 @@ func TestDefaultLoadsBuiltinTools(t *testing.T) {
 	want := []string{"read", "write", "edit", "bash"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools=%v, want default read/write/edit/bash (got %v)", got, want)
+	}
+}
+
+func TestProjectSettingsDefaultToolsWhenTrusted(t *testing.T) {
+	ctx := context.Background()
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"defaultTools":["grep"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	user, err := config.Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(ctx, Options{
+		Cwd:            cwd,
+		AgentDir:       t.TempDir(),
+		NoExtensions:   true,
+		ProjectTrusted: true,
+		Config:         config.ApplyProject(user, cwd, true),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if strings.Join(toolNames(e), ",") != "grep" {
+		t.Fatalf("trusted project defaultTools = %v", toolNames(e))
 	}
 }
 

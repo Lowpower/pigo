@@ -35,11 +35,13 @@ const maxEditorWidth = 100
 
 // entry is one rendered line/block in the transcript.
 type entry struct {
-	role     string
-	rendered string
-	thinking string // raw thinking block (Ctrl+T)
-	toolOut  string // raw tool result (Ctrl+O)
-	isError  bool
+	role       string
+	rendered   string
+	thinking   string // raw thinking block (Ctrl+T)
+	toolOut    string // raw tool result (Ctrl+O)
+	toolCallID string
+	partial    bool
+	isError    bool
 }
 
 // agentEventMsg / agentClosedMsg carry agent-loop events into the bubbletea loop.
@@ -100,6 +102,9 @@ type Model struct {
 	completeDir string
 	bashCancel  context.CancelFunc
 	bashRunning bool
+	bashEvents  chan tea.Msg
+	bashLive    string
+	bashCommand string
 	lastClear   time.Time
 	login       loginState
 
@@ -182,6 +187,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.editor.SetValue(msg.content)
 		}
 		return m, nil
+
+	case bashChunkMsg:
+		m.bashLive += msg.text
+		return m, waitBashEvent(m.bashEvents)
 
 	case bashDoneMsg:
 		return m.handleBashDone(msg)
@@ -815,11 +824,28 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 
 	case agent.EventToolStart:
 		m.transcript = append(m.transcript, entry{
-			role:     "tool",
-			rendered: m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, compactArgs(ev.Args))),
+			role:       "tool",
+			toolCallID: ev.ToolCallID,
+			rendered:   m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, compactArgs(ev.Args))),
 		})
 
+	case agent.EventToolUpdate:
+		for i, e := range m.transcript {
+			if e.toolCallID != ev.ToolCallID || ev.ToolCallID == "" {
+				continue
+			}
+			m.transcript[i].toolOut = ev.Result
+			m.transcript[i].partial = true
+			break
+		}
+
 	case agent.EventToolEnd:
+		for i, e := range m.transcript {
+			if e.toolCallID == ev.ToolCallID && e.partial {
+				m.transcript[i].toolOut = ""
+				m.transcript[i].partial = false
+			}
+		}
 		style := m.toolStyle
 		mark := "→"
 		if ev.IsError {
@@ -886,7 +912,13 @@ func (m Model) View() string {
 				b.WriteString(m.metaStyle.Render(e.thinking))
 			}
 		case "tool":
-			if e.toolOut != "" {
+			if e.partial {
+				b.WriteString(e.rendered)
+				if body := strings.TrimRight(previewTail(e.toolOut, 20), "\n"); body != "" {
+					b.WriteByte('\n')
+					b.WriteString(m.toolStyle.Render(indent(body)))
+				}
+			} else if e.toolOut != "" {
 				style := m.toolStyle
 				mark := "→"
 				if e.isError {
@@ -934,6 +966,13 @@ func (m Model) View() string {
 		b.WriteString("\n\n")
 	}
 	if m.bashRunning {
+		header := "$ " + m.bashCommand
+		b.WriteString(m.toolStyle.Render(header))
+		if body := strings.TrimRight(previewTail(m.bashLive, 20), "\n"); body != "" {
+			b.WriteByte('\n')
+			b.WriteString(indent(body))
+		}
+		b.WriteByte('\n')
 		b.WriteString(m.metaStyle.Render("…bash (Esc to cancel)"))
 		b.WriteString("\n\n")
 	}
@@ -1218,6 +1257,18 @@ func indent(s string) string {
 		lines[i] = "  " + ln
 	}
 	return strings.Join(lines, "\n")
+}
+
+func previewTail(s string, n int) string {
+	s = strings.TrimRight(s, "\n")
+	if s == "" || n <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 func firstLine(s string) string {

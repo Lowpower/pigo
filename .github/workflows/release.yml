@@ -1,0 +1,165 @@
+# Pack, smoke on native OS/arch runners, then publish a GitHub Release.
+# Trigger: git push origin vX.Y.Z
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pack binaries
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --skip=publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-archives
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  smoke:
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: tar.gz
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            ext: tar.gz
+          - runner: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: tar.gz
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            ext: tar.gz
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: zip
+          - runner: windows-11-arm
+            goos: windows
+            goarch: arm64
+            ext: zip
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          name: release-archives
+          path: release-assets
+
+      - name: Run packaged binary
+        shell: bash
+        env:
+          GOOS_NAME: ${{ matrix.goos }}
+          GOARCH_NAME: ${{ matrix.goarch }}
+          ARCHIVE_EXT: ${{ matrix.ext }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE="pigo_${VERSION}_${GOOS_NAME}_${GOARCH_NAME}.${ARCHIVE_EXT}"
+          test -f "release-assets/${ARCHIVE}"
+          mkdir -p extracted
+          if [[ "${ARCHIVE_EXT}" == "zip" ]]; then
+            PY="$(command -v python3 || command -v python)"
+            "$PY" -m zipfile -e "release-assets/${ARCHIVE}" extracted
+          else
+            tar -xzf "release-assets/${ARCHIVE}" -C extracted
+          fi
+          if [[ "${GOOS_NAME}" == "windows" ]]; then
+            BIN=extracted/pigo.exe
+          else
+            BIN=extracted/pigo
+          fi
+          test -f "$BIN"
+          chmod +x "$BIN"
+          "$BIN" --help
+          out="$("$BIN" --version)"
+          printf '%s\n' "$out"
+          echo "$out" | grep -F "pigo ${VERSION}"
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          name: release-archives
+          path: release-assets
+
+      - name: Verify checksums
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum -c checksums.txt
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          VERSION="${GITHUB_REF_NAME#v}"
+          assets=(
+            "pigo_${VERSION}_linux_amd64.tar.gz"
+            "pigo_${VERSION}_linux_arm64.tar.gz"
+            "pigo_${VERSION}_darwin_amd64.tar.gz"
+            "pigo_${VERSION}_darwin_arm64.tar.gz"
+            "pigo_${VERSION}_windows_amd64.zip"
+            "pigo_${VERSION}_windows_arm64.zip"
+            checksums.txt
+          )
+          for asset in "${assets[@]}"; do
+            test -f "${asset}"
+          done
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            "${assets[@]}"

@@ -471,10 +471,10 @@ func TestApplyProjectOverlayAndUntrusted(t *testing.T) {
 		t.Fatal(err)
 	}
 	cwd := t.TempDir()
-	if err := os.Mkdir(filepath.Join(cwd, ".pi"), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwd, ".pi", "settings.json"), []byte(`{"theme":"light","compaction":{"enabled":false}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"theme":"light","compaction":{"enabled":false}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	base, err := Load(agent)

@@ -27,6 +27,7 @@ import (
 // Options is the shared engine used by TUI, print, json, and rpc modes.
 type Options struct {
 	Config         config.Config
+	UserConfig     *config.Config // user ~/.pigo/agent settings; Config is the trusted overlay
 	Cwd            string
 	AgentDir       string
 	Session        *session.Manager // nil when --no-session
@@ -752,7 +753,22 @@ func (e *Engine) PersistModel(provider, id, thinking string) error {
 	if e.Opts.AgentDir == "" {
 		return nil
 	}
-	return config.Save(e.Opts.AgentDir, e.Opts.Config)
+	return config.Save(e.Opts.AgentDir, e.persistableConfig())
+}
+
+func (e *Engine) persistableConfig() config.Config {
+	if e.Opts.UserConfig != nil {
+		return *e.Opts.UserConfig
+	}
+	return e.Opts.Config
+}
+
+// RefreshSessionConfig rebuilds Config from UserConfig plus trusted project overlay.
+func (e *Engine) RefreshSessionConfig() {
+	if e.Opts.UserConfig == nil {
+		return
+	}
+	e.Opts.Config = config.ApplyProject(*e.Opts.UserConfig, e.Opts.Cwd, e.Opts.ProjectTrusted)
 }
 
 func (e *Engine) setModel(provider, id, thinking string, persist bool) {
@@ -761,6 +777,10 @@ func (e *Engine) setModel(provider, id, thinking string, persist bool) {
 		e.Opts.Config.Provider = provider
 		if persist {
 			e.Opts.Config.DefaultProvider = provider
+			if e.Opts.UserConfig != nil {
+				e.Opts.UserConfig.Provider = provider
+				e.Opts.UserConfig.DefaultProvider = provider
+			}
 		}
 		if e.Opts.AgentDir != "" {
 			if fn := boundStream(e.Opts.AgentDir, provider); fn != nil {
@@ -772,6 +792,10 @@ func (e *Engine) setModel(provider, id, thinking string, persist bool) {
 		e.Opts.Config.Model = id
 		if persist {
 			e.Opts.Config.DefaultModel = id
+			if e.Opts.UserConfig != nil {
+				e.Opts.UserConfig.Model = id
+				e.Opts.UserConfig.DefaultModel = id
+			}
 		}
 	}
 	if thinking != "" {

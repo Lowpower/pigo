@@ -45,6 +45,7 @@ type Config struct {
 	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
 	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
 	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
+	ShellPath              string                `mapstructure:"shellPath"`
 	DefaultTools           *[]string             `mapstructure:"defaultTools"`
 	EnabledModels          []string              `mapstructure:"enabledModels"`
 	DefaultProjectTrust    string                `mapstructure:"defaultProjectTrust"`
@@ -540,6 +541,9 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	}
 	if cfg.NpmCommand != nil {
 		existing["npmCommand"] = cfg.NpmCommand
+	}
+	if cfg.ShellPath != "" {
+		existing["shellPath"] = cfg.ShellPath
 	}
 	if cfg.DefaultTools != nil {
 		existing["defaultTools"] = *cfg.DefaultTools

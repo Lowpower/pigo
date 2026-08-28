@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/tools"
 )
 
 // Tool execution modes.
@@ -229,7 +230,16 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 			isError bool
 		)
 		if exec != nil {
-			out, isError = exec.Execute(ctx, c)
+			toolCtx := tools.WithOutputUpdate(ctx, func(partial string) {
+				_ = s.push(ctx, Event{
+					Type:       EventToolUpdate,
+					ToolCallID: c.ID,
+					ToolName:   c.Name,
+					Args:       c.Args,
+					Result:     partial,
+				})
+			})
+			out, isError = exec.Execute(toolCtx, c)
 		} else {
 			out, isError = fmt.Sprintf("no executor for tool %q", c.Name), true
 		}

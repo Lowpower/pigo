@@ -120,6 +120,26 @@ func TestToolEventsRender(t *testing.T) {
 	}
 }
 
+func TestToolUpdateRendersPartialOutput(t *testing.T) {
+	m := New(testCfg())
+	m = send(m, agentEventMsg{agent.Event{
+		Type:       agent.EventToolStart,
+		ToolCallID: "tc1",
+		ToolName:   "bash",
+		Args:       map[string]any{"command": "echo hi"},
+	}})
+	m = send(m, agentEventMsg{agent.Event{
+		Type:       agent.EventToolUpdate,
+		ToolCallID: "tc1",
+		ToolName:   "bash",
+		Result:     "hi-partial",
+	}})
+	view := m.View()
+	if !strings.Contains(view, "bash") || !strings.Contains(view, "hi-partial") {
+		t.Fatalf("partial tool output not shown; view=\n%s", view)
+	}
+}
+
 func TestAgentEndStopsRunning(t *testing.T) {
 	m := New(testCfg())
 	m.running = true
