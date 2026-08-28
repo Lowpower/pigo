@@ -756,7 +756,7 @@ func (e *Engine) PersistEnabledModels(patterns *[]string) error {
 			c.EnabledModels = nil
 			return
 		}
-		c.EnabledModels = append([]string(nil), (*patterns)...)
+		c.EnabledModels = append([]string{}, (*patterns)...)
 	}
 	apply(&e.Opts.Config)
 	if e.Opts.UserConfig != nil {

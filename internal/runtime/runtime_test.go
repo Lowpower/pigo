@@ -785,6 +785,24 @@ func TestPersistEnabledModels(t *testing.T) {
 	if len(loaded.EnabledModels) != 1 || loaded.EnabledModels[0] != "openai/gpt-4o" {
 		t.Fatalf("%v", loaded.EnabledModels)
 	}
+	ids = []string{}
+	if err := e.PersistEnabledModels(&ids); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.EnabledModels == nil || len(loaded.EnabledModels) != 0 {
+		t.Fatalf("empty selection: %#v", loaded.EnabledModels)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"enabledModels"`) {
+		t.Fatalf("empty selection key missing: %s", b)
+	}
 	if err := e.PersistEnabledModels(nil); err != nil {
 		t.Fatal(err)
 	}

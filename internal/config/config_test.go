@@ -459,6 +459,28 @@ func TestEnabledModelsThreeStates(t *testing.T) {
 		t.Fatalf("empty array: %#v", cfg.EnabledModels)
 	}
 
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"enabledModels":null}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EnabledModels != nil {
+		t.Fatalf("null: %#v", cfg.EnabledModels)
+	}
+	cfg.Theme = "dark"
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"enabledModels"`) {
+		t.Fatalf("saving unrelated change rewrote null enabledModels: %s", b)
+	}
+
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"enabledModels":["anthropic/claude-sonnet-4"]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -53,11 +53,20 @@ func (m Model) openScopedModels() (tea.Model, tea.Cmd) {
 	var en enabledIDs
 	if m.engine != nil && len(m.engine.Scoped) > 0 {
 		ids := make([]string, 0, len(m.engine.Scoped))
+		seen := make(map[string]bool, len(m.engine.Scoped))
 		for _, s := range m.engine.Scoped {
-			ids = append(ids, s.Provider+"/"+s.ID)
+			id := s.Provider + "/" + s.ID
+			ids = append(ids, id)
+			seen[id] = true
+		}
+		for _, id := range models.UnmatchedPatterns(patterns, avail) {
+			if !seen[id] {
+				ids = append(ids, id)
+				seen[id] = true
+			}
 		}
 		en = enabledIDs{ids: ids}
-	} else if len(patterns) == 0 {
+	} else if patterns == nil {
 		en = enabledIDs{all: true}
 	} else {
 		resolved := models.ResolvePatternsIn(patterns, avail)
@@ -128,7 +137,7 @@ func (m Model) handleScopedRefresh(msg scopedRefreshMsg) (tea.Model, tea.Cmd) {
 		if m.engine != nil && m.engine.Opts.UserConfig != nil {
 			patterns = m.engine.Opts.UserConfig.EnabledModels
 		}
-		if len(patterns) == 0 {
+		if patterns == nil {
 			m.scoped.enabled = enabledIDs{all: true}
 		} else {
 			resolved := models.ResolvePatternsIn(patterns, m.scoped.available)
@@ -465,7 +474,7 @@ func (m *Model) persistScopedModels() {
 	if patterns == nil {
 		m.cfg.EnabledModels = nil
 	} else {
-		m.cfg.EnabledModels = append([]string(nil), (*patterns)...)
+		m.cfg.EnabledModels = append([]string{}, (*patterns)...)
 	}
 	p.dirty = false
 	p.rebuild()

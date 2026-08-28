@@ -26,6 +26,42 @@ func TestSlashScopedModelsOpensPicker(t *testing.T) {
 	}
 }
 
+func TestSlashScopedModelsPreservesExplicitEmptySelection(t *testing.T) {
+	cfg := testCfg()
+	cfg.EnabledModels = []string{}
+	m := New(cfg)
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.scoped.enabled.all {
+		t.Fatal("explicit empty enabledModels opened in all mode")
+	}
+	if len(m.scoped.enabled.ids) != 0 {
+		t.Fatalf("enabled ids = %v", m.scoped.enabled.ids)
+	}
+}
+
+func TestSlashScopedModelsIncludesUnavailableConfiguredIDs(t *testing.T) {
+	cfg := testCfg()
+	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4", "missing/model"}
+	m := New(cfg)
+	m.engine = &runtime.Engine{
+		Scoped: []models.Spec{{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4"}}},
+		Opts:   runtime.Options{Config: cfg, Offline: true},
+	}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	found := false
+	for _, id := range m.scoped.enabled.ids {
+		if id == "missing/model" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unavailable configured id missing from picker: %v", m.scoped.enabled.ids)
+	}
+}
+
 func TestSlashScopedModelsStartsRefresh(t *testing.T) {
 	t.Setenv("PIGO_OFFLINE", "")
 	m := New(testCfg())

@@ -412,9 +412,6 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 	} else {
 		var ids []string
 		if json.Unmarshal(extra.EnabledModels, &ids) == nil {
-			if ids == nil {
-				ids = []string{}
-			}
 			cfg.EnabledModels = ids
 		}
 	}
