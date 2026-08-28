@@ -96,6 +96,7 @@ type Model struct {
 
 	keys        *keys.Manager
 	models      modelPicker
+	scoped      scopedModelsPicker
 	sessions    sessionPicker
 	complete    completer
 	completeDir string
@@ -200,6 +201,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.settingsActive() {
 			return m.handleSettingsKey(msg)
+		}
+		if m.scopedModelsActive() {
+			return m.handleScopedModelsKey(msg)
 		}
 		if m.overlay != overlayNone {
 			switch m.overlay {
@@ -539,6 +543,8 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		return note("compacted history")
 	case "settings":
 		return m.openSettings()
+	case "scoped-models":
+		return m.openScopedModels()
 	case "export":
 		if m.engine == nil || m.engine.Opts.Session == nil {
 			return note("no session to export")
@@ -869,6 +875,9 @@ func (m Model) View() string {
 	}
 	if m.settingsActive() {
 		return m.settings.view()
+	}
+	if m.scopedModelsActive() {
+		return m.scoped.view()
 	}
 	if m.modelPickerActive() {
 		return m.models.view()
