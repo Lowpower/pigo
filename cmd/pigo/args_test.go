@@ -6,7 +6,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Lowpower/pigo/internal/version"
 )
+
+func TestVersionFlag(t *testing.T) {
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--version"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	want := "pigo " + version.Version + "\n"
+	if out.String() != want {
+		t.Fatalf("got %q want %q", out.String(), want)
+	}
+}
 
 func TestExpandShortFlags(t *testing.T) {
 	got := expandShortFlags([]string{"-nt", "-ns", "-nc", "-p", "hi", "--", "-nt"})
