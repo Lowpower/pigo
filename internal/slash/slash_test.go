@@ -47,6 +47,19 @@ func TestHotkeysTextIncludesModelSelect(t *testing.T) {
 	}
 }
 
+func TestScopedModelsDescription(t *testing.T) {
+	c, ok := Parse("/scoped-models")
+	if !ok || c.Name != "scoped-models" {
+		t.Fatalf("%+v ok=%v", c, ok)
+	}
+	if c.Description != "Enable/disable models for Ctrl+P cycling" {
+		t.Fatalf("description = %q", c.Description)
+	}
+	if !contains(HelpText(), "Enable/disable models for Ctrl+P cycling") {
+		t.Fatalf("help:\n%s", HelpText())
+	}
+}
+
 func TestHelpListsShareAndChangelog(t *testing.T) {
 	text := HelpText()
 	if !contains(text, "/share") || !contains(text, "gist") {
