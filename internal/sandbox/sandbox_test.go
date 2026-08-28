@@ -74,8 +74,8 @@ func TestCommandUnchangedWhenDisabled(t *testing.T) {
 }
 
 func TestWrapArgvIncludesBwrapAndAllowWrite(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no bwrap wrap on windows")
+	if runtime.GOOS != "linux" {
+		t.Skip("bwrap wrap on linux")
 	}
 	on := true
 	cwd := t.TempDir()
@@ -94,17 +94,67 @@ func TestWrapArgvIncludesBwrapAndAllowWrite(t *testing.T) {
 	if !strings.Contains(joined, "-- bash -c echo hi") {
 		t.Fatalf("missing bash -c: %v", argv)
 	}
-	if strings.Contains(joined, "--unshare-net") {
-		t.Fatal("allowedDomains should keep network")
+	if !strings.Contains(joined, "--unshare-net") {
+		t.Fatal("sandbox must isolate the network namespace")
 	}
 }
 
 func TestWrapArgvUnsharesNetWhenNoDomains(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip()
+	if runtime.GOOS != "linux" {
+		t.Skip("bwrap wrap on linux")
 	}
 	argv := WrapArgv("true", t.TempDir(), Config{})
 	if !strings.Contains(strings.Join(argv, " "), "--unshare-net") {
 		t.Fatalf("argv=%v", argv)
+	}
+}
+
+func TestWrapArgvDenyWriteRoBind(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("bwrap denyWrite")
+	}
+	cwd := t.TempDir()
+	env := filepath.Join(cwd, ".env")
+	if err := os.WriteFile(env, []byte("secret=1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	on := true
+	argv := WrapArgv("true", cwd, Config{
+		Enabled:    &on,
+		Filesystem: Filesystem{AllowWrite: []string{"."}, DenyWrite: []string{".env"}},
+	})
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "--ro-bind "+env+" "+env) {
+		t.Fatalf("missing denyWrite ro-bind: %v", argv)
+	}
+}
+
+func TestUntrustedSkipsProjectSandbox(t *testing.T) {
+	SetProjectTrusted(false)
+	t.Cleanup(func() { SetProjectTrusted(true) })
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "sandbox.json"), []byte(`{"enabled": true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(cwd, t.TempDir())
+	if Active(cfg) {
+		t.Fatal("untrusted must ignore project sandbox.json")
+	}
+}
+
+func TestSeatbeltProfileDeniesWriteAndNetwork(t *testing.T) {
+	on := true
+	p := seatbeltProfile("/tmp/proj", Config{
+		Enabled:    &on,
+		Filesystem: Filesystem{AllowWrite: []string{"."}, DenyWrite: []string{".env", "*.pem"}},
+	}, netBridge{})
+	if !strings.Contains(p, "deny file-write") {
+		t.Fatalf("profile=%s", p)
+	}
+	if strings.Contains(p, "network-outbound") {
+		t.Fatal("no proxy ports should mean no network")
 	}
 }

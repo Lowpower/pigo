@@ -39,12 +39,16 @@ type Filesystem struct {
 
 var cliNoSandbox bool
 var processAgentDir string
+var projectTrusted = true
 
 // SetNoSandbox records the --no-sandbox CLI flag for this process.
 func SetNoSandbox(v bool) { cliNoSandbox = v }
 
 // SetAgentDir records the agent dir used to find extensions/sandbox.json.
 func SetAgentDir(dir string) { processAgentDir = dir }
+
+// SetProjectTrusted gates cwd/.pigo/sandbox.json (untrusted projects skip it).
+func SetProjectTrusted(v bool) { projectTrusted = v }
 
 // NoSandbox reports the --no-sandbox CLI flag.
 func NoSandbox() bool { return cliNoSandbox }
@@ -84,7 +88,7 @@ func Load(cwd, agentDir string) Config {
 	if agentDir != "" {
 		cfg = merge(cfg, readFile(filepath.Join(agentDir, "extensions", "sandbox.json")))
 	}
-	if cwd != "" {
+	if cwd != "" && projectTrusted {
 		cfg = merge(cfg, readFile(filepath.Join(cwd, ".pigo", "sandbox.json")))
 	}
 	return cfg
@@ -145,7 +149,15 @@ func Command(command, cwd, agentDir string) (name string, args []string) {
 	if !Active(cfg) {
 		return "bash", []string{"-c", command}
 	}
-	wrap := WrapArgv(command, cwd, cfg)
+	br := netBridge{}
+	if len(cfg.Network.AllowedDomains) > 0 {
+		if runtime.GOOS == "darwin" {
+			br = ensureProxy(cfg.Network)
+		} else if _, err := lookPath("socat"); err == nil {
+			br = ensureProxy(cfg.Network)
+		}
+	}
+	wrap := wrapArgv(command, cwd, cfg, br)
 	if len(wrap) == 0 {
 		return "bash", []string{"-c", command}
 	}
@@ -157,48 +169,9 @@ func Command(command, cwd, agentDir string) (name string, args []string) {
 
 var lookPath = exec.LookPath
 
-// WrapArgv is the bwrap (Linux) argv for a sandboxed bash -c. Empty if wrapping
-// is not possible on this platform.
+// WrapArgv is the sandbox argv for tests (no live network proxy).
 func WrapArgv(command, cwd string, cfg Config) []string {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	args := []string{
-		"bwrap",
-		"--die-with-parent",
-		"--unshare-pid",
-		"--new-session",
-		"--ro-bind", "/", "/",
-		"--dev", "/dev",
-		"--proc", "/proc",
-	}
-	if len(cfg.Network.AllowedDomains) == 0 {
-		args = append(args, "--unshare-net")
-	}
-	seen := map[string]bool{}
-	for _, p := range cfg.Filesystem.AllowWrite {
-		abs := expandPath(p, cwd)
-		if abs == "" || seen[abs] {
-			continue
-		}
-		seen[abs] = true
-		args = append(args, "--bind", abs, abs)
-	}
-	for _, p := range cfg.Filesystem.DenyRead {
-		abs := expandPath(p, cwd)
-		if abs == "" {
-			continue
-		}
-		args = append(args, "--tmpfs", abs)
-	}
-	if cwd != "" {
-		args = append(args, "--chdir", cwd)
-	}
-	args = append(args, "--", "bash", "-c", command)
-	return args
+	return wrapArgv(command, cwd, cfg, netBridge{})
 }
 
 func expandPath(p, cwd string) string {
@@ -216,4 +189,33 @@ func expandPath(p, cwd string) string {
 		p = filepath.Join(cwd, p)
 	}
 	return filepath.Clean(p)
+}
+
+func expandPatterns(patterns []string, cwd string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	for _, p := range patterns {
+		if strings.ContainsAny(p, "*?[") {
+			glob := p
+			if strings.HasPrefix(glob, "~") || filepath.IsAbs(glob) {
+				glob = expandPath(p, cwd)
+			} else {
+				glob = filepath.Join(cwd, p)
+			}
+			matches, _ := filepath.Glob(glob)
+			for _, m := range matches {
+				add(m)
+			}
+			continue
+		}
+		add(expandPath(p, cwd))
+	}
+	return out
 }
