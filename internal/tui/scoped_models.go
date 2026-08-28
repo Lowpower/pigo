@@ -44,13 +44,22 @@ type scopedModelsPicker struct {
 
 func (m Model) scopedModelsActive() bool { return m.scoped.active }
 
+// scopedSourcePatterns is the same list startup used for Engine.Scoped:
+// CLI --models when set, otherwise user settings enabledModels.
+func (m Model) scopedSourcePatterns() []string {
+	if m.engine != nil && len(m.engine.Opts.Models) > 0 {
+		return m.engine.Opts.Models
+	}
+	if m.engine != nil && m.engine.Opts.UserConfig != nil {
+		return m.engine.Opts.UserConfig.EnabledModels
+	}
+	return m.cfg.EnabledModels
+}
+
 func (m Model) openScopedModels() (tea.Model, tea.Cmd) {
 	avail := m.catalogModels()
 	allIDs := availableIDList(avail)
-	patterns := m.cfg.EnabledModels
-	if m.engine != nil && m.engine.Opts.UserConfig != nil {
-		patterns = m.engine.Opts.UserConfig.EnabledModels
-	}
+	patterns := m.scopedSourcePatterns()
 	openedEmpty := m.engine == nil || len(m.engine.Scoped) == 0
 	var en enabledIDs
 	if m.engine != nil && len(m.engine.Scoped) > 0 {
@@ -136,10 +145,7 @@ func (m Model) handleScopedRefresh(msg scopedRefreshMsg) (tea.Model, tea.Cmd) {
 	m.scoped.available = m.catalogModels()
 	m.scoped.allIDs = availableIDList(m.scoped.available)
 	if !m.scoped.dirty && m.scoped.openedEmptyScoped {
-		patterns := m.cfg.EnabledModels
-		if m.engine != nil && m.engine.Opts.UserConfig != nil {
-			patterns = m.engine.Opts.UserConfig.EnabledModels
-		}
+		patterns := m.scopedSourcePatterns()
 		if patterns == nil {
 			m.scoped.enabled = enabledIDs{all: true}
 		} else {
@@ -201,10 +207,10 @@ func (p *scopedModelsPicker) rebuildKeeping(keep string) {
 			aux = mod.ID
 		}
 		if !p.enabled.all {
-			if p.enabled.isEnabled(id) {
-				label += " ✓"
-			} else {
+			if !ok || !p.enabled.isEnabled(id) {
 				label += " ✗"
+			} else {
+				label += " ✓"
 			}
 		}
 		items = append(items, pickerItem{ID: id, Label: label, Meta: meta, Aux: aux})
