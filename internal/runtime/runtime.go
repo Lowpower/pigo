@@ -107,6 +107,19 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	ai.SetHTTPIdleTimeout(opts.Config.HTTPIdleTimeout())
 
 	store := auth.Open(opts.AgentDir)
+	patterns := opts.Models
+	if len(patterns) == 0 {
+		if opts.UserConfig != nil {
+			patterns = opts.UserConfig.EnabledModels
+		} else {
+			patterns = opts.Config.EnabledModels
+		}
+	}
+	avail := models.Available(auth.AuthenticatedIDs(store))
+	if len(avail) == 0 {
+		avail = models.Catalog()
+	}
+	scoped := models.ResolvePatternsIn(patterns, avail)
 	picked := models.PickInitial(models.PickOpts{
 		CLIProvider:   opts.CLIProvider,
 		CLIModel:      opts.CLIModel,
@@ -193,7 +206,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		Hosts:     hosts,
 		Skills:    sk,
 		Templates: prompt.DiscoverTemplates(opts.Cwd, opts.AgentDir, opts.PromptPaths, !opts.NoPromptTpls, opts.ProjectTrusted),
-		Scoped:    models.ResolvePatterns(opts.Models),
+		Scoped:    scoped,
 		System:    sys,
 	}
 	e.Steering = e.drainSteer
@@ -728,6 +741,31 @@ func (e *Engine) CycleModel(backward bool) (models.Spec, bool) {
 	}
 	e.ApplyModel(next.Provider, next.ID, next.Thinking)
 	return next, true
+}
+
+// SetScopedModels replaces the Ctrl+P cycle list. An empty slice means implicit-all.
+func (e *Engine) SetScopedModels(specs []models.Spec) {
+	e.Scoped = append([]models.Spec(nil), specs...)
+}
+
+// PersistEnabledModels writes settings.json enabledModels.
+// A nil pointer deletes the key (all enabled). A non-nil slice (including empty) is written as-is.
+func (e *Engine) PersistEnabledModels(patterns *[]string) error {
+	apply := func(c *config.Config) {
+		if patterns == nil {
+			c.EnabledModels = nil
+			return
+		}
+		c.EnabledModels = append([]string{}, (*patterns)...)
+	}
+	apply(&e.Opts.Config)
+	if e.Opts.UserConfig != nil {
+		apply(e.Opts.UserConfig)
+	}
+	if e.Opts.AgentDir == "" {
+		return nil
+	}
+	return config.Save(e.Opts.AgentDir, e.persistableConfig())
 }
 
 // CycleThinking steps thinking levels (shift+tab).

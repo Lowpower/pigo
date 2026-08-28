@@ -74,6 +74,24 @@ func TestRefreshProvider404ClearsOverlay(t *testing.T) {
 	}
 }
 
+func TestRefreshAllReturnsFailedProviders(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	failed := RefreshAll(context.Background(), &MemoryStore{}, srv.URL, true)
+	if len(failed) == 0 {
+		t.Fatal("expected failed provider ids")
+	}
+}
+
+func TestRefreshAllEmptyBaseURL(t *testing.T) {
+	if got := RefreshAll(context.Background(), &MemoryStore{}, "", true); got != nil {
+		t.Fatalf("%v", got)
+	}
+}
+
 func TestRefreshAllSkipsNetworkWhenOfflinePrepare(t *testing.T) {
 	t.Cleanup(ClearOverlays)
 	var hits int
