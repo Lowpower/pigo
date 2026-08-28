@@ -62,6 +62,107 @@ func TestSlashScopedModelsIncludesUnavailableConfiguredIDs(t *testing.T) {
 	if !found {
 		t.Fatalf("unavailable configured id missing from picker: %v", m.scoped.enabled.ids)
 	}
+	view := m.View()
+	if !strings.Contains(view, "missing/model") || !strings.Contains(view, "[unavailable]") {
+		t.Fatalf("expected unavailable row in view:\n%s", view)
+	}
+	if strings.Contains(view, "missing/model ✓") {
+		t.Fatalf("unavailable row must show ✗, not ✓:\n%s", view)
+	}
+	if !strings.Contains(view, "missing/model ✗") {
+		t.Fatalf("unavailable row missing ✗:\n%s", view)
+	}
+}
+
+func TestSlashScopedModelsCLIDoesNotMixSettingsUnmatched(t *testing.T) {
+	cfg := testCfg()
+	cfg.EnabledModels = []string{"missing/settings"}
+	m := New(cfg)
+	m.engine = &runtime.Engine{
+		Scoped: []models.Spec{{Model: models.Model{Provider: "openai", ID: "gpt-4o"}}},
+		Opts: runtime.Options{
+			Config:  cfg,
+			Models:  []string{"openai/gpt-4o"},
+			Offline: true,
+		},
+	}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	for _, id := range m.scoped.enabled.ids {
+		if id == "missing/settings" {
+			t.Fatalf("CLI --models mixed settings unmatched: %v", m.scoped.enabled.ids)
+		}
+	}
+	if len(m.scoped.enabled.ids) != 1 || m.scoped.enabled.ids[0] != "openai/gpt-4o" {
+		t.Fatalf("CLI scope = %v", m.scoped.enabled.ids)
+	}
+}
+
+func TestSlashScopedModelsCLIKeepsItsOwnUnmatched(t *testing.T) {
+	cfg := testCfg()
+	cfg.EnabledModels = []string{"missing/settings"}
+	m := New(cfg)
+	m.engine = &runtime.Engine{
+		Scoped: []models.Spec{{Model: models.Model{Provider: "openai", ID: "gpt-4o"}}},
+		Opts: runtime.Options{
+			Config:  cfg,
+			Models:  []string{"openai/gpt-4o", "missing/cli"},
+			Offline: true,
+		},
+	}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	got := map[string]bool{}
+	for _, id := range m.scoped.enabled.ids {
+		got[id] = true
+	}
+	if !got["openai/gpt-4o"] || !got["missing/cli"] {
+		t.Fatalf("CLI unmatched dropped: %v", m.scoped.enabled.ids)
+	}
+	if got["missing/settings"] {
+		t.Fatalf("settings unmatched leaked into CLI scope: %v", m.scoped.enabled.ids)
+	}
+}
+
+func TestSlashScopedModelsCLIEmptyScopeDoesNotFallBackToSettings(t *testing.T) {
+	cfg := testCfg()
+	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4"}
+	m := New(cfg)
+	m.engine = &runtime.Engine{
+		Opts: runtime.Options{
+			Config:  cfg,
+			Models:  []string{"missing/cli"},
+			Offline: true,
+		},
+	}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.scoped.enabled.all {
+		t.Fatal("unmatched CLI --models fell back to implicit-all")
+	}
+	if len(m.scoped.enabled.ids) != 1 || m.scoped.enabled.ids[0] != "missing/cli" {
+		t.Fatalf("CLI-only unmatched = %v", m.scoped.enabled.ids)
+	}
+}
+
+func TestScopedRefreshUsesCLIPatternsWhenOpenedEmpty(t *testing.T) {
+	cfg := testCfg()
+	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4"}
+	m := New(cfg)
+	m.engine = &runtime.Engine{
+		Opts: runtime.Options{
+			Config:  cfg,
+			Models:  []string{"missing/cli"},
+			Offline: true,
+		},
+	}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := m.Update(scopedRefreshMsg{gen: m.scoped.gen})
+	m = next.(Model)
+	if len(m.scoped.enabled.ids) != 1 || m.scoped.enabled.ids[0] != "missing/cli" {
+		t.Fatalf("refresh applied settings instead of CLI: %v", m.scoped.enabled.ids)
+	}
 }
 
 func TestSlashScopedModelsStartsRefresh(t *testing.T) {
@@ -149,6 +250,64 @@ func TestScopedModelsCtrlSWritesSettings(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("missing save status")
+	}
+	for _, id := range loaded.EnabledModels {
+		if !strings.Contains(id, "/") || strings.Contains(id, "*") {
+			t.Fatalf("Ctrl+S should write provider/id, got %q", id)
+		}
+	}
+}
+
+func TestScopedModelsCtrlSAllEnabledDeletesKey(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"theme":"default","enabledModels":["openai/gpt-4o"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: dir, Config: m.cfg}}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.scoped.enabled.all {
+		t.Fatal("expected implicit-all picker")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.EnabledModels != nil {
+		t.Fatalf("all-enabled should delete the key, got %#v", loaded.EnabledModels)
+	}
+}
+
+func TestScopedModelsCtrlSKeepsUnavailableIDs(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCfg()
+	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4", "missing/model"}
+	m := New(cfg)
+	m.engine = &runtime.Engine{
+		Scoped: []models.Spec{{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4"}}},
+		Opts:   runtime.Options{AgentDir: dir, Config: cfg},
+	}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlA})
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.EnabledModels == nil {
+		t.Fatal("available-plus-unavailable must not delete enabledModels")
+	}
+	found := false
+	for _, id := range loaded.EnabledModels {
+		if id == "missing/model" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unavailable id dropped on save: %v", loaded.EnabledModels)
 	}
 }
 
