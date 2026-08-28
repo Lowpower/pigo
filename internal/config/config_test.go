@@ -437,3 +437,95 @@ func TestDefaultToolsLoadAndSave(t *testing.T) {
 		t.Fatalf("empty defaultTools should yield no builtins, n=%d", n)
 	}
 }
+
+func TestEnabledModelsThreeStates(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EnabledModels != nil {
+		t.Fatalf("missing file: %v", cfg.EnabledModels)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"enabledModels":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EnabledModels == nil || len(cfg.EnabledModels) != 0 {
+		t.Fatalf("empty array: %#v", cfg.EnabledModels)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"enabledModels":["anthropic/claude-sonnet-4"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.EnabledModels) != 1 || cfg.EnabledModels[0] != "anthropic/claude-sonnet-4" {
+		t.Fatalf("list: %#v", cfg.EnabledModels)
+	}
+}
+
+func TestSaveEnabledModelsDeleteAndKeep(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{DefaultProvider: "openai", DefaultModel: "gpt-4o", Theme: "default", EnabledModels: []string{"openai/gpt-4o"}}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"enabledModels"`) || !strings.Contains(string(b), "openai/gpt-4o") {
+		t.Fatalf("write: %s", b)
+	}
+	cfg.Theme = "dark"
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"enabledModels"`) || !strings.Contains(string(b), `"dark"`) {
+		t.Fatalf("preserve: %s", b)
+	}
+	cfg.EnabledModels = nil
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "enabledModels") {
+		t.Fatalf("delete: %s", b)
+	}
+}
+
+func TestSaveEnabledModelsEmptyArray(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{Theme: "default", EnabledModels: []string{}}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"enabledModels"`) {
+		t.Fatalf("empty array should write the key: %s", b)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.EnabledModels == nil {
+		t.Fatal("empty array loaded as nil")
+	}
+}
