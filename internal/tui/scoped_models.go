@@ -2,13 +2,31 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Lowpower/pigo/internal/models"
 )
+
+type scopedRefreshMsg struct {
+	gen      int
+	failed   []string
+	timedOut bool
+}
+
+var scopedCatalogRefresh = defaultScopedCatalogRefresh
+
+func defaultScopedCatalogRefresh(ctx context.Context, agentDir, baseURL string) []string {
+	if agentDir == "" || baseURL == "" {
+		return nil
+	}
+	return models.RefreshAll(ctx, models.OpenFileStore(filepath.Join(agentDir, "models-store.json")), baseURL, true)
+}
 
 type scopedModelsPicker struct {
 	listPicker
@@ -56,6 +74,7 @@ func (m Model) openScopedModels() (tea.Model, tea.Cmd) {
 			saveHint = ks[0]
 		}
 	}
+	m.scopedGen++
 	p := scopedModelsPicker{
 		listPicker: listPicker{
 			title:  "Model Configuration\nSession-only. " + saveHint + " to save to settings.",
@@ -65,9 +84,73 @@ func (m Model) openScopedModels() (tea.Model, tea.Cmd) {
 		available:         avail,
 		allIDs:            allIDs,
 		openedEmptyScoped: openedEmpty,
+		gen:               m.scopedGen,
 	}
 	p.rebuild()
 	m.scoped = p
+	return m, m.startScopedRefresh()
+}
+
+func (m *Model) startScopedRefresh() tea.Cmd {
+	if m.engine == nil || m.engine.Opts.Offline || m.engine.Opts.CatalogBaseURL == "" {
+		return nil
+	}
+	if os.Getenv("PIGO_OFFLINE") != "" {
+		return nil
+	}
+	gen := m.scoped.gen
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	m.scoped.cancel = cancel
+	m.scoped.refreshStatus = "Refreshing model catalogs…"
+	m.scoped.rebuild()
+	dir := m.engine.Opts.AgentDir
+	base := m.engine.Opts.CatalogBaseURL
+	return func() tea.Msg {
+		failed := scopedCatalogRefresh(ctx, dir, base)
+		timedOut := ctx.Err() == context.DeadlineExceeded
+		return scopedRefreshMsg{gen: gen, failed: failed, timedOut: timedOut}
+	}
+}
+
+func (m Model) handleScopedRefresh(msg scopedRefreshMsg) (tea.Model, tea.Cmd) {
+	if !m.scoped.active || msg.gen != m.scoped.gen {
+		return m, nil
+	}
+	if m.scoped.cancel != nil {
+		m.scoped.cancel()
+		m.scoped.cancel = nil
+	}
+	m.scoped.available = m.catalogModels()
+	m.scoped.allIDs = availableIDList(m.scoped.available)
+	if !m.scoped.dirty && m.scoped.openedEmptyScoped {
+		patterns := m.cfg.EnabledModels
+		if m.engine != nil && m.engine.Opts.UserConfig != nil {
+			patterns = m.engine.Opts.UserConfig.EnabledModels
+		}
+		if len(patterns) == 0 {
+			m.scoped.enabled = enabledIDs{all: true}
+		} else {
+			resolved := models.ResolvePatternsIn(patterns, m.scoped.available)
+			ids := make([]string, 0, len(resolved))
+			for _, s := range resolved {
+				ids = append(ids, s.Provider+"/"+s.ID)
+			}
+			ids = append(ids, models.UnmatchedPatterns(patterns, m.scoped.available)...)
+			m.scoped.enabled = enabledIDs{ids: ids}
+		}
+	}
+	if !m.scoped.enabled.all {
+		m.applyScopedSession()
+	}
+	switch {
+	case msg.timedOut:
+		m.scoped.refreshStatus = "Model refresh timed out; showing cached models."
+	case len(msg.failed) > 0:
+		m.scoped.refreshStatus = "Could not refresh " + strings.Join(msg.failed, ", ") + "; showing cached models."
+	default:
+		m.scoped.refreshStatus = "Model catalogs refreshed."
+	}
+	m.scoped.rebuild()
 	return m, nil
 }
 
@@ -126,9 +209,6 @@ func (p *scopedModelsPicker) rebuildKeeping(keep string) {
 	if p.dirty {
 		p.hint += " (unsaved)"
 	}
-	if p.refreshStatus != "" {
-		p.hint += " · " + p.refreshStatus
-	}
 }
 
 func (p scopedModelsPicker) countText(available map[string]models.Model) string {
@@ -161,6 +241,10 @@ func (p scopedModelsPicker) view() string {
 	n := len(p.filtered)
 	if n == 0 {
 		b.WriteString("  (no matches)\n")
+		if p.refreshStatus != "" {
+			b.WriteString("\n")
+			b.WriteString(p.refreshStatus)
+		}
 		if p.hint != "" {
 			b.WriteString("\n")
 			b.WriteString(p.hint)
@@ -199,6 +283,10 @@ func (p scopedModelsPicker) view() string {
 			b.WriteString(item.Aux)
 		}
 		b.WriteByte('\n')
+	}
+	if p.refreshStatus != "" {
+		b.WriteString("\n")
+		b.WriteString(p.refreshStatus)
 	}
 	if p.hint != "" {
 		b.WriteString("\n")

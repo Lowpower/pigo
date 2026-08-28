@@ -105,3 +105,71 @@ func TestModelPickerSeesUpdatedScoped(t *testing.T) {
 		t.Fatalf("scope = %s", m.models.scope)
 	}
 }
+
+func TestScopedRefreshTimeoutCopy(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, CatalogBaseURL: "http://127.0.0.1:1"}}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.scoped.refreshStatus = "Refreshing model catalogs…"
+	next, _ := m.Update(scopedRefreshMsg{gen: m.scoped.gen, timedOut: true, failed: []string{"anthropic"}})
+	m = next.(Model)
+	if !strings.Contains(m.scoped.refreshStatus, "Model refresh timed out; showing cached models.") {
+		t.Fatalf("status = %q", m.scoped.refreshStatus)
+	}
+	if strings.Contains(m.scoped.refreshStatus, "Could not refresh") {
+		t.Fatal("timeout must win over failed providers")
+	}
+}
+
+func TestScopedRefreshDoesNotClobberDirty(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, CatalogBaseURL: "http://example"}}
+	m.editor.SetValue("/scoped-models")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	before := m.scoped.enabled.clone()
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.scoped.dirty {
+		t.Fatal("expected dirty after toggle")
+	}
+	after := m.scoped.enabled.clone()
+	next, _ := m.Update(scopedRefreshMsg{gen: m.scoped.gen})
+	m = next.(Model)
+	if m.scoped.enabled.all != after.all || len(m.scoped.enabled.ids) != len(after.ids) {
+		t.Fatalf("clobbered %+v -> %+v (started %+v)", after, m.scoped.enabled, before)
+	}
+}
+
+func TestScopedRefreshSkippedOffline(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, Offline: true, CatalogBaseURL: "http://x"}}
+	m.editor.SetValue("/scoped-models")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatal("offline must not start refresh")
+	}
+	if strings.Contains(m.View(), "Refreshing model catalogs…") {
+		t.Fatal("no refreshing status offline")
+	}
+}
+
+func TestScopedRefreshDropsPriorGenerationAfterReopen(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, CatalogBaseURL: "http://example"}}
+	first, _ := m.openScopedModels()
+	m = first.(Model)
+	oldGen := m.scoped.gen
+	m.closeScopedModels()
+	second, _ := m.openScopedModels()
+	m = second.(Model)
+	if m.scoped.gen == oldGen {
+		t.Fatalf("reused refresh generation %d", oldGen)
+	}
+	before := m.scoped.refreshStatus
+	next, _ := m.Update(scopedRefreshMsg{gen: oldGen, failed: []string{"stale"}})
+	m = next.(Model)
+	if m.scoped.refreshStatus != before {
+		t.Fatalf("stale refresh changed status from %q to %q", before, m.scoped.refreshStatus)
+	}
+}

@@ -97,6 +97,7 @@ type Model struct {
 	keys        *keys.Manager
 	models      modelPicker
 	scoped      scopedModelsPicker
+	scopedGen   int
 	sessions    sessionPicker
 	complete    completer
 	completeDir string
@@ -194,6 +195,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case bashDoneMsg:
 		return m.handleBashDone(msg)
+
+	case scopedRefreshMsg:
+		return m.handleScopedRefresh(msg)
 
 	case tea.KeyMsg:
 		if m.sessionPickerActive() {
