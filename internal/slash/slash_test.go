@@ -68,6 +68,9 @@ func TestHelpListsShareAndChangelog(t *testing.T) {
 	if !contains(text, "/trust") {
 		t.Fatalf("help missing /trust:\n%s", text)
 	}
+	if !contains(text, "/llama") {
+		t.Fatalf("help missing /llama:\n%s", text)
+	}
 }
 
 func contains(s, sub string) bool {

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/ai"
 )
 
 // NavigateOpts controls in-session tree navigation (no new session file).
@@ -201,17 +203,53 @@ func ContextEntries(m *Manager) []Entry {
 	if m == nil {
 		return nil
 	}
-	path := m.GetBranch("")
+	return BuildContextEntries(m.GetBranch(""))
+}
+
+// BuildContextEntries keeps the latest compaction, the retained tail starting
+// at firstKeptEntryId, and entries after that compaction.
+func BuildContextEntries(path []Entry) []Entry {
 	last := -1
 	for i, e := range path {
 		if e.Type == "compaction" {
 			last = i
 		}
 	}
-	if last >= 0 {
-		return path[last:]
+	if last < 0 {
+		return path
 	}
-	return path
+	comp := path[last]
+	out := []Entry{comp}
+	found := comp.FirstKeptEntryID == ""
+	for i := 0; i < last; i++ {
+		if path[i].ID == comp.FirstKeptEntryID {
+			found = true
+		}
+		if found && comp.FirstKeptEntryID != "" {
+			out = append(out, path[i])
+		}
+	}
+	out = append(out, path[last+1:]...)
+	return out
+}
+
+// FirstKeptEntryID maps a cut index in restored messages back to a session entry id.
+func FirstKeptEntryID(entries []Entry, _ []ai.Message, cut int) string {
+	if cut < 0 {
+		cut = 0
+	}
+	n := 0
+	for _, e := range entries {
+		restored := RestoreAIMessages([]Entry{e})
+		if len(restored) == 0 {
+			continue
+		}
+		if n <= cut && cut < n+len(restored) {
+			return e.ID
+		}
+		n += len(restored)
+	}
+	return ""
 }
 
 // EntryContentText is the text shown in the editor when navigating to a user turn.

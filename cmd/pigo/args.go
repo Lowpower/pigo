@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,4 +82,76 @@ func inlineFiles(cwd string, files []string) (string, error) {
 		fmt.Fprintf(&b, "<file name=\"%s\">\n%s\n</file>\n", p, string(body))
 	}
 	return b.String(), nil
+}
+
+func resolvePromptInput(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return input
+	}
+	info, err := os.Stat(input)
+	if err != nil || !info.Mode().IsRegular() {
+		return input
+	}
+	body, err := os.ReadFile(input)
+	if err != nil {
+		return input
+	}
+	return string(body)
+}
+
+func buildInitialMessage(stdin, fileText string, messages []string) (string, []string) {
+	parts := make([]string, 0, 3)
+	if stdin != "" {
+		parts = append(parts, stdin)
+	}
+	if fileText != "" {
+		parts = append(parts, fileText)
+	}
+	rest := messages
+	if len(messages) > 0 {
+		parts = append(parts, messages[0])
+		rest = append([]string(nil), messages[1:]...)
+	}
+	if len(parts) == 0 {
+		return "", rest
+	}
+	return strings.Join(parts, ""), rest
+}
+
+func resolveSessionDir(flag, settings, envFallback string) string {
+	if s := strings.TrimSpace(flag); s != "" {
+		return s
+	}
+	if s := strings.TrimSpace(settings); s != "" {
+		return s
+	}
+	if s := strings.TrimSpace(envFallback); s != "" {
+		return s
+	}
+	return strings.TrimSpace(os.Getenv("PIGO_CODING_AGENT_SESSION_DIR"))
+}
+
+func applyHTTPProxy(proxy string) {
+	proxy = strings.TrimSpace(proxy)
+	if proxy == "" {
+		return
+	}
+	if os.Getenv("HTTP_PROXY") == "" && os.Getenv("http_proxy") == "" {
+		_ = os.Setenv("HTTP_PROXY", proxy)
+	}
+	if os.Getenv("HTTPS_PROXY") == "" && os.Getenv("https_proxy") == "" {
+		_ = os.Setenv("HTTPS_PROXY", proxy)
+	}
+}
+
+func readPipedStdin() string {
+	if isTTY() {
+		return ""
+	}
+	b, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }

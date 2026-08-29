@@ -16,6 +16,7 @@ import (
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/session"
+	"github.com/Lowpower/pigo/internal/skills"
 	"github.com/Lowpower/pigo/internal/trust"
 )
 
@@ -563,3 +564,46 @@ func TestSlashTrustWritesStore(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func TestSessionSlashShowsStats(t *testing.T) {
+	sess := session.New(t.TempDir(), t.TempDir())
+	if _, err := sess.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"}); err != nil {
+		t.Fatal(err)
+	}
+	sess.SetName("demo")
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Session: sess, ContextWindow: 200}}
+	m.editor.SetValue("/session")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.transcript) == 0 {
+		t.Fatal("no transcript")
+	}
+	got := m.transcript[len(m.transcript)-1].rendered
+	for _, want := range []string{"Session Info", "Name: demo", "User: 1", "Assistant: 1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestSkillCommandsDisabled(t *testing.T) {
+	cfg := testCfg()
+	off := false
+	cfg.EnableSkillCommands = &off
+	m := New(cfg)
+	m.engine = &runtime.Engine{
+		Opts:   runtime.Options{Config: cfg},
+		Skills: []skills.Skill{{Name: "demo", Body: "skill body"}},
+	}
+	m.editor.SetValue("/demo")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.running {
+		t.Fatal("disabled skill commands should not start a turn")
+	}
+	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "not implemented") {
+		t.Fatalf("transcript=%+v", m.transcript)
+	}
+}

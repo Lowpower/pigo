@@ -55,6 +55,7 @@ type Options struct {
 	CLIThinking    string
 	CatalogBaseURL string
 	Offline        bool
+	SessionDir     string
 }
 
 // Engine is a configured agent runner.
@@ -306,7 +307,9 @@ func (e *Engine) CompactNow(ctx context.Context, msgs []ai.Message, customInstru
 		return msgs, "", err
 	}
 	if summary != "" && e.Opts.Session != nil {
-		if entry, err := e.Opts.Session.AppendCompaction(summary); err == nil && entry != nil {
+		keep := session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, compaction.FindCutIndex(msgs, s.KeepRecentTokens))
+		tokens := compaction.EstimateContextTokens(msgs)
+		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokens); err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 		}
 	}
@@ -522,7 +525,9 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 		return msgs, "", err
 	}
 	if summary != "" && e.Opts.Session != nil {
-		if entry, err := e.Opts.Session.AppendCompaction(summary); err == nil && entry != nil {
+		keep := session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, compaction.FindCutIndex(msgs, s.KeepRecentTokens))
+		tokens := compaction.EstimateContextTokens(msgs)
+		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokens); err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 		}
 	}
@@ -856,6 +861,32 @@ func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Mess
 	}
 	fmt.Fprintln(out)
 	e.PersistTranscript(last)
+	return printStopErr(last)
+}
+
+// WriteSessionHeader writes the session JSONL header as one JSON object.
+func (e *Engine) WriteSessionHeader(out io.Writer) error {
+	if e.Opts.Session == nil {
+		return nil
+	}
+	return json.NewEncoder(out).Encode(e.Opts.Session.Header())
+}
+
+func printStopErr(last []agent.Msg) error {
+	for i := len(last) - 1; i >= 0; i-- {
+		a := last[i].Assistant
+		if a == nil {
+			continue
+		}
+		if a.StopReason == ai.StopError || a.StopReason == ai.StopAborted {
+			msg := strings.TrimSpace(a.ErrorMessage)
+			if msg == "" {
+				msg = "Request " + string(a.StopReason)
+			}
+			return fmt.Errorf("%s", msg)
+		}
+		return nil
+	}
 	return nil
 }
 
@@ -873,6 +904,7 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	hist := history
 	continued := false
 	prefixLen := 0
+	var last []agent.Msg
 	for {
 		var stream *agent.Stream
 		if !continued {
@@ -880,7 +912,6 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 		} else {
 			stream = e.runLoop(ctx, hist, nil)
 		}
-		var last []agent.Msg
 		for ev := range stream.Events() {
 			if ev.Type == agent.EventMessageEnd && ev.Assistant != nil &&
 				ev.Assistant.StopReason != ai.StopError && e.retryAttempt > 0 {
@@ -920,7 +951,7 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 		continued = true
 	}
 	write(map[string]any{"type": "agent_settled"})
-	return nil
+	return printStopErr(last)
 }
 
 func boundStream(agentDir, provider string) ai.StreamFn {

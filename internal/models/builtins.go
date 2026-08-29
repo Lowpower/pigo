@@ -61,4 +61,13 @@ func registerBuiltins() {
 			{Provider: "amazon-bedrock", ID: "anthropic.claude-haiku-4-v1:0", API: "bedrock-converse-stream"},
 		},
 	})
+	RegisterProvider(ProviderSpec{
+		ID:         "llama.cpp",
+		Env:        []string{"LLAMA_BASE_URL", "LLAMA_API_KEY"},
+		BaseURL:    "http://127.0.0.1:8080/v1",
+		DefaultAPI: "openai-completions",
+		RefreshModels: func(store CatalogStore) error {
+			return refreshLlama(store)
+		},
+	})
 }

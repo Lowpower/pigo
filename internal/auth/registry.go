@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/Lowpower/pigo/internal/llama"
 )
 
 var (
@@ -93,6 +95,14 @@ func registerBuiltins() {
 			Env:     []string{"AWS_BEARER_TOKEN_BEDROCK"},
 			Login:   promptAPIKey("Bedrock bearer token"),
 			Resolve: bedrockAmbientAuth,
+		},
+	})
+	registerProvider(Provider{
+		ID: llama.ProviderID,
+		APIKey: &APIKeyHandler{
+			Name:  "llama.cpp server",
+			Env:   []string{"LLAMA_API_KEY"},
+			Login: llamaLogin,
 		},
 	})
 }

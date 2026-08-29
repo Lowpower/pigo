@@ -93,9 +93,11 @@ func TestRefreshAllReturnsFailedProviders(t *testing.T) {
 	failed := RefreshAll(context.Background(), &MemoryStore{}, srv.URL, true)
 	var want []string
 	for _, id := range ProviderIDs() {
-		if id != "openai" {
-			want = append(want, id)
+		spec, _ := LookupProvider(id)
+		if id == "openai" || spec.RefreshModels != nil {
+			continue
 		}
+		want = append(want, id)
 	}
 	sort.Strings(failed)
 	sort.Strings(want)

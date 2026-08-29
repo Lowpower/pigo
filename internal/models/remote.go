@@ -117,6 +117,7 @@ func PrepareCatalog(agentDir, catalogBaseURL string, offline bool) error {
 	}
 	store := OpenFileStore(filepath.Join(agentDir, "models-store.json"))
 	RestoreOverlays(store)
+	refreshLocalProviders(store)
 	if offline || catalogBaseURL == "" {
 		return nil
 	}
@@ -132,6 +133,12 @@ func DefaultCatalogBaseURL() string {
 		return v
 	}
 	return defaultCatalogBaseURL
+}
+
+func refreshLocalProviders(store CatalogStore) {
+	if spec, ok := LookupProvider("llama.cpp"); ok && spec.RefreshModels != nil {
+		_ = spec.RefreshModels(store)
+	}
 }
 
 // RefreshAll revalidates remote catalogs for every registered provider.

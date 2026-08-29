@@ -13,10 +13,12 @@ type projectOverlay struct {
 	DefaultModel         string                 `json:"defaultModel"`
 	Theme                string                 `json:"theme"`
 	Thinking             string                 `json:"thinking"`
+	DefaultThinkingLevel string                 `json:"defaultThinkingLevel"`
 	ContextWindow        int                    `json:"contextWindow"`
 	CompactionOn         *bool                  `json:"compactionEnabled"`
 	ReserveTokens        int                    `json:"compactionReserveTokens"`
 	KeepRecentTokens     int                    `json:"compactionKeepRecentTokens"`
+	Compaction           *CompactionSettings    `json:"compaction"`
 	SteeringMode         string                 `json:"steeringMode"`
 	FollowUpMode         string                 `json:"followUpMode"`
 	Retry                *RetrySettings         `json:"retry"`
@@ -34,6 +36,11 @@ type projectOverlay struct {
 	FullscreenExitOutput string                 `json:"fullscreenExitOutput"`
 	ShellPath            string                 `json:"shellPath"`
 	DefaultTools         *[]string              `json:"defaultTools"`
+	EnabledModels        []string               `json:"enabledModels"`
+	SessionDir           string                 `json:"sessionDir"`
+	QuietStartup         *bool                  `json:"quietStartup"`
+	HTTPProxy            string                 `json:"httpProxy"`
+	EnableSkillCommands  *bool                  `json:"enableSkillCommands"`
 	Packages             []PackageEntry         `json:"packages"`
 	Extensions           []string               `json:"extensions"`
 	Skills               []string               `json:"skills"`
@@ -75,6 +82,9 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	if over.Thinking != "" {
 		out.Thinking = over.Thinking
 	}
+	if over.DefaultThinkingLevel != "" {
+		out.DefaultThinkingLevel = over.DefaultThinkingLevel
+	}
 	if over.ContextWindow > 0 {
 		out.ContextWindow = over.ContextWindow
 	}
@@ -86,6 +96,9 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	}
 	if over.KeepRecentTokens > 0 {
 		out.KeepRecentTokens = over.KeepRecentTokens
+	}
+	if over.Compaction != nil {
+		out.Compaction = *over.Compaction
 	}
 	if over.SteeringMode != "" {
 		out.SteeringMode = over.SteeringMode
@@ -152,6 +165,21 @@ func applyOverlay(user Config, over projectOverlay) Config {
 		tools := append([]string(nil), (*over.DefaultTools)...)
 		out.DefaultTools = &tools
 	}
+	if over.EnabledModels != nil {
+		out.EnabledModels = append([]string(nil), over.EnabledModels...)
+	}
+	if over.SessionDir != "" {
+		out.SessionDir = over.SessionDir
+	}
+	if over.QuietStartup != nil {
+		out.QuietStartupFlag = over.QuietStartup
+	}
+	if over.HTTPProxy != "" {
+		out.HTTPProxy = over.HTTPProxy
+	}
+	if over.EnableSkillCommands != nil {
+		out.EnableSkillCommands = over.EnableSkillCommands
+	}
 	if over.Packages != nil {
 		out.Packages = over.Packages
 	}
@@ -169,6 +197,10 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	}
 	if over.NpmCommand != nil {
 		out.NpmCommand = over.NpmCommand
+	}
+	applyNestedCompaction(&out)
+	if out.Thinking == "" && out.DefaultThinkingLevel != "" {
+		out.Thinking = out.DefaultThinkingLevel
 	}
 	return out
 }

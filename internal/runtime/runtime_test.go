@@ -948,3 +948,57 @@ func TestRPCNavigateTree(t *testing.T) {
 		t.Fatalf("leaf = %s want %s", sess.LeafID(), a.ID)
 	}
 }
+
+func printErrorReply(msg string) ai.StreamFn {
+	return func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		return ai.EmitMessage(ctx, &ai.AssistantMessage{
+			Role:         ai.RoleAssistant,
+			StopReason:   ai.StopError,
+			ErrorMessage: msg,
+		}), nil
+	}
+}
+
+func TestPrintTextErrorExit(t *testing.T) {
+	e := &Engine{
+		Stream:   printErrorReply("boom"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Model: "x"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	err := e.PrintText(context.Background(), io.Discard, nil, "hi")
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPrintJSONWritesSessionHeader(t *testing.T) {
+	dir := t.TempDir()
+	cwd := t.TempDir()
+	sess := session.New(cwd, dir)
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Model: "x"}, Session: sess},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	var out bytes.Buffer
+	if err := e.WriteSessionHeader(&out); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.PrintJSON(context.Background(), &out, nil, "hi", nil); err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(&out)
+	var header map[string]any
+	if err := dec.Decode(&header); err != nil {
+		t.Fatal(err)
+	}
+	if header["type"] != "session" || header["id"] != sess.ID() {
+		t.Fatalf("header=%v", header)
+	}
+}

@@ -87,6 +87,36 @@ func TestFullMarkdown(t *testing.T) {
 	}
 }
 
+func TestTelemetryEnvOverridesSettings(t *testing.T) {
+	on := true
+	off := false
+	cfgOn := config.Config{EnableInstallTelemetry: &on}
+	cfgOff := config.Config{EnableInstallTelemetry: &off}
+
+	t.Setenv("PI_TELEMETRY", "0")
+	_ = os.Unsetenv("PI_TELEMETRY")
+	_ = os.Unsetenv("PIGO_TELEMETRY")
+	if !TelemetryAllowed(cfgOn) {
+		t.Fatal("settings on should allow telemetry")
+	}
+	if TelemetryAllowed(cfgOff) {
+		t.Fatal("settings off should deny telemetry")
+	}
+
+	t.Setenv("PI_TELEMETRY", "0")
+	if TelemetryAllowed(cfgOn) {
+		t.Fatal("PI_TELEMETRY=0 should deny even when settings enable it")
+	}
+	t.Setenv("PI_TELEMETRY", "true")
+	if !TelemetryAllowed(cfgOff) {
+		t.Fatal("PI_TELEMETRY=true should allow even when settings disable it")
+	}
+	t.Setenv("PIGO_TELEMETRY", "no")
+	if TelemetryAllowed(cfgOn) {
+		t.Fatal("PIGO_TELEMETRY should win over PI_TELEMETRY")
+	}
+}
+
 func TestEmbeddedMatchesRepoChangelog(t *testing.T) {
 	root, err := os.ReadFile(filepath.Join("..", "..", "CHANGELOG.md"))
 	if err != nil {

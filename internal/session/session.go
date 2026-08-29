@@ -45,6 +45,15 @@ type Entry struct {
 	Details  json.RawMessage `json:"details,omitempty"`
 	Name     string          `json:"name,omitempty"`
 
+	// Compaction / custom fields (top-level, like pi).
+	FirstKeptEntryID string          `json:"firstKeptEntryId,omitempty"`
+	TokensBefore     *int            `json:"tokensBefore,omitempty"`
+	FromHook         bool            `json:"fromHook,omitempty"`
+	CustomType       string          `json:"customType,omitempty"`
+	Content          json.RawMessage `json:"content,omitempty"`
+	Display          *bool           `json:"display,omitempty"`
+	Data             json.RawMessage `json:"data,omitempty"`
+
 	// role is used only for the buffer-until-assistant flush rule; not serialized.
 	role string
 }
@@ -82,7 +91,7 @@ func New(cwd, agentDir string) *Manager {
 	}
 	id := newUUID()
 	ts := isoNow()
-	dir := sessionDir(agentDir, resolvedCwd)
+	dir := StorageDir(resolvedCwd, agentDir, "")
 	return &Manager{
 		agentDir: agentDir,
 		cwd:      resolvedCwd,
@@ -94,8 +103,38 @@ func New(cwd, agentDir string) *Manager {
 	}
 }
 
+// NewAt starts a session stored in sessionDir (empty means the default cwd encoding).
+func NewAt(cwd, agentDir, sessionDir string) *Manager {
+	m := New(cwd, agentDir)
+	if strings.TrimSpace(sessionDir) == "" {
+		return m
+	}
+	m.dir = StorageDir(m.cwd, agentDir, sessionDir)
+	m.file = filepath.Join(m.dir, fmt.Sprintf("%s_%s.jsonl", fileTimestamp(m.header.Timestamp), m.id))
+	return m
+}
+
+// StorageDir is the directory that holds session jsonl files.
+// An override (CLI --session-dir, settings.sessionDir, or env) is used as-is.
+func StorageDir(cwd, agentDir, override string) string {
+	if s := strings.TrimSpace(override); s != "" {
+		if abs, err := filepath.Abs(s); err == nil {
+			return abs
+		}
+		return s
+	}
+	resolved := cwd
+	if abs, err := filepath.Abs(cwd); err == nil {
+		resolved = abs
+	}
+	return sessionDir(agentDir, resolved)
+}
+
 // ID returns the session id.
 func (m *Manager) ID() string { return m.id }
+
+// Header returns the session header.
+func (m *Manager) Header() Header { return m.header }
 
 // File returns the session file path.
 func (m *Manager) File() string { return m.file }
