@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Lowpower/pigo/internal/ai"
 )
 
 func TestContextEntriesKeepsTailFromFirstKeptEntryId(t *testing.T) {
@@ -163,5 +165,89 @@ func TestAppendCompactionJSONLShape(t *testing.T) {
 	if _, ok := last["message"]; ok {
 		t.Fatalf("unexpected message field: %v", last)
 	}
+	if _, ok := last["fromHook"]; ok {
+		t.Fatalf("unset fromHook should be omitted: %v", last)
+	}
 	_ = a
+}
+
+func lastJSONLObject(t *testing.T, path string) map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	var last map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
+		t.Fatal(err)
+	}
+	return last
+}
+
+func TestAppendCustomMessageJSONLHasNoSummary(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendCustomMessage("note", "injected", true); err != nil {
+		t.Fatal(err)
+	}
+	last := lastJSONLObject(t, m.File())
+	if last["type"] != "custom_message" || last["customType"] != "note" {
+		t.Fatalf("last=%v", last)
+	}
+	if _, ok := last["summary"]; ok {
+		t.Fatalf("custom_message must not write summary: %v", last)
+	}
+	if last["display"] != true {
+		t.Fatalf("display=%v", last["display"])
+	}
+}
+
+func TestAppendBranchSummaryFromHookIsTopLevel(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendBranchSummary("from-1", "branch-sum", true); err != nil {
+		t.Fatal(err)
+	}
+	last := lastJSONLObject(t, m.File())
+	if last["type"] != "branch_summary" || last["fromId"] != "from-1" || last["summary"] != "branch-sum" {
+		t.Fatalf("last=%v", last)
+	}
+	if last["fromHook"] != true {
+		t.Fatalf("fromHook should be top-level true: %v", last)
+	}
+	if details, ok := last["details"]; ok {
+		t.Fatalf("fromHook must not be stuffed into details: %v", details)
+	}
+}
+
+func TestAppendCompactionJSONLOptionalFields(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	u, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendCompaction("sum", u.ID, 7, CompactionMeta{
+		Details:  map[string]any{"readFiles": []string{"a.go"}},
+		Usage:    &ai.Usage{Input: 1, Output: 2, TotalTokens: 3},
+		FromHook: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	last := lastJSONLObject(t, m.File())
+	if last["type"] != "compaction" || last["fromHook"] != true {
+		t.Fatalf("last=%v", last)
+	}
+	details, _ := last["details"].(map[string]any)
+	if details["readFiles"] == nil {
+		t.Fatalf("details=%v", last["details"])
+	}
+	usage, _ := last["usage"].(map[string]any)
+	if usage["input"] != float64(1) || usage["output"] != float64(2) {
+		t.Fatalf("usage=%v", last["usage"])
+	}
 }

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Lowpower/pigo/internal/ai"
 )
 
 // Open loads an existing session file and continues appending to it.
@@ -131,8 +133,15 @@ func (m *Manager) Fork(cwd, agentDir string) (*Manager, error) {
 	return m.CreateBranchedSession(leaf, cwd, agentDir)
 }
 
+// CompactionMeta is optional compaction JSONL fields.
+type CompactionMeta struct {
+	Details  any
+	Usage    *ai.Usage
+	FromHook bool
+}
+
 // AppendCompaction records a compaction summary entry.
-func (m *Manager) AppendCompaction(summary, firstKeptEntryID string, tokensBefore int) (*Entry, error) {
+func (m *Manager) AppendCompaction(summary, firstKeptEntryID string, tokensBefore int, meta ...CompactionMeta) (*Entry, error) {
 	tok := tokensBefore
 	e := &Entry{
 		Type:             "compaction",
@@ -142,6 +151,18 @@ func (m *Manager) AppendCompaction(summary, firstKeptEntryID string, tokensBefor
 		FirstKeptEntryID: firstKeptEntryID,
 		TokensBefore:     &tok,
 		role:             "assistant",
+	}
+	if len(meta) > 0 {
+		extra := meta[0]
+		e.FromHook = extra.FromHook
+		e.Usage = extra.Usage
+		if extra.Details != nil {
+			raw, err := json.Marshal(extra.Details)
+			if err != nil {
+				return nil, err
+			}
+			e.Details = raw
+		}
 	}
 	return m.appendEntry(e)
 }
@@ -180,7 +201,6 @@ func (m *Manager) AppendCustomMessage(customType, content string, display bool) 
 		CustomType: customType,
 		Content:    raw,
 		Display:    &d,
-		Summary:    content,
 	}
 	return m.appendEntry(e)
 }

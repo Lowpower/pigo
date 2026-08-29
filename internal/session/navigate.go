@@ -1,7 +1,6 @@
 package session
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -178,11 +177,8 @@ func (m *Manager) AppendBranchSummary(fromID, summary string, fromHook bool) (*E
 		Timestamp: isoNow(),
 		FromID:    fromID,
 		Summary:   summary,
+		FromHook:  fromHook,
 		role:      "assistant",
-	}
-	if fromHook {
-		raw, _ := json.Marshal(map[string]any{"fromHook": true})
-		e.Details = raw
 	}
 	return m.appendEntry(e)
 }
