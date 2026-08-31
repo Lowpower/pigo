@@ -270,29 +270,24 @@ func TestPiShapedJSONLFixtureRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var custom, compact, branch *Entry
-	ents := opened.Entries()
-	for i := range ents {
-		e := ents[i]
+	var custom, compact, branch Entry
+	for _, e := range opened.Entries() {
 		switch e.Type {
 		case "custom_message":
-			copy := e
-			custom = &copy
+			custom = e
 		case "compaction":
-			copy := e
-			compact = &copy
+			compact = e
 		case "branch_summary":
-			copy := e
-			branch = &copy
+			branch = e
 		}
 	}
-	if custom == nil || custom.Summary != "" || custom.CustomType != "note" {
+	if custom.Type != "custom_message" || custom.Summary != "" || custom.CustomType != "note" {
 		t.Fatalf("custom_message=%+v", custom)
 	}
-	if compact == nil || !compact.FromHook || compact.FirstKeptEntryID != "n1" || len(compact.Details) == 0 || compact.Usage == nil {
+	if compact.Type != "compaction" || !compact.FromHook || compact.FirstKeptEntryID != "n1" || len(compact.Details) == 0 || compact.Usage == nil {
 		t.Fatalf("compaction=%+v", compact)
 	}
-	if branch == nil || !branch.FromHook || branch.FromID != "m2" || len(branch.Details) != 0 {
+	if branch.Type != "branch_summary" || !branch.FromHook || branch.FromID != "m2" || len(branch.Details) != 0 {
 		t.Fatalf("branch_summary=%+v", branch)
 	}
 	msgs := RestoreAIMessages(ContextEntries(opened))
