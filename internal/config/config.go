@@ -15,44 +15,58 @@ import (
 // Config holds the resolved pigo settings. Keys are defaultProvider /
 // defaultModel / theme, with aliases (provider / model) for the earlier scaffold.
 type Config struct {
-	Provider               string                `mapstructure:"provider"`
-	Model                  string                `mapstructure:"model"`
-	DefaultProvider        string                `mapstructure:"defaultProvider"`
-	DefaultModel           string                `mapstructure:"defaultModel"`
-	Theme                  string                `mapstructure:"theme"`
-	Thinking               string                `mapstructure:"thinking"`
-	DefaultThinkingLevel   string                `mapstructure:"defaultThinkingLevel"`
-	ContextWindow          int                   `mapstructure:"contextWindow"`
-	CompactionOn           *bool                 `mapstructure:"compactionEnabled"`
-	ReserveTokens          int                   `mapstructure:"compactionReserveTokens"`
-	KeepRecentTokens       int                   `mapstructure:"compactionKeepRecentTokens"`
-	Compaction             CompactionSettings    `mapstructure:"compaction"`
-	SteeringMode           string                `mapstructure:"steeringMode"`
-	FollowUpMode           string                `mapstructure:"followUpMode"`
-	Retry                  RetrySettings         `mapstructure:"retry"`
-	ThinkingBudgets        map[string]int        `mapstructure:"thinkingBudgets"`
-	ModelThinkingLevels    map[string]string     `mapstructure:"modelThinkingLevels"`
-	HTTPIdleTimeoutMs      *int                  `mapstructure:"httpIdleTimeoutMs"`
-	ExternalEditor         string                `mapstructure:"externalEditor"`
-	DoubleEscapeAction     string                `mapstructure:"doubleEscapeAction"`
-	TreeFilterMode         string                `mapstructure:"treeFilterMode"`
-	BranchSummary          BranchSummarySettings `mapstructure:"branchSummary"`
-	Terminal               TerminalSettings      `mapstructure:"terminal"`
-	Markdown               MarkdownSettings      `mapstructure:"markdown"`
-	Images                 ImageSettings         `mapstructure:"images"`
-	TUIMode                string                `mapstructure:"tuiMode"`
-	FullscreenExitOutput   string                `mapstructure:"fullscreenExitOutput"`
-	LastChangelogVersion   string                `mapstructure:"lastChangelogVersion"`
-	CollapseChangelog      *bool                 `mapstructure:"collapseChangelog"`
-	EnableInstallTelemetry *bool                 `mapstructure:"enableInstallTelemetry"`
-	ShellPath              string                `mapstructure:"shellPath"`
-	DefaultTools           *[]string             `mapstructure:"defaultTools"`
-	EnabledModels          []string              `mapstructure:"enabledModels"`
-	DefaultProjectTrust    string                `mapstructure:"defaultProjectTrust"`
-	SessionDir             string                `mapstructure:"sessionDir"`
-	QuietStartupFlag       *bool                 `mapstructure:"quietStartup"`
-	HTTPProxy              string                `mapstructure:"httpProxy"`
-	EnableSkillCommands    *bool                 `mapstructure:"enableSkillCommands"`
+	Provider                  string                `mapstructure:"provider"`
+	Model                     string                `mapstructure:"model"`
+	DefaultProvider           string                `mapstructure:"defaultProvider"`
+	DefaultModel              string                `mapstructure:"defaultModel"`
+	Theme                     string                `mapstructure:"theme"`
+	Thinking                  string                `mapstructure:"thinking"`
+	DefaultThinkingLevel      string                `mapstructure:"defaultThinkingLevel"`
+	ContextWindow             int                   `mapstructure:"contextWindow"`
+	CompactionOn              *bool                 `mapstructure:"compactionEnabled"`
+	ReserveTokens             int                   `mapstructure:"compactionReserveTokens"`
+	KeepRecentTokens          int                   `mapstructure:"compactionKeepRecentTokens"`
+	Compaction                CompactionSettings    `mapstructure:"compaction"`
+	SteeringMode              string                `mapstructure:"steeringMode"`
+	FollowUpMode              string                `mapstructure:"followUpMode"`
+	Retry                     RetrySettings         `mapstructure:"retry"`
+	ThinkingBudgets           map[string]int        `mapstructure:"thinkingBudgets"`
+	ModelThinkingLevels       map[string]string     `mapstructure:"modelThinkingLevels"`
+	HTTPIdleTimeoutMs         *int                  `mapstructure:"httpIdleTimeoutMs"`
+	ExternalEditor            string                `mapstructure:"externalEditor"`
+	DoubleEscapeAction        string                `mapstructure:"doubleEscapeAction"`
+	TreeFilterMode            string                `mapstructure:"treeFilterMode"`
+	BranchSummary             BranchSummarySettings `mapstructure:"branchSummary"`
+	Terminal                  TerminalSettings      `mapstructure:"terminal"`
+	Markdown                  MarkdownSettings      `mapstructure:"markdown"`
+	Images                    ImageSettings         `mapstructure:"images"`
+	TUIMode                   string                `mapstructure:"tuiMode"`
+	FullscreenExitOutput      string                `mapstructure:"fullscreenExitOutput"`
+	LastChangelogVersion      string                `mapstructure:"lastChangelogVersion"`
+	CollapseChangelog         *bool                 `mapstructure:"collapseChangelog"`
+	EnableInstallTelemetry    *bool                 `mapstructure:"enableInstallTelemetry"`
+	ShellPath                 string                `mapstructure:"shellPath"`
+	DefaultTools              *[]string             `mapstructure:"defaultTools"`
+	EnabledModels             []string              `mapstructure:"enabledModels"`
+	DefaultProjectTrust       string                `mapstructure:"defaultProjectTrust"`
+	SessionDir                string                `mapstructure:"sessionDir"`
+	QuietStartupFlag          *bool                 `mapstructure:"quietStartup"`
+	HTTPProxy                 string                `mapstructure:"httpProxy"`
+	EnableSkillCommands       *bool                 `mapstructure:"enableSkillCommands"`
+	HideThinkingBlock         *bool                 `mapstructure:"hideThinkingBlock"`
+	ShowCacheMissNotices      *bool                 `mapstructure:"showCacheMissNotices"`
+	ShellCommandPrefix        string                `mapstructure:"shellCommandPrefix"`
+	EditorPaddingX            *int                  `mapstructure:"editorPaddingX"`
+	OutputPad                 *int                  `mapstructure:"outputPad"`
+	AutocompleteMaxVisible    *int                  `mapstructure:"autocompleteMaxVisible"`
+	ShowHardwareCursor        *bool                 `mapstructure:"showHardwareCursor"`
+	WebsocketConnectTimeoutMs *int                  `mapstructure:"websocketConnectTimeoutMs"`
+	FullscreenScrollbar       *bool                 `mapstructure:"fullscreenScrollbar"`
+	FullscreenCopyOnSelect    *bool                 `mapstructure:"fullscreenCopyOnSelect"`
+	EnableAnalytics           *bool                 `mapstructure:"enableAnalytics"`
+	TrackingID                string                `mapstructure:"trackingId"`
+	Transport                 string                `mapstructure:"transport"`
+	Warnings                  map[string]any        `mapstructure:"warnings"`
 
 	Packages   []PackageEntry `mapstructure:"-" json:"packages,omitempty"`
 	Extensions []string       `mapstructure:"-" json:"extensions,omitempty"`
@@ -92,9 +106,13 @@ type BranchSummarySettings struct {
 
 // TerminalSettings is settings.terminal.
 type TerminalSettings struct {
-	ShowImages      *bool `mapstructure:"showImages" json:"showImages,omitempty"`
-	ImageWidthCells *int  `mapstructure:"imageWidthCells" json:"imageWidthCells,omitempty"`
-	Hyperlinks      any   `mapstructure:"hyperlinks" json:"hyperlinks,omitempty"`
+	ShowImages           *bool `mapstructure:"showImages" json:"showImages,omitempty"`
+	ImageWidthCells      *int  `mapstructure:"imageWidthCells" json:"imageWidthCells,omitempty"`
+	Hyperlinks           any   `mapstructure:"hyperlinks" json:"hyperlinks,omitempty"`
+	Images               any   `mapstructure:"images" json:"images,omitempty"`
+	ClearOnShrink        *bool `mapstructure:"clearOnShrink" json:"clearOnShrink,omitempty"`
+	ShowTerminalProgress *bool `mapstructure:"showTerminalProgress" json:"showTerminalProgress,omitempty"`
+	TrueColor            any   `mapstructure:"trueColor" json:"trueColor,omitempty"`
 }
 
 // ImageSettings is settings.images.
@@ -591,13 +609,57 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	if cfg.EnableSkillCommands != nil {
 		existing["enableSkillCommands"] = *cfg.EnableSkillCommands
 	}
+	if cfg.HideThinkingBlock != nil {
+		existing["hideThinkingBlock"] = *cfg.HideThinkingBlock
+	}
+	if cfg.ShowCacheMissNotices != nil {
+		existing["showCacheMissNotices"] = *cfg.ShowCacheMissNotices
+	}
+	if cfg.ShellCommandPrefix != "" {
+		existing["shellCommandPrefix"] = cfg.ShellCommandPrefix
+	}
+	if cfg.EditorPaddingX != nil {
+		existing["editorPaddingX"] = *cfg.EditorPaddingX
+	}
+	if cfg.OutputPad != nil {
+		existing["outputPad"] = *cfg.OutputPad
+	}
+	if cfg.AutocompleteMaxVisible != nil {
+		existing["autocompleteMaxVisible"] = *cfg.AutocompleteMaxVisible
+	}
+	if cfg.ShowHardwareCursor != nil {
+		existing["showHardwareCursor"] = *cfg.ShowHardwareCursor
+	}
+	if cfg.WebsocketConnectTimeoutMs != nil {
+		existing["websocketConnectTimeoutMs"] = *cfg.WebsocketConnectTimeoutMs
+	}
+	if cfg.FullscreenScrollbar != nil {
+		existing["fullscreenScrollbar"] = *cfg.FullscreenScrollbar
+	}
+	if cfg.FullscreenCopyOnSelect != nil {
+		existing["fullscreenCopyOnSelect"] = *cfg.FullscreenCopyOnSelect
+	}
+	if cfg.EnableAnalytics != nil {
+		existing["enableAnalytics"] = *cfg.EnableAnalytics
+	}
+	if cfg.TrackingID != "" {
+		existing["trackingId"] = cfg.TrackingID
+	}
+	if cfg.Transport != "" {
+		existing["transport"] = cfg.Transport
+	}
+	if cfg.Warnings != nil {
+		existing["warnings"] = cfg.Warnings
+	}
 	if cfg.DefaultThinkingLevel != "" {
 		existing["defaultThinkingLevel"] = cfg.DefaultThinkingLevel
 	}
 	if cfg.ExternalEditor != "" {
 		existing["externalEditor"] = cfg.ExternalEditor
 	}
-	if cfg.Terminal.ShowImages != nil || cfg.Terminal.ImageWidthCells != nil || cfg.Terminal.Hyperlinks != nil {
+	if cfg.Terminal.ShowImages != nil || cfg.Terminal.ImageWidthCells != nil || cfg.Terminal.Hyperlinks != nil ||
+		cfg.Terminal.Images != nil || cfg.Terminal.ClearOnShrink != nil || cfg.Terminal.ShowTerminalProgress != nil ||
+		cfg.Terminal.TrueColor != nil {
 		term, _ := existing["terminal"].(map[string]any)
 		if term == nil {
 			term = map[string]any{}
@@ -610,6 +672,18 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 		}
 		if cfg.Terminal.Hyperlinks != nil {
 			term["hyperlinks"] = cfg.Terminal.Hyperlinks
+		}
+		if cfg.Terminal.Images != nil {
+			term["images"] = cfg.Terminal.Images
+		}
+		if cfg.Terminal.ClearOnShrink != nil {
+			term["clearOnShrink"] = *cfg.Terminal.ClearOnShrink
+		}
+		if cfg.Terminal.ShowTerminalProgress != nil {
+			term["showTerminalProgress"] = *cfg.Terminal.ShowTerminalProgress
+		}
+		if cfg.Terminal.TrueColor != nil {
+			term["trueColor"] = cfg.Terminal.TrueColor
 		}
 		existing["terminal"] = term
 	}

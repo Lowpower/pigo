@@ -81,3 +81,11 @@ func IsContextOverflow(message *AssistantMessage, contextWindow int) bool {
 	}
 	return false
 }
+
+// IsRecoverableLength reports a length stop that ended below the intended output limit.
+func IsRecoverableLength(message *AssistantMessage, desiredMaxOutput int) bool {
+	if message == nil {
+		return false
+	}
+	return message.StopReason == StopLength && desiredMaxOutput > 0 && message.Usage.Output < desiredMaxOutput
+}

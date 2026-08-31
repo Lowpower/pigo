@@ -76,6 +76,7 @@ type Model struct {
 	provider          string
 	hideThinking      bool
 	toolsExpanded     bool
+	retryPrefix       int
 	usage             ai.Usage
 	gitCwd            string
 	gitBranch         string
@@ -126,11 +127,13 @@ type Model struct {
 // New builds the interactive model from the resolved config.
 func New(cfg config.Config) Model {
 	m := Model{
-		cfg:       cfg,
-		editor:    newPromptEditor(),
-		keys:      keys.NewManager(config.DefaultConfigDir()),
-		imgProto:  detectImageProtocol(os.Getenv),
-		altScreen: useAltScreen(cfg),
+		cfg:          cfg,
+		editor:       newPromptEditor(),
+		keys:         keys.NewManager(config.DefaultConfigDir()),
+		imgProto:     cfg.ImageProtocol(detectImageProtocol(os.Getenv)),
+		altScreen:    useAltScreen(cfg),
+		hideThinking: cfg.HideThinking(),
+		complete:     completer{maxVisible: cfg.AutocompleteVisible()},
 	}
 	m.glam = newRenderer(80)
 	m.applyTheme(theme.Load(cfg.Theme, "", ""))
@@ -298,6 +301,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.keyIs(msg, "app.thinking.toggle") {
 			m.hideThinking = !m.hideThinking
+			on := m.hideThinking
+			m.cfg.HideThinkingBlock = &on
+			if m.engine != nil && m.engine.Opts.UserConfig != nil {
+				m.engine.Opts.UserConfig.HideThinkingBlock = &on
+			}
+			if m.engine != nil {
+				m.persistSettings()
+			}
 			state := "visible"
 			if m.hideThinking {
 				state = "hidden"
@@ -838,10 +849,14 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 		}
 
 	case agent.EventToolStart:
+		label := compactArgs(ev.Args)
+		if p, ok := ev.Args["path"].(string); ok && p != "" {
+			label = strings.Replace(label, p, m.linkPath(p, p), 1)
+		}
 		m.transcript = append(m.transcript, entry{
 			role:       "tool",
 			toolCallID: ev.ToolCallID,
-			rendered:   m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, compactArgs(ev.Args))),
+			rendered:   m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, label)),
 		})
 
 	case agent.EventToolUpdate:
@@ -875,15 +890,45 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 		})
 
 	case agent.EventAgentEnd:
-		m.running = false
-		m.streamingActive = false
+		if m.engine != nil {
+			m.engine.PersistTurn(ev.Messages, m.retryPrefix)
+		}
+		m.retryPrefix = 0
 		if len(ev.Messages) > 0 {
 			m.history = agent.MessagesFromTranscript(ev.Messages)
-			if m.engine != nil {
-				m.engine.PersistTranscript(ev.Messages)
+		}
+		if m.engine != nil {
+			ctx := context.Background()
+			if hist, again := m.engine.AfterAgentEnd(ctx, ev.Messages); again {
+				m.history = hist
+				m.retryPrefix = len(hist)
+				stream := m.engine.Continue(ctx, hist)
+				m.agentEvents = stream.Events()
+				m.running = true
+				m.streamingActive = true
+				if m.cfg.CacheMissNotices() {
+					m.appendCacheMissNotice()
+				}
+				return
 			}
 		}
+		m.running = false
+		m.streamingActive = false
+		if m.cfg.CacheMissNotices() {
+			m.appendCacheMissNotice()
+		}
 	}
+}
+
+func (m *Model) appendCacheMissNotice() {
+	if m.engine == nil || m.engine.Opts.Session == nil {
+		return
+	}
+	note := session.LastCacheMissNotice(m.engine.Opts.Session.Entries())
+	if note == "" {
+		return
+	}
+	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(note)})
 }
 
 // View implements tea.Model.
@@ -1082,6 +1127,7 @@ func (m Model) mermaidOpts(streaming bool) mermaidOpts {
 }
 
 func (m Model) renderMarkdown(s string) string {
+	s = indentMarkdownCodeBlocks(s, m.cfg.CodeBlockIndent())
 	s = transformMermaid(s, m.mermaidOpts(false))
 	if m.glam == nil {
 		return s
@@ -1211,6 +1257,21 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
 		return m, nil
 	}
+	args := strings.Fields(rest)
+	if len(args) > 0 && args[0] == "search" {
+		if len(args) < 2 {
+			return note("usage: /llama search <query>")
+		}
+		query := strings.Join(args[1:], " ")
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("searching Hugging Face for " + query + "...")})
+		return m, func() tea.Msg {
+			found, err := llama.SearchHuggingFace(context.Background(), query, llama.FindHuggingFaceToken(), "")
+			if err != nil {
+				return llamaDoneMsg{text: err.Error()}
+			}
+			return llamaDoneMsg{text: llama.FormatSearch(found)}
+		}
+	}
 	url := strings.TrimSpace(os.Getenv("LLAMA_BASE_URL"))
 	key := strings.TrimSpace(os.Getenv("LLAMA_API_KEY"))
 	if m.engine != nil {
@@ -1229,7 +1290,6 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 	if err != nil {
 		return note(err.Error())
 	}
-	args := strings.Fields(rest)
 	if len(args) == 0 {
 		models, err := c.List(false)
 		if err != nil {
@@ -1276,7 +1336,7 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 			return err
 		})
 	default:
-		return note("usage: /llama | /llama load <model> | /llama unload <model> | /llama download <model>")
+		return note("usage: /llama | /llama search <query> | /llama load <model> | /llama unload <model> | /llama download <model>")
 	}
 }
 

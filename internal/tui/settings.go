@@ -51,7 +51,10 @@ func (m *Model) refreshSettingsItems() {
 		{"follow-up-mode", "Follow-up mode", "Queued follow-ups when the agent is idle", oneOrAll(m.cfg.FollowUpMode)},
 		{"mermaid-rendering", "Mermaid diagrams", "Render Mermaid code blocks as Unicode diagrams", m.cfg.MermaidMode()},
 		{"show-images", "Show images", "Inline tool-result images when the terminal supports it", boolText(m.cfg.ShowImages())},
+		{"auto-resize-images", "Auto-resize images", "Resize images larger than 2000px before sending them to the model", boolText(m.cfg.AutoResize())},
 		{"block-images", "Block images", "Omit images from requests sent to the model", boolText(m.cfg.BlockImages())},
+		{"hide-thinking", "Hide thinking", "Hide thinking blocks in the transcript", boolText(m.cfg.HideThinking())},
+		{"cache-miss-notices", "Cache miss notices", "Show transcript notices for significant prompt-cache misses", boolText(m.cfg.CacheMissNotices())},
 		{"default-project-trust", "Default project trust", "When a project has local resources and no saved decision", m.cfg.ProjectTrustDefault()},
 		{"double-escape-action", "Double-escape action", "Action when pressing Escape twice with empty editor", m.cfg.DoubleEscape()},
 		{"tree-filter-mode", "Tree filter mode", "Default filter when opening /tree", m.cfg.TreeFilter()},
@@ -113,7 +116,7 @@ func nextChoice(cur string, values []string) string {
 
 func (m Model) settingChoices(id string) []string {
 	switch id {
-	case "autocompact", "show-images", "block-images", "collapse-changelog", "install-telemetry":
+	case "autocompact", "show-images", "block-images", "collapse-changelog", "install-telemetry", "auto-resize-images", "hide-thinking", "cache-miss-notices":
 		return []string{"true", "false"}
 	case "steering-mode", "follow-up-mode":
 		return []string{"one-at-a-time", "all"}
@@ -154,8 +157,14 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.MermaidMode()
 	case "show-images":
 		return boolText(m.cfg.ShowImages())
+	case "auto-resize-images":
+		return boolText(m.cfg.AutoResize())
 	case "block-images":
 		return boolText(m.cfg.BlockImages())
+	case "hide-thinking":
+		return boolText(m.cfg.HideThinking())
+	case "cache-miss-notices":
+		return boolText(m.cfg.CacheMissNotices())
 	case "default-project-trust":
 		return m.cfg.ProjectTrustDefault()
 	case "double-escape-action":
@@ -203,9 +212,19 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 	case "show-images":
 		on := value == "true"
 		patch(func(c *config.Config) { c.Terminal.ShowImages = &on })
+	case "auto-resize-images":
+		on := value == "true"
+		patch(func(c *config.Config) { c.Images.AutoResize = &on })
 	case "block-images":
 		on := value == "true"
 		patch(func(c *config.Config) { c.Images.BlockImages = &on })
+	case "hide-thinking":
+		on := value == "true"
+		patch(func(c *config.Config) { c.HideThinkingBlock = &on })
+		m.hideThinking = on
+	case "cache-miss-notices":
+		on := value == "true"
+		patch(func(c *config.Config) { c.ShowCacheMissNotices = &on })
 	case "default-project-trust":
 		patch(func(c *config.Config) { c.DefaultProjectTrust = value })
 	case "double-escape-action":

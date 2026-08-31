@@ -63,6 +63,15 @@ func Lookup(provider, id string) (Model, bool) {
 	return Model{}, false
 }
 
+// CacheReadPerToken is catalog cache-read dollars per token, or 0.
+func CacheReadPerToken(provider, id string) float64 {
+	m, ok := Lookup(provider, id)
+	if !ok || m.Cost == nil {
+		return 0
+	}
+	return m.Cost.CacheRead / 1_000_000
+}
+
 // DefaultAPI is the API used when a model id is not in the catalog.
 func DefaultAPI(provider string) string {
 	if p, ok := LookupProvider(provider); ok && p.DefaultAPI != "" {

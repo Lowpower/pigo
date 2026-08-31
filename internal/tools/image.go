@@ -61,7 +61,7 @@ type processedImage struct {
 	hints    []string
 }
 
-func processImage(data []byte, mime string) (processedImage, bool) {
+func processImage(data []byte, mime string, autoResize bool) (processedImage, bool) {
 	img, err := decodeImage(data, mime)
 	if err != nil {
 		return processedImage{}, false
@@ -75,7 +75,7 @@ func processImage(data []byte, mime string) (processedImage, bool) {
 
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	if w > imageMaxEdge || h > imageMaxEdge {
+	if autoResize && (w > imageMaxEdge || h > imageMaxEdge) {
 		scale := float64(imageMaxEdge) / float64(w)
 		if s := float64(imageMaxEdge) / float64(h); s < scale {
 			scale = s

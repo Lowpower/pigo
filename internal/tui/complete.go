@@ -19,10 +19,11 @@ type completeItem struct {
 }
 
 type completer struct {
-	items  []completeItem
-	prefix string
-	sel    int
-	active bool
+	items      []completeItem
+	prefix     string
+	sel        int
+	active     bool
+	maxVisible int
 }
 
 func (c *completer) set(items []completeItem, prefix string) {
@@ -69,8 +70,12 @@ func (c completer) view() string {
 	}
 	var b strings.Builder
 	n := len(c.items)
-	start := max(0, min(c.sel-completeVisible/2, n-completeVisible))
-	end := min(start+completeVisible, n)
+	visible := c.maxVisible
+	if visible <= 0 {
+		visible = completeVisible
+	}
+	start := max(0, min(c.sel-visible/2, n-visible))
+	end := min(start+visible, n)
 	for i := start; i < end; i++ {
 		it := c.items[i]
 		mark := "  "

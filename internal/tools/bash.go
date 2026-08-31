@@ -12,14 +12,16 @@ import (
 )
 
 // bashTool executes a shell command via shell.GetConfig (Git Bash / PATH / WSL).
-type bashTool struct{}
+type bashTool struct {
+	prefix string
+}
 
 type bashParams struct {
 	Command string `json:"command" jsonschema:"description=Bash command to execute"`
 	Timeout int    `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds (optional, no default timeout)"`
 }
 
-func (bashTool) Name() string { return "bash" }
+func (t bashTool) Name() string { return "bash" }
 
 func (bashTool) Description() string {
 	return fmt.Sprintf("Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.", DefaultMaxLines, DefaultMaxBytes/1024)
@@ -27,7 +29,7 @@ func (bashTool) Description() string {
 
 func (bashTool) Schema() map[string]any { return schemaFor(&bashParams{}) }
 
-func (bashTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
+func (t bashTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
 	var p bashParams
 	if err := decodeArgs(args, &p); err != nil {
 		return "invalid arguments: " + err.Error(), true
@@ -43,7 +45,12 @@ func (bashTool) Execute(ctx context.Context, args map[string]any) (string, bool)
 		defer cancel()
 	}
 
-	cmd, err := bashCmd(runCtx, p.Command, "")
+	command := p.Command
+	if t.prefix != "" {
+		command = t.prefix + "\n" + command
+	}
+
+	cmd, err := bashCmd(runCtx, command, "")
 	if err != nil {
 		return err.Error(), true
 	}
