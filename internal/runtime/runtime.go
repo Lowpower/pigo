@@ -190,6 +190,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 
 	sys := prompt.Build(prompt.Options{
 		Cwd:              opts.Cwd,
+		AgentDir:         opts.AgentDir,
 		Custom:           opts.SystemPrompt,
 		Append:           opts.AppendSystem,
 		NoContextFiles:   opts.NoContextFiles,
@@ -287,6 +288,12 @@ func (e *Engine) contextWindow() int {
 
 // CompactNow runs a manual compaction (RPC compact), including customInstructions.
 func (e *Engine) CompactNow(ctx context.Context, msgs []ai.Message, customInstructions string) ([]ai.Message, string, error) {
+	s := e.compactionSettings()
+	s.CustomInstructions = customInstructions
+	return e.runCompaction(ctx, "manual", msgs, s)
+}
+
+func (e *Engine) compactionSettings() compaction.Settings {
 	s := compaction.DefaultSettings()
 	if e.Opts.Config.ReserveTokens > 0 {
 		s.ReserveTokens = e.Opts.Config.ReserveTokens
@@ -294,15 +301,25 @@ func (e *Engine) CompactNow(ctx context.Context, msgs []ai.Message, customInstru
 	if e.Opts.Config.KeepRecentTokens > 0 {
 		s.KeepRecentTokens = e.Opts.Config.KeepRecentTokens
 	}
-	s.CustomInstructions = customInstructions
+	return s
+}
+
+func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Message, s compaction.Settings) ([]ai.Message, string, error) {
 	e.setCompacting(true)
 	defer e.setCompacting(false)
-	e.emitSession(map[string]any{"type": "compaction_start", "reason": "manual"})
-	out, summary, err := compaction.Compact(ctx, e.Stream, e.Opts.Config.ResolvedModel(), msgs, s)
+	e.emitSession(map[string]any{"type": "compaction_start", "reason": reason})
+	var out []ai.Message
+	var summary string
+	err := e.withSummarizationRetry(ctx, map[string]any{"source": "compaction", "reason": reason}, func() error {
+		var cerr error
+		out, summary, cerr = compaction.Compact(ctx, e.Stream, e.Opts.Config.ResolvedModel(), msgs, s)
+		return cerr
+	})
 	if err != nil {
 		e.emitSession(map[string]any{
-			"type": "compaction_end", "reason": "manual",
-			"result": nil, "aborted": false, "willRetry": false, "errorMessage": err.Error(),
+			"type": "compaction_end", "reason": reason,
+			"result": nil, "aborted": errors.Is(err, compaction.ErrSummarizeAborted) || errors.Is(err, context.Canceled),
+			"willRetry": false, "errorMessage": err.Error(),
 		})
 		return msgs, "", err
 	}
@@ -314,7 +331,7 @@ func (e *Engine) CompactNow(ctx context.Context, msgs []ai.Message, customInstru
 		}
 	}
 	e.emitSession(map[string]any{
-		"type": "compaction_end", "reason": "manual",
+		"type": "compaction_end", "reason": reason,
 		"result": map[string]any{"summary": summary}, "aborted": false, "willRetry": false,
 	})
 	return out, summary, nil
@@ -503,39 +520,11 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 	if window <= 0 {
 		window = 200000
 	}
-	s := compaction.DefaultSettings()
-	if e.Opts.Config.ReserveTokens > 0 {
-		s.ReserveTokens = e.Opts.Config.ReserveTokens
-	}
-	if e.Opts.Config.KeepRecentTokens > 0 {
-		s.KeepRecentTokens = e.Opts.Config.KeepRecentTokens
-	}
+	s := e.compactionSettings()
 	if !compaction.ShouldCompact(compaction.EstimateContextTokens(msgs), window, s) {
 		return msgs, "", nil
 	}
-	e.setCompacting(true)
-	defer e.setCompacting(false)
-	e.emitSession(map[string]any{"type": "compaction_start", "reason": "threshold"})
-	out, summary, err := compaction.Compact(ctx, e.Stream, e.Opts.Config.ResolvedModel(), msgs, s)
-	if err != nil {
-		e.emitSession(map[string]any{
-			"type": "compaction_end", "reason": "threshold",
-			"result": nil, "aborted": false, "willRetry": false, "errorMessage": err.Error(),
-		})
-		return msgs, "", err
-	}
-	if summary != "" && e.Opts.Session != nil {
-		keep := session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, compaction.FindCutIndex(msgs, s.KeepRecentTokens))
-		tokens := compaction.EstimateContextTokens(msgs)
-		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokens); err == nil && entry != nil {
-			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
-		}
-	}
-	e.emitSession(map[string]any{
-		"type": "compaction_end", "reason": "threshold",
-		"result": map[string]any{"summary": summary}, "aborted": false, "willRetry": false,
-	})
-	return out, summary, nil
+	return e.runCompaction(ctx, "threshold", msgs, s)
 }
 
 // RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
@@ -617,14 +606,19 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 		}
 	}
 	if opts.Summarize && opts.Summary == "" && len(abandoned) > 0 {
-		summary, err := compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.RestoreAIMessages(abandoned), compaction.BranchSummaryOpts{
-			CustomInstructions:  opts.CustomInstructions,
-			ReplaceInstructions: opts.ReplaceInstructions,
-			ReserveTokens:       e.Opts.Config.BranchSummaryReserveTokens(),
-			ContextWindow:       e.Opts.Config.ContextWindow,
+		var summary string
+		err := e.withSummarizationRetry(ctx, map[string]any{"source": "branchSummary"}, func() error {
+			var serr error
+			summary, serr = compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.RestoreAIMessages(abandoned), compaction.BranchSummaryOpts{
+				CustomInstructions:  opts.CustomInstructions,
+				ReplaceInstructions: opts.ReplaceInstructions,
+				ReserveTokens:       e.Opts.Config.BranchSummaryReserveTokens(),
+				ContextWindow:       e.Opts.Config.ContextWindow,
+			})
+			return serr
 		})
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, compaction.ErrSummaryAborted) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, compaction.ErrSummaryAborted) || errors.Is(err, compaction.ErrSummarizeAborted) {
 				return session.NavigateResult{Cancelled: true, Aborted: true, OldLeafID: oldLeaf, NewLeafID: oldLeaf}, nil
 			}
 			return session.NavigateResult{}, err
@@ -693,6 +687,7 @@ func (e *Engine) Reload() {
 
 	e.System = prompt.Build(prompt.Options{
 		Cwd:              e.Opts.Cwd,
+		AgentDir:         e.Opts.AgentDir,
 		Custom:           e.Opts.SystemPrompt,
 		Append:           e.Opts.AppendSystem,
 		NoContextFiles:   e.Opts.NoContextFiles,

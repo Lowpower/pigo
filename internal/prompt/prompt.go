@@ -13,6 +13,7 @@ import (
 // Options controls system prompt construction.
 type Options struct {
 	Cwd              string
+	AgentDir         string
 	Custom           string
 	Append           []string
 	NoContextFiles   bool
@@ -49,7 +50,7 @@ func Build(opts Options) string {
 		b.WriteString(a)
 	}
 	if !opts.NoContextFiles {
-		if ctx := loadContextFiles(opts.Cwd, opts.ProjectTrusted); ctx != "" {
+		if ctx := loadContextFiles(opts.Cwd, opts.AgentDir, opts.ProjectTrusted); ctx != "" {
 			b.WriteString("\n<project_context>\n")
 			b.WriteString(ctx)
 			b.WriteString("\n</project_context>\n")
@@ -80,33 +81,24 @@ func hasRead(tools []ai.Tool) bool {
 	return false
 }
 
-func loadContextFiles(cwd string, trusted bool) string {
-	if cwd == "" {
-		return ""
-	}
+func loadContextFiles(cwd, agentDir string, trusted bool) string {
 	var chunks []string
+	seen := map[string]bool{}
+	add := func(text string) {
+		if text == "" {
+			return
+		}
+		chunks = append(chunks, text)
+	}
+	if agentDir != "" {
+		add(loadDirContext(agentDir, false, seen))
+	}
+	if cwd == "" {
+		return strings.Join(chunks, "\n\n")
+	}
 	dir := cwd
 	for i := 0; i < 12; i++ {
-		if p := filepath.Join(dir, "AGENTS.override.md"); fileExists(p) {
-			if b, err := os.ReadFile(p); err == nil {
-				chunks = append(chunks, "# "+p+"\n"+string(b))
-			}
-		} else {
-			for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
-				p := filepath.Join(dir, name)
-				b, err := os.ReadFile(p)
-				if err != nil {
-					continue
-				}
-				chunks = append(chunks, "# "+p+"\n"+string(b))
-			}
-		}
-		if trusted {
-			p := filepath.Join(dir, ".pigo", "AGENTS.md")
-			if b, err := os.ReadFile(p); err == nil {
-				chunks = append(chunks, "# "+p+"\n"+string(b))
-			}
-		}
+		add(loadDirContext(dir, trusted, seen))
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break
@@ -117,6 +109,55 @@ func loadContextFiles(cwd string, trusted bool) string {
 		dir = parent
 	}
 	return strings.Join(chunks, "\n\n")
+}
+
+func loadDirContext(dir string, includeDotPigo bool, seen map[string]bool) string {
+	var parts []string
+	if p := firstExisting(dir, "AGENTS.override.md"); p != "" {
+		if text := readContextFile(p, seen); text != "" {
+			parts = append(parts, text)
+		}
+	} else {
+		if p := firstExisting(dir, "AGENTS.md", "AGENTS.MD"); p != "" {
+			if text := readContextFile(p, seen); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		if p := firstExisting(dir, "CLAUDE.md", "CLAUDE.MD"); p != "" {
+			if text := readContextFile(p, seen); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	if includeDotPigo {
+		p := filepath.Join(dir, ".pigo", "AGENTS.md")
+		if text := readContextFile(p, seen); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func firstExisting(dir string, names ...string) string {
+	for _, name := range names {
+		p := filepath.Join(dir, name)
+		if fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func readContextFile(path string, seen map[string]bool) string {
+	if seen[path] {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	seen[path] = true
+	return "# " + path + "\n" + string(b)
 }
 
 func fileExists(path string) bool {

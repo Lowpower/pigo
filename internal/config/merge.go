@@ -116,6 +116,9 @@ func applyOverlay(user Config, over projectOverlay) Config {
 		if over.Retry.BaseDelayMs != nil {
 			out.Retry.BaseDelayMs = over.Retry.BaseDelayMs
 		}
+		if over.Retry.Provider != nil {
+			out.Retry.Provider = over.Retry.Provider
+		}
 	}
 	if over.ThinkingBudgets != nil {
 		out.ThinkingBudgets = over.ThinkingBudgets
@@ -143,14 +146,32 @@ func applyOverlay(user Config, over projectOverlay) Config {
 			out.BranchSummary.ReserveTokens = over.BranchSummary.ReserveTokens
 		}
 	}
-	if over.Terminal != nil && over.Terminal.ShowImages != nil {
-		out.Terminal.ShowImages = over.Terminal.ShowImages
+	if over.Terminal != nil {
+		if over.Terminal.ShowImages != nil {
+			out.Terminal.ShowImages = over.Terminal.ShowImages
+		}
+		if over.Terminal.ImageWidthCells != nil {
+			out.Terminal.ImageWidthCells = over.Terminal.ImageWidthCells
+		}
+		if over.Terminal.Hyperlinks != nil {
+			out.Terminal.Hyperlinks = over.Terminal.Hyperlinks
+		}
 	}
-	if over.Markdown != nil && over.Markdown.Mermaid != "" {
-		out.Markdown.Mermaid = over.Markdown.Mermaid
+	if over.Markdown != nil {
+		if over.Markdown.Mermaid != "" {
+			out.Markdown.Mermaid = over.Markdown.Mermaid
+		}
+		if over.Markdown.CodeBlockIndent != "" {
+			out.Markdown.CodeBlockIndent = over.Markdown.CodeBlockIndent
+		}
 	}
-	if over.Images != nil && over.Images.BlockImages != nil {
-		out.Images.BlockImages = over.Images.BlockImages
+	if over.Images != nil {
+		if over.Images.BlockImages != nil {
+			out.Images.BlockImages = over.Images.BlockImages
+		}
+		if over.Images.AutoResize != nil {
+			out.Images.AutoResize = over.Images.AutoResize
+		}
 	}
 	if over.TUIMode != "" {
 		out.TUIMode = over.TUIMode

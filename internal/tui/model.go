@@ -48,6 +48,7 @@ type entry struct {
 type agentEventMsg struct{ ev agent.Event }
 type agentClosedMsg struct{}
 type shareDoneMsg struct{ text string }
+type llamaDoneMsg struct{ text string }
 
 type queuedPrompt struct {
 	text   string
@@ -363,6 +364,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case shareDoneMsg:
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg.text)})
+		return m, nil
+
+	case llamaDoneMsg:
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg.text)})
 		return m, nil
 	}
@@ -1233,25 +1238,45 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 		props, _ := c.Props()
 		return note(llama.FormatCatalog(models, props.ModelsAutoload))
 	}
+	run := func(pending, done string, fn func() error) (tea.Model, tea.Cmd) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(pending)})
+		return m, func() tea.Msg {
+			if err := fn(); err != nil {
+				return llamaDoneMsg{text: err.Error()}
+			}
+			_ = models.ApplyLlamaCatalog(c, nil)
+			return llamaDoneMsg{text: done}
+		}
+	}
 	switch args[0] {
 	case "load":
 		if len(args) < 2 {
 			return note("usage: /llama load <model>")
 		}
-		if err := c.Load(args[1]); err != nil {
-			return note(err.Error())
-		}
-		return note("loading " + args[1])
+		id := args[1]
+		return run("loading "+id+"...", "loaded "+id, func() error {
+			_, err := c.LoadAndWait(context.Background(), id)
+			return err
+		})
 	case "unload":
 		if len(args) < 2 {
 			return note("usage: /llama unload <model>")
 		}
-		if err := c.Unload(args[1]); err != nil {
-			return note(err.Error())
+		id := args[1]
+		return run("unloading "+id+"...", "unloaded "+id, func() error {
+			return c.UnloadAndWait(context.Background(), id)
+		})
+	case "download":
+		if len(args) < 2 {
+			return note("usage: /llama download <model>")
 		}
-		return note("unloading " + args[1])
+		id := args[1]
+		return run("downloading "+id+"...", "downloaded "+id, func() error {
+			_, err := c.DownloadAndWait(context.Background(), id)
+			return err
+		})
 	default:
-		return note("usage: /llama | /llama load <model> | /llama unload <model>")
+		return note("usage: /llama | /llama load <model> | /llama unload <model> | /llama download <model>")
 	}
 }
 

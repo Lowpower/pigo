@@ -133,8 +133,11 @@ func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []
 	if final == nil {
 		return "", errors.New("compaction: summarization produced no message")
 	}
-	if final.StopReason == ai.StopError || final.StopReason == ai.StopAborted {
-		return "", errors.New("compaction: summarization failed: " + final.ErrorMessage)
+	if final.StopReason == ai.StopAborted {
+		return "", ErrSummarizeAborted
+	}
+	if final.StopReason == ai.StopError {
+		return "", &SummarizeError{Cause: final.ErrorMessage}
 	}
 	summary := final.Text()
 	if summary == "" {

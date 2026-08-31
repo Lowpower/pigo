@@ -3,10 +3,12 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/compaction"
 )
 
 // Ported from pi packages/coding-agent/src/core/agent-session.ts
@@ -130,4 +132,69 @@ func stripLastAssistant(msgs []agent.Msg) []ai.Message {
 		return hist[:n-1]
 	}
 	return hist
+}
+
+func (e *Engine) withSummarizationRetry(ctx context.Context, source map[string]any, run func() error) error {
+	var attempt int
+	maxAttempts := e.Opts.Config.RetryMaxRetries()
+	var lastRetry bool
+	for {
+		err := run()
+		if err == nil {
+			if lastRetry {
+				e.emitSession(map[string]any{"type": "summarization_retry_finished"})
+			}
+			return nil
+		}
+		if !e.shouldRetrySummarization(err) || attempt >= maxAttempts {
+			if lastRetry {
+				e.emitSession(map[string]any{"type": "summarization_retry_finished"})
+			}
+			return err
+		}
+		attempt++
+		lastRetry = true
+		delayMs := e.Opts.Config.RetryBaseDelayMs() * (1 << (attempt - 1))
+		e.emitSession(map[string]any{
+			"type":         "summarization_retry_scheduled",
+			"attempt":      attempt,
+			"maxAttempts":  maxAttempts,
+			"delayMs":      delayMs,
+			"errorMessage": summarizationErrorMessage(err),
+		})
+		if sleepErr := e.sleepRetry(ctx, time.Duration(delayMs)*time.Millisecond); sleepErr != nil {
+			e.emitSession(map[string]any{"type": "summarization_retry_finished"})
+			return sleepErr
+		}
+		ev := map[string]any{"type": "summarization_retry_attempt_start"}
+		for k, v := range source {
+			ev[k] = v
+		}
+		e.emitSession(ev)
+	}
+}
+
+func (e *Engine) shouldRetrySummarization(err error) bool {
+	if err == nil || !e.Opts.Config.RetryEnabled() {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, compaction.ErrSummarizeAborted) || errors.Is(err, compaction.ErrSummaryAborted) {
+		return false
+	}
+	msg := &ai.AssistantMessage{StopReason: ai.StopError, ErrorMessage: summarizationErrorMessage(err)}
+	return ai.IsRetryableAssistantError(msg)
+}
+
+func summarizationErrorMessage(err error) string {
+	var se *compaction.SummarizeError
+	if errors.As(err, &se) && se.Cause != "" {
+		return se.Cause
+	}
+	if err == nil {
+		return "Unknown error"
+	}
+	if err.Error() == "" {
+		return "Unknown error"
+	}
+	return err.Error()
 }

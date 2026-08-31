@@ -12,16 +12,32 @@ import (
 // Stats is the RPC get_session_stats payload (pi SessionStats).
 // packages/coding-agent/src/core/agent-session.ts
 type Stats struct {
-	SessionFile       string        `json:"sessionFile,omitempty"`
-	SessionID         string        `json:"sessionId"`
-	UserMessages      int           `json:"userMessages"`
-	AssistantMessages int           `json:"assistantMessages"`
-	ToolCalls         int           `json:"toolCalls"`
-	ToolResults       int           `json:"toolResults"`
-	TotalMessages     int           `json:"totalMessages"`
-	Tokens            TokenTotals   `json:"tokens"`
-	Cost              float64       `json:"cost"`
-	ContextUsage      *ContextUsage `json:"contextUsage,omitempty"`
+	SessionFile       string          `json:"sessionFile,omitempty"`
+	SessionID         string          `json:"sessionId"`
+	UserMessages      int             `json:"userMessages"`
+	AssistantMessages int             `json:"assistantMessages"`
+	ToolCalls         int             `json:"toolCalls"`
+	ToolResults       int             `json:"toolResults"`
+	TotalMessages     int             `json:"totalMessages"`
+	Tokens            TokenTotals     `json:"tokens"`
+	Cost              float64         `json:"cost"`
+	CostBreakdown     []CostBreakdown `json:"costBreakdown,omitempty"`
+	CacheWaste        *CacheWaste     `json:"cacheWaste,omitempty"`
+	ContextUsage      *ContextUsage   `json:"contextUsage,omitempty"`
+}
+
+// CostBreakdown is one provider/model (or Tools/summaries) bucket.
+type CostBreakdown struct {
+	Key    string  `json:"key"`
+	Cost   float64 `json:"cost"`
+	Tokens int     `json:"tokens"`
+}
+
+// CacheWaste is prompt tokens re-billed instead of served from cache.
+type CacheWaste struct {
+	MissedTokens int     `json:"missedTokens"`
+	MissedCost   float64 `json:"missedCost"`
+	MissCount    int     `json:"missCount"`
 }
 
 // TokenTotals aggregates billed token counts across the session.
@@ -91,6 +107,12 @@ func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats
 		}
 	}
 	s.Tokens.Total = s.Tokens.Input + s.Tokens.Output + s.Tokens.CacheRead + s.Tokens.CacheWrite
+	if m != nil {
+		s.CostBreakdown = usageCostBreakdown(m.Entries())
+		if w := computeCacheWaste(m.Entries()); w.MissCount > 0 || w.MissedTokens > 0 {
+			s.CacheWaste = &w
+		}
+	}
 	if contextWindow > 0 {
 		tok := compaction.EstimateContextTokens(contextMsgs)
 		pct := 0.0
@@ -135,8 +157,29 @@ func FormatInfo(s Stats, name string) string {
 	}
 	fmt.Fprintf(&b, "Output: %d\n", s.Tokens.Output)
 	fmt.Fprintf(&b, "Total: %d\n", s.Tokens.Total)
-	if s.Cost > 0 {
+	waste := CacheWaste{}
+	if s.CacheWaste != nil {
+		waste = *s.CacheWaste
+	}
+	if s.Cost > 0 || waste.MissedTokens > 0 {
 		fmt.Fprintf(&b, "\nCost\nTotal: $%.3f\n", s.Cost)
+		if len(s.CostBreakdown) > 1 {
+			for _, row := range s.CostBreakdown {
+				fmt.Fprintf(&b, "  %s: $%.3f (%d tokens)\n", row.Key, row.Cost, row.Tokens)
+			}
+		}
+		if waste.MissedTokens > 0 {
+			missLabel := "1 miss"
+			if waste.MissCount != 1 {
+				missLabel = fmt.Sprintf("%d misses", waste.MissCount)
+			}
+			detail := fmt.Sprintf("%d tokens, %s", waste.MissedTokens, missLabel)
+			if waste.MissedCost >= 0.0001 {
+				fmt.Fprintf(&b, "Cache Re-billed: $%.3f (%s)\n", waste.MissedCost, detail)
+			} else {
+				fmt.Fprintf(&b, "Cache Re-billed: %s\n", detail)
+			}
+		}
 	}
 	if s.ContextUsage != nil {
 		tok := 0
