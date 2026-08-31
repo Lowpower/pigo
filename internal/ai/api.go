@@ -126,6 +126,16 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 				c.BaseURL = spec.BaseURL
 			}
 		}
+		if spec, ok := models.LookupProvider(provider); ok && len(spec.Headers) > 0 {
+			merged := make(map[string]string, len(spec.Headers)+len(c.Headers))
+			for k, v := range spec.Headers {
+				merged[k] = v
+			}
+			for k, v := range c.Headers {
+				merged[k] = v
+			}
+			c.Headers = merged
+		}
 		api := models.APIFor(provider, opts.Model)
 		if api == "" {
 			api = "unknown"

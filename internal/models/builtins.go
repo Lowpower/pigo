@@ -70,4 +70,5 @@ func registerBuiltins() {
 			return refreshLlama(store)
 		},
 	})
+	registerExtraProviders()
 }

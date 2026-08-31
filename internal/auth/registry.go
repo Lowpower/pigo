@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/Lowpower/pigo/internal/llama"
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 var (
@@ -105,12 +106,42 @@ func registerBuiltins() {
 			Login: llamaLogin,
 		},
 	})
+	registerCatalogAPIKeys()
 }
 
 func registerProvider(p Provider) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	registry[p.ID] = p
+}
+
+func registerCatalogAPIKeys() {
+	for _, id := range models.ProviderIDs() {
+		spec, ok := models.LookupProvider(id)
+		if !ok || len(spec.Env) == 0 {
+			continue
+		}
+		name := spec.Name
+		if name == "" {
+			name = id + " API key"
+		}
+		existing, found := Lookup(id)
+		if found {
+			if existing.APIKey == nil {
+				existing.APIKey = &APIKeyHandler{Name: name, Env: spec.Env, Login: promptAPIKey(name)}
+				registerProvider(existing)
+			}
+			continue
+		}
+		registerProvider(Provider{
+			ID: id,
+			APIKey: &APIKeyHandler{
+				Name:  name,
+				Env:   spec.Env,
+				Login: promptAPIKey(name),
+			},
+		})
+	}
 }
 
 // Lookup returns a registered auth provider.

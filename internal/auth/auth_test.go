@@ -235,6 +235,34 @@ func TestCheckAuthGoogleEnv(t *testing.T) {
 	}
 }
 
+func TestCheckAuthGroqFromEnv(t *testing.T) {
+	t.Setenv("GROQ_API_KEY", "g")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "groq")
+	if chk == nil || chk.Source != "GROQ_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+	ids := AuthenticatedIDs(s)
+	found := false
+	for _, id := range ids {
+		if id == "groq" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("AuthenticatedIDs missing groq: %v", ids)
+	}
+}
+
+func TestCheckAuthKimiAPIKeyEnv(t *testing.T) {
+	t.Setenv("KIMI_API_KEY", "k")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "kimi-coding")
+	if chk == nil || chk.Source != "KIMI_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
 func TestCheckAuthBedrockAmbient(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIATEST")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")

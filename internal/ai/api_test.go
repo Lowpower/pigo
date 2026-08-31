@@ -57,6 +57,31 @@ func TestStreamForSetsThinkingBudget(t *testing.T) {
 	}
 }
 
+func TestStreamForMergesProviderHeaders(t *testing.T) {
+	var got map[string]string
+	RegisterAPI("hdr-api", func(cfg ClientConfig) StreamFn {
+		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+			got = cfg.Headers
+			return ScriptedStreamFn("ok", 0)(ctx, reqCtx, opts)
+		}
+	})
+	models.RegisterProvider(models.ProviderSpec{
+		ID:         "hdr-prov",
+		DefaultAPI: "hdr-api",
+		DefaultID:  "m",
+		Headers:    map[string]string{"NVCF-POLL-SECONDS": "3600", "X-Default": "a"},
+		Models:     []models.Model{{Provider: "hdr-prov", ID: "m", API: "hdr-api"}},
+	})
+	stream, err := StreamFor("hdr-prov", ClientConfig{Headers: map[string]string{"X-Override": "b"}})(context.Background(), Context{}, Options{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	if got["NVCF-POLL-SECONDS"] != "3600" || got["X-Default"] != "a" || got["X-Override"] != "b" {
+		t.Fatalf("headers = %#v", got)
+	}
+}
+
 func TestStreamForUnknownAPIErrors(t *testing.T) {
 	models.RegisterProvider(models.ProviderSpec{
 		ID:         "no-api-prov",
