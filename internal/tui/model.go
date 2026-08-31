@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
@@ -122,6 +123,8 @@ type Model struct {
 	clipOSC       string
 	imgProto      string
 	altScreen     bool
+	lastWidth     int
+	lastHeight    int
 }
 
 // New builds the interactive model from the resolved config.
@@ -138,7 +141,17 @@ func New(cfg config.Config) Model {
 	m.glam = newRenderer(80)
 	m.applyTheme(theme.Load(cfg.Theme, "", ""))
 	m.refreshGit()
+	applyTrueColor(cfg)
 	return m
+}
+
+func applyTrueColor(cfg config.Config) {
+	switch cfg.TrueColorMode() {
+	case "on":
+		lipgloss.SetColorProfile(termenv.TrueColor)
+	case "off":
+		lipgloss.SetColorProfile(termenv.ANSI)
+	}
 }
 
 func (m *Model) applyTheme(th theme.Theme) {
@@ -177,16 +190,31 @@ func newRenderer(width int) *glamour.TermRenderer {
 }
 
 // Init implements tea.Model.
-func (m Model) Init() tea.Cmd { return textarea.Blink }
+func (m Model) Init() tea.Cmd {
+	if m.cfg.HardwareCursor() {
+		return tea.Batch(textarea.Blink, tea.ShowCursor)
+	}
+	return textarea.Blink
+}
 
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		cmds := []tea.Cmd{}
+		if m.cfg.ClearOnShrink() && m.lastWidth > 0 && (msg.Width < m.lastWidth || msg.Height < m.lastHeight) {
+			cmds = append(cmds, tea.ClearScreen)
+		}
+		m.lastWidth, m.lastHeight = msg.Width, msg.Height
 		m.width, m.height = msg.Width, msg.Height
-		m.editor.SetWidth(min(msg.Width, maxEditorWidth))
-		m.glam = newRenderer(min(msg.Width, maxEditorWidth))
-		return m, nil
+		edW := min(msg.Width, maxEditorWidth) - 2*m.cfg.EditorPadX()
+		if edW < 20 {
+			edW = 20
+		}
+		m.editor.SetWidth(edW)
+		wrap := min(msg.Width, maxEditorWidth) - m.cfg.OutputPadN()
+		m.glam = newRenderer(wrap)
+		return m, tea.Batch(cmds...)
 
 	case externalEditorDoneMsg:
 		if msg.ok {
@@ -937,25 +965,25 @@ func (m Model) View() string {
 		return "bye\n"
 	}
 	if m.sessionPickerActive() {
-		return m.sessions.view()
+		return m.present(m.sessions.view())
 	}
 	if m.settingsActive() {
-		return m.settings.view()
+		return m.present(m.settings.view())
 	}
 	if m.scopedModelsActive() {
-		return m.scoped.view()
+		return m.present(m.scoped.view())
 	}
 	if m.modelPickerActive() {
-		return m.models.view()
+		return m.present(m.models.view())
 	}
 	if m.loginActive() {
-		return m.loginView()
+		return m.present(m.loginView())
 	}
 	if m.overlay == overlayTree || m.overlay == overlayTreeLabel || m.overlay == overlayTreeSummary || m.overlay == overlayTreeCustom {
-		return m.withClip(m.treeView())
+		return m.present(m.treeView())
 	}
 	if m.overlay == overlayFork {
-		return m.withClip(m.forkView())
+		return m.present(m.forkView())
 	}
 
 	var b strings.Builder
@@ -1040,13 +1068,17 @@ func (m Model) View() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(m.editor.View())
+	ed := m.editor.View()
+	if n := m.cfg.EditorPadX(); n > 0 {
+		ed = padLines(ed, n)
+	}
+	b.WriteString(ed)
 	b.WriteString("\n")
 	if m.complete.active {
 		b.WriteString(m.complete.view())
 	}
 	b.WriteString(m.footerStyle.Render(m.footerText()))
-	return m.withClip(b.String())
+	return m.present(b.String())
 }
 
 type pendingNav struct {
@@ -1176,6 +1208,9 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 	if useAltScreen(m.cfg) {
 		opts = append(opts, tea.WithAltScreen())
 		m.altScreen = true
+	}
+	if m.cfg.CopyOnSelect() {
+		opts = append(opts, tea.WithMouseCellMotion())
 	}
 	final, err := tea.NewProgram(m, opts...).Run()
 	if err != nil {

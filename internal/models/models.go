@@ -35,11 +35,12 @@ func NextThinkingLevel(current string) string {
 
 // Model is a known catalog entry used by --list-models and /model.
 type Model struct {
-	Provider string `json:"provider,omitempty"`
-	ID       string `json:"id"`
-	API      string `json:"api,omitempty"`
-	BaseURL  string `json:"baseUrl,omitempty"`
-	Cost     *Cost  `json:"cost,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	ID        string `json:"id"`
+	API       string `json:"api,omitempty"`
+	BaseURL   string `json:"baseUrl,omitempty"`
+	Cost      *Cost  `json:"cost,omitempty"`
+	MaxTokens int    `json:"maxTokens,omitempty"`
 }
 
 // Cost is catalog pricing in dollars per million tokens.

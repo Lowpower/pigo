@@ -296,6 +296,14 @@ func (e *Engine) contextWindow() int {
 	return window
 }
 
+func (e *Engine) maxTokens() int {
+	provider := e.Provider
+	if provider == "" {
+		provider = e.Opts.Config.ResolvedProvider()
+	}
+	return models.MaxTokens(provider, e.Opts.Config.ResolvedModel())
+}
+
 // CompactNow runs a manual compaction (RPC compact), including customInstructions.
 func (e *Engine) CompactNow(ctx context.Context, msgs []ai.Message, customInstructions string) ([]ai.Message, string, error) {
 	s := e.compactionSettings()

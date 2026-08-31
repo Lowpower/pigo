@@ -14,7 +14,8 @@ type ProviderRetry struct {
 	MaxDelay   time.Duration
 }
 
-// WrapProviderRetry retries StreamFn setup failures (not overflow) with backoff.
+// WrapProviderRetry retries StreamFn setup failures and retryable in-stream
+// errors that produced no output (not overflow) with backoff.
 func WrapProviderRetry(inner StreamFn, cfg ProviderRetry) StreamFn {
 	if inner == nil {
 		return nil
@@ -25,36 +26,113 @@ func WrapProviderRetry(inner StreamFn, cfg ProviderRetry) StreamFn {
 		if cfg.Timeout > 0 {
 			callCtx, cancel = context.WithTimeout(ctx, cfg.Timeout)
 		}
-		defer cancel()
 
-		var last error
-		for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
-			stream, err := inner(callCtx, reqCtx, opts)
-			if err == nil {
-				return stream, nil
-			}
-			last = err
+		stream, err := inner(callCtx, reqCtx, opts)
+		for attempt := 0; err != nil; attempt++ {
 			if attempt == cfg.MaxRetries || !isProviderSetupRetryable(err) {
+				cancel()
 				return nil, err
 			}
-			delay := providerBackoff(attempt, cfg.MaxDelay)
-			if delay < 0 {
-				delay = 0
+			if sleepErr := sleepProviderRetry(callCtx, attempt, cfg.MaxDelay); sleepErr != nil {
+				cancel()
+				return nil, sleepErr
 			}
-			timer := time.NewTimer(delay)
-			select {
-			case <-timer.C:
-			case <-callCtx.Done():
-				timer.Stop()
-				return nil, callCtx.Err()
+			stream, err = inner(callCtx, reqCtx, opts)
+		}
+
+		out := NewEventStream(16)
+		go func() {
+			defer cancel()
+			defer out.end()
+			current := stream
+			attemptsLeft := cfg.MaxRetries
+			for {
+				var buf []Event
+				var terminal *AssistantMessage
+				closed := true
+				for ev := range current.Events() {
+					if eventHasOutput(ev) {
+						for _, b := range buf {
+							if !out.push(callCtx, b) {
+								return
+							}
+						}
+						if !out.push(callCtx, ev) {
+							return
+						}
+						for ev := range current.Events() {
+							if !out.push(callCtx, ev) {
+								return
+							}
+						}
+						return
+					}
+					buf = append(buf, ev)
+					if ev.Type == EventDone || ev.Type == EventError {
+						terminal = ev.Message
+						closed = false
+						break
+					}
+				}
+				if attemptsLeft > 0 && streamErrorRetryable(terminal) {
+					attemptsLeft--
+					attempt := cfg.MaxRetries - attemptsLeft - 1
+					if attempt < 0 {
+						attempt = 0
+					}
+					if sleepErr := sleepProviderRetry(callCtx, attempt, cfg.MaxDelay); sleepErr != nil {
+						return
+					}
+					next, nerr := inner(callCtx, reqCtx, opts)
+					if nerr != nil {
+						if isProviderSetupRetryable(nerr) && attemptsLeft > 0 {
+							current = EmitMessage(callCtx, &AssistantMessage{Role: RoleAssistant, StopReason: StopError, ErrorMessage: nerr.Error()})
+							continue
+						}
+						msg := &AssistantMessage{Role: RoleAssistant, StopReason: StopError, ErrorMessage: nerr.Error()}
+						out.push(callCtx, Event{Type: EventError, Reason: StopError, Message: msg})
+						return
+					}
+					current = next
+					continue
+				}
+				for _, b := range buf {
+					if !out.push(callCtx, b) {
+						return
+					}
+				}
+				if !closed {
+					for ev := range current.Events() {
+						if !out.push(callCtx, ev) {
+							return
+						}
+					}
+				}
+				return
 			}
-			timer.Stop()
-		}
-		if last == nil {
-			last = errors.New("provider retry exhausted")
-		}
-		return nil, last
+		}()
+		return out, nil
 	}
+}
+
+func eventHasOutput(ev Event) bool {
+	switch ev.Type {
+	case EventTextStart, EventTextDelta, EventThinkingStart, EventThinkingDelta,
+		EventToolCallStart, EventToolCallDelta, EventToolCallEnd:
+		return true
+	default:
+		return false
+	}
+}
+
+func streamErrorRetryable(msg *AssistantMessage) bool {
+	if msg == nil {
+		return false
+	}
+	if IsContextOverflow(msg, 0) {
+		return false
+	}
+	return IsRetryableAssistantError(msg)
 }
 
 func isProviderSetupRetryable(err error) bool {
@@ -73,6 +151,21 @@ func isProviderSetupRetryable(err error) bool {
 	}
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "timeout") || strings.Contains(s, "temporarily") || strings.Contains(s, "eof")
+}
+
+func sleepProviderRetry(ctx context.Context, attempt int, maxDelay time.Duration) error {
+	delay := providerBackoff(attempt, maxDelay)
+	if delay < 0 {
+		delay = 0
+	}
+	timer := time.NewTimer(delay)
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		timer.Stop()
+		return ctx.Err()
+	}
 }
 
 func providerBackoff(attempt int, maxDelay time.Duration) time.Duration {

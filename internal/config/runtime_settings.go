@@ -144,6 +144,67 @@ func (c Config) StreamIdleTimeout() time.Duration {
 	return c.HTTPIdleTimeout()
 }
 
+// EditorPadX is settings.editorPaddingX (default 0).
+func (c Config) EditorPadX() int {
+	if c.EditorPaddingX == nil || *c.EditorPaddingX < 0 {
+		return 0
+	}
+	return *c.EditorPaddingX
+}
+
+// OutputPadN is settings.outputPad (default 0).
+func (c Config) OutputPadN() int {
+	if c.OutputPad == nil || *c.OutputPad < 0 {
+		return 0
+	}
+	return *c.OutputPad
+}
+
+// HardwareCursor reports whether the terminal hardware cursor should stay visible.
+func (c Config) HardwareCursor() bool {
+	return c.ShowHardwareCursor != nil && *c.ShowHardwareCursor
+}
+
+// ClearOnShrink reports whether a smaller terminal should clear the screen.
+func (c Config) ClearOnShrink() bool {
+	return c.Terminal.ClearOnShrink != nil && *c.Terminal.ClearOnShrink
+}
+
+// TerminalProgress reports whether OSC 9;4 progress should be emitted.
+func (c Config) TerminalProgress() bool {
+	return c.Terminal.ShowTerminalProgress != nil && *c.Terminal.ShowTerminalProgress
+}
+
+// TrueColorMode is "on", "off", or "auto".
+func (c Config) TrueColorMode() string {
+	switch v := c.Terminal.TrueColor.(type) {
+	case bool:
+		if v {
+			return "on"
+		}
+		return "off"
+	case string:
+		s := strings.ToLower(strings.TrimSpace(v))
+		switch s {
+		case "true", "1", "yes", "on":
+			return "on"
+		case "false", "0", "no", "off":
+			return "off"
+		}
+	}
+	return "auto"
+}
+
+// CopyOnSelect reports whether fullscreen mouse-select copy is enabled.
+func (c Config) CopyOnSelect() bool {
+	return c.FullscreenCopyOnSelect != nil && *c.FullscreenCopyOnSelect
+}
+
+// ScrollbarEnabled reports whether a fullscreen scrollbar should be drawn.
+func (c Config) ScrollbarEnabled() bool {
+	return c.FullscreenScrollbar != nil && *c.FullscreenScrollbar
+}
+
 // WebSocketConnectTimeout is settings.websocketConnectTimeoutMs when set.
 func (c Config) WebSocketConnectTimeout() time.Duration {
 	if c.WebsocketConnectTimeoutMs == nil || *c.WebsocketConnectTimeoutMs <= 0 {

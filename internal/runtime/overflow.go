@@ -25,7 +25,7 @@ func (e *Engine) overflowShouldHandle(msg *ai.AssistantMessage) bool {
 	if ai.IsContextOverflow(msg, e.contextWindow()) {
 		return true
 	}
-	return ai.IsRecoverableLength(msg, 0)
+	return ai.IsRecoverableLength(msg, e.maxTokens())
 }
 
 func (e *Engine) prepareOverflow(ctx context.Context, last []agent.Msg) bool {

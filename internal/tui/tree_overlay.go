@@ -500,7 +500,7 @@ func (m Model) treeView() string {
 	for i := start; i < end; i++ {
 		n := m.tree.vis[i]
 		foldable := m.tree.hasKids(n.node.Entry.ID)
-		rows = append(rows, buildTreeRow(n, i == m.tree.cursor, m.tree.path[n.node.Entry.ID], m.tree.showLabelTime, foldable, m.tree.folded[n.node.Entry.ID], m.tree.multiRoots, tools))
+		rows = append(rows, buildTreeRow(n, i == m.tree.cursor, m.tree.path[n.node.Entry.ID], m.tree.showLabelTime, foldable, m.tree.folded[n.node.Entry.ID], m.tree.multiRoots, tools, m.linkPath))
 	}
 	width := m.width
 	if width <= 0 {

@@ -81,6 +81,54 @@ func TestPrintJSONOverflowCompactsAndRetriesOnce(t *testing.T) {
 	}
 }
 
+func TestPrintJSONRecoverableLengthCompactsAndRetriesOnce(t *testing.T) {
+	var calls int32
+	e := &Engine{
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts: Options{Config: config.Config{
+			Provider:         "anthropic",
+			Model:            "claude-sonnet-4",
+			KeepRecentTokens: 1,
+		}},
+		Stream: func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+			n := atomic.AddInt32(&calls, 1)
+			switch n {
+			case 1:
+				return ai.EmitMessage(ctx, &ai.AssistantMessage{
+					Role:       ai.RoleAssistant,
+					StopReason: ai.StopLength,
+					Usage:      ai.Usage{Output: 10},
+					Content:    []*ai.Content{{Type: ai.KindText, Text: "truncated"}},
+				}), nil
+			case 2:
+				return textReply("## Goal\nCompacted.")(ctx, req, opts)
+			default:
+				return textReply("recovered")(ctx, req, opts)
+			}
+		},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	var out bytes.Buffer
+	if err := e.PrintJSON(context.Background(), &out, compactableMsgs(), "next", nil); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&calls) < 3 {
+		t.Fatalf("calls=%d want overflow+summary+retry", calls)
+	}
+	s := out.String()
+	if !strings.Contains(s, `"reason":"overflow"`) {
+		t.Fatalf("missing overflow compaction:\n%s", s)
+	}
+	if strings.Contains(s, `"type":"auto_retry_start"`) {
+		t.Fatalf("length recovery must not use auto_retry:\n%s", s)
+	}
+	if !strings.Contains(s, "recovered") {
+		t.Fatalf("missing recovered text:\n%s", s)
+	}
+}
+
 func TestPrintJSONOverflowDoesNotLoop(t *testing.T) {
 	var calls int32
 	e := &Engine{

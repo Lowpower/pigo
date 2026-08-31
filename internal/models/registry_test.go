@@ -73,3 +73,35 @@ func TestBudgetTokensOverride(t *testing.T) {
 		t.Fatal("off should be 0")
 	}
 }
+
+func TestBuiltinCacheReadAndMaxTokens(t *testing.T) {
+	if CacheReadPerToken("anthropic", "claude-sonnet-4") <= 0 {
+		t.Fatal("builtin sonnet should have cache-read price")
+	}
+	if MaxTokens("anthropic", "claude-sonnet-4") != 64000 {
+		t.Fatalf("maxTokens=%d", MaxTokens("anthropic", "claude-sonnet-4"))
+	}
+	if CacheReadPerToken("openai", "gpt-4o") <= 0 || MaxTokens("openai", "gpt-4o") != 16384 {
+		t.Fatal("openai gpt-4o catalog")
+	}
+}
+
+func TestOverlayMergesCostAndMaxTokens(t *testing.T) {
+	ClearOverlays()
+	t.Cleanup(ClearOverlays)
+	SetUserOverlay("anthropic", []Model{{
+		ID:        "claude-sonnet-4",
+		Cost:      &Cost{CacheRead: 9.99},
+		MaxTokens: 111,
+	}})
+	m, ok := Lookup("anthropic", "claude-sonnet-4")
+	if !ok {
+		t.Fatal("missing")
+	}
+	if m.Cost == nil || m.Cost.CacheRead != 9.99 {
+		t.Fatalf("cost=%+v", m.Cost)
+	}
+	if m.MaxTokens != 111 {
+		t.Fatalf("maxTokens=%d", m.MaxTokens)
+	}
+}

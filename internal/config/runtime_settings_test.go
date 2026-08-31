@@ -34,6 +34,12 @@ func TestRuntimeSettingDefaults(t *testing.T) {
 	if c.ProviderRetryMaxDelay() != 60*time.Second {
 		t.Fatalf("delay=%s", c.ProviderRetryMaxDelay())
 	}
+	if c.EditorPadX() != 0 || c.OutputPadN() != 0 || c.HardwareCursor() || c.ClearOnShrink() || c.TerminalProgress() {
+		t.Fatal("tui extras default off")
+	}
+	if c.TrueColorMode() != "auto" {
+		t.Fatalf("trueColor=%s", c.TrueColorMode())
+	}
 }
 
 func TestRuntimeSettingOverrides(t *testing.T) {
@@ -123,6 +129,12 @@ func TestLoadSaveExtraRuntimeKeys(t *testing.T) {
 	}
 	if cfg.Terminal.ClearOnShrink == nil || !*cfg.Terminal.ClearOnShrink {
 		t.Fatal("clearOnShrink")
+	}
+	if cfg.TrueColorMode() != "on" || !cfg.ClearOnShrink() || !cfg.TerminalProgress() {
+		t.Fatal("terminal extras")
+	}
+	if cfg.EditorPadX() != 2 || cfg.OutputPadN() != 1 || !cfg.HardwareCursor() {
+		t.Fatal("editor extras")
 	}
 	if err := Save(dir, cfg); err != nil {
 		t.Fatal(err)
