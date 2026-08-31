@@ -83,6 +83,26 @@ func TestAnthropicWireMessagesIncludesUserImages(t *testing.T) {
 	}
 }
 
+func TestOpenAIWireMessagesIncludesReasoningContent(t *testing.T) {
+	asst := &AssistantMessage{
+		Role: RoleAssistant,
+		Content: []*Content{
+			{Type: KindThinking, Thinking: "secret plan"},
+			{Type: KindText, Text: "hello"},
+		},
+	}
+	wire := OpenAIWireMessages([]Message{{Role: RoleAssistant, Assistant: asst}})
+	if len(wire) != 1 {
+		t.Fatalf("len=%d", len(wire))
+	}
+	if wire[0]["content"] != "hello" {
+		t.Fatalf("content = %#v, want hello", wire[0]["content"])
+	}
+	if wire[0]["reasoning_content"] != "secret plan" {
+		t.Fatalf("reasoning_content = %#v", wire[0]["reasoning_content"])
+	}
+}
+
 func TestOpenAIWireMessagesIncludesUserImages(t *testing.T) {
 	wire := OpenAIWireMessages([]Message{{
 		Role:    RoleUser,
