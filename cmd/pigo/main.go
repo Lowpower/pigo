@@ -358,10 +358,19 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			if err != nil {
 				return fmt.Errorf("session-id: %w", err)
 			}
-		case f.continueSession, f.resume:
+		case f.continueSession:
 			sess, err = session.ContinueRecentAt(cwd, agentDir, sessionDir)
 			if err != nil {
-				return fmt.Errorf("resume session: %w", err)
+				return fmt.Errorf("continue session: %w", err)
+			}
+		case f.resume:
+			if tui.ShouldOpenResumePicker(mode, f.resume, f.sessionID, f.sessionPath, f.fork, f.noSession) {
+				sess = nil
+			} else {
+				sess, err = session.ContinueRecentAt(cwd, agentDir, sessionDir)
+				if err != nil {
+					return fmt.Errorf("resume session: %w", err)
+				}
 			}
 		default:
 			sess = session.NewAt(cwd, agentDir, sessionDir)

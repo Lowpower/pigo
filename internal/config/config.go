@@ -69,11 +69,19 @@ type CompactionSettings struct {
 	KeepRecentTokens int   `mapstructure:"keepRecentTokens" json:"keepRecentTokens,omitempty"`
 }
 
-// RetrySettings is pi settings.retry (enabled default true, maxRetries 3, baseDelayMs 2000).
+// RetrySettings is settings.retry (enabled default true, maxRetries 3, baseDelayMs 2000).
 type RetrySettings struct {
-	Enabled     *bool `mapstructure:"enabled" json:"enabled,omitempty"`
-	MaxRetries  *int  `mapstructure:"maxRetries" json:"maxRetries,omitempty"`
-	BaseDelayMs *int  `mapstructure:"baseDelayMs" json:"baseDelayMs,omitempty"`
+	Enabled     *bool                  `mapstructure:"enabled" json:"enabled,omitempty"`
+	MaxRetries  *int                   `mapstructure:"maxRetries" json:"maxRetries,omitempty"`
+	BaseDelayMs *int                   `mapstructure:"baseDelayMs" json:"baseDelayMs,omitempty"`
+	Provider    *ProviderRetrySettings `mapstructure:"provider" json:"provider,omitempty"`
+}
+
+// ProviderRetrySettings is settings.retry.provider.
+type ProviderRetrySettings struct {
+	TimeoutMs       *int `mapstructure:"timeoutMs" json:"timeoutMs,omitempty"`
+	MaxRetries      *int `mapstructure:"maxRetries" json:"maxRetries,omitempty"`
+	MaxRetryDelayMs *int `mapstructure:"maxRetryDelayMs" json:"maxRetryDelayMs,omitempty"`
 }
 
 // BranchSummarySettings is pi settings.branchSummary.
@@ -84,17 +92,21 @@ type BranchSummarySettings struct {
 
 // TerminalSettings is settings.terminal.
 type TerminalSettings struct {
-	ShowImages *bool `mapstructure:"showImages" json:"showImages,omitempty"`
+	ShowImages      *bool `mapstructure:"showImages" json:"showImages,omitempty"`
+	ImageWidthCells *int  `mapstructure:"imageWidthCells" json:"imageWidthCells,omitempty"`
+	Hyperlinks      any   `mapstructure:"hyperlinks" json:"hyperlinks,omitempty"`
 }
 
 // ImageSettings is settings.images.
 type ImageSettings struct {
 	BlockImages *bool `mapstructure:"blockImages" json:"blockImages,omitempty"`
+	AutoResize  *bool `mapstructure:"autoResize" json:"autoResize,omitempty"`
 }
 
 // MarkdownSettings is settings.markdown.
 type MarkdownSettings struct {
-	Mermaid string `mapstructure:"mermaid" json:"mermaid,omitempty"`
+	Mermaid         string `mapstructure:"mermaid" json:"mermaid,omitempty"`
+	CodeBlockIndent string `mapstructure:"codeBlockIndent" json:"codeBlockIndent,omitempty"`
 }
 
 // ResourceKinds is the settings.json key order for discovered resources.
@@ -538,6 +550,11 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 		"maxRetries":  cfg.RetryMaxRetries(),
 		"baseDelayMs": cfg.RetryBaseDelayMs(),
 	}
+	if cfg.Retry.Provider != nil {
+		retry, _ := existing["retry"].(map[string]any)
+		retry["provider"] = cfg.Retry.Provider
+		existing["retry"] = retry
+	}
 	if cfg.Packages != nil {
 		existing["packages"] = cfg.Packages
 	}
@@ -580,20 +597,33 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	if cfg.ExternalEditor != "" {
 		existing["externalEditor"] = cfg.ExternalEditor
 	}
-	if cfg.Terminal.ShowImages != nil {
+	if cfg.Terminal.ShowImages != nil || cfg.Terminal.ImageWidthCells != nil || cfg.Terminal.Hyperlinks != nil {
 		term, _ := existing["terminal"].(map[string]any)
 		if term == nil {
 			term = map[string]any{}
 		}
-		term["showImages"] = *cfg.Terminal.ShowImages
+		if cfg.Terminal.ShowImages != nil {
+			term["showImages"] = *cfg.Terminal.ShowImages
+		}
+		if cfg.Terminal.ImageWidthCells != nil {
+			term["imageWidthCells"] = *cfg.Terminal.ImageWidthCells
+		}
+		if cfg.Terminal.Hyperlinks != nil {
+			term["hyperlinks"] = cfg.Terminal.Hyperlinks
+		}
 		existing["terminal"] = term
 	}
-	if cfg.Images.BlockImages != nil {
+	if cfg.Images.BlockImages != nil || cfg.Images.AutoResize != nil {
 		images, _ := existing["images"].(map[string]any)
 		if images == nil {
 			images = map[string]any{}
 		}
-		images["blockImages"] = *cfg.Images.BlockImages
+		if cfg.Images.BlockImages != nil {
+			images["blockImages"] = *cfg.Images.BlockImages
+		}
+		if cfg.Images.AutoResize != nil {
+			images["autoResize"] = *cfg.Images.AutoResize
+		}
 		existing["images"] = images
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Markdown.Mermaid)) {
@@ -603,6 +633,14 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 			md = map[string]any{}
 		}
 		md["mermaid"] = strings.ToLower(strings.TrimSpace(cfg.Markdown.Mermaid))
+		existing["markdown"] = md
+	}
+	if indent := strings.TrimSpace(cfg.Markdown.CodeBlockIndent); indent != "" {
+		md, _ := existing["markdown"].(map[string]any)
+		if md == nil {
+			md = map[string]any{}
+		}
+		md["codeBlockIndent"] = cfg.Markdown.CodeBlockIndent
 		existing["markdown"] = md
 	}
 }

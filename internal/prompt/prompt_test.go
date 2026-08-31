@@ -60,6 +60,24 @@ func TestOverridePreferredOverAgentsAndClaude(t *testing.T) {
 	}
 }
 
+func TestGlobalAgentDirAndCaseVariants(t *testing.T) {
+	cwd := t.TempDir()
+	agent := t.TempDir()
+	if err := os.WriteFile(filepath.Join(agent, "AGENTS.md"), []byte("global-agents"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "AGENTS.MD"), []byte("cwd-caps"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Build(Options{Cwd: cwd, AgentDir: agent})
+	if !strings.Contains(got, "global-agents") {
+		t.Fatalf("missing global:\n%s", got)
+	}
+	if !strings.Contains(got, "cwd-caps") {
+		t.Fatalf("missing AGENTS.MD:\n%s", got)
+	}
+}
+
 func TestBuildSkipsUntrustedProjectAgents(t *testing.T) {
 	cwd := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {

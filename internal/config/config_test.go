@@ -631,3 +631,51 @@ func TestSaveEnabledModelsEmptyArray(t *testing.T) {
 		t.Fatal("empty array loaded as nil")
 	}
 }
+
+func TestLoadRetryProviderAndDisplaySettings(t *testing.T) {
+	dir := t.TempDir()
+	raw := `{
+  "retry":{"enabled":true,"maxRetries":2,"baseDelayMs":10,"provider":{"timeoutMs":1000,"maxRetries":4,"maxRetryDelayMs":60000}},
+  "terminal":{"showImages":true,"imageWidthCells":80,"hyperlinks":"auto"},
+  "images":{"blockImages":false,"autoResize":false},
+  "markdown":{"mermaid":"final","codeBlockIndent":"\t"}
+}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retry.Provider == nil || cfg.Retry.Provider.TimeoutMs == nil || *cfg.Retry.Provider.TimeoutMs != 1000 {
+		t.Fatalf("retry.provider=%+v", cfg.Retry.Provider)
+	}
+	if cfg.Retry.Provider.MaxRetries == nil || *cfg.Retry.Provider.MaxRetries != 4 {
+		t.Fatalf("provider.maxRetries=%v", cfg.Retry.Provider.MaxRetries)
+	}
+	if cfg.Terminal.ImageWidthCells == nil || *cfg.Terminal.ImageWidthCells != 80 {
+		t.Fatalf("imageWidthCells=%v", cfg.Terminal.ImageWidthCells)
+	}
+	if cfg.Terminal.Hyperlinks != "auto" {
+		t.Fatalf("hyperlinks=%v", cfg.Terminal.Hyperlinks)
+	}
+	if cfg.Images.AutoResize == nil || *cfg.Images.AutoResize {
+		t.Fatalf("autoResize=%v", cfg.Images.AutoResize)
+	}
+	if cfg.Markdown.CodeBlockIndent != "\t" {
+		t.Fatalf("codeBlockIndent=%q", cfg.Markdown.CodeBlockIndent)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{`"timeoutMs"`, `"imageWidthCells"`, `"hyperlinks"`, `"autoResize"`, `"codeBlockIndent"`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %s in %s", want, s)
+		}
+	}
+}
