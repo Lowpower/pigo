@@ -3,6 +3,7 @@ package llama
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -40,9 +41,10 @@ type ServerProps struct {
 
 // Client talks to a llama.cpp router.
 type Client struct {
-	ServerURL string
-	APIKey    string
-	HTTP      *http.Client
+	ServerURL    string
+	APIKey       string
+	HTTP         *http.Client
+	PollInterval time.Duration
 }
 
 // NormalizeServerURL strips trailing slashes and a /v1 suffix.
@@ -87,6 +89,13 @@ func NewClient(serverURL, apiKey string) (*Client, error) {
 }
 
 func (c *Client) request(method, path string, body any) ([]byte, error) {
+	return c.requestContext(context.Background(), method, path, body)
+}
+
+func (c *Client) requestContext(ctx context.Context, method, path string, body any) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -95,7 +104,7 @@ func (c *Client) request(method, path string, body any) ([]byte, error) {
 		}
 		rdr = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, c.ServerURL+path, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, c.ServerURL+path, rdr)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +187,124 @@ func (c *Client) Load(model string) error {
 func (c *Client) Unload(model string) error {
 	_, err := c.request(http.MethodPost, "/models/unload", map[string]string{"model": model})
 	return err
+}
+
+// Download POSTs /models to fetch a GGUF into the router.
+func (c *Client) Download(model string) error {
+	_, err := c.request(http.MethodPost, "/models", map[string]string{"model": model})
+	return err
+}
+
+func (c *Client) pollDelay(d time.Duration) time.Duration {
+	if c.PollInterval > 0 {
+		return c.PollInterval
+	}
+	return d
+}
+
+func (c *Client) sleep(ctx context.Context, d time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (c *Client) findModel(reload bool, id string) (ModelInfo, bool, error) {
+	list, err := c.List(reload)
+	if err != nil {
+		return ModelInfo{}, false, err
+	}
+	for _, m := range list {
+		if m.ID == id {
+			return m, true, nil
+		}
+	}
+	return ModelInfo{}, false, nil
+}
+
+// LoadAndWait POSTs /models/load and polls until loaded or failed.
+func (c *Client) LoadAndWait(ctx context.Context, model string) (ModelInfo, error) {
+	if err := c.Load(model); err != nil {
+		return ModelInfo{}, err
+	}
+	for {
+		entry, ok, err := c.findModel(false, model)
+		if err != nil {
+			return ModelInfo{}, err
+		}
+		if ok && entry.Status.Value == "loaded" {
+			return entry, nil
+		}
+		if ok && entry.Status.Failed {
+			if entry.Status.ExitCode != nil {
+				return ModelInfo{}, fmt.Errorf("model exited with code %d", *entry.Status.ExitCode)
+			}
+			return ModelInfo{}, fmt.Errorf("model failed to load")
+		}
+		if err := c.sleep(ctx, c.pollDelay(250*time.Millisecond)); err != nil {
+			return ModelInfo{}, err
+		}
+	}
+}
+
+// UnloadAndWait POSTs /models/unload and polls until unloaded.
+func (c *Client) UnloadAndWait(ctx context.Context, model string) error {
+	if err := c.Unload(model); err != nil {
+		return err
+	}
+	for {
+		entry, ok, err := c.findModel(false, model)
+		if err != nil {
+			return err
+		}
+		if !ok || entry.Status.Value == "unloaded" {
+			return nil
+		}
+		if err := c.sleep(ctx, c.pollDelay(100*time.Millisecond)); err != nil {
+			return err
+		}
+	}
+}
+
+// DownloadAndWait POSTs /models and polls until the model leaves the downloading state.
+func (c *Client) DownloadAndWait(ctx context.Context, model string) ([]ModelInfo, error) {
+	if err := c.Download(model); err != nil {
+		return nil, err
+	}
+	sawDownloading := false
+	polls := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		list, err := c.List(false)
+		if err != nil {
+			return nil, err
+		}
+		polls++
+		var entry *ModelInfo
+		for i := range list {
+			if list[i].ID == model {
+				entry = &list[i]
+				break
+			}
+		}
+		if entry != nil && entry.Status.Value == "downloading" {
+			sawDownloading = true
+		} else if entry != nil && (sawDownloading || polls >= 2) {
+			return c.List(true)
+		}
+		if err := c.sleep(ctx, c.pollDelay(500*time.Millisecond)); err != nil {
+			return nil, err
+		}
+	}
 }
 
 // Selectable reports whether a router model can be used for inference.

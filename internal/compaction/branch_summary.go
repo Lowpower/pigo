@@ -11,6 +11,21 @@ import (
 // ErrSummaryAborted is returned when the summarizer stopReason is aborted.
 var ErrSummaryAborted = errors.New("branch summary aborted")
 
+// ErrSummarizeAborted is returned when compaction summarization is aborted.
+var ErrSummarizeAborted = errors.New("compaction: summarization aborted")
+
+// SummarizeError is a failed (non-abort) summarization call.
+type SummarizeError struct {
+	Cause string
+}
+
+func (e *SummarizeError) Error() string {
+	if e == nil || e.Cause == "" {
+		return "compaction: summarization failed"
+	}
+	return "compaction: summarization failed: " + e.Cause
+}
+
 // BranchSummaryPreamble is prepended to the stored summary so later turns
 // know the text describes an abandoned branch.
 const BranchSummaryPreamble = `The user explored a different conversation branch before returning here.
@@ -122,7 +137,7 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 		return "", ErrSummaryAborted
 	}
 	if final.StopReason == ai.StopError {
-		return "", errors.New("branch summary failed: " + final.ErrorMessage)
+		return "", &SummarizeError{Cause: final.ErrorMessage}
 	}
 	text := strings.TrimSpace(final.Text())
 	if text == "" {

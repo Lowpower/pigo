@@ -1,11 +1,13 @@
 package llama
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeServerURL(t *testing.T) {
@@ -82,5 +84,71 @@ func TestClientListLoadUnload(t *testing.T) {
 	text := FormatCatalog(models, true)
 	if !strings.Contains(text, "qwen") || !strings.Contains(text, "loaded-model") {
 		t.Fatalf("catalog:\n%s", text)
+	}
+}
+
+func TestClientLoadAndWaitAndDownload(t *testing.T) {
+	status := "unloaded"
+	var downloads int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/models":
+			data := []map[string]any{
+				{"id": "qwen", "status": map[string]any{"value": status}, "source": "preset"},
+			}
+			if downloads > 0 {
+				data = append(data, map[string]any{
+					"id": "owner/repo:Q4_K_M", "status": map[string]any{"value": "unloaded"},
+				})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+		case r.Method == http.MethodPost && r.URL.Path == "/models/load":
+			status = "loaded"
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/models/unload":
+			status = "unloaded"
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/models":
+			downloads++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := NewClient(srv.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.PollInterval = time.Millisecond
+	got, err := c.LoadAndWait(context.Background(), "qwen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "qwen" || got.Status.Value != "loaded" {
+		t.Fatalf("loaded=%+v", got)
+	}
+	if err := c.UnloadAndWait(context.Background(), "qwen"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := c.DownloadAndWait(context.Background(), "owner/repo:Q4_K_M")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if downloads != 1 {
+		t.Fatalf("downloads=%d", downloads)
+	}
+	found := false
+	for _, m := range list {
+		if m.ID == "owner/repo:Q4_K_M" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("after download=%+v", list)
 	}
 }

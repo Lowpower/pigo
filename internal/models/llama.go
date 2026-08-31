@@ -16,7 +16,15 @@ func refreshLlama(store CatalogStore) error {
 	if err != nil {
 		return err
 	}
-	list, err := c.List(false)
+	return ApplyLlamaCatalog(c, store)
+}
+
+// ApplyLlamaCatalog replaces the llama.cpp overlay from a live router client.
+func ApplyLlamaCatalog(c *llama.Client, store CatalogStore) error {
+	if c == nil {
+		return nil
+	}
+	list, err := c.List(true)
 	if err != nil {
 		return err
 	}
