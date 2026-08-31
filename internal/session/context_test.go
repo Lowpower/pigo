@@ -251,3 +251,60 @@ func TestAppendCompactionJSONLOptionalFields(t *testing.T) {
 		t.Fatalf("usage=%v", last["usage"])
 	}
 }
+
+func TestPiShapedJSONLFixtureRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pi-shaped.jsonl")
+	body := `{"type":"session","version":3,"id":"sid","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/tmp"}
+{"type":"message","id":"m1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"old"}}
+{"type":"message","id":"m2","parentId":"m1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","content":"ok"}}
+{"type":"custom_message","id":"n1","parentId":"m2","timestamp":"2026-01-01T00:00:02.500Z","customType":"note","content":"injected","display":true}
+{"type":"compaction","id":"c1","parentId":"n1","timestamp":"2026-01-01T00:00:03.000Z","summary":"sum","firstKeptEntryId":"n1","tokensBefore":42,"fromHook":true,"details":{"readFiles":["a.go"]},"usage":{"input":1,"output":2,"totalTokens":3,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}}
+{"type":"branch_summary","id":"b1","parentId":"c1","timestamp":"2026-01-01T00:00:04.000Z","fromId":"m2","summary":"branch-sum","fromHook":true}
+{"type":"message","id":"m3","parentId":"b1","timestamp":"2026-01-01T00:00:05.000Z","message":{"role":"user","content":"next"}}
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var custom, compact, branch *Entry
+	ents := opened.Entries()
+	for i := range ents {
+		e := ents[i]
+		switch e.Type {
+		case "custom_message":
+			copy := e
+			custom = &copy
+		case "compaction":
+			copy := e
+			compact = &copy
+		case "branch_summary":
+			copy := e
+			branch = &copy
+		}
+	}
+	if custom == nil || custom.Summary != "" || custom.CustomType != "note" {
+		t.Fatalf("custom_message=%+v", custom)
+	}
+	if compact == nil || !compact.FromHook || compact.FirstKeptEntryID != "n1" || len(compact.Details) == 0 || compact.Usage == nil {
+		t.Fatalf("compaction=%+v", compact)
+	}
+	if branch == nil || !branch.FromHook || branch.FromID != "m2" || len(branch.Details) != 0 {
+		t.Fatalf("branch_summary=%+v", branch)
+	}
+	msgs := RestoreAIMessages(ContextEntries(opened))
+	var texts []string
+	for _, msg := range msgs {
+		texts = append(texts, msg.Content)
+	}
+	joined := strings.Join(texts, "|")
+	if strings.Contains(joined, "old") {
+		t.Fatalf("old leaked: %s", joined)
+	}
+	if !strings.Contains(joined, "sum") || !strings.Contains(joined, "injected") || !strings.Contains(joined, "next") {
+		t.Fatalf("context = %s", joined)
+	}
+}
