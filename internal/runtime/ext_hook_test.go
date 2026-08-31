@@ -38,6 +38,30 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				Name: "plan", Type: "boolean", Description: "plan",
 			}},
 		})
+	case "stream":
+		_ = ext.Serve(ext.Handler{
+			Name: "stream-ext",
+			Providers: []ext.ProviderDef{{
+				ID: "capdemo",
+				Args: map[string]any{
+					"name":   "capdemo",
+					"stream": true,
+					"models": []any{map[string]any{"id": "demo"}},
+				},
+			}},
+			OnStream: func(_ map[string]any, emit func(event string, payload map[string]any), _ <-chan struct{}) {
+				emit("start", map[string]any{})
+				emit("text_start", map[string]any{"contentIndex": 0.0})
+				emit("text_delta", map[string]any{"contentIndex": 0.0, "delta": "hello from capdemo"})
+				emit("text_end", map[string]any{"contentIndex": 0.0, "content": "hello from capdemo"})
+				emit("done", map[string]any{
+					"message": map[string]any{
+						"role": "assistant", "stopReason": "stop",
+						"content": []any{map[string]any{"type": "text", "text": "hello from capdemo"}},
+					},
+				})
+			},
+		})
 	}
 	os.Exit(0)
 }
@@ -101,5 +125,28 @@ func TestUnclaimedFlags(t *testing.T) {
 	left := e.UnclaimedFlags()
 	if len(left) != 1 || left[0].Name != "orphan" {
 		t.Fatalf("leftover=%+v", left)
+	}
+}
+
+func TestBindExtensionStream(t *testing.T) {
+	h := spawnRuntimeExt(t, "stream", nil)
+	e := &Engine{
+		Opts:     Options{AgentDir: t.TempDir(), Config: config.Config{Provider: "capdemo", Model: "demo"}},
+		Provider: "capdemo",
+		Hosts:    []*ext.Host{h},
+	}
+	e.applyProviders()
+	t.Cleanup(func() { e.dropAllProviders() })
+	fn := e.bindStream("capdemo")
+	if fn == nil {
+		t.Fatal("missing stream")
+	}
+	es, err := fn(context.Background(), ai.Context{}, ai.Options{Model: "demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, msg := es.Collect()
+	if msg == nil || msg.Text() != "hello from capdemo" {
+		t.Fatalf("got %+v", msg)
 	}
 }

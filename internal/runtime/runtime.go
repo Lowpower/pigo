@@ -160,7 +160,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 	sf := boundStream(opts.AgentDir, provider)
 	if sf == nil {
-		sf, provider = ai.DefaultStreamFn()
+		sf, _ = ai.DefaultStreamFn()
 	}
 
 	reg := tools.Default()
