@@ -96,7 +96,14 @@ func (s *EventStream) push(ctx context.Context, ev Event) bool {
 	}
 }
 
-// end closes the stream. It must be called exactly once by the producer.
+// Push sends an event to consumers. False means ctx was cancelled.
+func (s *EventStream) Push(ctx context.Context, ev Event) bool {
+	return s.push(ctx, ev)
+}
+
+// Close ends the stream. It must be called exactly once by the producer.
+func (s *EventStream) Close() { s.end() }
+
 func (s *EventStream) end() { close(s.ch) }
 
 // Events returns the receive channel to range over.

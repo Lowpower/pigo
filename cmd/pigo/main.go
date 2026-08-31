@@ -25,7 +25,10 @@ import (
 )
 
 func main() {
-	os.Args = append([]string{os.Args[0]}, expandShortFlags(os.Args[1:])...)
+	expanded := expandShortFlags(os.Args[1:])
+	rest, unknown := peelUnknownFlags(expanded)
+	extraFlags = unknown
+	os.Args = append([]string{os.Args[0]}, rest...)
 	if err := newRootCmd().Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -422,11 +425,16 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		CatalogBaseURL: catalogURL,
 		Offline:        f.offline,
 		SessionDir:     sessionDir,
+		UnknownFlags:   extraFlags,
+		InputSource:    inputSource(mode),
 	})
 	if err != nil {
 		return err
 	}
 	defer eng.Close()
+	if leftover := eng.UnclaimedFlags(); len(leftover) > 0 {
+		return fmt.Errorf("%s", formatUnclaimed(leftover))
+	}
 
 	ctx := cmd.Context()
 	out := cmd.OutOrStdout()

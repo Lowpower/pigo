@@ -70,6 +70,8 @@ type Host struct {
 	closed         bool
 	waitErr        error
 	waitDone       chan struct{}
+
+	providerHook func(id string, args map[string]any, drop bool)
 }
 
 // Spawn starts an extension process (argv) and completes the handshake: it waits
@@ -200,7 +202,11 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 		case protocol.TypeRegisterProvider:
 			h.mu.Lock()
 			h.providers = append(h.providers, registeredProvider{id: m.Name, args: m.Args})
+			hook := h.providerHook
 			h.mu.Unlock()
+			if hook != nil {
+				hook(m.Name, m.Args, false)
+			}
 		case protocol.TypeUnregisterProvider:
 			h.mu.Lock()
 			filtered := h.providers[:0]
@@ -210,7 +216,11 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 				}
 			}
 			h.providers = filtered
+			hook := h.providerHook
 			h.mu.Unlock()
+			if hook != nil {
+				hook(m.Name, nil, true)
+			}
 		case protocol.TypeGetFlag:
 			h.replyFlag(m.ID, m.Name)
 		case protocol.TypeInitialized:
@@ -298,10 +308,34 @@ func (h *Host) Tools() []ai.Tool {
 	return out
 }
 
+// Name is the spawn label (usually argv0).
+func (h *Host) Name() string { return h.name }
+
 // SetUI installs the RPC (or TUI) handler for extension UI requests.
 func (h *Host) SetUI(ui func(method string, args map[string]any, timeout time.Duration) map[string]any) {
 	h.mu.Lock()
 	h.ui = ui
+	h.mu.Unlock()
+}
+
+// SetNotify replaces the notify callback after spawn.
+func (h *Host) SetNotify(fn func(level, text string)) {
+	h.mu.Lock()
+	h.notify = fn
+	h.mu.Unlock()
+}
+
+// SetStatus replaces the status_line_item callback after spawn.
+func (h *Host) SetStatus(fn func(key, text string)) {
+	h.mu.Lock()
+	h.status = fn
+	h.mu.Unlock()
+}
+
+// SetProviderHook is called for register/unregister after the handshake.
+func (h *Host) SetProviderHook(fn func(id string, args map[string]any, drop bool)) {
+	h.mu.Lock()
+	h.providerHook = fn
 	h.mu.Unlock()
 }
 

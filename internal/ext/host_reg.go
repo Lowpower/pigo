@@ -3,6 +3,8 @@ package ext
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 
 	"github.com/Lowpower/pigo/internal/protocol"
 )
@@ -68,6 +70,7 @@ type registeredProvider struct {
 	args map[string]any
 }
 
+// Commands returns slash commands registered by this extension.
 func (h *Host) Commands() []RegisteredCommand {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -75,6 +78,7 @@ func (h *Host) Commands() []RegisteredCommand {
 	return out
 }
 
+// HasShortcut reports whether the extension registered this key id.
 func (h *Host) HasShortcut(name string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -86,12 +90,14 @@ func (h *Host) HasShortcut(name string) bool {
 	return false
 }
 
+// Shortcuts returns keybindings registered by this extension.
 func (h *Host) Shortcuts() []RegisteredShortcut {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]RegisteredShortcut(nil), h.shortcuts...)
 }
 
+// FlagValue returns the claimed CLI value or the registered default.
 func (h *Host) FlagValue(name string) (any, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -108,6 +114,14 @@ func (h *Host) FlagValue(name string) (any, bool) {
 	return nil, false
 }
 
+// ClaimedFlag reports whether register_flag consumed this leftover name.
+func (h *Host) ClaimedFlag(name string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.claimedUnknown[name]
+}
+
+// UnclaimedFlags are leftovers this host did not register.
 func (h *Host) UnclaimedFlags() []UnknownFlag {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -120,12 +134,14 @@ func (h *Host) UnclaimedFlags() []UnknownFlag {
 	return out
 }
 
+// Subscribed reports whether the extension asked for this event.
 func (h *Host) Subscribed(event string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.subscribed[event]
 }
 
+// Providers returns JSON provider registrations from this extension.
 func (h *Host) Providers() []ProviderDef {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -136,10 +152,12 @@ func (h *Host) Providers() []ProviderDef {
 	return out
 }
 
+// SendCommand delivers a slash command (fire-and-forget).
 func (h *Host) SendCommand(name, args string) error {
 	return h.send(protocol.Message{Type: protocol.TypeCommand, Name: name, Text: args})
 }
 
+// SendShortcut delivers a keybinding (fire-and-forget).
 func (h *Host) SendShortcut(name string) error {
 	return h.send(protocol.Message{Type: protocol.TypeShortcut, Name: name})
 }
@@ -154,6 +172,7 @@ func (h *Host) QueryEvent(ctx context.Context, event string, payload map[string]
 		Type: protocol.TypeEvent, Event: event, Payload: payload,
 	}, protocol.TypeEventResult)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "pigo: extension %q event %s: %v\n", h.name, event, err)
 		return map[string]any{}, nil
 	}
 	if m.Payload == nil {
@@ -241,15 +260,4 @@ func (h *Host) replyFlag(id, name string) {
 		payload["value"] = f.value
 	}
 	_ = h.send(protocol.Message{Type: protocol.TypeFlagValue, ID: id, Payload: payload})
-}
-
-func truthy(v any) bool {
-	switch t := v.(type) {
-	case bool:
-		return t
-	case string:
-		return t == "true" || t == "1"
-	default:
-		return false
-	}
 }

@@ -21,7 +21,9 @@ import (
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/skills"
+	"github.com/Lowpower/pigo/internal/slash"
 	"github.com/Lowpower/pigo/internal/tools"
+	"github.com/Lowpower/pigo/internal/trust"
 )
 
 // Options is the shared engine used by TUI, print, json, and rpc modes.
@@ -56,6 +58,8 @@ type Options struct {
 	CatalogBaseURL string
 	Offline        bool
 	SessionDir     string
+	UnknownFlags   []ext.UnknownFlag
+	InputSource    string
 }
 
 // Engine is a configured agent runner.
@@ -89,6 +93,12 @@ type Engine struct {
 	retryMu      sync.Mutex
 	retryCancel  context.CancelFunc
 	retryAttempt int
+
+	extCommands    []extCommand
+	extProviderIDs map[string]bool
+	providerBackup map[string]providerBackup
+	extStreams     map[string]ai.StreamFn
+	stopAfterTools bool
 }
 
 // New applies auth, discovers skills, loads tools/extensions, and builds the prompt.
@@ -152,13 +162,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	if sf == nil {
 		sf, provider = ai.DefaultStreamFn()
 	}
-	if opts.Config.BlockImages() {
-		inner := sf
-		sf = func(ctx context.Context, req ai.Context, opt ai.Options) (*ai.EventStream, error) {
-			req.Messages = ai.BlockImages(req.Messages)
-			return inner(ctx, req, opt)
-		}
-	}
+
 	reg := tools.Default()
 	if opts.NoTools {
 		reg = tools.NewRegistry()
@@ -177,7 +181,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	var hosts []*ext.Host
 	if !opts.NoTools {
 		var err error
-		hosts, reg, err = spawnExtensions(ctx, extSpecs, reg)
+		hosts, reg, err = spawnExtensions(ctx, extSpecs, reg, opts.UnknownFlags)
 		if err != nil {
 			return nil, err
 		}
@@ -213,6 +217,21 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 	e.Steering = e.drainSteer
 	e.FollowUp = e.drainFollow
+	e.applyProviders()
+	e.rebuildCommands()
+	e.applyProjectTrust(ctx)
+	if fn := e.bindStream(provider); fn != nil {
+		e.Stream = fn
+	} else if e.Stream != nil {
+		e.Stream = e.gatedStream(e.Stream)
+	}
+	if opts.Config.BlockImages() && e.Stream != nil {
+		inner := e.Stream
+		e.Stream = func(ctx context.Context, req ai.Context, opt ai.Options) (*ai.EventStream, error) {
+			req.Messages = ai.BlockImages(req.Messages)
+			return inner(ctx, req, opt)
+		}
+	}
 	return e, nil
 }
 
@@ -232,14 +251,19 @@ func collectExtensionSpecs(ctx context.Context, opts Options) []string {
 	return specs
 }
 
-func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry) ([]*ext.Host, *tools.Registry, error) {
+func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, unknown []ext.UnknownFlag) ([]*ext.Host, *tools.Registry, error) {
 	var hosts []*ext.Host
 	for _, spec := range specs {
 		argv := strings.Fields(spec)
 		if len(argv) == 0 {
 			continue
 		}
-		h, err := ext.Spawn(ctx, argv[0], argv, ext.Options{})
+		h, err := ext.Spawn(ctx, argv[0], argv, ext.Options{
+			UnknownFlags: unknown,
+			Notify: func(level, text string) {
+				fmt.Fprintf(os.Stderr, "pigo [%s] %s\n", level, text)
+			},
+		})
 		if err != nil {
 			return hosts, reg, fmt.Errorf("extension %q: %w", spec, err)
 		}
@@ -249,6 +273,40 @@ func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry) (
 		}
 	}
 	return hosts, reg, nil
+}
+
+func (e *Engine) applyProjectTrust(ctx context.Context) {
+	if e.Opts.ProjectTrusted || !trust.HasProjectResources(e.Opts.Cwd) {
+		return
+	}
+	res := e.DispatchEvent(ctx, "project_trust", map[string]any{"cwd": e.Opts.Cwd})
+	switch asString(res["trusted"]) {
+	case "yes":
+		e.Opts.ProjectTrusted = true
+		if asBool(res["remember"]) {
+			_ = trust.Open(e.Opts.AgentDir).Set(e.Opts.Cwd, true)
+		}
+		if !e.Opts.NoSkills {
+			e.Skills, _ = skills.Discover(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SkillPaths, true, true)
+		}
+		e.Templates = prompt.DiscoverTemplates(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.PromptPaths, !e.Opts.NoPromptTpls, true)
+		e.System = prompt.Build(prompt.Options{
+			Cwd: e.Opts.Cwd, AgentDir: e.Opts.AgentDir, Custom: e.Opts.SystemPrompt,
+			Append: e.Opts.AppendSystem, NoContextFiles: e.Opts.NoContextFiles,
+			ProjectTrusted: true, Skills: e.Skills, IncludeToolHints: true,
+		})
+		if e.Tools != nil {
+			e.System = prompt.Build(prompt.Options{
+				Cwd: e.Opts.Cwd, AgentDir: e.Opts.AgentDir, Custom: e.Opts.SystemPrompt,
+				Append: e.Opts.AppendSystem, NoContextFiles: e.Opts.NoContextFiles,
+				ProjectTrusted: true, Skills: e.Skills, Tools: e.Tools.AITools(), IncludeToolHints: true,
+			})
+		}
+	case "no":
+		if asBool(res["remember"]) {
+			_ = trust.Open(e.Opts.AgentDir).Set(e.Opts.Cwd, false)
+		}
+	}
 }
 
 func (e *Engine) emitSession(v any) {
@@ -307,6 +365,27 @@ func (e *Engine) compactionSettings() compaction.Settings {
 func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Message, s compaction.Settings) ([]ai.Message, string, error) {
 	e.setCompacting(true)
 	defer e.setCompacting(false)
+	hook := e.DispatchEvent(ctx, "session_before_compact", map[string]any{
+		"reason": reason, "willRetry": false, "customInstructions": s.CustomInstructions,
+	})
+	if asBool(hook["cancel"]) {
+		return msgs, "", nil
+	}
+	if replacement := asString(hook["compaction"]); replacement != "" {
+		e.emitSession(map[string]any{"type": "compaction_start", "reason": reason})
+		if e.Opts.Session != nil {
+			keep := session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, compaction.FindCutIndex(msgs, s.KeepRecentTokens))
+			tokens := compaction.EstimateContextTokens(msgs)
+			if entry, err := e.Opts.Session.AppendCompaction(replacement, keep, tokens); err == nil && entry != nil {
+				e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
+			}
+		}
+		e.emitSession(map[string]any{
+			"type": "compaction_end", "reason": reason,
+			"result": map[string]any{"summary": replacement}, "aborted": false, "willRetry": false,
+		})
+		return msgs, replacement, nil
+	}
 	e.emitSession(map[string]any{"type": "compaction_start", "reason": reason})
 	var out []ai.Message
 	var summary string
@@ -504,7 +583,37 @@ func (e *Engine) Executor() agent.ToolExecutor {
 		if e.Tools == nil {
 			return "", true
 		}
-		return e.Tools.Execute(ctx, c.Name, c.Args)
+		payload := map[string]any{
+			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
+		}
+		pre := e.DispatchEvent(ctx, "tool_call", payload)
+		if v := asMap(pre["input"]); v != nil {
+			c.Args = v
+		}
+		if asBool(pre["block"]) {
+			if asBool(pre["terminate"]) {
+				e.mu.Lock()
+				e.stopAfterTools = true
+				e.mu.Unlock()
+			}
+			reason := asString(pre["reason"])
+			if reason == "" {
+				reason = "blocked by extension"
+			}
+			return reason, true
+		}
+		result, isErr := e.Tools.Execute(ctx, c.Name, c.Args)
+		post := e.DispatchEvent(ctx, "tool_result", map[string]any{
+			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
+			"content": result, "isError": isErr,
+		})
+		if v, ok := post["content"]; ok {
+			result = fmt.Sprint(v)
+		}
+		if v, ok := post["isError"]; ok {
+			isErr = asBool(v)
+		}
+		return result, isErr
 	})
 }
 
@@ -529,21 +638,75 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 
 // RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
 func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent) *agent.Stream {
+	e.mu.Lock()
+	e.stopAfterTools = false
+	e.mu.Unlock()
+
+	if cmd, ok := slash.Parse(user); ok && e.DispatchCommand(cmd.Name, cmd.Rest) {
+		return agent.Finished(nil)
+	}
+
+	source := e.Opts.InputSource
+	if source == "" {
+		source = "cli"
+	}
+	in := e.DispatchEvent(ctx, "input", map[string]any{
+		"text": user, "images": imagesPayload(images), "source": source,
+	})
+	action := asString(in["action"])
+	if action == "handled" {
+		return agent.Finished(nil)
+	}
+	if action == "transform" {
+		if t := asString(in["text"]); t != "" {
+			user = t
+		}
+		if imgs := imagesFromPayload(in["images"]); len(imgs) > 0 {
+			images = imgs
+		}
+	}
+
+	if cmd, ok := slash.Parse(user); ok && !slash.IsBuiltin(cmd.Name) && !e.hasCommand(cmd.Name) {
+		if expanded, ok := prompt.ExpandTemplate(user, e.Templates); ok {
+			user = expanded
+		} else if e.Opts.Config.SkillCommandsEnabled() {
+			if body, ok := skills.ExpandCommand(e.Skills, cmd.Name, cmd.Rest); ok {
+				user = body
+			}
+		}
+	}
+
+	sys := e.System
+	start := e.DispatchEvent(ctx, "before_agent_start", map[string]any{
+		"prompt": user, "images": imagesPayload(images), "systemPrompt": sys,
+	})
+	if s := asString(start["systemPrompt"]); s != "" {
+		sys = s
+	}
+
 	userMsg := ai.Message{Role: ai.RoleUser, Content: user, Images: images}
 	history = append(append([]ai.Message(nil), history...), userMsg)
 	compacted, _, err := e.MaybeCompact(ctx, history)
 	if err == nil {
 		history = compacted
 	}
-	return e.runLoop(ctx, history, []ai.Message{userMsg})
+	return e.runLoopWithSystem(ctx, history, []ai.Message{userMsg}, sys)
 }
 
 func (e *Engine) runLoop(ctx context.Context, history, newUsers []ai.Message) *agent.Stream {
-	req := ai.Context{System: e.System, Messages: history}
+	return e.runLoopWithSystem(ctx, history, newUsers, e.System)
+}
+
+func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.Message, system string) *agent.Stream {
+	req := ai.Context{System: system, Messages: history}
 	if e.Tools != nil {
 		req.Tools = e.Tools.AITools()
 	}
-	return agent.Run(ctx, e.Stream, req, e.Executor(), agent.Config{
+	sf := e.Stream
+	if sf == nil {
+		sf, _ = ai.DefaultStreamFn()
+	}
+	return agent.Run(ctx, sf, req, e.Executor(), agent.Config{
 		Model:           e.Opts.Config.ResolvedModel(),
 		Thinking:        e.Opts.Config.Thinking,
 		Steering:        e.Steering,
@@ -665,7 +828,10 @@ func (e *Engine) Reload() {
 	for _, h := range e.Hosts {
 		_ = h.Close()
 	}
+	e.dropAllProviders()
 	e.Hosts = nil
+	e.extCommands = nil
+	e.extStreams = nil
 	reg := tools.Default()
 	if e.Opts.NoTools {
 		reg = tools.NewRegistry()
@@ -677,13 +843,18 @@ func (e *Engine) Reload() {
 	if !e.Opts.NoTools {
 		specs := collectExtensionSpecs(ctx, e.Opts)
 		e.Opts.Extensions = specs
-		hosts, r, err := spawnExtensions(ctx, specs, reg)
+		hosts, r, err := spawnExtensions(ctx, specs, reg, e.Opts.UnknownFlags)
 		if err == nil {
 			e.Hosts = hosts
 			reg = r
 		}
 	}
 	e.Tools = reg
+	e.applyProviders()
+	e.rebuildCommands()
+	if fn := e.bindStream(e.Provider); fn != nil {
+		e.Stream = fn
+	}
 
 	e.System = prompt.Build(prompt.Options{
 		Cwd:              e.Opts.Cwd,
@@ -816,7 +987,7 @@ func (e *Engine) setModel(provider, id, thinking string, persist bool) {
 			}
 		}
 		if e.Opts.AgentDir != "" {
-			if fn := boundStream(e.Opts.AgentDir, provider); fn != nil {
+			if fn := e.bindStream(provider); fn != nil {
 				e.Stream = fn
 			}
 		}

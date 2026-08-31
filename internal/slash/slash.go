@@ -1,3 +1,4 @@
+// Package slash parses built-in and extension slash commands.
 package slash
 
 import (
@@ -50,6 +51,12 @@ func lookup(name string) (Command, bool) {
 	return Command{}, false
 }
 
+// IsBuiltin reports whether name (or an alias) is a built-in slash command.
+func IsBuiltin(name string) bool {
+	_, ok := lookup(name)
+	return ok
+}
+
 // Builtins is the built-in slash command list.
 func Builtins() []Command {
 	return []Command{
@@ -88,9 +95,19 @@ func Builtins() []Command {
 
 // HelpText formats /help output.
 func HelpText() string {
+	return HelpTextWith(nil)
+}
+
+// HelpTextWith formats /help including extra (extension) commands.
+func HelpTextWith(extra []Command) string {
 	var b strings.Builder
 	b.WriteString("slash commands:\n")
-	for _, c := range Builtins() {
+	seen := map[string]bool{}
+	for _, c := range append(append([]Command{}, Builtins()...), extra...) {
+		if seen[c.Name] {
+			continue
+		}
+		seen[c.Name] = true
 		b.WriteString("  /")
 		b.WriteString(c.Name)
 		b.WriteString(" — ")

@@ -94,6 +94,16 @@ func (s *Stream) push(ctx context.Context, ev Event) bool {
 
 func (s *Stream) end() { close(s.ch) }
 
+// Finished returns a stream that emits AgentEnd and closes.
+func Finished(msgs []Msg) *Stream {
+	s := newStream(1)
+	go func() {
+		defer s.end()
+		s.ch <- Event{Type: EventAgentEnd, Messages: msgs}
+	}()
+	return s
+}
+
 // Events returns the receive channel to range over.
 func (s *Stream) Events() <-chan Event { return s.ch }
 

@@ -5,6 +5,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/Lowpower/pigo/internal/ai"
 )
 
 func TestCapHelperProcess(_ *testing.T) {
@@ -30,7 +32,7 @@ func TestCapHelperProcess(_ *testing.T) {
 			Default:     false,
 		}},
 		Events: []string{"tool_call"},
-		OnEvent: func(event string, payload map[string]any) map[string]any {
+		OnEvent: func(event string, _ map[string]any) map[string]any {
 			if event == "tool_call" {
 				return map[string]any{"block": true, "reason": "blocked"}
 			}
@@ -103,5 +105,45 @@ func TestSendCommandDoesNotHang(t *testing.T) {
 	}
 	if err := h.SendShortcut("ctrl+shift+p"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStreamHelperProcess(_ *testing.T) {
+	if os.Getenv("PIGO_EXT_HELPER") != "stream" {
+		return
+	}
+	_ = Serve(Handler{
+		Name: "stream-ext",
+		OnStream: func(_ map[string]any, emit func(event string, payload map[string]any), _ <-chan struct{}) {
+			emit("start", map[string]any{})
+			emit("text_start", map[string]any{"contentIndex": 0.0})
+			emit("text_delta", map[string]any{"contentIndex": 0.0, "delta": "hi"})
+			emit("text_end", map[string]any{"contentIndex": 0.0, "content": "hi"})
+			emit("done", map[string]any{
+				"message": map[string]any{
+					"role": "assistant", "stopReason": "stop",
+					"content": []any{map[string]any{"type": "text", "text": "hi"}},
+				},
+			})
+		},
+	})
+	os.Exit(0)
+}
+
+func TestHostStreamScripted(t *testing.T) {
+	h, err := Spawn(context.Background(), "stream-ext",
+		[]string{os.Args[0], "-test.run=^TestStreamHelperProcess$"},
+		Options{Env: []string{"PIGO_EXT_HELPER=stream"}})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	defer func() { _ = h.Close() }()
+	es, err := h.Stream("cap")(context.Background(), ai.Context{}, ai.Options{Model: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, msg := es.Collect()
+	if msg == nil || msg.Text() != "hi" {
+		t.Fatalf("message=%+v", msg)
 	}
 }

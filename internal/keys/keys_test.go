@@ -117,6 +117,22 @@ func TestPasteImageDefaultKeys(t *testing.T) {
 	}
 }
 
+func TestBindExtensionSkipsReservedAndOverrides(t *testing.T) {
+	m := newManager("", false)
+	if m.BindExtension("ctrl+c", "nope") {
+		t.Fatal("reserved ctrl+c must not bind")
+	}
+	if !m.BindExtension("ctrl+shift+u", "ext") {
+		t.Fatal("free key should bind")
+	}
+	if _, ok := m.ExtensionKey("ctrl+shift+u"); !ok {
+		t.Fatal("missing extension key")
+	}
+	if !strings.Contains(m.HotkeysText(), "ext") {
+		t.Fatal("hotkeys should list extension shortcut")
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
 		(func() bool {

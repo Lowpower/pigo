@@ -15,6 +15,12 @@ type Manager struct {
 	user     map[string][]string
 	resolved map[string][]string
 	path     string
+	ext      []extShortcut
+}
+
+type extShortcut struct {
+	Key         string
+	Description string
 }
 
 // Def is one action's default keys and help text.
@@ -52,6 +58,7 @@ func (m *Manager) Reload() {
 		m.user = loadFile(m.path)
 	}
 	m.rebuild()
+	m.ext = nil
 }
 
 // Matches reports whether key (bubbletea KeyMsg.String()) fires action.
@@ -97,7 +104,86 @@ func (m *Manager) HotkeysText() string {
 		b.WriteByte('\n')
 	}
 	b.WriteString("  /help                 list slash commands\n")
+	for _, s := range m.ext {
+		label := s.Key
+		if label == "" {
+			label = "(unbound)"
+		}
+		b.WriteString("  ")
+		b.WriteString(pad(label, 22))
+		b.WriteString(" ")
+		b.WriteString(s.Description)
+		b.WriteByte('\n')
+	}
 	return b.String()
+}
+
+var reservedActions = []string{
+	"app.interrupt",
+	"app.clear",
+	"app.exit",
+	"app.suspend",
+	"app.thinking.cycle",
+	"app.model.cycleForward",
+	"app.model.cycleBackward",
+	"app.model.select",
+	"app.tools.expand",
+	"app.thinking.toggle",
+	"app.editor.external",
+	"app.message.copy",
+	"app.message.followUp",
+	"tui.input.submit",
+	"tui.select.confirm",
+	"tui.select.cancel",
+	"tui.input.copy",
+	"tui.editor.deleteToLineEnd",
+}
+
+// BindExtension registers an extension shortcut. Reserved built-in keys are
+// skipped. A later extension on the same key wins.
+func (m *Manager) BindExtension(key, desc string) (ok bool) {
+	key = Normalize(key)
+	if key == "" {
+		return false
+	}
+	if m.keyRestricted(key) {
+		return false
+	}
+	filtered := m.ext[:0]
+	for _, s := range m.ext {
+		if s.Key != key {
+			filtered = append(filtered, s)
+		}
+	}
+	m.ext = append(filtered, extShortcut{Key: key, Description: desc})
+	return true
+}
+
+// ClearExtensions drops extension shortcuts (used on /reload).
+func (m *Manager) ClearExtensions() {
+	m.ext = nil
+}
+
+// ExtensionKey reports whether key is an extension shortcut.
+func (m *Manager) ExtensionKey(key string) (desc string, ok bool) {
+	want := Normalize(key)
+	for _, s := range m.ext {
+		if s.Key == want {
+			return s.Description, true
+		}
+	}
+	return "", false
+}
+
+func (m *Manager) keyRestricted(key string) bool {
+	for _, action := range reservedActions {
+		for _, k := range m.resolved[action] {
+			if Normalize(k) == key {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func pad(s string, n int) string {

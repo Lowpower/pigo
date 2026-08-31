@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -181,6 +182,22 @@ func (m Model) footerText() string {
 		line2 += "  " + strings.Join(flags, " · ")
 	}
 	hint := "Ctrl+T thinking · Ctrl+O tools · /help · Ctrl+D exit"
+	if len(m.extStatus) > 0 {
+		var keys []string
+		for k := range m.extStatus {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var items []string
+		for _, k := range keys {
+			if v := m.extStatus[k]; v != "" {
+				items = append(items, v)
+			}
+		}
+		if len(items) > 0 {
+			hint = strings.Join(items, " · ") + "\n" + hint
+		}
+	}
 	var b strings.Builder
 	if pwd != "" {
 		b.WriteString(pwd)

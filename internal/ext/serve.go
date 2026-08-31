@@ -7,10 +7,19 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/protocol"
 )
+
+var flagStore sync.Map
+
+// Flag returns a CLI flag value this process claimed during Serve handshake.
+func Flag(name string) (any, bool) {
+	v, ok := flagStore.Load(name)
+	return v, ok
+}
 
 // ToolDef is a tool an extension exposes.
 type ToolDef struct {
@@ -43,6 +52,10 @@ func Serve(h Handler) error {
 }
 
 func serveRW(h Handler, in io.Reader, out io.Writer) error {
+	flagStore.Range(func(k, _ any) bool {
+		flagStore.Delete(k)
+		return true
+	})
 	r := bufio.NewReader(in)
 
 	if err := protocol.WriteMessage(out, protocol.Message{Type: protocol.TypeHello, ExtName: h.Name, APIVersion: APIVersion}); err != nil {
@@ -107,6 +120,11 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 				return ignoreEOF(err)
 			}
 			if m.Type == protocol.TypeFlagValue && m.ID == id {
+				if m.Payload != nil {
+					if v, ok := m.Payload["value"]; ok {
+						flagStore.Store(f.Name, v)
+					}
+				}
 				break
 			}
 		}

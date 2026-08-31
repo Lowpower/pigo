@@ -60,6 +60,16 @@ func TestScopedModelsDescription(t *testing.T) {
 	}
 }
 
+func TestIsBuiltinAndHelpTextWith(t *testing.T) {
+	if !IsBuiltin("help") || !IsBuiltin("quit") || IsBuiltin("cmd") {
+		t.Fatal("builtin lookup")
+	}
+	text := HelpTextWith([]Command{{Name: "cmd", Description: "demo"}})
+	if !contains(text, "/cmd") {
+		t.Fatalf("help extra:\n%s", text)
+	}
+}
+
 func TestHelpListsShareAndChangelog(t *testing.T) {
 	text := HelpText()
 	if !contains(text, "/share") || !contains(text, "gist") {
