@@ -84,6 +84,9 @@ func ApplyEnv(agentDir string) {
 				key = resolved
 			}
 		}
+		for env, val := range c.Env {
+			set(env, val)
+		}
 		switch id {
 		case "anthropic":
 			set("ANTHROPIC_API_KEY", key)

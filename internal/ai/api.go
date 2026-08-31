@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -136,6 +137,7 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 			}
 			c.Headers = merged
 		}
+		c.BaseURL = expandPlaceholders(c.BaseURL)
 		api := models.APIFor(provider, opts.Model)
 		if api == "" {
 			api = "unknown"
@@ -151,6 +153,20 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 // StreamWithAuth builds a StreamFn from resolved provider auth.
 func StreamWithAuth(provider, apiKey, baseURL string, headers map[string]string) StreamFn {
 	return StreamFor(provider, ClientConfig{APIKey: apiKey, BaseURL: baseURL, Headers: headers})
+}
+
+var placeholderRE = regexp.MustCompile(`\{[A-Z][A-Z0-9_]*\}`)
+
+func expandPlaceholders(s string) string {
+	if s == "" || !strings.Contains(s, "{") {
+		return s
+	}
+	return placeholderRE.ReplaceAllStringFunc(s, func(tok string) string {
+		if v := os.Getenv(tok[1 : len(tok)-1]); v != "" {
+			return v
+		}
+		return tok
+	})
 }
 
 func envKey(names ...string) string {

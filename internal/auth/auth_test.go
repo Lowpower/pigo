@@ -226,6 +226,21 @@ func (s staticOAuth) Refresh(ctx context.Context, c Credential) (Credential, err
 }
 func (s staticOAuth) ToAuth(c Credential) (ModelAuth, error) { return s.toAuth(c) }
 
+func TestApplyEnvWritesCredentialEnv(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "")
+	s := Open(dir)
+	if _, err := s.Modify("cloudflare-workers-ai", func(*Credential) (*Credential, error) {
+		return &Credential{Type: TypeAPIKey, Key: "k", Env: map[string]string{"CLOUDFLARE_ACCOUNT_ID": "acct"}}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ApplyEnv(dir)
+	if os.Getenv("CLOUDFLARE_ACCOUNT_ID") != "acct" {
+		t.Fatalf("CLOUDFLARE_ACCOUNT_ID = %q", os.Getenv("CLOUDFLARE_ACCOUNT_ID"))
+	}
+}
+
 func TestCheckAuthGoogleEnv(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "g-key")
 	s := Open(t.TempDir())
@@ -260,6 +275,43 @@ func TestCheckAuthKimiAPIKeyEnv(t *testing.T) {
 	chk := CheckAuth(s, "kimi-coding")
 	if chk == nil || chk.Source != "KIMI_API_KEY" {
 		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthCopilotTokenEnv(t *testing.T) {
+	t.Setenv("COPILOT_GITHUB_TOKEN", "t")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "github-copilot")
+	if chk == nil || chk.Source != "COPILOT_GITHUB_TOKEN" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthCloudflareWorkersNeedsAccount(t *testing.T) {
+	t.Setenv("CLOUDFLARE_API_KEY", "k")
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "")
+	s := Open(t.TempDir())
+	if chk := CheckAuth(s, "cloudflare-workers-ai"); chk != nil {
+		t.Fatalf("key alone should not auth: %+v", chk)
+	}
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+	chk := CheckAuth(s, "cloudflare-workers-ai")
+	if chk == nil {
+		t.Fatal("expected workers-ai auth with key+account")
+	}
+}
+
+func TestCheckAuthCloudflareGatewayNeedsGatewayID(t *testing.T) {
+	t.Setenv("CLOUDFLARE_API_KEY", "k")
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+	t.Setenv("CLOUDFLARE_GATEWAY_ID", "")
+	s := Open(t.TempDir())
+	if chk := CheckAuth(s, "cloudflare-ai-gateway"); chk != nil {
+		t.Fatalf("missing gateway id should not auth: %+v", chk)
+	}
+	t.Setenv("CLOUDFLARE_GATEWAY_ID", "gw")
+	if chk := CheckAuth(s, "cloudflare-ai-gateway"); chk == nil {
+		t.Fatal("expected gateway auth")
 	}
 }
 
