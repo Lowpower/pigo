@@ -77,6 +77,13 @@ func registerBuiltinAPIs() {
 			return openai(ctx, reqCtx, opts)
 		}
 	})
+	RegisterAPI("azure-openai-responses", func(cfg ClientConfig) StreamFn {
+		base := cfg.BaseURL
+		if base == "" {
+			base = azureResolvedBaseURL()
+		}
+		return (&OpenAIResponsesClient{BaseURL: base, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
+	})
 }
 
 // RegisterAPI adds or replaces an API stream factory.
@@ -167,6 +174,16 @@ func expandPlaceholders(s string) string {
 		}
 		return tok
 	})
+}
+
+func azureResolvedBaseURL() string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("AZURE_OPENAI_BASE_URL")), "/"); v != "" {
+		return v
+	}
+	if res := strings.TrimSpace(os.Getenv("AZURE_OPENAI_RESOURCE_NAME")); res != "" {
+		return "https://" + res + ".openai.azure.com/openai/v1"
+	}
+	return ""
 }
 
 func envKey(names ...string) string {

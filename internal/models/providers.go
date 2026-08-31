@@ -48,6 +48,7 @@ var extraProviders = []extraProvider{
 	}},
 	{ID: "cloudflare-workers-ai", Name: "Cloudflare API key", DefaultAPI: "openai-completions", DefaultID: "@cf/deepseek-ai/deepseek-v4-flash-0731", BaseURL: "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1"},
 	{ID: "cloudflare-ai-gateway", Name: "Cloudflare API key", DefaultAPI: "anthropic-messages", DefaultID: "claude-fable-5", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic"},
+	{ID: "azure-openai-responses", Name: "Azure OpenAI API key", DefaultAPI: "azure-openai-responses", DefaultID: "gpt-4"},
 }
 
 func registerExtraProviders() {

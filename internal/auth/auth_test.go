@@ -301,6 +301,20 @@ func TestCheckAuthCloudflareWorkersNeedsAccount(t *testing.T) {
 	}
 }
 
+func TestCheckAuthAzureNeedsBaseOrResource(t *testing.T) {
+	t.Setenv("AZURE_OPENAI_API_KEY", "k")
+	t.Setenv("AZURE_OPENAI_BASE_URL", "")
+	t.Setenv("AZURE_OPENAI_RESOURCE_NAME", "")
+	s := Open(t.TempDir())
+	if chk := CheckAuth(s, "azure-openai-responses"); chk != nil {
+		t.Fatalf("key alone should not auth: %+v", chk)
+	}
+	t.Setenv("AZURE_OPENAI_RESOURCE_NAME", "myres")
+	if chk := CheckAuth(s, "azure-openai-responses"); chk == nil {
+		t.Fatal("expected azure auth with resource name")
+	}
+}
+
 func TestCheckAuthCloudflareGatewayNeedsGatewayID(t *testing.T) {
 	t.Setenv("CLOUDFLARE_API_KEY", "k")
 	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "acct")

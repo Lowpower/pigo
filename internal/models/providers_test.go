@@ -107,3 +107,16 @@ func TestMixedProvidersAreRegistered(t *testing.T) {
 		t.Fatalf("copilot headers = %#v", copilot.Headers)
 	}
 }
+
+func TestAzureOpenAIResponsesRegistered(t *testing.T) {
+	spec, ok := LookupProvider("azure-openai-responses")
+	if !ok {
+		t.Fatal("missing azure-openai-responses")
+	}
+	if spec.DefaultAPI != "azure-openai-responses" || spec.DefaultID == "" {
+		t.Fatalf("spec = %+v", spec)
+	}
+	if APIFor("azure-openai-responses", spec.DefaultID) != "azure-openai-responses" {
+		t.Fatalf("api = %q", APIFor("azure-openai-responses", spec.DefaultID))
+	}
+}

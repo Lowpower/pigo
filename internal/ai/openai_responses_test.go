@@ -51,6 +51,28 @@ func TestOpenAIResponsesClientHTTP(t *testing.T) {
 	}
 }
 
+func TestStreamForAzureOpenAIResponses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/responses") {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(responsesFixture))
+	}))
+	defer srv.Close()
+
+	stream, err := StreamFor("azure-openai-responses", ClientConfig{APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client()})(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "gpt-4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	if final == nil || final.Text() != "Hello, world" {
+		t.Fatalf("text = %v", final)
+	}
+}
+
 func TestBuildResponsesInputToolPair(t *testing.T) {
 	items := buildResponsesInput(Context{Messages: []Message{
 		{Role: RoleUser, Content: "hi"},

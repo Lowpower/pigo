@@ -109,6 +109,7 @@ func registerBuiltins() {
 	})
 	registerCatalogAPIKeys()
 	registerCloudflareAuth()
+	registerAzureAuth()
 }
 
 func registerProvider(p Provider) {
@@ -219,6 +220,63 @@ func resolveCloudflare(gateway bool) func() *Result {
 		}
 		return &Result{Auth: auth, Env: env, Source: "CLOUDFLARE_API_KEY"}
 	}
+}
+
+func registerAzureAuth() {
+	registerProvider(Provider{
+		ID: "azure-openai-responses",
+		APIKey: &APIKeyHandler{
+			Name:    "Azure OpenAI API key",
+			Login:   azureLogin,
+			Resolve: resolveAzure,
+		},
+	})
+}
+
+func azureLogin(ix Interaction) (Credential, error) {
+	if ix.Prompt == nil {
+		return Credential{}, fmt.Errorf("no prompt available")
+	}
+	key, err := ix.Prompt(Prompt{Type: PromptSecret, Message: "Azure OpenAI API key:"})
+	if err != nil {
+		return Credential{}, err
+	}
+	if key == "" {
+		return Credential{}, fmt.Errorf("empty API key")
+	}
+	endpoint, err := ix.Prompt(Prompt{Type: PromptText, Message: "Azure OpenAI base URL or resource name:"})
+	if err != nil {
+		return Credential{}, err
+	}
+	if endpoint == "" {
+		return Credential{}, fmt.Errorf("empty Azure endpoint")
+	}
+	env := map[string]string{}
+	if strings.Contains(endpoint, "://") {
+		env["AZURE_OPENAI_BASE_URL"] = endpoint
+	} else {
+		env["AZURE_OPENAI_RESOURCE_NAME"] = endpoint
+	}
+	return Credential{Type: TypeAPIKey, Key: key, Env: env}, nil
+}
+
+func resolveAzure() *Result {
+	key := os.Getenv("AZURE_OPENAI_API_KEY")
+	base := azureAuthBaseURL()
+	if key == "" || base == "" {
+		return nil
+	}
+	return &Result{Auth: ModelAuth{APIKey: key, BaseURL: base}, Source: "AZURE_OPENAI_API_KEY"}
+}
+
+func azureAuthBaseURL() string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("AZURE_OPENAI_BASE_URL")), "/"); v != "" {
+		return v
+	}
+	if res := strings.TrimSpace(os.Getenv("AZURE_OPENAI_RESOURCE_NAME")); res != "" {
+		return "https://" + res + ".openai.azure.com/openai/v1"
+	}
+	return ""
 }
 
 // Lookup returns a registered auth provider.
