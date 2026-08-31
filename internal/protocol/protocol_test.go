@@ -13,6 +13,23 @@ func TestFrameRoundTrip(t *testing.T) {
 		{Type: TypeToolCall, ID: "1", Name: "reverse", Args: map[string]any{"text": "abc\nwith newline"}},
 		{Type: TypeToolResult, ID: "1", Result: "cba", IsError: false},
 		{Type: TypeEvent, Event: "before_tool_call", Payload: map[string]any{"tool": "read"}},
+		{Type: TypeEventResult, ID: "e1", Payload: map[string]any{"block": true}},
+		{Type: TypeRegisterCommand, Name: "stats", Description: "show stats"},
+		{Type: TypeRegisterShortcut, Name: "ctrl+shift+p", Description: "toggle"},
+		{Type: TypeRegisterFlag, Name: "plan", Description: "plan mode", Args: map[string]any{"type": "boolean"}},
+		{Type: TypeGetFlag, ID: "f1", Name: "plan"},
+		{Type: TypeFlagValue, ID: "f1", Payload: map[string]any{"value": true}},
+		{Type: TypeShortcut, Name: "ctrl+shift+p"},
+		{Type: TypeCommand, Name: "stats", Text: "today"},
+		{Type: TypeRegisterProvider, Name: "local", Args: map[string]any{"baseUrl": "http://127.0.0.1"}},
+		{Type: TypeUnregisterProvider, Name: "local"},
+		{Type: TypeOAuthLogin, ID: "o1"},
+		{Type: TypeOAuthResult, ID: "o1", Payload: map[string]any{"access": "tok"}},
+		{Type: TypeRefreshModels, ID: "r1"},
+		{Type: TypeRefreshModelsResult, ID: "r1", Payload: map[string]any{"models": []any{}}},
+		{Type: TypeStreamStart, ID: "s1", Payload: map[string]any{"model": "x"}},
+		{Type: TypeStreamEvent, ID: "s1", Event: "text_delta", Payload: map[string]any{"delta": "hi"}},
+		{Type: TypeStreamAbort, ID: "s1"},
 	}
 
 	var buf bytes.Buffer

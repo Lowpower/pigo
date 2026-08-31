@@ -30,8 +30,12 @@ type Options struct {
 	CallTimeout time.Duration
 	// Notify receives the extension's notify messages (level, text). Optional.
 	Notify func(level, text string)
+	// Status receives keyed status_line_item updates (empty text clears).
+	Status func(key, text string)
 	// UI handles extension UI methods (select/confirm/...) in RPC mode.
 	UI func(method string, args map[string]any, timeout time.Duration) map[string]any
+	// UnknownFlags are leftover CLI flags for register_flag to claim.
+	UnknownFlags []UnknownFlag
 }
 
 type registeredTool struct {
@@ -47,16 +51,25 @@ type Host struct {
 	stdin       io.WriteCloser
 	callTimeout time.Duration
 	notify      func(level, text string)
+	status      func(key, text string)
 	ui          func(method string, args map[string]any, timeout time.Duration) map[string]any
 
 	writeMu sync.Mutex
 
-	mu       sync.Mutex
-	tools    []registeredTool
-	pending  map[string]chan protocol.Message
-	closed   bool
-	waitErr  error
-	waitDone chan struct{}
+	mu             sync.Mutex
+	tools          []registeredTool
+	commands       []RegisteredCommand
+	shortcuts      []RegisteredShortcut
+	flags          map[string]registeredFlag
+	unknown        []UnknownFlag
+	claimedUnknown map[string]bool
+	subscribed     map[string]bool
+	providers      []registeredProvider
+	pending        map[string]chan protocol.Message
+	streamCh       map[string]chan protocol.Message
+	closed         bool
+	waitErr        error
+	waitDone       chan struct{}
 }
 
 // Spawn starts an extension process (argv) and completes the handshake: it waits
@@ -88,14 +101,20 @@ func Spawn(ctx context.Context, name string, argv []string, opts Options) (*Host
 		callTimeout = 60 * time.Second
 	}
 	h := &Host{
-		name:        name,
-		cmd:         cmd,
-		stdin:       stdin,
-		callTimeout: callTimeout,
-		notify:      opts.Notify,
-		ui:          opts.UI,
-		pending:     make(map[string]chan protocol.Message),
-		waitDone:    make(chan struct{}),
+		name:           name,
+		cmd:            cmd,
+		stdin:          stdin,
+		callTimeout:    callTimeout,
+		notify:         opts.Notify,
+		status:         opts.Status,
+		ui:             opts.UI,
+		unknown:        append([]UnknownFlag(nil), opts.UnknownFlags...),
+		claimedUnknown: map[string]bool{},
+		flags:          map[string]registeredFlag{},
+		subscribed:     map[string]bool{},
+		pending:        make(map[string]chan protocol.Message),
+		streamCh:       map[string]chan protocol.Message{},
+		waitDone:       make(chan struct{}),
 	}
 
 	ready := make(chan error, 1)
@@ -137,6 +156,10 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 				close(ch)
 				delete(h.pending, id)
 			}
+			for id, ch := range h.streamCh {
+				close(ch)
+				delete(h.streamCh, id)
+			}
 			h.mu.Unlock()
 			signalReady(fmt.Errorf("ext %q exited before initialization", h.name))
 			return
@@ -149,16 +172,56 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 			h.mu.Lock()
 			h.tools = append(h.tools, registeredTool{name: m.Name, description: m.Description, schema: m.Schema})
 			h.mu.Unlock()
+		case protocol.TypeRegisterCommand:
+			h.mu.Lock()
+			h.commands = append(h.commands, RegisteredCommand{Name: m.Name, Description: m.Description})
+			h.mu.Unlock()
+		case protocol.TypeRegisterShortcut:
+			h.mu.Lock()
+			h.shortcuts = append(h.shortcuts, RegisteredShortcut{Name: m.Name, Description: m.Description})
+			h.mu.Unlock()
+		case protocol.TypeRegisterFlag:
+			typ := ""
+			var def any
+			if m.Args != nil {
+				typ, _ = m.Args["type"].(string)
+				def = m.Args["default"]
+			}
+			h.claimFlag(m.Name, typ, def)
+		case protocol.TypeSubscribe:
+			h.mu.Lock()
+			if h.subscribed == nil {
+				h.subscribed = map[string]bool{}
+			}
+			for _, ev := range m.Events {
+				h.subscribed[ev] = true
+			}
+			h.mu.Unlock()
+		case protocol.TypeRegisterProvider:
+			h.mu.Lock()
+			h.providers = append(h.providers, registeredProvider{id: m.Name, args: m.Args})
+			h.mu.Unlock()
+		case protocol.TypeUnregisterProvider:
+			h.mu.Lock()
+			filtered := h.providers[:0]
+			for _, p := range h.providers {
+				if p.id != m.Name {
+					filtered = append(filtered, p)
+				}
+			}
+			h.providers = filtered
+			h.mu.Unlock()
+		case protocol.TypeGetFlag:
+			h.replyFlag(m.ID, m.Name)
 		case protocol.TypeInitialized:
 			signalReady(nil)
-		case protocol.TypeToolResult:
-			h.mu.Lock()
-			ch := h.pending[m.ID]
-			delete(h.pending, m.ID)
-			h.mu.Unlock()
-			if ch != nil {
-				ch <- m
-				close(ch)
+		case protocol.TypeToolResult, protocol.TypeEventResult, protocol.TypeOAuthResult, protocol.TypeRefreshModelsResult:
+			h.deliverPending(m)
+		case protocol.TypeStreamEvent:
+			h.deliverStream(m)
+		case protocol.TypeStatusItem:
+			if h.status != nil {
+				h.status(m.Name, m.Text)
 			}
 		case protocol.TypeNotify:
 			if h.notify != nil {
@@ -184,6 +247,30 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 				result := ui(m.Name, m.Args, timeout)
 				_ = h.send(protocol.Message{Type: protocol.TypeUIResult, ID: m.ID, Args: result})
 			}(m)
+		}
+	}
+}
+
+func (h *Host) deliverPending(m protocol.Message) {
+	h.mu.Lock()
+	ch := h.pending[m.ID]
+	delete(h.pending, m.ID)
+	h.mu.Unlock()
+	if ch != nil {
+		ch <- m
+		close(ch)
+	}
+}
+
+func (h *Host) deliverStream(m protocol.Message) {
+	h.mu.Lock()
+	ch := h.streamCh[m.ID]
+	h.mu.Unlock()
+	if ch != nil {
+		select {
+		case ch <- m:
+		default:
+			ch <- m
 		}
 	}
 }
