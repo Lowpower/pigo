@@ -22,7 +22,12 @@ func TestWrapProviderRetryRetriesSetupError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	count := 0
 	for range stream.Events() {
+		count++
+	}
+	if count == 0 {
+		t.Fatal("expected stream events")
 	}
 	if atomic.LoadInt32(&n) != 2 {
 		t.Fatalf("calls=%d", n)
@@ -31,7 +36,7 @@ func TestWrapProviderRetryRetriesSetupError(t *testing.T) {
 
 func TestWrapProviderRetryDoesNotRetryOverflow(t *testing.T) {
 	var n int32
-	inner := StreamFn(func(ctx context.Context, _ Context, _ Options) (*EventStream, error) {
+	inner := StreamFn(func(_ context.Context, _ Context, _ Options) (*EventStream, error) {
 		atomic.AddInt32(&n, 1)
 		return nil, errors.New("prompt is too long")
 	})

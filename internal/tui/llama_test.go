@@ -99,12 +99,6 @@ func TestHandleLlamaUsageMentionsDownload(t *testing.T) {
 }
 
 func TestHandleLlamaSearch(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "owner/qwen", "downloads": 9}})
-	}))
-	t.Cleanup(srv.Close)
-	// SearchHuggingFace is unit-tested against a fake server; the TUI path
-	// only needs to accept the command and show a pending line.
 	m := New(testCfg())
 	next, cmd := m.handleLlama("search qwen")
 	got := next.(Model)
@@ -114,5 +108,4 @@ func TestHandleLlamaSearch(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected async search")
 	}
-	_ = srv
 }

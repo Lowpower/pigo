@@ -82,9 +82,9 @@ func SearchHuggingFace(ctx context.Context, query, token, baseURL string) ([]HFM
 	defer func() { _ = resp.Body.Close() }()
 	payload, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		msg := fmt.Sprintf("Hugging Face returned HTTP %d", resp.StatusCode)
+		msg := fmt.Sprintf("hugging face returned HTTP %d", resp.StatusCode)
 		if resp.StatusCode == 429 {
-			msg = "Hugging Face rate limit reached"
+			msg = "hugging face rate limit reached"
 		}
 		var wrap struct {
 			Error string `json:"error"`
@@ -99,7 +99,7 @@ func SearchHuggingFace(ctx context.Context, query, token, baseURL string) ([]HFM
 		Downloads int    `json:"downloads"`
 	}
 	if json.Unmarshal(payload, &raw) != nil {
-		return nil, fmt.Errorf("Hugging Face returned invalid search results")
+		return nil, fmt.Errorf("hugging face returned invalid search results")
 	}
 	out := make([]HFModel, 0, len(raw))
 	for _, m := range raw {

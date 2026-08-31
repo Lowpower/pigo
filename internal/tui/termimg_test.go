@@ -189,7 +189,7 @@ func TestViewInlinesITermImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := fmt.Sprintf("\x1b]1337;File=inline=1;size=%d:%s\x07", len(decoded), png1x1)
+	want := fmt.Sprintf("\x1b]1337;File=inline=1;width=60;size=%d:%s\x07", len(decoded), png1x1)
 	if !strings.Contains(view, want) {
 		t.Fatalf("missing iterm sequence:\n%s", view)
 	}
