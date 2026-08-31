@@ -301,6 +301,57 @@ func TestCheckAuthCloudflareWorkersNeedsAccount(t *testing.T) {
 	}
 }
 
+func TestCheckAuthMistralFromEnv(t *testing.T) {
+	t.Setenv("MISTRAL_API_KEY", "m")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "mistral")
+	if chk == nil || chk.Source != "MISTRAL_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthRadiusFromEnv(t *testing.T) {
+	t.Setenv("RADIUS_API_KEY", "r")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "radius")
+	if chk == nil || chk.Source != "RADIUS_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthVertexAPIKey(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_API_KEY", "vk")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+	t.Setenv("GOOGLE_CLOUD_LOCATION", "")
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "google-vertex")
+	if chk == nil || chk.Source != "GOOGLE_CLOUD_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthVertexNeedsProjectAndLocationForADC(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_API_KEY", "")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "proj")
+	t.Setenv("GOOGLE_CLOUD_LOCATION", "")
+	t.Setenv("GCLOUD_PROJECT", "")
+	adc := filepath.Join(t.TempDir(), "adc.json")
+	if err := os.WriteFile(adc, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", adc)
+	s := Open(t.TempDir())
+	if chk := CheckAuth(s, "google-vertex"); chk != nil {
+		t.Fatalf("project without location should not auth: %+v", chk)
+	}
+	t.Setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+	chk := CheckAuth(s, "google-vertex")
+	if chk == nil {
+		t.Fatal("expected vertex ADC auth with project+location+credentials")
+	}
+}
+
 func TestCheckAuthAzureNeedsBaseOrResource(t *testing.T) {
 	t.Setenv("AZURE_OPENAI_API_KEY", "k")
 	t.Setenv("AZURE_OPENAI_BASE_URL", "")

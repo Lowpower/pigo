@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -110,6 +111,8 @@ func registerBuiltins() {
 	registerCatalogAPIKeys()
 	registerCloudflareAuth()
 	registerAzureAuth()
+	registerVertexAuth()
+	registerRadiusAuth()
 }
 
 func registerProvider(p Provider) {
@@ -277,6 +280,125 @@ func azureAuthBaseURL() string {
 		return "https://" + res + ".openai.azure.com/openai/v1"
 	}
 	return ""
+}
+
+func registerVertexAuth() {
+	registerProvider(Provider{
+		ID: "google-vertex",
+		APIKey: &APIKeyHandler{
+			Name:    "Google Cloud credentials",
+			Login:   vertexLogin,
+			Resolve: resolveVertex,
+		},
+	})
+}
+
+func vertexLogin(ix Interaction) (Credential, error) {
+	if ix.Prompt == nil {
+		return Credential{}, fmt.Errorf("no prompt available")
+	}
+	method, err := ix.Prompt(Prompt{
+		Type:    PromptSelect,
+		Message: "Select Google Vertex AI authentication method:",
+		Options: []SelectOption{
+			{ID: "api-key", Label: "Google Cloud API key"},
+			{ID: "adc", Label: "Application Default Credentials"},
+			{ID: "service-account", Label: "Service account credentials file"},
+		},
+	})
+	if err != nil {
+		return Credential{}, err
+	}
+	if method == "" {
+		method = "api-key"
+	}
+	if method == "api-key" {
+		key, err := ix.Prompt(Prompt{Type: PromptSecret, Message: "Enter Google Cloud API key"})
+		if err != nil {
+			return Credential{}, err
+		}
+		if key == "" {
+			return Credential{}, fmt.Errorf("empty API key")
+		}
+		return Credential{Type: TypeAPIKey, Key: key}, nil
+	}
+	project, err := ix.Prompt(Prompt{Type: PromptText, Message: "Enter Google Cloud project ID"})
+	if err != nil {
+		return Credential{}, err
+	}
+	if project == "" {
+		return Credential{}, fmt.Errorf("empty project ID")
+	}
+	location, err := ix.Prompt(Prompt{Type: PromptText, Message: "Enter Google Cloud location"})
+	if err != nil {
+		return Credential{}, err
+	}
+	if location == "" {
+		return Credential{}, fmt.Errorf("empty location")
+	}
+	env := map[string]string{
+		"GOOGLE_CLOUD_PROJECT":  project,
+		"GOOGLE_CLOUD_LOCATION": location,
+	}
+	if method == "service-account" {
+		path, err := ix.Prompt(Prompt{Type: PromptText, Message: "Enter service account credentials file path"})
+		if err != nil {
+			return Credential{}, err
+		}
+		if path == "" {
+			return Credential{}, fmt.Errorf("empty credentials path")
+		}
+		env["GOOGLE_APPLICATION_CREDENTIALS"] = path
+	}
+	return Credential{Type: TypeAPIKey, Env: env}, nil
+}
+
+func resolveVertex() *Result {
+	if key := os.Getenv("GOOGLE_CLOUD_API_KEY"); key != "" {
+		return &Result{Auth: ModelAuth{APIKey: key}, Source: "GOOGLE_CLOUD_API_KEY"}
+	}
+	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if project == "" {
+		project = os.Getenv("GCLOUD_PROJECT")
+	}
+	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
+	if location == "" {
+		location = os.Getenv("GOOGLE_CLOUD_REGION")
+	}
+	if project == "" || location == "" {
+		return nil
+	}
+	adc := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	if adc == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		adc = filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
+	}
+	if _, err := os.Stat(adc); err != nil {
+		return nil
+	}
+	return &Result{
+		Auth:   ModelAuth{},
+		Source: "gcloud application default credentials",
+		Env: map[string]string{
+			"GOOGLE_CLOUD_PROJECT":  project,
+			"GOOGLE_CLOUD_LOCATION": location,
+		},
+	}
+}
+
+func registerRadiusAuth() {
+	registerProvider(Provider{
+		ID: "radius",
+		APIKey: &APIKeyHandler{
+			Name:  "Radius API key",
+			Env:   []string{"RADIUS_API_KEY"},
+			Login: promptAPIKey("Radius API key"),
+		},
+		OAuth: NewRadiusOAuth("Radius", "https://radius.pi.dev"),
+	})
 }
 
 // Lookup returns a registered auth provider.

@@ -7,23 +7,71 @@ import (
 	"google.golang.org/genai"
 )
 
-// GoogleClient talks to Gemini (google-generative-ai).
+// GoogleClient talks to Gemini (google-generative-ai) or Vertex AI.
 type GoogleClient struct {
 	APIKey     string
+	Project    string
+	Location   string
 	Headers    map[string]string
 	HTTPClient *http.Client
+	Vertex     bool
+}
+
+func (c *GoogleClient) apiID() string {
+	if c.Vertex {
+		return "google-vertex"
+	}
+	return "google-generative-ai"
+}
+
+func (c *GoogleClient) providerID() string {
+	if c.Vertex {
+		return "google-vertex"
+	}
+	return "google"
+}
+
+func (c *GoogleClient) genaiConfig() *genai.ClientConfig {
+	cfg := &genai.ClientConfig{HTTPClient: c.HTTPClient}
+	if c.Vertex {
+		cfg.Backend = genai.BackendVertexAI
+		cfg.Project = c.Project
+		cfg.Location = c.Location
+		if c.APIKey != "" {
+			cfg.APIKey = c.APIKey
+		}
+		return cfg
+	}
+	cfg.APIKey = c.APIKey
+	cfg.Backend = genai.BackendGeminiAPI
+	return cfg
+}
+
+func (c *GoogleClient) missingAuth() string {
+	if c.Vertex {
+		if c.APIKey != "" {
+			return ""
+		}
+		if c.Project == "" || c.Location == "" {
+			return "Vertex AI requires GOOGLE_CLOUD_API_KEY or project+location"
+		}
+		return ""
+	}
+	if c.APIKey == "" {
+		return "no API key for provider: google"
+	}
+	return ""
 }
 
 // StreamFn returns a StreamFn bound to this client.
 func (c *GoogleClient) StreamFn() StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
-		if c.APIKey == "" {
-			return errorStreamProvider(opts.Model, "google-generative-ai", "no API key for provider: google"), nil
+		if msg := c.missingAuth(); msg != "" {
+			return errorStreamProvider(opts.Model, c.apiID(), msg), nil
 		}
-		cfg := &genai.ClientConfig{APIKey: c.APIKey, Backend: genai.BackendGeminiAPI, HTTPClient: c.HTTPClient}
-		client, err := genai.NewClient(ctx, cfg)
+		client, err := genai.NewClient(ctx, c.genaiConfig())
 		if err != nil {
-			return errorStreamProvider(opts.Model, "google-generative-ai", err.Error()), nil
+			return errorStreamProvider(opts.Model, c.apiID(), err.Error()), nil
 		}
 		contents := googleContents(reqCtx)
 		gcfg := &genai.GenerateContentConfig{}
@@ -48,8 +96,8 @@ func (c *GoogleClient) StreamFn() StreamFn {
 		}
 		s := NewEventStream(16)
 		out := &AssistantMessage{
-			Role: RoleAssistant, Content: []*Content{}, API: "google-generative-ai",
-			Provider: "google", Model: opts.Model, StopReason: StopPending,
+			Role: RoleAssistant, Content: []*Content{}, API: c.apiID(),
+			Provider: c.providerID(), Model: opts.Model, StopReason: StopPending,
 		}
 		go func() {
 			defer s.end()
