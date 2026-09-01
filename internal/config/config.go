@@ -519,6 +519,7 @@ func Save(configDir string, cfg Config) error {
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &existing)
 	}
+	(&cfg).ensureAnalyticsTrackingID()
 	mergeSaveMap(existing, cfg)
 	b, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {

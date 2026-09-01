@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -220,4 +222,38 @@ func StdoutIsTTY() bool {
 		return false
 	}
 	return st.Mode()&os.ModeCharDevice != 0
+}
+
+// AnalyticsEnabled is settings.enableAnalytics (default false).
+func (c Config) AnalyticsEnabled() bool {
+	return c.EnableAnalytics != nil && *c.EnableAnalytics
+}
+
+// SetEnableAnalytics writes the opt-in flag. First enable mints trackingId;
+// later toggles keep the same id.
+func (c *Config) SetEnableAnalytics(enabled bool) {
+	c.EnableAnalytics = &enabled
+	if enabled {
+		c.ensureAnalyticsTrackingID()
+	}
+}
+
+func (c *Config) ensureAnalyticsTrackingID() {
+	if c.EnableAnalytics == nil || !*c.EnableAnalytics {
+		return
+	}
+	if strings.TrimSpace(c.TrackingID) != "" {
+		return
+	}
+	c.TrackingID = newTrackingID()
+}
+
+func newTrackingID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("pigo-%d", time.Now().UnixNano())
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
