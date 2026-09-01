@@ -49,6 +49,9 @@ var extraProviders = []extraProvider{
 	{ID: "cloudflare-workers-ai", Name: "Cloudflare API key", DefaultAPI: "openai-completions", DefaultID: "@cf/deepseek-ai/deepseek-v4-flash-0731", BaseURL: "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1"},
 	{ID: "cloudflare-ai-gateway", Name: "Cloudflare API key", DefaultAPI: "anthropic-messages", DefaultID: "claude-fable-5", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic"},
 	{ID: "azure-openai-responses", Name: "Azure OpenAI API key", DefaultAPI: "azure-openai-responses", DefaultID: "gpt-4"},
+	{ID: "google-vertex", Name: "Google Cloud credentials", DefaultAPI: "google-vertex", DefaultID: "gemini-2.5-flash", BaseURL: "https://{location}-aiplatform.googleapis.com", Env: []string{"GOOGLE_CLOUD_API_KEY", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_APPLICATION_CREDENTIALS"}},
+	{ID: "mistral", Name: "Mistral API key", DefaultAPI: "mistral-conversations", DefaultID: "codestral-latest", BaseURL: "https://api.mistral.ai", Env: []string{"MISTRAL_API_KEY"}},
+	{ID: "openai-codex", Name: "OpenAI Codex", DefaultAPI: "openai-codex-responses", DefaultID: "gpt-5.3-codex-spark", BaseURL: "https://chatgpt.com/backend-api"},
 }
 
 func registerExtraProviders() {

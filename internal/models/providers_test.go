@@ -120,3 +120,39 @@ func TestAzureOpenAIResponsesRegistered(t *testing.T) {
 		t.Fatalf("api = %q", APIFor("azure-openai-responses", spec.DefaultID))
 	}
 }
+
+func TestRemainingNewAPIProvidersRegistered(t *testing.T) {
+	want := []struct {
+		id, api, defaultID string
+		needBase           bool
+	}{
+		{"google-vertex", "google-vertex", "gemini-2.5-flash", false},
+		{"mistral", "mistral-conversations", "codestral-latest", true},
+		{"openai-codex", "openai-codex-responses", "gpt-5.3-codex-spark", true},
+		{"radius", "pi-messages", "", false},
+	}
+	for _, tc := range want {
+		spec, ok := LookupProvider(tc.id)
+		if !ok {
+			t.Errorf("missing provider %s", tc.id)
+			continue
+		}
+		if spec.DefaultAPI != tc.api {
+			t.Errorf("%s DefaultAPI = %q, want %q", tc.id, spec.DefaultAPI, tc.api)
+		}
+		if tc.defaultID != "" {
+			if spec.DefaultID != tc.defaultID {
+				t.Errorf("%s DefaultID = %q, want %q", tc.id, spec.DefaultID, tc.defaultID)
+			}
+			if APIFor(tc.id, spec.DefaultID) != tc.api {
+				t.Errorf("%s APIFor(%s) = %q, want %q", tc.id, spec.DefaultID, APIFor(tc.id, spec.DefaultID), tc.api)
+			}
+		}
+		if tc.needBase && spec.BaseURL == "" {
+			t.Errorf("%s missing BaseURL", tc.id)
+		}
+	}
+	if spec, _ := LookupProvider("radius"); spec.RefreshModels == nil {
+		t.Error("radius missing RefreshModels")
+	}
+}

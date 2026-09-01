@@ -84,6 +84,48 @@ func registerBuiltinAPIs() {
 		}
 		return (&OpenAIResponsesClient{BaseURL: base, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
 	})
+	RegisterAPI("google-vertex", func(cfg ClientConfig) StreamFn {
+		return (&GoogleClient{
+			APIKey:     cfg.APIKey,
+			Project:    envKey("GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT"),
+			Location:   envKey("GOOGLE_CLOUD_LOCATION", "GOOGLE_CLOUD_REGION"),
+			Headers:    cfg.Headers,
+			HTTPClient: httpClient(cfg),
+			Vertex:     true,
+		}).StreamFn()
+	})
+	RegisterAPI("mistral-conversations", func(cfg ClientConfig) StreamFn {
+		base := strings.TrimRight(cfg.BaseURL, "/")
+		if base == "" {
+			base = "https://api.mistral.ai"
+		}
+		return (&MistralClient{BaseURL: base, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
+	})
+	RegisterAPI("pi-messages", func(cfg ClientConfig) StreamFn {
+		return (&PiMessagesClient{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
+	})
+	RegisterAPI("openai-codex-responses", func(cfg ClientConfig) StreamFn {
+		headers := map[string]string{}
+		for k, v := range cfg.Headers {
+			headers[k] = v
+		}
+		if headers["originator"] == "" {
+			headers["originator"] = "pi"
+		}
+		if headers["OpenAI-Beta"] == "" {
+			headers["OpenAI-Beta"] = "responses=experimental"
+		}
+		if headers["chatgpt-account-id"] == "" {
+			if id := extractCodexAccountID(cfg.APIKey); id != "" {
+				headers["chatgpt-account-id"] = id
+			}
+		}
+		base := strings.TrimRight(cfg.BaseURL, "/")
+		if base == "" {
+			base = defaultCodexBaseURL
+		}
+		return (&OpenAICodexClient{BaseURL: base, APIKey: cfg.APIKey, Headers: headers, HTTPClient: httpClient(cfg)}).StreamFn()
+	})
 }
 
 // RegisterAPI adds or replaces an API stream factory.

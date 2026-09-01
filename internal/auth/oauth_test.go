@@ -43,6 +43,22 @@ func TestOpenRouterRefreshNoop(t *testing.T) {
 	}
 }
 
+func TestCodexToAuthHeaders(t *testing.T) {
+	a, err := openaiCodexOAuth{}.ToAuth(Credential{Access: "tok", Extra: map[string]any{"accountId": "acct-9"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.APIKey != "tok" {
+		t.Fatalf("apiKey = %q", a.APIKey)
+	}
+	if a.Headers["chatgpt-account-id"] != "acct-9" {
+		t.Fatalf("headers = %#v", a.Headers)
+	}
+	if a.Headers["originator"] != "pi" || a.Headers["OpenAI-Beta"] != "responses=experimental" {
+		t.Fatalf("headers = %#v", a.Headers)
+	}
+}
+
 func TestKimiToAuthBearer(t *testing.T) {
 	a, err := kimiOAuth{}.ToAuth(Credential{Access: "abc"})
 	if err != nil {
