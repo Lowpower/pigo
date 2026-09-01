@@ -47,3 +47,56 @@ func TestFindHuggingFaceTokenEnv(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestParseHuggingFaceModel(t *testing.T) {
+	repo, quant := ParseHuggingFaceModel("owner/repo:Q4_K_M")
+	if repo != "owner/repo" || quant != "Q4_K_M" {
+		t.Fatalf("repo=%q quant=%q", repo, quant)
+	}
+	repo, quant = ParseHuggingFaceModel("owner/repo")
+	if repo != "owner/repo" || quant != "" {
+		t.Fatalf("repo=%q quant=%q", repo, quant)
+	}
+}
+
+func TestHuggingFaceDetails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/models/owner/repo" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("blobs") != "true" {
+			t.Errorf("query=%v", r.URL.Query())
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":    "owner/repo",
+			"gated": "auto",
+			"siblings": []map[string]any{
+				{"rfilename": "model-Q4_K_M.gguf", "size": 1000},
+				{"rfilename": "model-Q8_0.gguf", "size": 2000},
+				{"rfilename": "mmproj-F16.gguf", "size": 50},
+				{"rfilename": "model-Q4_K_M-00001-of-00002.gguf", "size": 500},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	got, err := HuggingFaceDetails(context.Background(), "owner/repo", "tok", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "owner/repo" || got.Gated != "auto" {
+		t.Fatalf("%+v", got)
+	}
+	if len(got.Quantizations) < 2 || got.Quantizations[0].Name != "Q4_K_M" {
+		t.Fatalf("quants=%+v", got.Quantizations)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	if got := FormatBytes(500); got != "500 B" {
+		t.Fatalf("%q", got)
+	}
+	if got := FormatBytes(2048); !strings.Contains(got, "KiB") {
+		t.Fatalf("%q", got)
+	}
+}
