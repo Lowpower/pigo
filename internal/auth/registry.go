@@ -3,11 +3,14 @@ package auth
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/Lowpower/pigo/internal/llama"
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 var (
@@ -105,6 +108,11 @@ func registerBuiltins() {
 			Login: llamaLogin,
 		},
 	})
+	registerCatalogAPIKeys()
+	registerCloudflareAuth()
+	registerAzureAuth()
+	registerVertexAuth()
+	registerRadiusAuth()
 }
 
 func registerProvider(p Provider) {
@@ -123,6 +131,286 @@ func UnregisterProvider(id string) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	delete(registry, id)
+}
+
+func registerCatalogAPIKeys() {
+	for _, id := range models.ProviderIDs() {
+		spec, ok := models.LookupProvider(id)
+		if !ok || len(spec.Env) == 0 {
+			continue
+		}
+		name := spec.Name
+		if name == "" {
+			name = id + " API key"
+		}
+		existing, found := Lookup(id)
+		if found {
+			if existing.APIKey == nil {
+				existing.APIKey = &APIKeyHandler{Name: name, Env: spec.Env, Login: promptAPIKey(name)}
+				registerProvider(existing)
+			}
+			continue
+		}
+		registerProvider(Provider{
+			ID: id,
+			APIKey: &APIKeyHandler{
+				Name:  name,
+				Env:   spec.Env,
+				Login: promptAPIKey(name),
+			},
+		})
+	}
+}
+
+func registerCloudflareAuth() {
+	registerProvider(Provider{
+		ID: "cloudflare-workers-ai",
+		APIKey: &APIKeyHandler{
+			Name:    "Cloudflare API key",
+			Login:   cloudflareLogin(false),
+			Resolve: resolveCloudflare(false),
+		},
+	})
+	registerProvider(Provider{
+		ID: "cloudflare-ai-gateway",
+		APIKey: &APIKeyHandler{
+			Name:    "Cloudflare API key",
+			Login:   cloudflareLogin(true),
+			Resolve: resolveCloudflare(true),
+		},
+	})
+}
+
+func cloudflareLogin(gateway bool) func(Interaction) (Credential, error) {
+	return func(ix Interaction) (Credential, error) {
+		if ix.Prompt == nil {
+			return Credential{}, fmt.Errorf("no prompt available")
+		}
+		key, err := ix.Prompt(Prompt{Type: PromptSecret, Message: "Cloudflare API key:"})
+		if err != nil {
+			return Credential{}, err
+		}
+		if key == "" {
+			return Credential{}, fmt.Errorf("empty API key")
+		}
+		account, err := ix.Prompt(Prompt{Type: PromptText, Message: "Cloudflare account ID:"})
+		if err != nil {
+			return Credential{}, err
+		}
+		if account == "" {
+			return Credential{}, fmt.Errorf("empty account ID")
+		}
+		env := map[string]string{"CLOUDFLARE_ACCOUNT_ID": account}
+		if gateway {
+			gw, err := ix.Prompt(Prompt{Type: PromptText, Message: "Cloudflare AI Gateway ID:"})
+			if err != nil {
+				return Credential{}, err
+			}
+			if gw == "" {
+				return Credential{}, fmt.Errorf("empty gateway ID")
+			}
+			env["CLOUDFLARE_GATEWAY_ID"] = gw
+		}
+		return Credential{Type: TypeAPIKey, Key: key, Env: env}, nil
+	}
+}
+
+func resolveCloudflare(gateway bool) func() *Result {
+	return func() *Result {
+		key := os.Getenv("CLOUDFLARE_API_KEY")
+		account := os.Getenv("CLOUDFLARE_ACCOUNT_ID")
+		if key == "" || account == "" {
+			return nil
+		}
+		env := map[string]string{"CLOUDFLARE_ACCOUNT_ID": account}
+		auth := ModelAuth{APIKey: key}
+		if gateway {
+			gw := os.Getenv("CLOUDFLARE_GATEWAY_ID")
+			if gw == "" {
+				return nil
+			}
+			env["CLOUDFLARE_GATEWAY_ID"] = gw
+			auth.APIKey = ""
+			auth.Headers = map[string]string{"cf-aig-authorization": "Bearer " + key}
+		}
+		return &Result{Auth: auth, Env: env, Source: "CLOUDFLARE_API_KEY"}
+	}
+}
+
+func registerAzureAuth() {
+	registerProvider(Provider{
+		ID: "azure-openai-responses",
+		APIKey: &APIKeyHandler{
+			Name:    "Azure OpenAI API key",
+			Login:   azureLogin,
+			Resolve: resolveAzure,
+		},
+	})
+}
+
+func azureLogin(ix Interaction) (Credential, error) {
+	if ix.Prompt == nil {
+		return Credential{}, fmt.Errorf("no prompt available")
+	}
+	key, err := ix.Prompt(Prompt{Type: PromptSecret, Message: "Azure OpenAI API key:"})
+	if err != nil {
+		return Credential{}, err
+	}
+	if key == "" {
+		return Credential{}, fmt.Errorf("empty API key")
+	}
+	endpoint, err := ix.Prompt(Prompt{Type: PromptText, Message: "Azure OpenAI base URL or resource name:"})
+	if err != nil {
+		return Credential{}, err
+	}
+	if endpoint == "" {
+		return Credential{}, fmt.Errorf("empty Azure endpoint")
+	}
+	env := map[string]string{}
+	if strings.Contains(endpoint, "://") {
+		env["AZURE_OPENAI_BASE_URL"] = endpoint
+	} else {
+		env["AZURE_OPENAI_RESOURCE_NAME"] = endpoint
+	}
+	return Credential{Type: TypeAPIKey, Key: key, Env: env}, nil
+}
+
+func resolveAzure() *Result {
+	key := os.Getenv("AZURE_OPENAI_API_KEY")
+	base := azureAuthBaseURL()
+	if key == "" || base == "" {
+		return nil
+	}
+	return &Result{Auth: ModelAuth{APIKey: key, BaseURL: base}, Source: "AZURE_OPENAI_API_KEY"}
+}
+
+func azureAuthBaseURL() string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("AZURE_OPENAI_BASE_URL")), "/"); v != "" {
+		return v
+	}
+	if res := strings.TrimSpace(os.Getenv("AZURE_OPENAI_RESOURCE_NAME")); res != "" {
+		return "https://" + res + ".openai.azure.com/openai/v1"
+	}
+	return ""
+}
+
+func registerVertexAuth() {
+	registerProvider(Provider{
+		ID: "google-vertex",
+		APIKey: &APIKeyHandler{
+			Name:    "Google Cloud credentials",
+			Login:   vertexLogin,
+			Resolve: resolveVertex,
+		},
+	})
+}
+
+func vertexLogin(ix Interaction) (Credential, error) {
+	if ix.Prompt == nil {
+		return Credential{}, fmt.Errorf("no prompt available")
+	}
+	method, err := ix.Prompt(Prompt{
+		Type:    PromptSelect,
+		Message: "Select Google Vertex AI authentication method:",
+		Options: []SelectOption{
+			{ID: "api-key", Label: "Google Cloud API key"},
+			{ID: "adc", Label: "Application Default Credentials"},
+			{ID: "service-account", Label: "Service account credentials file"},
+		},
+	})
+	if err != nil {
+		return Credential{}, err
+	}
+	if method == "" {
+		method = "api-key"
+	}
+	if method == "api-key" {
+		key, err := ix.Prompt(Prompt{Type: PromptSecret, Message: "Enter Google Cloud API key"})
+		if err != nil {
+			return Credential{}, err
+		}
+		if key == "" {
+			return Credential{}, fmt.Errorf("empty API key")
+		}
+		return Credential{Type: TypeAPIKey, Key: key}, nil
+	}
+	project, err := ix.Prompt(Prompt{Type: PromptText, Message: "Enter Google Cloud project ID"})
+	if err != nil {
+		return Credential{}, err
+	}
+	if project == "" {
+		return Credential{}, fmt.Errorf("empty project ID")
+	}
+	location, err := ix.Prompt(Prompt{Type: PromptText, Message: "Enter Google Cloud location"})
+	if err != nil {
+		return Credential{}, err
+	}
+	if location == "" {
+		return Credential{}, fmt.Errorf("empty location")
+	}
+	env := map[string]string{
+		"GOOGLE_CLOUD_PROJECT":  project,
+		"GOOGLE_CLOUD_LOCATION": location,
+	}
+	if method == "service-account" {
+		path, err := ix.Prompt(Prompt{Type: PromptText, Message: "Enter service account credentials file path"})
+		if err != nil {
+			return Credential{}, err
+		}
+		if path == "" {
+			return Credential{}, fmt.Errorf("empty credentials path")
+		}
+		env["GOOGLE_APPLICATION_CREDENTIALS"] = path
+	}
+	return Credential{Type: TypeAPIKey, Env: env}, nil
+}
+
+func resolveVertex() *Result {
+	if key := os.Getenv("GOOGLE_CLOUD_API_KEY"); key != "" {
+		return &Result{Auth: ModelAuth{APIKey: key}, Source: "GOOGLE_CLOUD_API_KEY"}
+	}
+	project := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if project == "" {
+		project = os.Getenv("GCLOUD_PROJECT")
+	}
+	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
+	if location == "" {
+		location = os.Getenv("GOOGLE_CLOUD_REGION")
+	}
+	if project == "" || location == "" {
+		return nil
+	}
+	adc := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	if adc == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		adc = filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
+	}
+	if _, err := os.Stat(adc); err != nil {
+		return nil
+	}
+	return &Result{
+		Auth:   ModelAuth{},
+		Source: "gcloud application default credentials",
+		Env: map[string]string{
+			"GOOGLE_CLOUD_PROJECT":  project,
+			"GOOGLE_CLOUD_LOCATION": location,
+		},
+	}
+}
+
+func registerRadiusAuth() {
+	registerProvider(Provider{
+		ID: "radius",
+		APIKey: &APIKeyHandler{
+			Name:  "Radius API key",
+			Env:   []string{"RADIUS_API_KEY"},
+			Login: promptAPIKey("Radius API key"),
+		},
+		OAuth: NewRadiusOAuth("Radius", "https://radius.pi.dev"),
+	})
 }
 
 // Lookup returns a registered auth provider.

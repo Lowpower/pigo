@@ -226,12 +226,157 @@ func (s staticOAuth) Refresh(ctx context.Context, c Credential) (Credential, err
 }
 func (s staticOAuth) ToAuth(c Credential) (ModelAuth, error) { return s.toAuth(c) }
 
+func TestApplyEnvWritesCredentialEnv(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "")
+	s := Open(dir)
+	if _, err := s.Modify("cloudflare-workers-ai", func(*Credential) (*Credential, error) {
+		return &Credential{Type: TypeAPIKey, Key: "k", Env: map[string]string{"CLOUDFLARE_ACCOUNT_ID": "acct"}}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ApplyEnv(dir)
+	if os.Getenv("CLOUDFLARE_ACCOUNT_ID") != "acct" {
+		t.Fatalf("CLOUDFLARE_ACCOUNT_ID = %q", os.Getenv("CLOUDFLARE_ACCOUNT_ID"))
+	}
+}
+
 func TestCheckAuthGoogleEnv(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "g-key")
 	s := Open(t.TempDir())
 	chk := CheckAuth(s, "google")
 	if chk == nil || chk.Source != "GEMINI_API_KEY" {
 		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthGroqFromEnv(t *testing.T) {
+	t.Setenv("GROQ_API_KEY", "g")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "groq")
+	if chk == nil || chk.Source != "GROQ_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+	ids := AuthenticatedIDs(s)
+	found := false
+	for _, id := range ids {
+		if id == "groq" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("AuthenticatedIDs missing groq: %v", ids)
+	}
+}
+
+func TestCheckAuthKimiAPIKeyEnv(t *testing.T) {
+	t.Setenv("KIMI_API_KEY", "k")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "kimi-coding")
+	if chk == nil || chk.Source != "KIMI_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthCopilotTokenEnv(t *testing.T) {
+	t.Setenv("COPILOT_GITHUB_TOKEN", "t")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "github-copilot")
+	if chk == nil || chk.Source != "COPILOT_GITHUB_TOKEN" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthCloudflareWorkersNeedsAccount(t *testing.T) {
+	t.Setenv("CLOUDFLARE_API_KEY", "k")
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "")
+	s := Open(t.TempDir())
+	if chk := CheckAuth(s, "cloudflare-workers-ai"); chk != nil {
+		t.Fatalf("key alone should not auth: %+v", chk)
+	}
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+	chk := CheckAuth(s, "cloudflare-workers-ai")
+	if chk == nil {
+		t.Fatal("expected workers-ai auth with key+account")
+	}
+}
+
+func TestCheckAuthMistralFromEnv(t *testing.T) {
+	t.Setenv("MISTRAL_API_KEY", "m")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "mistral")
+	if chk == nil || chk.Source != "MISTRAL_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthRadiusFromEnv(t *testing.T) {
+	t.Setenv("RADIUS_API_KEY", "r")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "radius")
+	if chk == nil || chk.Source != "RADIUS_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthVertexAPIKey(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_API_KEY", "vk")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+	t.Setenv("GOOGLE_CLOUD_LOCATION", "")
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+	s := Open(t.TempDir())
+	chk := CheckAuth(s, "google-vertex")
+	if chk == nil || chk.Source != "GOOGLE_CLOUD_API_KEY" {
+		t.Fatalf("check = %+v", chk)
+	}
+}
+
+func TestCheckAuthVertexNeedsProjectAndLocationForADC(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_API_KEY", "")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "proj")
+	t.Setenv("GOOGLE_CLOUD_LOCATION", "")
+	t.Setenv("GCLOUD_PROJECT", "")
+	adc := filepath.Join(t.TempDir(), "adc.json")
+	if err := os.WriteFile(adc, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", adc)
+	s := Open(t.TempDir())
+	if chk := CheckAuth(s, "google-vertex"); chk != nil {
+		t.Fatalf("project without location should not auth: %+v", chk)
+	}
+	t.Setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+	chk := CheckAuth(s, "google-vertex")
+	if chk == nil {
+		t.Fatal("expected vertex ADC auth with project+location+credentials")
+	}
+}
+
+func TestCheckAuthAzureNeedsBaseOrResource(t *testing.T) {
+	t.Setenv("AZURE_OPENAI_API_KEY", "k")
+	t.Setenv("AZURE_OPENAI_BASE_URL", "")
+	t.Setenv("AZURE_OPENAI_RESOURCE_NAME", "")
+	s := Open(t.TempDir())
+	if chk := CheckAuth(s, "azure-openai-responses"); chk != nil {
+		t.Fatalf("key alone should not auth: %+v", chk)
+	}
+	t.Setenv("AZURE_OPENAI_RESOURCE_NAME", "myres")
+	if chk := CheckAuth(s, "azure-openai-responses"); chk == nil {
+		t.Fatal("expected azure auth with resource name")
+	}
+}
+
+func TestCheckAuthCloudflareGatewayNeedsGatewayID(t *testing.T) {
+	t.Setenv("CLOUDFLARE_API_KEY", "k")
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+	t.Setenv("CLOUDFLARE_GATEWAY_ID", "")
+	s := Open(t.TempDir())
+	if chk := CheckAuth(s, "cloudflare-ai-gateway"); chk != nil {
+		t.Fatalf("missing gateway id should not auth: %+v", chk)
+	}
+	t.Setenv("CLOUDFLARE_GATEWAY_ID", "gw")
+	if chk := CheckAuth(s, "cloudflare-ai-gateway"); chk == nil {
+		t.Fatal("expected gateway auth")
 	}
 }
 

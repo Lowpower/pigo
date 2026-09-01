@@ -88,4 +88,12 @@ func registerBuiltins() {
 			return refreshLlama(store)
 		},
 	})
+	registerExtraProviders()
+	RegisterProvider(ProviderSpec{
+		ID:            "radius",
+		Name:          "Radius API key",
+		Env:           []string{"RADIUS_API_KEY"},
+		DefaultAPI:    "pi-messages",
+		RefreshModels: refreshRadius,
+	})
 }

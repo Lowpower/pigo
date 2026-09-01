@@ -1,6 +1,11 @@
 package ai
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"google.golang.org/genai"
+)
 
 func TestGoogleContentsRolesAndTools(t *testing.T) {
 	got := googleContents(Context{Messages: []Message{
@@ -22,5 +27,31 @@ func TestGoogleContentsRolesAndTools(t *testing.T) {
 	}
 	if got[2].Parts[0].FunctionResponse == nil {
 		t.Fatal("missing function response")
+	}
+}
+
+func TestGoogleVertexClientConfig(t *testing.T) {
+	c := &GoogleClient{APIKey: "k", Project: "p", Location: "us-central1", Vertex: true}
+	cfg := c.genaiConfig()
+	if cfg.Backend != genai.BackendVertexAI || cfg.APIKey != "k" || cfg.Project != "p" || cfg.Location != "us-central1" {
+		t.Fatalf("%+v", cfg)
+	}
+	if msg := c.missingAuth(); msg != "" {
+		t.Fatalf("unexpected missingAuth %q", msg)
+	}
+}
+
+func TestGoogleVertexMissingAuth(t *testing.T) {
+	c := &GoogleClient{Vertex: true, Project: "p"}
+	if msg := c.missingAuth(); msg == "" {
+		t.Fatal("expected missing location")
+	}
+	stream, err := c.StreamFn()(context.Background(), Context{}, Options{Model: "gemini-2.5-flash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	if final == nil || final.StopReason != StopError || final.API != "google-vertex" {
+		t.Fatalf("%+v", final)
 	}
 }

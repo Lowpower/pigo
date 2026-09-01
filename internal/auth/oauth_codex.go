@@ -146,7 +146,18 @@ func (openaiCodexOAuth) Refresh(ctx context.Context, cred Credential) (Credentia
 }
 
 func (openaiCodexOAuth) ToAuth(cred Credential) (ModelAuth, error) {
-	return ModelAuth{APIKey: cred.Access}, nil
+	headers := map[string]string{
+		"originator":  "pi",
+		"OpenAI-Beta": "responses=experimental",
+	}
+	id := cred.extraString("accountId")
+	if id == "" {
+		id = codexAccountID(cred.Access)
+	}
+	if id != "" {
+		headers["chatgpt-account-id"] = id
+	}
+	return ModelAuth{APIKey: cred.Access, Headers: headers}, nil
 }
 
 func exchangeCodexCode(ctx context.Context, code, verifier, redirect string) (Credential, error) {

@@ -7,8 +7,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/version"
 )
+
+func clearCatalogEnvs(t *testing.T) {
+	t.Helper()
+	for _, id := range models.ProviderIDs() {
+		spec, ok := models.LookupProvider(id)
+		if !ok {
+			continue
+		}
+		for _, name := range spec.Env {
+			t.Setenv(name, "")
+		}
+	}
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+}
 
 func TestVersionFlag(t *testing.T) {
 	cmd := newRootCmd()
@@ -111,15 +126,8 @@ func TestThemeFlagsParse(t *testing.T) {
 }
 
 func TestListModelsFiltersByAuth(t *testing.T) {
+	clearCatalogEnvs(t)
 	t.Setenv("OPENAI_API_KEY", "sk-test")
-	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	t.Setenv("OPENCODE_API_KEY", "")
-	t.Setenv("GEMINI_API_KEY", "")
-	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
-	t.Setenv("AWS_PROFILE", "")
-	t.Setenv("AWS_ACCESS_KEY_ID", "")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
 	cmd := newRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -136,16 +144,27 @@ func TestListModelsFiltersByAuth(t *testing.T) {
 	}
 }
 
+func TestListModelsIncludesGroqWhenKeySet(t *testing.T) {
+	clearCatalogEnvs(t)
+	t.Setenv("GROQ_API_KEY", "g")
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--list-models", "--offline", "--config-dir", t.TempDir()})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "groq/") || !strings.Contains(s, "openai-completions") {
+		t.Fatalf("missing groq: %s", s)
+	}
+	if strings.Contains(s, "openai/gpt-4o") {
+		t.Fatalf("unauthenticated openai leaked: %s", s)
+	}
+}
+
 func TestListModelsEmptyWithoutAuth(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "")
-	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	t.Setenv("OPENCODE_API_KEY", "")
-	t.Setenv("GEMINI_API_KEY", "")
-	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
-	t.Setenv("AWS_PROFILE", "")
-	t.Setenv("AWS_ACCESS_KEY_ID", "")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	clearCatalogEnvs(t)
 	cmd := newRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
