@@ -10,6 +10,10 @@ files under `~/deps/pi` (cloned by `.cursor/install.sh`; never imported). If tha
 directory is missing, re-run `.cursor/install.sh`. Do not sprinkle source-path
 citations or “align with …” comments into this repo.
 
+GitHub issue and PR titles/bodies describe **pigo** behavior only: what changed,
+how to use it, how it was tested. Do not name the Cloud Agent harness. Do not
+frame work as copying, aligning with, or replicating another product.
+
 ## Environment
 
 - **Go 1.27** (the base image ships an EOL Go 1.22). `.cursor/install.sh` installs Go
@@ -64,3 +68,4 @@ Create it at **Settings → Rules → Rulesets** (this cannot be applied from a 
 - Respond to the repository owner in Chinese; keep code identifiers/paths in English.
 - Prefer simple solutions; do not add scope that was not requested.
 - Keep on-disk formats (session JSONL, `~/.pigo/agent`) stable.
+- Issue/PR text is user-facing: no harness names, no “复刻/对齐/align with” wording.
