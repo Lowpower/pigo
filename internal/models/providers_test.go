@@ -106,6 +106,31 @@ func TestMixedProvidersAreRegistered(t *testing.T) {
 	if copilot.Headers["Copilot-Integration-Id"] != "vscode-chat" {
 		t.Fatalf("copilot headers = %#v", copilot.Headers)
 	}
+	if copilot.FilterModels == nil {
+		t.Fatal("github-copilot missing FilterModels")
+	}
+}
+
+func TestFilterByAvailableIDs(t *testing.T) {
+	const provider = "filter-test"
+	t.Cleanup(func() { ClearAvailableModelIDs(provider) })
+	ClearAvailableModelIDs(provider)
+	list := []Model{{ID: "keep"}, {ID: "drop"}}
+	f := filterByAvailableIDs(provider)
+	got := f(list)
+	if len(got) != 2 {
+		t.Fatalf("unfiltered = %v", got)
+	}
+	SetAvailableModelIDs(provider, []string{"keep"})
+	got = f(list)
+	if len(got) != 1 || got[0].ID != "keep" {
+		t.Fatalf("filtered = %v", got)
+	}
+	SetAvailableModelIDs(provider, []string{"missing"})
+	got = f(list)
+	if len(got) != 0 {
+		t.Fatalf("empty allowlist = %v", got)
+	}
 }
 
 func TestAzureOpenAIResponsesRegistered(t *testing.T) {

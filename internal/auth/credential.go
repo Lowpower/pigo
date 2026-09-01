@@ -72,6 +72,34 @@ func (c Credential) extraString(key string) string {
 	return s
 }
 
+func extraStringSlice(c Credential, key string) []string {
+	if c.Extra == nil {
+		return nil
+	}
+	v, ok := c.Extra[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch t := v.(type) {
+	case []string:
+		out := make([]string, len(t))
+		copy(out, t)
+		return out
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, x := range t {
+			s, ok := x.(string)
+			if !ok {
+				return nil
+			}
+			out = append(out, s)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 func (c Credential) withExtra(key string, value any) Credential {
 	out := c
 	out.Extra = map[string]any{}

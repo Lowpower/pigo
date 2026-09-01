@@ -113,7 +113,7 @@ func registerBuiltinAPIs() {
 			headers["originator"] = "pi"
 		}
 		if headers["OpenAI-Beta"] == "" {
-			headers["OpenAI-Beta"] = "responses=experimental"
+			headers["OpenAI-Beta"] = openaiBetaSSE
 		}
 		if headers["chatgpt-account-id"] == "" {
 			if id := extractCodexAccountID(cfg.APIKey); id != "" {
@@ -187,6 +187,16 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 			c.Headers = merged
 		}
 		c.BaseURL = expandPlaceholders(c.BaseURL)
+		if provider == "github-copilot" {
+			merged := make(map[string]string, len(c.Headers)+3)
+			for k, v := range c.Headers {
+				merged[k] = v
+			}
+			for k, v := range buildCopilotDynamicHeaders(reqCtx.Messages) {
+				merged[k] = v
+			}
+			c.Headers = merged
+		}
 		api := models.APIFor(provider, opts.Model)
 		if api == "" {
 			api = "unknown"

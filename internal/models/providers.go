@@ -56,7 +56,7 @@ var extraProviders = []extraProvider{
 
 func registerExtraProviders() {
 	for _, p := range extraProviders {
-		RegisterProvider(ProviderSpec{
+		spec := ProviderSpec{
 			ID:         p.ID,
 			Name:       p.Name,
 			Env:        p.Env,
@@ -69,6 +69,10 @@ func registerExtraProviders() {
 				ID:       p.DefaultID,
 				API:      p.DefaultAPI,
 			}},
-		})
+		}
+		if p.ID == "github-copilot" {
+			spec.FilterModels = filterByAvailableIDs(p.ID)
+		}
+		RegisterProvider(spec)
 	}
 }

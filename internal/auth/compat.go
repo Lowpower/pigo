@@ -107,5 +107,8 @@ func ApplyEnv(agentDir string) {
 		case "mistral":
 			set("MISTRAL_API_KEY", key)
 		}
+		if id == "github-copilot" {
+			applyCopilotAvailableModels(c)
+		}
 	}
 }
