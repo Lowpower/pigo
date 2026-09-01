@@ -180,11 +180,14 @@ func openaiUserContent(m Message) any {
 
 func openaiAssistant(msg *AssistantMessage) map[string]any {
 	var text string
+	var thinking string
 	var toolCalls []map[string]any
 	for _, c := range msg.Content {
 		switch c.Type {
 		case KindText:
 			text += c.Text
+		case KindThinking:
+			thinking += c.Thinking
 		case KindToolCall:
 			args, _ := json.Marshal(c.Arguments)
 			if string(args) == "null" {
@@ -201,6 +204,9 @@ func openaiAssistant(msg *AssistantMessage) map[string]any {
 		}
 	}
 	out := map[string]any{"role": "assistant", "content": text}
+	if thinking != "" {
+		out["reasoning_content"] = thinking
+	}
 	if len(toolCalls) > 0 {
 		out["tool_calls"] = toolCalls
 	}

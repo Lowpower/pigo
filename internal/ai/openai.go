@@ -12,9 +12,8 @@ import (
 	"time"
 )
 
-// This file streams OpenAI Chat Completions SSE: text and tool-call streaming,
-// finish_reason mapping, and usage. Only the fields needed by OpenAI-compatible
-// gateways such as opencode are handled.
+// This file streams OpenAI Chat Completions SSE: text, reasoning_content
+// thinking, tool-call streaming, finish_reason mapping, and usage.
 
 // OpenAICompletionsClient talks to an OpenAI-compatible /v1/chat/completions
 // endpoint. BaseURL and APIKey are configurable; auth is Bearer.
@@ -33,7 +32,7 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 			return nil, err
 		}
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			strings.TrimRight(c.BaseURL, "/")+"/v1/chat/completions", bytes.NewReader(body))
+			chatCompletionsURL(c.BaseURL), bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -83,6 +82,17 @@ func StreamOpenAIReader(ctx context.Context, r io.Reader, model string) *EventSt
 	return s
 }
 
+// chatCompletionsURL joins a provider base URL with /chat/completions.
+// Bases that already end in /v1 or /v4 (OpenAI SDK style, groq, zai) must not
+// get another /v1 segment.
+func chatCompletionsURL(base string) string {
+	base = strings.TrimRight(base, "/")
+	if strings.HasSuffix(base, "/v1") || strings.HasSuffix(base, "/v4") {
+		return base + "/chat/completions"
+	}
+	return base + "/v1/chat/completions"
+}
+
 func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 	msgs := make([]map[string]any, 0, len(reqCtx.Messages)+1)
 	if reqCtx.System != "" {
@@ -115,8 +125,11 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 type oaiChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content   string `json:"content"`
-			ToolCalls []struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
+			ReasoningText    string `json:"reasoning_text"`
+			ToolCalls        []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
 				Function struct {
@@ -140,6 +153,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 	}
 
 	textIdx := -1            // position of the text block in out.Content (-1 = none yet)
+	thinkIdx := -1           // position of the thinking block in out.Content (-1 = none yet)
 	toolPos := map[int]int{} // openai tool_call index -> position in out.Content
 
 	scanner := bufio.NewScanner(r)
@@ -155,7 +169,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 		if payload == "[DONE]" {
 			return true
 		}
-		return handleOpenAIChunk(ctx, payload, out, &textIdx, toolPos, s)
+		return handleOpenAIChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s)
 	}
 
 	for scanner.Scan() {
@@ -185,6 +199,10 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 			if !s.push(ctx, Event{Type: EventTextEnd, ContentIndex: i, Content: c.Text, Partial: out}) {
 				return
 			}
+		case KindThinking:
+			if !s.push(ctx, Event{Type: EventThinkingEnd, ContentIndex: i, Content: c.Thinking, Partial: out}) {
+				return
+			}
 		case KindToolCall:
 			c.Arguments = parseStreamingJSON(c.partialJSON)
 			c.partialJSON = ""
@@ -210,7 +228,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 	}
 }
 
-func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx *int, toolPos map[int]int, s *EventStream) bool {
+func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream) bool {
 	var chunk oaiChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return true
@@ -228,6 +246,20 @@ func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessag
 		return true
 	}
 	choice := chunk.Choices[0]
+
+	if delta := firstReasoningDelta(choice.Delta.ReasoningContent, choice.Delta.Reasoning, choice.Delta.ReasoningText); delta != "" {
+		if *thinkIdx < 0 {
+			out.Content = append(out.Content, &Content{Type: KindThinking, ThinkingSignature: "reasoning_content"})
+			*thinkIdx = len(out.Content) - 1
+			if !s.push(ctx, Event{Type: EventThinkingStart, ContentIndex: *thinkIdx, Partial: out}) {
+				return false
+			}
+		}
+		out.Content[*thinkIdx].Thinking += delta
+		if !s.push(ctx, Event{Type: EventThinkingDelta, ContentIndex: *thinkIdx, Delta: delta, Partial: out}) {
+			return false
+		}
+	}
 
 	if choice.Delta.Content != "" {
 		if *textIdx < 0 {
@@ -274,6 +306,15 @@ func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessag
 		out.StopReason, out.ErrorMessage = mapOpenAIFinishReason(*choice.FinishReason)
 	}
 	return true
+}
+
+func firstReasoningDelta(fields ...string) string {
+	for _, s := range fields {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func mapOpenAIFinishReason(reason string) (StopReason, string) {

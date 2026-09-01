@@ -84,6 +84,106 @@ func TestOpenAIClientHTTP(t *testing.T) {
 	}
 }
 
+func TestOpenAICompletionsJoinsBaseURL(t *testing.T) {
+	cases := []struct {
+		name     string
+		suffix   string
+		wantPath string
+	}{
+		{name: "host only", suffix: "", wantPath: "/v1/chat/completions"},
+		{name: "trailing slash", suffix: "/", wantPath: "/v1/chat/completions"},
+		{name: "already v1", suffix: "/v1", wantPath: "/v1/chat/completions"},
+		{name: "v1 slash", suffix: "/v1/", wantPath: "/v1/chat/completions"},
+		{name: "nested openai v1", suffix: "/openai/v1", wantPath: "/openai/v1/chat/completions"},
+		{name: "v4 paas", suffix: "/api/coding/paas/v4", wantPath: "/api/coding/paas/v4/chat/completions"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(openAIFixture))
+			}))
+			defer srv.Close()
+
+			client := &OpenAICompletionsClient{BaseURL: srv.URL + tc.suffix, APIKey: "k", HTTPClient: srv.Client()}
+			stream, err := client.StreamFn()(context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "gpt-test"})
+			if err != nil {
+				t.Fatalf("StreamFn error: %v", err)
+			}
+			stream.Collect()
+			if gotPath != tc.wantPath {
+				t.Fatalf("path = %q, want %q", gotPath, tc.wantPath)
+			}
+		})
+	}
+}
+
+const openAIReasoningFixture = `data: {"choices":[{"delta":{"reasoning_content":"plan "}}]}
+
+data: {"choices":[{"delta":{"reasoning_content":"ahead"}}]}
+
+data: {"choices":[{"delta":{"content":"done"}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+`
+
+func TestStreamOpenAIReaderReasoningContent(t *testing.T) {
+	stream := StreamOpenAIReader(context.Background(), strings.NewReader(openAIReasoningFixture), "gpt-test")
+	events, final := stream.Collect()
+	has := map[EventType]bool{}
+	for _, e := range events {
+		has[e.Type] = true
+	}
+	if !has[EventThinkingStart] || !has[EventThinkingEnd] || !has[EventTextEnd] {
+		t.Fatalf("missing thinking/text events; events=%v", eventTypes(events))
+	}
+	if final == nil {
+		t.Fatal("no final message")
+	}
+	if final.Text() != "done" {
+		t.Errorf("text = %q, want done", final.Text())
+	}
+	var thinking string
+	for _, c := range final.Content {
+		if c.Type == KindThinking {
+			thinking += c.Thinking
+		}
+	}
+	if thinking != "plan ahead" {
+		t.Errorf("thinking = %q, want %q", thinking, "plan ahead")
+	}
+}
+
+const openAIReasoningAltFixture = `data: {"choices":[{"delta":{"reasoning":"alt"}}]}
+
+data: {"choices":[{"delta":{"content":"ok"}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+`
+
+func TestStreamOpenAIReaderReasoningFieldFallback(t *testing.T) {
+	stream := StreamOpenAIReader(context.Background(), strings.NewReader(openAIReasoningAltFixture), "gpt-test")
+	_, final := stream.Collect()
+	if final == nil {
+		t.Fatal("no final message")
+	}
+	var thinking string
+	for _, c := range final.Content {
+		if c.Type == KindThinking {
+			thinking += c.Thinking
+		}
+	}
+	if thinking != "alt" {
+		t.Fatalf("thinking = %q, want alt", thinking)
+	}
+}
+
 func eventTypes(events []Event) []EventType {
 	out := make([]EventType, len(events))
 	for i, e := range events {
