@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,13 +26,35 @@ type ModelInfo struct {
 	ID     string      `json:"id"`
 	Source string      `json:"source,omitempty"`
 	Status ModelStatus `json:"status"`
+	Meta   *ModelMeta  `json:"meta,omitempty"`
+}
+
+// ModelMeta is optional llama.cpp model metadata.
+type ModelMeta struct {
+	NCtx      int64 `json:"n_ctx"`
+	NCtxTrain int64 `json:"n_ctx_train"`
+}
+
+// FileProgress is one download file's bytes.
+type FileProgress struct {
+	Done  float64 `json:"done"`
+	Total float64 `json:"total"`
 }
 
 // ModelStatus is llama.cpp router status.
 type ModelStatus struct {
-	Value    string `json:"value"`
-	Failed   bool   `json:"failed,omitempty"`
-	ExitCode *int   `json:"exit_code,omitempty"`
+	Value    string                  `json:"value"`
+	Failed   bool                    `json:"failed,omitempty"`
+	ExitCode *int                    `json:"exit_code,omitempty"`
+	Args     []string                `json:"args,omitempty"`
+	Progress map[string]FileProgress `json:"progress,omitempty"`
+}
+
+// Progress is a load/download status update for the manager UI.
+type Progress struct {
+	Message string
+	Ratio   float64 // -1 when unknown
+	Detail  string
 }
 
 // ServerProps is GET /props.
@@ -231,8 +254,16 @@ func (c *Client) findModel(reload bool, id string) (ModelInfo, bool, error) {
 
 // LoadAndWait POSTs /models/load and polls until loaded or failed.
 func (c *Client) LoadAndWait(ctx context.Context, model string) (ModelInfo, error) {
+	return c.LoadAndWaitProgress(ctx, model, nil)
+}
+
+// LoadAndWaitProgress is LoadAndWait with optional progress callbacks.
+func (c *Client) LoadAndWaitProgress(ctx context.Context, model string, onProgress func(Progress)) (ModelInfo, error) {
 	if err := c.Load(model); err != nil {
 		return ModelInfo{}, err
+	}
+	if onProgress != nil {
+		onProgress(Progress{Message: "Loading model", Ratio: -1})
 	}
 	for {
 		entry, ok, err := c.findModel(false, model)
@@ -275,8 +306,16 @@ func (c *Client) UnloadAndWait(ctx context.Context, model string) error {
 
 // DownloadAndWait POSTs /models and polls until the model leaves the downloading state.
 func (c *Client) DownloadAndWait(ctx context.Context, model string) ([]ModelInfo, error) {
+	return c.DownloadAndWaitProgress(ctx, model, nil)
+}
+
+// DownloadAndWaitProgress is DownloadAndWait with optional progress callbacks.
+func (c *Client) DownloadAndWaitProgress(ctx context.Context, model string, onProgress func(Progress)) ([]ModelInfo, error) {
 	if err := c.Download(model); err != nil {
 		return nil, err
+	}
+	if onProgress != nil {
+		onProgress(Progress{Message: "Downloading model", Ratio: -1})
 	}
 	sawDownloading := false
 	polls := 0
@@ -298,6 +337,9 @@ func (c *Client) DownloadAndWait(ctx context.Context, model string) ([]ModelInfo
 		}
 		if entry != nil && entry.Status.Value == "downloading" {
 			sawDownloading = true
+			if onProgress != nil {
+				onProgress(downloadProgress(*entry))
+			}
 		} else if entry != nil && (sawDownloading || polls >= 2) {
 			return c.List(true)
 		}
@@ -305,6 +347,57 @@ func (c *Client) DownloadAndWait(ctx context.Context, model string) ([]ModelInfo
 			return nil, err
 		}
 	}
+}
+
+func downloadProgress(entry ModelInfo) Progress {
+	var done, total float64
+	for _, p := range entry.Status.Progress {
+		done += p.Done
+		total += p.Total
+	}
+	if total <= 0 {
+		return Progress{Message: "Downloading model", Ratio: -1}
+	}
+	return Progress{
+		Message: "Downloading model",
+		Ratio:   done / total,
+		Detail:  FormatBytes(done) + " / " + FormatBytes(total),
+	}
+}
+
+// ModelIsLoaded reports loaded or sleeping.
+func ModelIsLoaded(m ModelInfo) bool {
+	return m.Status.Value == "loaded" || m.Status.Value == "sleeping"
+}
+
+// ContextLabel is a short n_ctx / --ctx-size label.
+func ContextLabel(m ModelInfo) string {
+	ctx := int64(0)
+	if m.Meta != nil {
+		ctx = m.Meta.NCtx
+		if ctx == 0 {
+			ctx = m.Meta.NCtxTrain
+		}
+	}
+	if ctx == 0 {
+		args := m.Status.Args
+		for i := 0; i < len(args)-1; i++ {
+			switch args[i] {
+			case "--ctx-size", "-c", "-ctx":
+				n, err := strconv.ParseInt(args[i+1], 10, 64)
+				if err == nil && n > 0 {
+					ctx = n
+				}
+			}
+		}
+	}
+	if ctx <= 0 {
+		return ""
+	}
+	if ctx >= 1000 {
+		return strconv.FormatInt((ctx+500)/1000, 10) + "k"
+	}
+	return strconv.FormatInt(ctx, 10)
 }
 
 // Selectable reports whether a router model can be used for inference.

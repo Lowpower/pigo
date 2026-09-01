@@ -88,7 +88,7 @@ func Builtins() []Command {
 		{Name: "theme", Description: "show or set the theme"},
 		{Name: "skills", Description: "list discovered skills"},
 		{Name: "tools", Description: "list available tools"},
-		{Name: "llama", Description: "list, search, load, unload, or download llama.cpp router models"},
+		{Name: "llama", Description: "manage llama.cpp router models"},
 		{Name: "clear", Description: "clear the on-screen transcript"},
 	}
 }

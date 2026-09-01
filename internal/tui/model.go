@@ -117,6 +117,7 @@ type Model struct {
 	tree          treeOverlay
 	fork          forkOverlay
 	settings      settingsPicker
+	llama         llamaOverlay
 	lastEscape    time.Time
 	summaryCancel context.CancelFunc
 	pendingNav    *pendingNav
@@ -244,6 +245,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.sessionPickerActive() {
 			return m.handleSessionPickerKey(msg)
+		}
+		if m.llamaActive() {
+			return m.handleLlamaKey(msg)
 		}
 		if m.settingsActive() {
 			return m.handleSettingsKey(msg)
@@ -424,6 +428,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case llamaDoneMsg:
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg.text)})
 		return m, nil
+
+	case llamaCatalogMsg, llamaSearchTickMsg, llamaSearchResultMsg, llamaDetailsMsg, llamaActionDoneMsg:
+		return m.handleLlamaMsg(msg)
 	}
 
 	var cmd tea.Cmd
@@ -1000,6 +1007,9 @@ func (m Model) View() string {
 	if m.settingsActive() {
 		return m.present(m.settings.view())
 	}
+	if m.llamaActive() {
+		return m.present(m.llama.view())
+	}
 	if m.scopedModelsActive() {
 		return m.present(m.scoped.view())
 	}
@@ -1361,17 +1371,12 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	if len(args) == 0 {
+		return m.openLlamaManager()
+	}
 	c, err := llama.NewClient(url, key)
 	if err != nil {
 		return note(err.Error())
-	}
-	if len(args) == 0 {
-		models, err := c.List(false)
-		if err != nil {
-			return note(err.Error())
-		}
-		props, _ := c.Props()
-		return note(llama.FormatCatalog(models, props.ModelsAutoload))
 	}
 	run := func(pending, done string, fn func() error) (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(pending)})
