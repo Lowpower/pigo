@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -152,3 +153,46 @@ func TestLoadSaveExtraRuntimeKeys(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+var trackingIDRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func TestSetEnableAnalyticsMintsTrackingID(t *testing.T) {
+	var c Config
+	c.SetEnableAnalytics(true)
+	if c.EnableAnalytics == nil || !*c.EnableAnalytics {
+		t.Fatal("expected analytics on")
+	}
+	if !trackingIDRe.MatchString(c.TrackingID) {
+		t.Fatalf("trackingId=%q", c.TrackingID)
+	}
+	first := c.TrackingID
+	c.SetEnableAnalytics(false)
+	if c.EnableAnalytics == nil || *c.EnableAnalytics {
+		t.Fatal("expected analytics off")
+	}
+	if c.TrackingID != first {
+		t.Fatalf("id cleared: %q", c.TrackingID)
+	}
+	c.SetEnableAnalytics(true)
+	if c.TrackingID != first {
+		t.Fatalf("id changed on re-enable: %q vs %q", c.TrackingID, first)
+	}
+}
+
+func TestSaveMintsTrackingIDWhenAnalyticsOn(t *testing.T) {
+	dir := t.TempDir()
+	on := true
+	if err := Save(dir, Config{EnableAnalytics: &on}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.EnableAnalytics == nil || !*got.EnableAnalytics {
+		t.Fatal("expected analytics on")
+	}
+	if !trackingIDRe.MatchString(got.TrackingID) {
+		t.Fatalf("trackingId=%q", got.TrackingID)
+	}
+}
