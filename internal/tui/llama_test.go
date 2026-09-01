@@ -93,4 +93,19 @@ func TestHandleLlamaUsageMentionsDownload(t *testing.T) {
 	if !transcriptContains(next.(Model), "/llama download") {
 		t.Fatalf("usage:\n%s", transcriptText(next.(Model)))
 	}
+	if !transcriptContains(next.(Model), "/llama search") {
+		t.Fatalf("usage missing search:\n%s", transcriptText(next.(Model)))
+	}
+}
+
+func TestHandleLlamaSearch(t *testing.T) {
+	m := New(testCfg())
+	next, cmd := m.handleLlama("search qwen")
+	got := next.(Model)
+	if !transcriptContains(got, "searching Hugging Face") {
+		t.Fatalf("pending:\n%s", transcriptText(got))
+	}
+	if cmd == nil {
+		t.Fatal("expected async search")
+	}
 }

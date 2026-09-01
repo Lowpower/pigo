@@ -303,3 +303,29 @@ func TestPiShapedJSONLFixtureRoundTrip(t *testing.T) {
 		t.Fatalf("context = %s", joined)
 	}
 }
+
+func TestOpenRealPiJSONLFixture(t *testing.T) {
+	src := filepath.Join("testdata", "pi-before-compaction-head.jsonl")
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Header().Type != "session" || opened.Header().ID == "" {
+		t.Fatalf("header=%+v", opened.Header())
+	}
+	if len(opened.Entries()) == 0 {
+		t.Fatal("expected entries from pi fixture")
+	}
+	msgs := RestoreAIMessages(ContextEntries(opened))
+	if len(msgs) == 0 {
+		t.Fatal("expected restored messages")
+	}
+}

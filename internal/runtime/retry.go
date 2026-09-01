@@ -30,6 +30,9 @@ func (e *Engine) AbortRetry() {
 }
 
 func (e *Engine) willRetryAfterAgentEnd(ev agent.Event) bool {
+	if e.willOverflowRetry(ev.Messages) {
+		return true
+	}
 	if !e.Opts.Config.RetryEnabled() || e.retryAttempt >= e.Opts.Config.RetryMaxRetries() {
 		return false
 	}

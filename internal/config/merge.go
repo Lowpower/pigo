@@ -9,44 +9,58 @@ import (
 // projectOverlay is the JSON keys a trusted project settings.json may supply.
 // defaultProjectTrust is global-only and is not read from project files.
 type projectOverlay struct {
-	DefaultProvider      string                 `json:"defaultProvider"`
-	DefaultModel         string                 `json:"defaultModel"`
-	Theme                string                 `json:"theme"`
-	Thinking             string                 `json:"thinking"`
-	DefaultThinkingLevel string                 `json:"defaultThinkingLevel"`
-	ContextWindow        int                    `json:"contextWindow"`
-	CompactionOn         *bool                  `json:"compactionEnabled"`
-	ReserveTokens        int                    `json:"compactionReserveTokens"`
-	KeepRecentTokens     int                    `json:"compactionKeepRecentTokens"`
-	Compaction           *CompactionSettings    `json:"compaction"`
-	SteeringMode         string                 `json:"steeringMode"`
-	FollowUpMode         string                 `json:"followUpMode"`
-	Retry                *RetrySettings         `json:"retry"`
-	ThinkingBudgets      map[string]int         `json:"thinkingBudgets"`
-	ModelThinkingLevels  map[string]string      `json:"modelThinkingLevels"`
-	HTTPIdleTimeoutMs    *int                   `json:"httpIdleTimeoutMs"`
-	ExternalEditor       string                 `json:"externalEditor"`
-	DoubleEscapeAction   string                 `json:"doubleEscapeAction"`
-	TreeFilterMode       string                 `json:"treeFilterMode"`
-	BranchSummary        *BranchSummarySettings `json:"branchSummary"`
-	Terminal             *TerminalSettings      `json:"terminal"`
-	Markdown             *MarkdownSettings      `json:"markdown"`
-	Images               *ImageSettings         `json:"images"`
-	TUIMode              string                 `json:"tuiMode"`
-	FullscreenExitOutput string                 `json:"fullscreenExitOutput"`
-	ShellPath            string                 `json:"shellPath"`
-	DefaultTools         *[]string              `json:"defaultTools"`
-	EnabledModels        []string               `json:"enabledModels"`
-	SessionDir           string                 `json:"sessionDir"`
-	QuietStartup         *bool                  `json:"quietStartup"`
-	HTTPProxy            string                 `json:"httpProxy"`
-	EnableSkillCommands  *bool                  `json:"enableSkillCommands"`
-	Packages             []PackageEntry         `json:"packages"`
-	Extensions           []string               `json:"extensions"`
-	Skills               []string               `json:"skills"`
-	Prompts              []string               `json:"prompts"`
-	Themes               []string               `json:"themes"`
-	NpmCommand           []string               `json:"npmCommand"`
+	DefaultProvider           string                 `json:"defaultProvider"`
+	DefaultModel              string                 `json:"defaultModel"`
+	Theme                     string                 `json:"theme"`
+	Thinking                  string                 `json:"thinking"`
+	DefaultThinkingLevel      string                 `json:"defaultThinkingLevel"`
+	ContextWindow             int                    `json:"contextWindow"`
+	CompactionOn              *bool                  `json:"compactionEnabled"`
+	ReserveTokens             int                    `json:"compactionReserveTokens"`
+	KeepRecentTokens          int                    `json:"compactionKeepRecentTokens"`
+	Compaction                *CompactionSettings    `json:"compaction"`
+	SteeringMode              string                 `json:"steeringMode"`
+	FollowUpMode              string                 `json:"followUpMode"`
+	Retry                     *RetrySettings         `json:"retry"`
+	ThinkingBudgets           map[string]int         `json:"thinkingBudgets"`
+	ModelThinkingLevels       map[string]string      `json:"modelThinkingLevels"`
+	HTTPIdleTimeoutMs         *int                   `json:"httpIdleTimeoutMs"`
+	ExternalEditor            string                 `json:"externalEditor"`
+	DoubleEscapeAction        string                 `json:"doubleEscapeAction"`
+	TreeFilterMode            string                 `json:"treeFilterMode"`
+	BranchSummary             *BranchSummarySettings `json:"branchSummary"`
+	Terminal                  *TerminalSettings      `json:"terminal"`
+	Markdown                  *MarkdownSettings      `json:"markdown"`
+	Images                    *ImageSettings         `json:"images"`
+	TUIMode                   string                 `json:"tuiMode"`
+	FullscreenExitOutput      string                 `json:"fullscreenExitOutput"`
+	ShellPath                 string                 `json:"shellPath"`
+	DefaultTools              *[]string              `json:"defaultTools"`
+	EnabledModels             []string               `json:"enabledModels"`
+	SessionDir                string                 `json:"sessionDir"`
+	QuietStartup              *bool                  `json:"quietStartup"`
+	HTTPProxy                 string                 `json:"httpProxy"`
+	EnableSkillCommands       *bool                  `json:"enableSkillCommands"`
+	HideThinkingBlock         *bool                  `json:"hideThinkingBlock"`
+	ShowCacheMissNotices      *bool                  `json:"showCacheMissNotices"`
+	ShellCommandPrefix        string                 `json:"shellCommandPrefix"`
+	EditorPaddingX            *int                   `json:"editorPaddingX"`
+	OutputPad                 *int                   `json:"outputPad"`
+	AutocompleteMaxVisible    *int                   `json:"autocompleteMaxVisible"`
+	ShowHardwareCursor        *bool                  `json:"showHardwareCursor"`
+	WebsocketConnectTimeoutMs *int                   `json:"websocketConnectTimeoutMs"`
+	FullscreenScrollbar       *bool                  `json:"fullscreenScrollbar"`
+	FullscreenCopyOnSelect    *bool                  `json:"fullscreenCopyOnSelect"`
+	EnableAnalytics           *bool                  `json:"enableAnalytics"`
+	TrackingID                string                 `json:"trackingId"`
+	Transport                 string                 `json:"transport"`
+	Warnings                  map[string]any         `json:"warnings"`
+	Packages                  []PackageEntry         `json:"packages"`
+	Extensions                []string               `json:"extensions"`
+	Skills                    []string               `json:"skills"`
+	Prompts                   []string               `json:"prompts"`
+	Themes                    []string               `json:"themes"`
+	NpmCommand                []string               `json:"npmCommand"`
 }
 
 // ApplyProject overlays cwd/.pigo/settings.json onto user when trusted.
@@ -156,6 +170,18 @@ func applyOverlay(user Config, over projectOverlay) Config {
 		if over.Terminal.Hyperlinks != nil {
 			out.Terminal.Hyperlinks = over.Terminal.Hyperlinks
 		}
+		if over.Terminal.Images != nil {
+			out.Terminal.Images = over.Terminal.Images
+		}
+		if over.Terminal.ClearOnShrink != nil {
+			out.Terminal.ClearOnShrink = over.Terminal.ClearOnShrink
+		}
+		if over.Terminal.ShowTerminalProgress != nil {
+			out.Terminal.ShowTerminalProgress = over.Terminal.ShowTerminalProgress
+		}
+		if over.Terminal.TrueColor != nil {
+			out.Terminal.TrueColor = over.Terminal.TrueColor
+		}
 	}
 	if over.Markdown != nil {
 		if over.Markdown.Mermaid != "" {
@@ -200,6 +226,48 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	}
 	if over.EnableSkillCommands != nil {
 		out.EnableSkillCommands = over.EnableSkillCommands
+	}
+	if over.HideThinkingBlock != nil {
+		out.HideThinkingBlock = over.HideThinkingBlock
+	}
+	if over.ShowCacheMissNotices != nil {
+		out.ShowCacheMissNotices = over.ShowCacheMissNotices
+	}
+	if over.ShellCommandPrefix != "" {
+		out.ShellCommandPrefix = over.ShellCommandPrefix
+	}
+	if over.EditorPaddingX != nil {
+		out.EditorPaddingX = over.EditorPaddingX
+	}
+	if over.OutputPad != nil {
+		out.OutputPad = over.OutputPad
+	}
+	if over.AutocompleteMaxVisible != nil {
+		out.AutocompleteMaxVisible = over.AutocompleteMaxVisible
+	}
+	if over.ShowHardwareCursor != nil {
+		out.ShowHardwareCursor = over.ShowHardwareCursor
+	}
+	if over.WebsocketConnectTimeoutMs != nil {
+		out.WebsocketConnectTimeoutMs = over.WebsocketConnectTimeoutMs
+	}
+	if over.FullscreenScrollbar != nil {
+		out.FullscreenScrollbar = over.FullscreenScrollbar
+	}
+	if over.FullscreenCopyOnSelect != nil {
+		out.FullscreenCopyOnSelect = over.FullscreenCopyOnSelect
+	}
+	if over.EnableAnalytics != nil {
+		out.EnableAnalytics = over.EnableAnalytics
+	}
+	if over.TrackingID != "" {
+		out.TrackingID = over.TrackingID
+	}
+	if over.Transport != "" {
+		out.Transport = over.Transport
+	}
+	if over.Warnings != nil {
+		out.Warnings = over.Warnings
 	}
 	if over.Packages != nil {
 		out.Packages = over.Packages
@@ -246,4 +314,8 @@ func CopyUISettings(dst *Config, src Config) {
 	dst.EnableInstallTelemetry = src.EnableInstallTelemetry
 	dst.TUIMode = src.TUIMode
 	dst.FullscreenExitOutput = src.FullscreenExitOutput
+	dst.HideThinkingBlock = src.HideThinkingBlock
+	dst.ShowCacheMissNotices = src.ShowCacheMissNotices
+	dst.ShellCommandPrefix = src.ShellCommandPrefix
+	dst.AutocompleteMaxVisible = src.AutocompleteMaxVisible
 }

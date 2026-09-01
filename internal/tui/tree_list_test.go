@@ -44,12 +44,12 @@ func TestSearchAndFold(t *testing.T) {
 	_, _ = m.AppendMessage("user", map[string]any{"role": "user", "content": "gamma"})
 	flat := flattenForest(m.GetTree(), m.LeafID())
 	got := filterFlat(flat, filterAll, "gamma", m.LeafID(), nil)
-	if len(got) != 1 || !strings.Contains(entryDisplay(got[0].node.Entry, nil), "gamma") {
+	if len(got) != 1 || !strings.Contains(entryDisplay(got[0].node.Entry, nil, nil), "gamma") {
 		t.Fatalf("search = %+v", got)
 	}
 	folded := filterFlat(flat, filterAll, "", m.LeafID(), map[string]bool{a.ID: true})
 	for _, n := range folded {
-		if strings.Contains(entryDisplay(n.node.Entry, nil), "gamma") {
+		if strings.Contains(entryDisplay(n.node.Entry, nil, nil), "gamma") {
 			t.Fatal("folded parent should hide descendants")
 		}
 	}
@@ -90,11 +90,11 @@ func TestCycleFilter(t *testing.T) {
 }
 
 func TestFormatToolCallReadAndBash(t *testing.T) {
-	got := formatToolCall("read", map[string]any{"path": "/tmp/a.go", "offset": 10, "limit": 5})
+	got := formatToolCall("read", map[string]any{"path": "/tmp/a.go", "offset": 10, "limit": 5}, nil)
 	if got != "[read: /tmp/a.go:10-14]" {
 		t.Fatalf("read = %q", got)
 	}
-	got = formatToolCall("bash", map[string]any{"command": "echo hi"})
+	got = formatToolCall("bash", map[string]any{"command": "echo hi"}, nil)
 	if got != "[bash: echo hi]" {
 		t.Fatalf("bash = %q", got)
 	}
@@ -115,7 +115,7 @@ func TestToolResultUsesAssistantToolCall(t *testing.T) {
 	var shown string
 	for _, n := range flat {
 		if entryRoleOf(n.node.Entry) == "toolResult" {
-			shown = entryDisplay(n.node.Entry, tools)
+			shown = entryDisplay(n.node.Entry, tools, nil)
 		}
 	}
 	if shown != "[read: a.txt]" {

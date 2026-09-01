@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
@@ -76,6 +77,7 @@ type Model struct {
 	provider          string
 	hideThinking      bool
 	toolsExpanded     bool
+	retryPrefix       int
 	usage             ai.Usage
 	gitCwd            string
 	gitBranch         string
@@ -121,21 +123,35 @@ type Model struct {
 	clipOSC       string
 	imgProto      string
 	altScreen     bool
+	lastWidth     int
+	lastHeight    int
 }
 
 // New builds the interactive model from the resolved config.
 func New(cfg config.Config) Model {
 	m := Model{
-		cfg:       cfg,
-		editor:    newPromptEditor(),
-		keys:      keys.NewManager(config.DefaultConfigDir()),
-		imgProto:  detectImageProtocol(os.Getenv),
-		altScreen: useAltScreen(cfg),
+		cfg:          cfg,
+		editor:       newPromptEditor(),
+		keys:         keys.NewManager(config.DefaultConfigDir()),
+		imgProto:     cfg.ImageProtocol(detectImageProtocol(os.Getenv)),
+		altScreen:    useAltScreen(cfg),
+		hideThinking: cfg.HideThinking(),
+		complete:     completer{maxVisible: cfg.AutocompleteVisible()},
 	}
 	m.glam = newRenderer(80)
 	m.applyTheme(theme.Load(cfg.Theme, "", ""))
 	m.refreshGit()
+	applyTrueColor(cfg)
 	return m
+}
+
+func applyTrueColor(cfg config.Config) {
+	switch cfg.TrueColorMode() {
+	case "on":
+		lipgloss.SetColorProfile(termenv.TrueColor)
+	case "off":
+		lipgloss.SetColorProfile(termenv.ANSI)
+	}
 }
 
 func (m *Model) applyTheme(th theme.Theme) {
@@ -174,16 +190,31 @@ func newRenderer(width int) *glamour.TermRenderer {
 }
 
 // Init implements tea.Model.
-func (m Model) Init() tea.Cmd { return textarea.Blink }
+func (m Model) Init() tea.Cmd {
+	if m.cfg.HardwareCursor() {
+		return tea.Batch(textarea.Blink, tea.ShowCursor)
+	}
+	return textarea.Blink
+}
 
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		cmds := []tea.Cmd{}
+		if m.cfg.ClearOnShrink() && m.lastWidth > 0 && (msg.Width < m.lastWidth || msg.Height < m.lastHeight) {
+			cmds = append(cmds, tea.ClearScreen)
+		}
+		m.lastWidth, m.lastHeight = msg.Width, msg.Height
 		m.width, m.height = msg.Width, msg.Height
-		m.editor.SetWidth(min(msg.Width, maxEditorWidth))
-		m.glam = newRenderer(min(msg.Width, maxEditorWidth))
-		return m, nil
+		edW := min(msg.Width, maxEditorWidth) - 2*m.cfg.EditorPadX()
+		if edW < 20 {
+			edW = 20
+		}
+		m.editor.SetWidth(edW)
+		wrap := min(msg.Width, maxEditorWidth) - m.cfg.OutputPadN()
+		m.glam = newRenderer(wrap)
+		return m, tea.Batch(cmds...)
 
 	case externalEditorDoneMsg:
 		if msg.ok {
@@ -298,6 +329,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.keyIs(msg, "app.thinking.toggle") {
 			m.hideThinking = !m.hideThinking
+			on := m.hideThinking
+			m.cfg.HideThinkingBlock = &on
+			if m.engine != nil && m.engine.Opts.UserConfig != nil {
+				m.engine.Opts.UserConfig.HideThinkingBlock = &on
+			}
+			if m.engine != nil {
+				m.persistSettings()
+			}
 			state := "visible"
 			if m.hideThinking {
 				state = "hidden"
@@ -838,10 +877,14 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 		}
 
 	case agent.EventToolStart:
+		label := compactArgs(ev.Args)
+		if p, ok := ev.Args["path"].(string); ok && p != "" {
+			label = strings.Replace(label, p, m.linkPath(p, p), 1)
+		}
 		m.transcript = append(m.transcript, entry{
 			role:       "tool",
 			toolCallID: ev.ToolCallID,
-			rendered:   m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, compactArgs(ev.Args))),
+			rendered:   m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, label)),
 		})
 
 	case agent.EventToolUpdate:
@@ -875,15 +918,45 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 		})
 
 	case agent.EventAgentEnd:
-		m.running = false
-		m.streamingActive = false
+		if m.engine != nil {
+			m.engine.PersistTurn(ev.Messages, m.retryPrefix)
+		}
+		m.retryPrefix = 0
 		if len(ev.Messages) > 0 {
 			m.history = agent.MessagesFromTranscript(ev.Messages)
-			if m.engine != nil {
-				m.engine.PersistTranscript(ev.Messages)
+		}
+		if m.engine != nil {
+			ctx := context.Background()
+			if hist, again := m.engine.AfterAgentEnd(ctx, ev.Messages); again {
+				m.history = hist
+				m.retryPrefix = len(hist)
+				stream := m.engine.Continue(ctx, hist)
+				m.agentEvents = stream.Events()
+				m.running = true
+				m.streamingActive = true
+				if m.cfg.CacheMissNotices() {
+					m.appendCacheMissNotice()
+				}
+				return
 			}
 		}
+		m.running = false
+		m.streamingActive = false
+		if m.cfg.CacheMissNotices() {
+			m.appendCacheMissNotice()
+		}
 	}
+}
+
+func (m *Model) appendCacheMissNotice() {
+	if m.engine == nil || m.engine.Opts.Session == nil {
+		return
+	}
+	note := session.LastCacheMissNotice(m.engine.Opts.Session.Entries())
+	if note == "" {
+		return
+	}
+	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(note)})
 }
 
 // View implements tea.Model.
@@ -892,25 +965,25 @@ func (m Model) View() string {
 		return "bye\n"
 	}
 	if m.sessionPickerActive() {
-		return m.sessions.view()
+		return m.present(m.sessions.view())
 	}
 	if m.settingsActive() {
-		return m.settings.view()
+		return m.present(m.settings.view())
 	}
 	if m.scopedModelsActive() {
-		return m.scoped.view()
+		return m.present(m.scoped.view())
 	}
 	if m.modelPickerActive() {
-		return m.models.view()
+		return m.present(m.models.view())
 	}
 	if m.loginActive() {
-		return m.loginView()
+		return m.present(m.loginView())
 	}
 	if m.overlay == overlayTree || m.overlay == overlayTreeLabel || m.overlay == overlayTreeSummary || m.overlay == overlayTreeCustom {
-		return m.withClip(m.treeView())
+		return m.present(m.treeView())
 	}
 	if m.overlay == overlayFork {
-		return m.withClip(m.forkView())
+		return m.present(m.forkView())
 	}
 
 	var b strings.Builder
@@ -995,13 +1068,17 @@ func (m Model) View() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(m.editor.View())
+	ed := m.editor.View()
+	if n := m.cfg.EditorPadX(); n > 0 {
+		ed = padLines(ed, n)
+	}
+	b.WriteString(ed)
 	b.WriteString("\n")
 	if m.complete.active {
 		b.WriteString(m.complete.view())
 	}
 	b.WriteString(m.footerStyle.Render(m.footerText()))
-	return m.withClip(b.String())
+	return m.present(b.String())
 }
 
 type pendingNav struct {
@@ -1082,6 +1159,7 @@ func (m Model) mermaidOpts(streaming bool) mermaidOpts {
 }
 
 func (m Model) renderMarkdown(s string) string {
+	s = indentMarkdownCodeBlocks(s, m.cfg.CodeBlockIndent())
 	s = transformMermaid(s, m.mermaidOpts(false))
 	if m.glam == nil {
 		return s
@@ -1130,6 +1208,9 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 	if useAltScreen(m.cfg) {
 		opts = append(opts, tea.WithAltScreen())
 		m.altScreen = true
+	}
+	if m.cfg.CopyOnSelect() {
+		opts = append(opts, tea.WithMouseCellMotion())
 	}
 	final, err := tea.NewProgram(m, opts...).Run()
 	if err != nil {
@@ -1211,6 +1292,21 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
 		return m, nil
 	}
+	args := strings.Fields(rest)
+	if len(args) > 0 && args[0] == "search" {
+		if len(args) < 2 {
+			return note("usage: /llama search <query>")
+		}
+		query := strings.Join(args[1:], " ")
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("searching Hugging Face for " + query + "...")})
+		return m, func() tea.Msg {
+			found, err := llama.SearchHuggingFace(context.Background(), query, llama.FindHuggingFaceToken(), "")
+			if err != nil {
+				return llamaDoneMsg{text: err.Error()}
+			}
+			return llamaDoneMsg{text: llama.FormatSearch(found)}
+		}
+	}
 	url := strings.TrimSpace(os.Getenv("LLAMA_BASE_URL"))
 	key := strings.TrimSpace(os.Getenv("LLAMA_API_KEY"))
 	if m.engine != nil {
@@ -1229,7 +1325,6 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 	if err != nil {
 		return note(err.Error())
 	}
-	args := strings.Fields(rest)
 	if len(args) == 0 {
 		models, err := c.List(false)
 		if err != nil {
@@ -1276,7 +1371,7 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 			return err
 		})
 	default:
-		return note("usage: /llama | /llama load <model> | /llama unload <model> | /llama download <model>")
+		return note("usage: /llama | /llama search <query> | /llama load <model> | /llama unload <model> | /llama download <model>")
 	}
 }
 

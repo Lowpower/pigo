@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 func costUsage(tokens int, total float64) ai.Usage {
@@ -158,6 +159,37 @@ func TestCollectStatsCacheWasteOnFullMiss(t *testing.T) {
 	got := CollectStats(m, nil, 0)
 	if got.CacheWaste == nil || got.CacheWaste.MissCount != 1 || got.CacheWaste.MissedTokens != 100_000 {
 		t.Fatalf("waste=%+v", got.CacheWaste)
+	}
+}
+
+func TestCollectStatsCacheWasteUsesCatalogPrice(t *testing.T) {
+	models.ClearOverlays()
+	t.Cleanup(models.ClearOverlays)
+	models.SetUserOverlay("priced", []models.Model{{
+		Provider: "priced", ID: "m1", Cost: &models.Cost{CacheRead: 0.30},
+	}})
+	m := New(t.TempDir(), t.TempDir())
+	write := func(cacheWrite int, inputCost float64) error {
+		_, err := m.AppendMessage("assistant", &ai.AssistantMessage{
+			Role:     ai.RoleAssistant,
+			Provider: "priced",
+			Model:    "m1",
+			Usage: ai.Usage{
+				CacheWrite: cacheWrite,
+				Cost:       ai.UsageCost{Input: inputCost, Total: inputCost},
+			},
+		})
+		return err
+	}
+	if err := write(100_000, 0.375); err != nil {
+		t.Fatal(err)
+	}
+	if err := write(110_000, 0.4125); err != nil {
+		t.Fatal(err)
+	}
+	got := CollectStats(m, nil, 0)
+	if got.CacheWaste == nil || got.CacheWaste.MissedCost <= 0 {
+		t.Fatalf("catalog fallback should price the miss: %+v", got.CacheWaste)
 	}
 }
 

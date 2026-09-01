@@ -35,10 +35,20 @@ func NextThinkingLevel(current string) string {
 
 // Model is a known catalog entry used by --list-models and /model.
 type Model struct {
-	Provider string `json:"provider,omitempty"`
-	ID       string `json:"id"`
-	API      string `json:"api,omitempty"`
-	BaseURL  string `json:"baseUrl,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	ID        string `json:"id"`
+	API       string `json:"api,omitempty"`
+	BaseURL   string `json:"baseUrl,omitempty"`
+	Cost      *Cost  `json:"cost,omitempty"`
+	MaxTokens int    `json:"maxTokens,omitempty"`
+}
+
+// Cost is catalog pricing in dollars per million tokens.
+type Cost struct {
+	Input      float64 `json:"input,omitempty"`
+	Output     float64 `json:"output,omitempty"`
+	CacheRead  float64 `json:"cacheRead,omitempty"`
+	CacheWrite float64 `json:"cacheWrite,omitempty"`
 }
 
 // Spec is a model plus optional thinking override (--models sonnet:high).

@@ -2,9 +2,11 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 const cacheMissNoiseFloor = 1024
@@ -125,6 +127,8 @@ func detectCacheMiss(prev *previousRequest, message ai.AssistantMessage) *cacheM
 	readPerToken := 0.0
 	if u.CacheRead > 0 {
 		readPerToken = u.Cost.CacheRead / float64(u.CacheRead)
+	} else {
+		readPerToken = models.CacheReadPerToken(message.Provider, message.Model)
 	}
 	diff := paidPerToken - readPerToken
 	if diff < 0 {
@@ -148,4 +152,36 @@ func asPreviousRequest(message ai.AssistantMessage, prev *previousRequest) *prev
 		modelKey:      message.Provider + "/" + message.Model,
 		reportedCache: reported,
 	}
+}
+
+// LastCacheMissNotice is the transcript line for the latest counted cache miss.
+func LastCacheMissNotice(entries []Entry) string {
+	var prev *previousRequest
+	var last *cacheMiss
+	for _, e := range entries {
+		if e.Type == "compaction" || e.Type == "branch_summary" {
+			prev = nil
+			continue
+		}
+		if e.Type != "message" && e.Type != "" {
+			continue
+		}
+		var am ai.AssistantMessage
+		if json.Unmarshal(e.Message, &am) != nil || am.Role != ai.RoleAssistant {
+			continue
+		}
+		if miss := detectCacheMiss(prev, am); miss != nil {
+			last = miss
+		}
+		if next := asPreviousRequest(am, prev); next != nil {
+			prev = next
+		}
+	}
+	if last == nil {
+		return ""
+	}
+	if last.missedCost >= 0.0001 {
+		return fmt.Sprintf("Cache miss: %d tokens re-billed ($%.3f)", last.missedTokens, last.missedCost)
+	}
+	return fmt.Sprintf("Cache miss: %d tokens re-billed", last.missedTokens)
 }

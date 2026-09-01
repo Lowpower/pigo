@@ -82,12 +82,32 @@ func TestReadResizesOversizeImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, isErr := run(t, readTool{}, map[string]any{"path": file})
+	out, isErr := run(t, readTool{autoResize: true}, map[string]any{"path": file})
 	if isErr {
 		t.Fatalf("read oversize error: %s", out)
 	}
 	if !strings.Contains(out, "resized from 2001x10") {
 		t.Fatalf("expected resize hint, got %q", out)
+	}
+}
+
+func TestReadSkipsResizeWhenAutoResizeOff(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "wide.png")
+	img := image.NewRGBA(image.Rect(0, 0, 2001, 10))
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, isErr := run(t, readTool{autoResize: false}, map[string]any{"path": file})
+	if isErr {
+		t.Fatalf("read oversize error: %s", out)
+	}
+	if strings.Contains(out, "resized from") {
+		t.Fatalf("should not resize: %q", out)
 	}
 }
 
