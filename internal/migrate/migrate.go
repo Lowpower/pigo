@@ -26,8 +26,10 @@ func Run(cwd, agentDir string) Result {
 	migrateCommandsToPrompts(agentDir)
 	if cwd != "" {
 		migrateCommandsToPrompts(filepath.Join(cwd, ".pi"))
+		migrateCommandsToPrompts(filepath.Join(cwd, ".pigo"))
 		res.Warnings = append(res.Warnings, deprecatedExtensionDirs(agentDir, "Global")...)
 		res.Warnings = append(res.Warnings, deprecatedExtensionDirs(filepath.Join(cwd, ".pi"), "Project")...)
+		res.Warnings = append(res.Warnings, deprecatedExtensionDirs(filepath.Join(cwd, ".pigo"), "Project")...)
 	} else {
 		res.Warnings = append(res.Warnings, deprecatedExtensionDirs(agentDir, "Global")...)
 	}

@@ -94,11 +94,12 @@ type Engine struct {
 	retryCancel  context.CancelFunc
 	retryAttempt int
 
-	extCommands    []extCommand
-	extProviderIDs map[string]bool
-	providerBackup map[string]providerBackup
-	extStreams     map[string]ai.StreamFn
-	stopAfterTools bool
+	extCommands       []extCommand
+	extProviderIDs    map[string]bool
+	providerBackup    map[string]providerBackup
+	extStreams        map[string]ai.StreamFn
+	stopAfterTools    bool
+	overflowAttempted bool
 }
 
 // New applies auth, discovers skills, loads tools/extensions, and builds the prompt.
@@ -115,7 +116,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		return nil, fmt.Errorf("models.json: %w", err)
 	}
 	models.SetThinkingBudgets(opts.Config.ThinkingBudgets)
-	ai.SetHTTPIdleTimeout(opts.Config.HTTPIdleTimeout())
+	ai.SetHTTPIdleTimeout(opts.Config.StreamIdleTimeout())
 
 	store := auth.Open(opts.AgentDir)
 	patterns := opts.Models
@@ -162,8 +163,15 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	if sf == nil {
 		sf, _ = ai.DefaultStreamFn()
 	}
-
-	reg := tools.Default()
+	sf = ai.WrapProviderRetry(sf, ai.ProviderRetry{
+		Timeout:    opts.Config.ProviderRetryTimeout(),
+		MaxRetries: opts.Config.ProviderRetryMaxRetries(),
+		MaxDelay:   opts.Config.ProviderRetryMaxDelay(),
+	})
+	reg := tools.NewBuiltins(tools.Options{
+		AutoResize:  opts.Config.AutoResize(),
+		ShellPrefix: opts.Config.ShellPrefix(),
+	})
 	if opts.NoTools {
 		reg = tools.NewRegistry()
 	} else if opts.NoBuiltinTools {
@@ -344,11 +352,19 @@ func (e *Engine) contextWindow() int {
 	return window
 }
 
+func (e *Engine) maxTokens() int {
+	provider := e.Provider
+	if provider == "" {
+		provider = e.Opts.Config.ResolvedProvider()
+	}
+	return models.MaxTokens(provider, e.Opts.Config.ResolvedModel())
+}
+
 // CompactNow runs a manual compaction (RPC compact), including customInstructions.
 func (e *Engine) CompactNow(ctx context.Context, msgs []ai.Message, customInstructions string) ([]ai.Message, string, error) {
 	s := e.compactionSettings()
 	s.CustomInstructions = customInstructions
-	return e.runCompaction(ctx, "manual", msgs, s)
+	return e.runCompaction(ctx, "manual", msgs, s, false)
 }
 
 func (e *Engine) compactionSettings() compaction.Settings {
@@ -362,7 +378,7 @@ func (e *Engine) compactionSettings() compaction.Settings {
 	return s
 }
 
-func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Message, s compaction.Settings) ([]ai.Message, string, error) {
+func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Message, s compaction.Settings, willRetry bool) ([]ai.Message, string, error) {
 	e.setCompacting(true)
 	defer e.setCompacting(false)
 	hook := e.DispatchEvent(ctx, "session_before_compact", map[string]any{
@@ -411,7 +427,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	}
 	e.emitSession(map[string]any{
 		"type": "compaction_end", "reason": reason,
-		"result": map[string]any{"summary": summary}, "aborted": false, "willRetry": false,
+		"result": map[string]any{"summary": summary}, "aborted": false, "willRetry": willRetry,
 	})
 	return out, summary, nil
 }
@@ -633,7 +649,7 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 	if !compaction.ShouldCompact(compaction.EstimateContextTokens(msgs), window, s) {
 		return msgs, "", nil
 	}
-	return e.runCompaction(ctx, "threshold", msgs, s)
+	return e.runCompaction(ctx, "threshold", msgs, s, false)
 }
 
 // RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
@@ -684,6 +700,7 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 		sys = s
 	}
 
+	e.overflowAttempted = false
 	userMsg := ai.Message{Role: ai.RoleUser, Content: user, Images: images}
 	history = append(append([]ai.Message(nil), history...), userMsg)
 	compacted, _, err := e.MaybeCompact(ctx, history)
@@ -832,7 +849,10 @@ func (e *Engine) Reload() {
 	e.Hosts = nil
 	e.extCommands = nil
 	e.extStreams = nil
-	reg := tools.Default()
+	reg := tools.NewBuiltins(tools.Options{
+		AutoResize:  e.Opts.Config.AutoResize(),
+		ShellPrefix: e.Opts.Config.ShellPrefix(),
+	})
 	if e.Opts.NoTools {
 		reg = tools.NewRegistry()
 	} else if e.Opts.NoBuiltinTools {
@@ -1108,6 +1128,12 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 			e.PersistTranscript(last[prefixLen:])
 		} else {
 			e.PersistTranscript(last)
+		}
+		if e.prepareOverflow(ctx, last) {
+			hist = stripLastAssistant(last)
+			prefixLen = len(hist)
+			continued = true
+			continue
 		}
 		if !e.prepareRetry(ctx, last) {
 			break

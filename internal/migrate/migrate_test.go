@@ -81,3 +81,31 @@ func TestRunMovesSessionsCommandsToolsAndKeybindings(t *testing.T) {
 		t.Fatalf("keybindings: %s", kb)
 	}
 }
+
+func TestRunMigratesPigoProjectCommandsAndWarnsHooks(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	proj := filepath.Join(cwd, ".pigo")
+	if err := os.MkdirAll(filepath.Join(proj, "commands"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "commands", "local.md"), []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(proj, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := Run(cwd, agent)
+	if _, err := os.Stat(filepath.Join(proj, "prompts", "local.md")); err != nil {
+		t.Fatalf("project .pigo prompts: %v", err)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "hooks") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings=%v", res.Warnings)
+	}
+}

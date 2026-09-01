@@ -54,10 +54,13 @@ func detectImageProtocol(getenv func(string) string) string {
 	return ""
 }
 
-func encodeKitty(b64 string) string {
+func encodeKitty(b64 string, cells int) string {
 	const prefix = "\x1b_G"
 	const suffix = "\x1b\\"
-	params := "a=T,f=100,q=2"
+	if cells < 1 {
+		cells = 60
+	}
+	params := fmt.Sprintf("a=T,f=100,q=2,c=%d", cells)
 	if len(b64) <= kittyChunk {
 		return prefix + params + ";" + b64 + suffix
 	}
@@ -90,8 +93,11 @@ func encodeKitty(b64 string) string {
 	return b.String()
 }
 
-func encodeITerm2(b64 string) string {
-	return fmt.Sprintf("\x1b]1337;File=inline=1;size=%d:%s\x07", decodedBase64Len(b64), b64)
+func encodeITerm2(b64 string, cells int) string {
+	if cells < 1 {
+		cells = 60
+	}
+	return fmt.Sprintf("\x1b]1337;File=inline=1;width=%d;size=%d:%s\x07", cells, decodedBase64Len(b64), b64)
 }
 
 func decodedBase64Len(s string) int {
@@ -343,14 +349,15 @@ func (m Model) renderInlineImage(img ai.ImageContent) string {
 	if !m.cfg.ShowImages() || m.imgProto == "" {
 		return imageFallback(img)
 	}
+	cells := m.cfg.ImageWidthCells()
 	switch m.imgProto {
 	case protoKitty:
 		if !kittyCanInline(img) {
 			return imageFallback(img)
 		}
-		return encodeKitty(img.Data)
+		return encodeKitty(img.Data, cells)
 	case protoITerm:
-		return encodeITerm2(img.Data)
+		return encodeITerm2(img.Data, cells)
 	default:
 		return imageFallback(img)
 	}

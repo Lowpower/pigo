@@ -65,3 +65,16 @@ func TestIsContextOverflow(t *testing.T) {
 		t.Fatal("overloaded should not be overflow")
 	}
 }
+
+func TestIsRecoverableLength(t *testing.T) {
+	msg := &AssistantMessage{StopReason: StopLength, Usage: Usage{Output: 10}}
+	if !IsRecoverableLength(msg, 128000) {
+		t.Fatal("want recoverable")
+	}
+	if IsRecoverableLength(msg, 10) || IsRecoverableLength(msg, 0) {
+		t.Fatal("at/zero limit is not recoverable")
+	}
+	if IsRecoverableLength(&AssistantMessage{StopReason: StopStop, Usage: Usage{Output: 1}}, 100) {
+		t.Fatal("stop is not recoverable")
+	}
+}

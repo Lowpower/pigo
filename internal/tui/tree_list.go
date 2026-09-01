@@ -309,11 +309,11 @@ type treeViewRow struct {
 }
 
 func renderTreeLine(n flatNode, selected, onPath, showLabelTime, foldable, folded bool, multiRoots bool) string {
-	r := buildTreeRow(n, selected, onPath, showLabelTime, foldable, folded, multiRoots, nil)
+	r := buildTreeRow(n, selected, onPath, showLabelTime, foldable, folded, multiRoots, nil, nil)
 	return r.gutter + r.body
 }
 
-func buildTreeRow(n flatNode, selected, onPath, showLabelTime, foldable, folded bool, multiRoots bool, tools map[string]toolCallInfo) treeViewRow {
+func buildTreeRow(n flatNode, selected, onPath, showLabelTime, foldable, folded bool, multiRoots bool, tools map[string]toolCallInfo, link pathLink) treeViewRow {
 	gutter := "  "
 	if selected {
 		gutter = "› "
@@ -364,7 +364,7 @@ func buildTreeRow(n flatNode, selected, onPath, showLabelTime, foldable, folded 
 	lead := prefix.String() + foldMark + active + label
 	return treeViewRow{
 		gutter:    gutter,
-		body:      lead + entryDisplay(n.node.Entry, tools),
+		body:      lead + entryDisplay(n.node.Entry, tools, link),
 		anchorCol: len([]rune(lead)),
 		selected:  selected,
 	}
@@ -459,9 +459,14 @@ func collectToolCalls(nodes []flatNode) map[string]toolCallInfo {
 	return out
 }
 
-func formatToolCall(name string, args map[string]any) string {
+type pathLink func(display, raw string) string
+
+func formatToolCall(name string, args map[string]any, link pathLink) string {
 	if args == nil {
 		args = map[string]any{}
+	}
+	if link == nil {
+		link = func(display, _ string) string { return display }
 	}
 	shorten := func(p string) string {
 		home, _ := os.UserHomeDir()
@@ -500,11 +505,13 @@ func formatToolCall(name string, args map[string]any) string {
 				display += ":" + strconv.Itoa(start)
 			}
 		}
-		return "[read: " + display + "]"
+		return "[read: " + link(display, argStr("path", "file_path")) + "]"
 	case "write":
-		return "[write: " + shorten(argStr("path", "file_path")) + "]"
+		path := argStr("path", "file_path")
+		return "[write: " + link(shorten(path), path) + "]"
 	case "edit":
-		return "[edit: " + shorten(argStr("path", "file_path")) + "]"
+		path := argStr("path", "file_path")
+		return "[edit: " + link(shorten(path), path) + "]"
 	case "bash":
 		raw := argStr("command")
 		cmd := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(raw, "\n", " "), "\t", " "))
@@ -513,11 +520,14 @@ func formatToolCall(name string, args map[string]any) string {
 		}
 		return "[bash: " + cmd + "]"
 	case "grep":
-		return "[grep: /" + argStr("pattern") + "/ in " + shorten(orDefault(argStr("path"), ".")) + "]"
+		path := orDefault(argStr("path"), ".")
+		return "[grep: /" + argStr("pattern") + "/ in " + link(shorten(path), path) + "]"
 	case "find":
-		return "[find: " + argStr("pattern") + " in " + shorten(orDefault(argStr("path"), ".")) + "]"
+		path := orDefault(argStr("path"), ".")
+		return "[find: " + argStr("pattern") + " in " + link(shorten(path), path) + "]"
 	case "ls":
-		return "[ls: " + shorten(orDefault(argStr("path"), ".")) + "]"
+		path := orDefault(argStr("path"), ".")
+		return "[ls: " + link(shorten(path), path) + "]"
 	default:
 		raw, _ := json.Marshal(args)
 		s := string(raw)
@@ -548,7 +558,7 @@ func orDefault(s, fallback string) string {
 	return s
 }
 
-func entryDisplay(e session.Entry, tools map[string]toolCallInfo) string {
+func entryDisplay(e session.Entry, tools map[string]toolCallInfo, link pathLink) string {
 	role := entryRoleOf(e)
 	norm := func(s string) string {
 		s = strings.ReplaceAll(s, "\n", " ")
@@ -608,7 +618,7 @@ func entryDisplay(e session.Entry, tools map[string]toolCallInfo) string {
 		_ = json.Unmarshal(e.Message, &p)
 		if tools != nil {
 			if tc, ok := tools[p.ToolCallID]; ok {
-				return formatToolCall(tc.name, tc.args)
+				return formatToolCall(tc.name, tc.args, link)
 			}
 		}
 		if p.ToolName != "" {
@@ -630,7 +640,7 @@ func entryDisplay(e session.Entry, tools map[string]toolCallInfo) string {
 }
 
 func searchableText(n session.TreeNode, tools map[string]toolCallInfo) string {
-	return n.Label + " " + entryDisplay(n.Entry, tools) + " " + n.Entry.ID
+	return n.Label + " " + entryDisplay(n.Entry, tools, nil) + " " + n.Entry.ID
 }
 
 func entryCopyText(e session.Entry) string {

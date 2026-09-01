@@ -80,6 +80,24 @@ func Lookup(provider, id string) (Model, bool) {
 	return Model{}, false
 }
 
+// CacheReadPerToken is catalog cache-read dollars per token, or 0.
+func CacheReadPerToken(provider, id string) float64 {
+	m, ok := Lookup(provider, id)
+	if !ok || m.Cost == nil {
+		return 0
+	}
+	return m.Cost.CacheRead / 1_000_000
+}
+
+// MaxTokens is the catalog output cap, or 0 when unknown.
+func MaxTokens(provider, id string) int {
+	m, ok := Lookup(provider, id)
+	if !ok || m.MaxTokens <= 0 {
+		return 0
+	}
+	return m.MaxTokens
+}
+
 // DefaultAPI is the API used when a model id is not in the catalog.
 func DefaultAPI(provider string) string {
 	if p, ok := LookupProvider(provider); ok && p.DefaultAPI != "" {
@@ -244,6 +262,12 @@ func mergeOverlay(base, extra []Model) []Model {
 			}
 			if m.BaseURL != "" {
 				out[i].BaseURL = m.BaseURL
+			}
+			if m.Cost != nil {
+				out[i].Cost = m.Cost
+			}
+			if m.MaxTokens > 0 {
+				out[i].MaxTokens = m.MaxTokens
 			}
 			continue
 		}

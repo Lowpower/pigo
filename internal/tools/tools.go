@@ -37,9 +37,28 @@ func NewRegistry(ts ...Tool) *Registry {
 	return r
 }
 
+// Options configures built-in tool runtime behaviour.
+type Options struct {
+	AutoResize  bool
+	ShellPrefix string
+}
+
 // Default returns a registry with the built-in tools. powershell is Windows-only.
 func Default() *Registry {
-	ts := []Tool{readTool{}, writeTool{}, editTool{}, bashTool{}, grepTool{}, findTool{}, listTool{}}
+	return NewBuiltins(Options{AutoResize: true})
+}
+
+// NewBuiltins builds the built-in tool set with runtime options.
+func NewBuiltins(opt Options) *Registry {
+	ts := []Tool{
+		readTool{autoResize: opt.AutoResize},
+		writeTool{},
+		editTool{},
+		bashTool{prefix: opt.ShellPrefix},
+		grepTool{},
+		findTool{},
+		listTool{},
+	}
 	ts = append(ts, extraPlatformTools()...)
 	return NewRegistry(ts...)
 }

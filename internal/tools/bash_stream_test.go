@@ -28,3 +28,12 @@ func TestBashStreamsAccumulatedOutput(t *testing.T) {
 		t.Fatalf("snapshots = %#v", snaps)
 	}
 }
+
+func TestBashPrependsCommandPrefix(t *testing.T) {
+	out, isErr := bashTool{prefix: "TEST_PIGO_PREFIX=1"}.Execute(context.Background(), map[string]any{
+		"command": "printf %s \"$TEST_PIGO_PREFIX\"",
+	})
+	if isErr || !strings.Contains(out, "1") {
+		t.Fatalf("prefixed bash = %q isErr=%v", out, isErr)
+	}
+}
