@@ -82,6 +82,32 @@ func TestStreamForMergesProviderHeaders(t *testing.T) {
 	}
 }
 
+func TestStreamForExpandsBaseURLPlaceholders(t *testing.T) {
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "acct-1")
+	var gotBase string
+	RegisterAPI("ph-api", func(cfg ClientConfig) StreamFn {
+		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+			gotBase = cfg.BaseURL
+			return ScriptedStreamFn("ok", 0)(ctx, reqCtx, opts)
+		}
+	})
+	models.RegisterProvider(models.ProviderSpec{
+		ID:         "ph-prov",
+		DefaultAPI: "ph-api",
+		DefaultID:  "m",
+		BaseURL:    "https://example.test/accounts/{CLOUDFLARE_ACCOUNT_ID}/v1",
+		Models:     []models.Model{{Provider: "ph-prov", ID: "m", API: "ph-api"}},
+	})
+	stream, err := StreamFor("ph-prov", ClientConfig{})(context.Background(), Context{}, Options{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	if gotBase != "https://example.test/accounts/acct-1/v1" {
+		t.Fatalf("base = %q", gotBase)
+	}
+}
+
 func TestStreamForUnknownAPIErrors(t *testing.T) {
 	models.RegisterProvider(models.ProviderSpec{
 		ID:         "no-api-prov",

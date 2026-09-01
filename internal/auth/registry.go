@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -107,6 +108,7 @@ func registerBuiltins() {
 		},
 	})
 	registerCatalogAPIKeys()
+	registerCloudflareAuth()
 }
 
 func registerProvider(p Provider) {
@@ -141,6 +143,81 @@ func registerCatalogAPIKeys() {
 				Login: promptAPIKey(name),
 			},
 		})
+	}
+}
+
+func registerCloudflareAuth() {
+	registerProvider(Provider{
+		ID: "cloudflare-workers-ai",
+		APIKey: &APIKeyHandler{
+			Name:    "Cloudflare API key",
+			Login:   cloudflareLogin(false),
+			Resolve: resolveCloudflare(false),
+		},
+	})
+	registerProvider(Provider{
+		ID: "cloudflare-ai-gateway",
+		APIKey: &APIKeyHandler{
+			Name:    "Cloudflare API key",
+			Login:   cloudflareLogin(true),
+			Resolve: resolveCloudflare(true),
+		},
+	})
+}
+
+func cloudflareLogin(gateway bool) func(Interaction) (Credential, error) {
+	return func(ix Interaction) (Credential, error) {
+		if ix.Prompt == nil {
+			return Credential{}, fmt.Errorf("no prompt available")
+		}
+		key, err := ix.Prompt(Prompt{Type: PromptSecret, Message: "Cloudflare API key:"})
+		if err != nil {
+			return Credential{}, err
+		}
+		if key == "" {
+			return Credential{}, fmt.Errorf("empty API key")
+		}
+		account, err := ix.Prompt(Prompt{Type: PromptText, Message: "Cloudflare account ID:"})
+		if err != nil {
+			return Credential{}, err
+		}
+		if account == "" {
+			return Credential{}, fmt.Errorf("empty account ID")
+		}
+		env := map[string]string{"CLOUDFLARE_ACCOUNT_ID": account}
+		if gateway {
+			gw, err := ix.Prompt(Prompt{Type: PromptText, Message: "Cloudflare AI Gateway ID:"})
+			if err != nil {
+				return Credential{}, err
+			}
+			if gw == "" {
+				return Credential{}, fmt.Errorf("empty gateway ID")
+			}
+			env["CLOUDFLARE_GATEWAY_ID"] = gw
+		}
+		return Credential{Type: TypeAPIKey, Key: key, Env: env}, nil
+	}
+}
+
+func resolveCloudflare(gateway bool) func() *Result {
+	return func() *Result {
+		key := os.Getenv("CLOUDFLARE_API_KEY")
+		account := os.Getenv("CLOUDFLARE_ACCOUNT_ID")
+		if key == "" || account == "" {
+			return nil
+		}
+		env := map[string]string{"CLOUDFLARE_ACCOUNT_ID": account}
+		auth := ModelAuth{APIKey: key}
+		if gateway {
+			gw := os.Getenv("CLOUDFLARE_GATEWAY_ID")
+			if gw == "" {
+				return nil
+			}
+			env["CLOUDFLARE_GATEWAY_ID"] = gw
+			auth.APIKey = ""
+			auth.Headers = map[string]string{"cf-aig-authorization": "Bearer " + key}
+		}
+		return &Result{Auth: auth, Env: env, Source: "CLOUDFLARE_API_KEY"}
 	}
 }
 

@@ -79,3 +79,31 @@ func TestNvidiaDefaultHeaders(t *testing.T) {
 		t.Fatalf("nvidia headers = %#v", spec.Headers)
 	}
 }
+
+func TestMixedProvidersAreRegistered(t *testing.T) {
+	want := map[string]string{
+		"xai":                   "openai-responses",
+		"fireworks":             "anthropic-messages",
+		"github-copilot":        "openai-completions",
+		"opencode-go":           "openai-completions",
+		"cloudflare-workers-ai": "openai-completions",
+		"cloudflare-ai-gateway": "anthropic-messages",
+	}
+	for id, api := range want {
+		spec, ok := LookupProvider(id)
+		if !ok {
+			t.Errorf("missing provider %s", id)
+			continue
+		}
+		if spec.DefaultAPI != api {
+			t.Errorf("%s DefaultAPI = %q, want %q", id, spec.DefaultAPI, api)
+		}
+		if spec.DefaultID == "" || spec.BaseURL == "" {
+			t.Errorf("%s missing default/base: %+v", id, spec)
+		}
+	}
+	copilot, _ := LookupProvider("github-copilot")
+	if copilot.Headers["Copilot-Integration-Id"] != "vscode-chat" {
+		t.Fatalf("copilot headers = %#v", copilot.Headers)
+	}
+}
