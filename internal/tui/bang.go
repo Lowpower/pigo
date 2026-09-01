@@ -62,6 +62,7 @@ func (m Model) extraSlashCommands() []slash.Command {
 	for _, t := range m.engine.Templates {
 		extra = append(extra, slash.Command{Name: t.Name, Description: t.Description})
 	}
+	extra = append(extra, m.engine.SlashCommands()...)
 	return extra
 }
 
@@ -121,10 +122,18 @@ func (m Model) startBash(command string, exclude bool) (tea.Model, tea.Cmd) {
 	ch := make(chan tea.Msg, 32)
 	m.bashEvents = ch
 	cwd := m.cwd()
+	eng := m.engine
 	go func() {
-		res := runtime.RunBash(ctx, cwd, command, func(delta string) {
-			ch <- bashChunkMsg{text: delta}
-		})
+		var res runtime.BashResult
+		if eng != nil {
+			res = eng.RunUserBash(ctx, command, exclude, func(delta string) {
+				ch <- bashChunkMsg{text: delta}
+			})
+		} else {
+			res = runtime.RunBash(ctx, cwd, command, func(delta string) {
+				ch <- bashChunkMsg{text: delta}
+			})
+		}
 		ch <- bashDoneMsg{command: command, exclude: exclude, result: res}
 	}()
 	return m, waitBashEvent(ch)

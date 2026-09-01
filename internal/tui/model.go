@@ -125,6 +125,12 @@ type Model struct {
 	altScreen     bool
 	lastWidth     int
 	lastHeight    int
+
+	extHub     *extUIHub
+	extStatus  map[string]string
+	extWidgets []extWidget
+	extTitle   string
+	extUI      extUIState
 }
 
 // New builds the interactive model from the resolved config.
@@ -199,6 +205,9 @@ func (m Model) Init() tea.Cmd {
 
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if next, ok := m.handleExtMsg(msg); ok {
+		return next, nil
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		cmds := []tea.Cmd{}
@@ -255,6 +264,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.loginActive() {
 			return m.handleLoginKey(msg)
+		}
+		if m.extUI.active {
+			return m.handleExtUIKey(msg)
+		}
+		if next, ok := m.tryExtensionShortcut(msg); ok {
+			return next, nil
 		}
 		if m.complete.active {
 			if m.keyIs(msg, "tui.select.up") || m.keyIs(msg, "tui.editor.cursorUp") {
@@ -481,6 +496,14 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m.startBash(command, exclude)
 	}
 	if cmd, ok := slash.Parse(text); ok {
+		if slash.IsBuiltin(cmd.Name) {
+			return m.handleSlash(cmd)
+		}
+		if m.engine != nil && m.engine.DispatchCommand(cmd.Name, cmd.Rest) {
+			m.editor.Reset()
+			m.complete.hide()
+			return m, nil
+		}
 		return m.handleSlash(cmd)
 	}
 	if m.running {
@@ -510,6 +533,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 	case "help":
+		if m.engine != nil {
+			return note(slash.HelpTextWith(m.engine.SlashCommands()))
+		}
 		return note(slash.HelpText())
 	case "hotkeys":
 		if m.keys != nil {
@@ -731,6 +757,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if m.keys != nil {
 			m.keys.Reload()
 		}
+		m.attachExtensions()
 		return note("reloaded keybindings, skills, and context files")
 	case "copy":
 		text := lastAssistant(m.history)
@@ -781,6 +808,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 	case "llama":
 		return m.handleLlama(cmd.Rest)
 	default:
+		if m.engine != nil && m.engine.DispatchCommand(cmd.Name, cmd.Rest) {
+			return m, nil
+		}
 		if m.engine != nil {
 			if expanded, ok := prompt.ExpandTemplate("/"+cmd.Name+" "+cmd.Rest, m.engine.Templates); ok {
 				return m.startTurn(expanded, nil)
@@ -979,6 +1009,9 @@ func (m Model) View() string {
 	if m.loginActive() {
 		return m.present(m.loginView())
 	}
+	if m.extUI.active {
+		return m.extUIView()
+	}
 	if m.overlay == overlayTree || m.overlay == overlayTreeLabel || m.overlay == overlayTreeSummary || m.overlay == overlayTreeCustom {
 		return m.present(m.treeView())
 	}
@@ -1068,17 +1101,19 @@ func (m Model) View() string {
 		b.WriteString("\n\n")
 	}
 
+	b.WriteString(m.widgets("aboveEditor"))
 	ed := m.editor.View()
 	if n := m.cfg.EditorPadX(); n > 0 {
 		ed = padLines(ed, n)
 	}
 	b.WriteString(ed)
 	b.WriteString("\n")
+	b.WriteString(m.widgets("belowEditor"))
 	if m.complete.active {
 		b.WriteString(m.complete.view())
 	}
 	b.WriteString(m.footerStyle.Render(m.footerText()))
-	return m.present(b.String())
+	return m.withTitle(m.present(b.String()))
 }
 
 type pendingNav struct {
@@ -1195,6 +1230,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		m.keys = keys.NewManager(eng.Opts.AgentDir)
 		m.applyTheme(theme.LoadWith(m.themeOpts(cfg.Theme)))
 		m.refreshGit()
+		m.attachExtensions()
 		if trust.HasProjectResources(eng.Opts.Cwd) && !eng.Opts.ProjectTrusted {
 			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(trust.UntrustedHint)})
 		}
@@ -1212,7 +1248,11 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 	if m.cfg.CopyOnSelect() {
 		opts = append(opts, tea.WithMouseCellMotion())
 	}
-	final, err := tea.NewProgram(m, opts...).Run()
+	p := tea.NewProgram(m, opts...)
+	if m.extHub != nil {
+		m.extHub.send = func(msg tea.Msg) { p.Send(msg) }
+	}
+	final, err := p.Run()
 	if err != nil {
 		return err
 	}

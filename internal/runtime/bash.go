@@ -36,6 +36,37 @@ func (r BashResult) asData() map[string]any {
 	return data
 }
 
+// RunUserBash runs bang/RPC bash, allowing extensions to replace the result.
+func (e *Engine) RunUserBash(ctx context.Context, command string, exclude bool, onChunk func(string)) BashResult {
+	if e != nil {
+		res := e.DispatchEvent(ctx, "user_bash", map[string]any{
+			"command":            command,
+			"excludeFromContext": exclude,
+			"cwd":                e.Opts.Cwd,
+		})
+		if r := asMap(res["result"]); r != nil {
+			out := asString(r["stdout"])
+			if errText := asString(r["stderr"]); errText != "" {
+				if out != "" {
+					out += "\n"
+				}
+				out += errText
+			}
+			code := 0
+			switch v := r["exitCode"].(type) {
+			case float64:
+				code = int(v)
+			case int:
+				code = v
+			}
+			return BashResult{Output: out, ExitCode: &code}
+		}
+		cwd := e.Opts.Cwd
+		return RunBash(ctx, cwd, command, onChunk)
+	}
+	return RunBash(ctx, "", command, onChunk)
+}
+
 // RunBash executes command with the resolved shell in cwd (pi user bang / RPC bash).
 func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) BashResult {
 	cfg, err := shell.GetConfig()

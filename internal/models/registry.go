@@ -36,6 +36,23 @@ func RegisterProvider(p ProviderSpec) {
 	providers[p.ID] = p
 }
 
+// UnregisterProvider removes a dynamically registered provider.
+func UnregisterProvider(id string) {
+	regMu.Lock()
+	defer regMu.Unlock()
+	if _, ok := providers[id]; !ok {
+		return
+	}
+	delete(providers, id)
+	out := regOrder[:0]
+	for _, existing := range regOrder {
+		if existing != id {
+			out = append(out, existing)
+		}
+	}
+	regOrder = out
+}
+
 // LookupProvider returns a registered provider spec.
 func LookupProvider(id string) (ProviderSpec, bool) {
 	regMu.Lock()

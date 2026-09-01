@@ -264,7 +264,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			go func(id any, cmdStr string, exclude bool, bctx context.Context, bcancel context.CancelFunc) {
 				defer wg.Done()
 				defer bcancel()
-				result := RunBash(bctx, e.Opts.Cwd, cmdStr, func(delta string) {
+				result := e.RunUserBash(bctx, cmdStr, exclude, func(delta string) {
 					emit(map[string]any{"type": "bash_execution_update", "id": id, "delta": delta})
 				})
 				payload := map[string]any{
@@ -472,6 +472,9 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			var cmds []map[string]string
 			for _, c := range slash.Builtins() {
 				cmds = append(cmds, map[string]string{"name": c.Name, "description": c.Description, "source": "builtin"})
+			}
+			for _, c := range e.SlashCommands() {
+				cmds = append(cmds, map[string]string{"name": c.Name, "description": c.Description, "source": "extension"})
 			}
 			for _, t := range e.Templates {
 				cmds = append(cmds, map[string]string{"name": t.Name, "description": t.Description, "source": "prompt"})

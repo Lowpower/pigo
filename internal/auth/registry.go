@@ -113,6 +113,18 @@ func registerProvider(p Provider) {
 	registry[p.ID] = p
 }
 
+// RegisterProvider adds or replaces an auth provider (extension overlay).
+func RegisterProvider(p Provider) {
+	registerProvider(p)
+}
+
+// UnregisterProvider removes a dynamically registered auth provider.
+func UnregisterProvider(id string) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	delete(registry, id)
+}
+
 // Lookup returns a registered auth provider.
 func Lookup(id string) (Provider, bool) {
 	registryMu.Lock()
