@@ -39,8 +39,9 @@ type wsAcquire struct {
 }
 
 var (
-	codexWSMu    sync.Mutex
-	codexWSCache = map[string]map[string]*cachedWSConn{}
+	codexWSMu        sync.Mutex
+	codexWSCache     = map[string]map[string]*cachedWSConn{}
+	codexSSEFallback = map[string]struct{}{}
 )
 
 func resetCodexWebSocketCache() {
@@ -55,6 +56,26 @@ func resetCodexWebSocketCache() {
 		}
 	}
 	codexWSCache = map[string]map[string]*cachedWSConn{}
+	codexSSEFallback = map[string]struct{}{}
+}
+
+func codexSessionStickySSE(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	codexWSMu.Lock()
+	defer codexWSMu.Unlock()
+	_, ok := codexSSEFallback[sessionID]
+	return ok
+}
+
+func markCodexSessionStickySSE(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	codexWSMu.Lock()
+	defer codexWSMu.Unlock()
+	codexSSEFallback[sessionID] = struct{}{}
 }
 
 func wsInputDelta(current, baseline []any) ([]any, bool) {
@@ -166,7 +187,7 @@ func (c *OpenAICodexClient) accountID() string {
 
 func (c *OpenAICodexClient) acquireWS(ctx context.Context, sessionID string) (wsAcquire, error) {
 	if sessionID == "" {
-		conn, err := c.dialWebSocket(ctx)
+		conn, err := c.dialWebSocket(ctx, sessionID)
 		if err != nil {
 			return wsAcquire{}, err
 		}
@@ -201,7 +222,7 @@ func (c *OpenAICodexClient) acquireWS(ctx context.Context, sessionID string) (ws
 		}
 		if cached.busy {
 			codexWSMu.Unlock()
-			conn, err := c.dialWebSocket(ctx)
+			conn, err := c.dialWebSocket(ctx, sessionID)
 			if err != nil {
 				return wsAcquire{}, err
 			}
@@ -220,7 +241,7 @@ func (c *OpenAICodexClient) acquireWS(ctx context.Context, sessionID string) (ws
 	}
 	codexWSMu.Unlock()
 
-	conn, err := c.dialWebSocket(ctx)
+	conn, err := c.dialWebSocket(ctx, sessionID)
 	if err != nil {
 		return wsAcquire{}, err
 	}

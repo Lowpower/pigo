@@ -37,7 +37,8 @@ type Content struct {
 	Type ContentKind `json:"type"`
 
 	// KindText
-	Text string `json:"text,omitempty"`
+	Text          string `json:"text,omitempty"`
+	TextSignature string `json:"textSignature,omitempty"`
 
 	// KindThinking
 	Thinking          string `json:"thinking,omitempty"`

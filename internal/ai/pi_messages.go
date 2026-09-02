@@ -90,6 +90,15 @@ func piMessagesOptions(opts Options) map[string]any {
 	if opts.Thinking != "" && opts.Thinking != "off" {
 		o["reasoning"] = opts.Thinking
 	}
+	if opts.SessionID != "" {
+		o["sessionId"] = opts.SessionID
+	}
+	if opts.CacheRetention != "" {
+		o["cacheRetention"] = opts.CacheRetention
+	}
+	if opts.ToolChoice != "" {
+		o["toolChoice"] = opts.ToolChoice
+	}
 	return o
 }
 

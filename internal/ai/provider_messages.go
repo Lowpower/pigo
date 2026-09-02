@@ -102,13 +102,17 @@ func anthropicContent(msg *AssistantMessage) []map[string]any {
 		case KindText:
 			blocks = append(blocks, map[string]any{"type": "text", "text": c.Text})
 		case KindThinking:
+			if c.Redacted {
+				data := c.ThinkingSignature
+				if data == "" {
+					data = c.Thinking
+				}
+				blocks = append(blocks, map[string]any{"type": "redacted_thinking", "data": data})
+				continue
+			}
 			b := map[string]any{"type": "thinking", "thinking": c.Thinking}
 			if c.ThinkingSignature != "" {
 				b["signature"] = c.ThinkingSignature
-			}
-			if c.Redacted {
-				b["type"] = "redacted_thinking"
-				b["data"] = c.Thinking
 			}
 			blocks = append(blocks, b)
 		case KindToolCall:
@@ -141,15 +145,35 @@ func OpenAIWireMessages(msgs []Message) []map[string]any {
 			continue
 		}
 		if m.Role == RoleToolResult || m.ToolCallID != "" {
-			text, _ := ParseToolContent(m.Content)
+			text, imgs := ParseToolContent(m.Content)
 			if text == "" {
 				text = m.Content
 			}
-			out = append(out, map[string]any{
+			if len(imgs) == 0 {
+				imgs = m.Images
+			}
+			msg := map[string]any{
 				"role":         "tool",
 				"tool_call_id": m.ToolCallID,
-				"content":      text,
-			})
+			}
+			if len(imgs) == 0 {
+				msg["content"] = text
+			} else {
+				blocks := make([]map[string]any, 0, 1+len(imgs))
+				if text != "" {
+					blocks = append(blocks, map[string]any{"type": "text", "text": text})
+				}
+				for _, img := range imgs {
+					blocks = append(blocks, map[string]any{
+						"type": "image_url",
+						"image_url": map[string]any{
+							"url": "data:" + img.MimeType + ";base64," + img.Data,
+						},
+					})
+				}
+				msg["content"] = blocks
+			}
+			out = append(out, msg)
 			continue
 		}
 		role := m.Role

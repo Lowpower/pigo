@@ -116,6 +116,13 @@ func resolveAPIKeyInner(p Provider, cred *Credential) (*Result, error) {
 	if key == "" && p.APIKey != nil {
 		for _, name := range p.APIKey.Env {
 			if v := os.Getenv(name); v != "" {
+				if name == "ANTHROPIC_AUTH_TOKEN" {
+					return &Result{
+						Auth:   ModelAuth{Headers: map[string]string{"Authorization": "Bearer " + v}},
+						Source: name,
+						Env:    env,
+					}, nil
+				}
 				return &Result{Auth: ModelAuth{APIKey: v}, Source: name, Env: env}, nil
 			}
 		}

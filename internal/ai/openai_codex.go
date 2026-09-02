@@ -105,11 +105,24 @@ func (c *OpenAICodexClient) buildRequestBody(reqCtx Context, opts Options) (map[
 		instructions = "You are a helpful assistant."
 	}
 	bodyMap := map[string]any{
-		"model":        opts.Model,
-		"store":        false,
-		"stream":       true,
-		"instructions": instructions,
-		"input":        buildResponsesInput(reqCtx),
+		"model":               opts.Model,
+		"store":               false,
+		"stream":              true,
+		"instructions":        instructions,
+		"input":               buildResponsesInput(reqCtx),
+		"text":                map[string]any{"verbosity": "low"},
+		"include":             []string{"reasoning.encrypted_content"},
+		"tool_choice":         "auto",
+		"parallel_tool_calls": true,
+	}
+	if key := clampPromptCacheKey(opts.SessionID); key != "" {
+		bodyMap["prompt_cache_key"] = key
+	}
+	if effort := reasoningEffort(opts); effort != "" {
+		bodyMap["reasoning"] = map[string]any{
+			"effort":  effort,
+			"summary": "auto",
+		}
 	}
 	if opts.MaxTokens > 0 {
 		n := opts.MaxTokens
@@ -163,7 +176,7 @@ func skipCodexWebSocketHeader(k string) bool {
 	}
 }
 
-func (c *OpenAICodexClient) websocketHeaders() http.Header {
+func (c *OpenAICodexClient) websocketHeaders(sessionID string) http.Header {
 	h := http.Header{}
 	h.Set("authorization", "Bearer "+c.APIKey)
 	for k, v := range c.Headers {
@@ -173,10 +186,14 @@ func (c *OpenAICodexClient) websocketHeaders() http.Header {
 		h.Set(k, v)
 	}
 	h.Set("OpenAI-Beta", openaiBetaWS)
+	if sessionID != "" {
+		h.Set("session-id", sessionID)
+		h.Set("x-client-request-id", sessionID)
+	}
 	return h
 }
 
-func (c *OpenAICodexClient) dialWebSocket(ctx context.Context) (*websocket.Conn, error) {
+func (c *OpenAICodexClient) dialWebSocket(ctx context.Context, sessionID string) (*websocket.Conn, error) {
 	dialer := *websocket.DefaultDialer
 	if deadline, ok := ctx.Deadline(); ok {
 		dialer.HandshakeTimeout = time.Until(deadline)
@@ -184,7 +201,7 @@ func (c *OpenAICodexClient) dialWebSocket(ctx context.Context) (*websocket.Conn,
 			return nil, ctx.Err()
 		}
 	}
-	conn, resp, err := dialer.DialContext(ctx, resolveCodexWebSocketURL(c.BaseURL), c.websocketHeaders())
+	conn, resp, err := dialer.DialContext(ctx, resolveCodexWebSocketURL(c.BaseURL), c.websocketHeaders(sessionID))
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
@@ -274,6 +291,10 @@ func (c *OpenAICodexClient) sseEventStream(ctx context.Context, body []byte, opt
 	for k, v := range c.Headers {
 		httpReq.Header.Set(k, v)
 	}
+	if opts.SessionID != "" {
+		httpReq.Header.Set("session-id", opts.SessionID)
+		httpReq.Header.Set("x-client-request-id", opts.SessionID)
+	}
 	resp, err := c.httpClient().Do(httpReq)
 	if err != nil {
 		return nil, err
@@ -331,7 +352,7 @@ func (c *OpenAICodexClient) StreamFn() StreamFn {
 			return nil, err
 		}
 		tr := c.transport()
-		if tr != "sse" {
+		if tr != "sse" && !codexSessionStickySSE(opts.SessionID) {
 			stream, err := c.streamWebSocket(ctx, bodyMap, opts)
 			if err == nil {
 				return stream, nil
@@ -340,6 +361,7 @@ func (c *OpenAICodexClient) StreamFn() StreamFn {
 				return errorStreamProvider(opts.Model, "openai-codex-responses",
 					fmt.Sprintf("Codex websocket error: %s", err.Error())), nil
 			}
+			markCodexSessionStickySSE(opts.SessionID)
 		}
 		return c.sseEventStream(ctx, body, opts)
 	}

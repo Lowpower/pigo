@@ -64,14 +64,12 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 			return nil, err
 		}
 		httpReq.Header.Set("content-type", "application/json")
-		if c.APIKey != "" {
-			httpReq.Header.Set("x-api-key", c.APIKey)
-		}
 		httpReq.Header.Set("anthropic-version", anthropicVersion)
 		httpReq.Header.Set("accept", "text/event-stream")
 		for k, v := range c.Headers {
 			httpReq.Header.Set(k, v)
 		}
+		applyAnthropicAuth(httpReq, c.APIKey)
 
 		client := c.HTTPClient
 		if client == nil {
@@ -112,6 +110,37 @@ func StreamAnthropicReader(ctx context.Context, r io.Reader, model string) *Even
 	return s
 }
 
+func applyAnthropicAuth(req *http.Request, apiKey string) {
+	authz := firstHeader(req, "Authorization")
+	oauth := isAnthropicOAuthToken(apiKey) || isAnthropicOAuthToken(strings.TrimPrefix(authz, "Bearer "))
+	if authz == "" && oauth && apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		authz = "Bearer " + apiKey
+	}
+	if authz == "" && apiKey != "" {
+		req.Header.Set("x-api-key", apiKey)
+	}
+	if req.Header.Get("anthropic-beta") != "" {
+		return
+	}
+	betas := "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+	if oauth {
+		betas = "claude-code-20250219,oauth-2025-04-20," + betas
+	}
+	req.Header.Set("anthropic-beta", betas)
+}
+
+func firstHeader(req *http.Request, name string) string {
+	if v := req.Header.Get(name); v != "" {
+		return v
+	}
+	return req.Header.Get(strings.ToLower(name))
+}
+
+func isAnthropicOAuthToken(key string) bool {
+	return strings.Contains(key, "sk-ant-oat")
+}
+
 func newOutputMessage(model string) *AssistantMessage {
 	return &AssistantMessage{
 		Role:       RoleAssistant,
@@ -140,6 +169,7 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 	}
 
 	msgs := AnthropicWireMessages(reqCtx.Messages)
+	applyAnthropicCacheControl(msgs)
 
 	req := map[string]any{
 		"model":      opts.Model,
@@ -148,18 +178,27 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		"stream":     true,
 	}
 	if reqCtx.System != "" {
-		req["system"] = reqCtx.System
+		req["system"] = []map[string]any{{
+			"type":          "text",
+			"text":          reqCtx.System,
+			"cache_control": map[string]any{"type": "ephemeral"},
+		}}
 	}
 	if len(reqCtx.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(reqCtx.Tools))
-		for _, t := range reqCtx.Tools {
-			tools = append(tools, map[string]any{
+		for i, t := range reqCtx.Tools {
+			tool := map[string]any{
 				"name":         t.Name,
 				"description":  t.Description,
 				"input_schema": t.Parameters,
-			})
+			}
+			if i == len(reqCtx.Tools)-1 {
+				tool["cache_control"] = map[string]any{"type": "ephemeral"}
+			}
+			tools = append(tools, tool)
 		}
 		req["tools"] = tools
+		req["tool_choice"] = map[string]any{"type": "auto"}
 	}
 	budget := opts.ThinkingBudget
 	if budget == 0 {
@@ -170,8 +209,34 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		if maxTokens <= budget {
 			req["max_tokens"] = budget + 4096
 		}
+	} else if reasoningEffort(opts) != "" {
+		req["thinking"] = map[string]any{"type": "adaptive"}
 	}
 	return json.Marshal(req)
+}
+
+func applyAnthropicCacheControl(msgs []map[string]any) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		role, _ := msgs[i]["role"].(string)
+		if role != RoleUser {
+			continue
+		}
+		switch content := msgs[i]["content"].(type) {
+		case string:
+			msgs[i]["content"] = []map[string]any{{
+				"type":          "text",
+				"text":          content,
+				"cache_control": map[string]any{"type": "ephemeral"},
+			}}
+		case []map[string]any:
+			if len(content) == 0 {
+				break
+			}
+			content[len(content)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
+			msgs[i]["content"] = content
+		}
+		return
+	}
 }
 
 // --- SSE core ---
@@ -430,6 +495,8 @@ func mapAnthropicStopReason(raw string) StopReason {
 		return StopLength
 	case "tool_use":
 		return StopToolUse
+	case "refusal", "sensitive":
+		return StopError
 	default:
 		return StopStop
 	}

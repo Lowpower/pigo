@@ -21,6 +21,7 @@ type OpenAIResponsesClient struct {
 	APIKey     string
 	Headers    map[string]string
 	HTTPClient *http.Client
+	API        string
 }
 
 // StreamFn returns a StreamFn bound to this client.
@@ -49,6 +50,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			Input: responses.ResponseNewParamsInputUnion{
 				OfInputItemList: buildResponsesInput(reqCtx),
 			},
+			Store: param.NewOpt(false),
 		}
 		if reqCtx.System != "" {
 			params.Instructions = param.NewOpt(reqCtx.System)
@@ -59,6 +61,16 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 				n = 16
 			}
 			params.MaxOutputTokens = param.NewOpt(n)
+		}
+		if key := clampPromptCacheKey(opts.SessionID); key != "" {
+			params.PromptCacheKey = param.NewOpt(key)
+		}
+		if effort := reasoningEffort(opts); effort != "" {
+			params.Reasoning = shared.ReasoningParam{
+				Effort:  shared.ReasoningEffort(effort),
+				Summary: shared.ReasoningSummaryAuto,
+			}
+			params.Include = []responses.ResponseIncludable{responses.ResponseIncludableReasoningEncryptedContent}
 		}
 		if len(reqCtx.Tools) > 0 {
 			tools := make([]responses.ToolUnionParam, 0, len(reqCtx.Tools))
@@ -78,8 +90,12 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 
 		stream := client.Responses.NewStreaming(ctx, params)
 		s := NewEventStream(16)
+		apiID := c.API
+		if apiID == "" {
+			apiID = "openai-responses"
+		}
 		out := &AssistantMessage{
-			Role: RoleAssistant, Content: []*Content{}, API: "openai-responses",
+			Role: RoleAssistant, Content: []*Content{}, API: apiID,
 			Provider: "openai", Model: opts.Model, StopReason: StopPending,
 		}
 		go func() {
@@ -118,6 +134,12 @@ func buildResponsesInput(reqCtx Context) responses.ResponseInputParam {
 					if c.Text != "" {
 						items = append(items, responses.ResponseInputItemParamOfMessage(c.Text, responses.EasyInputMessageRoleAssistant))
 					}
+				case KindThinking:
+					if c.ThinkingSignature != "" {
+						item := responses.ResponseInputItemParamOfReasoning("rsn_"+c.ThinkingSignature[:min(len(c.ThinkingSignature), 8)], nil)
+						item.OfReasoning.EncryptedContent = param.NewOpt(c.ThinkingSignature)
+						items = append(items, item)
+					}
 				case KindToolCall:
 					args, _ := json.Marshal(c.Arguments)
 					items = append(items, responses.ResponseInputItemParamOfFunctionCall(string(args), c.ToolID, c.ToolName))
@@ -126,7 +148,17 @@ func buildResponsesInput(reqCtx Context) responses.ResponseInputParam {
 			continue
 		}
 		if m.Role == RoleToolResult || m.ToolCallID != "" {
-			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(m.ToolCallID, m.Content))
+			text, imgs := ParseToolContent(m.Content)
+			if text == "" {
+				text = m.Content
+			}
+			if len(imgs) == 0 {
+				imgs = m.Images
+			}
+			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(m.ToolCallID, text))
+			if len(imgs) > 0 {
+				items = append(items, responsesUserImageMessage("", imgs))
+			}
 			continue
 		}
 		role := responses.EasyInputMessageRoleUser
@@ -136,9 +168,26 @@ func buildResponsesInput(reqCtx Context) responses.ResponseInputParam {
 		case "system":
 			role = responses.EasyInputMessageRoleSystem
 		}
-		items = append(items, responses.ResponseInputItemParamOfMessage(m.Content, role))
+		if len(m.Images) == 0 {
+			items = append(items, responses.ResponseInputItemParamOfMessage(m.Content, role))
+			continue
+		}
+		items = append(items, responsesUserImageMessage(m.Content, m.Images))
 	}
 	return items
+}
+
+func responsesUserImageMessage(text string, imgs []ImageContent) responses.ResponseInputItemUnionParam {
+	content := responses.ResponseInputMessageContentListParam{}
+	if text != "" {
+		content = append(content, responses.ResponseInputContentParamOfInputText(text))
+	}
+	for _, img := range imgs {
+		part := responses.ResponseInputContentParamOfInputImage(responses.ResponseInputImageDetailAuto)
+		part.OfInputImage.ImageURL = param.NewOpt("data:" + img.MimeType + ";base64," + img.Data)
+		content = append(content, part)
+	}
+	return responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser)
 }
 
 func processResponsesStream(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], out *AssistantMessage, s *EventStream) error {
@@ -174,11 +223,18 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 				}
 			}
 			if v.Item.Type == "reasoning" {
-				out.Content = append(out.Content, &Content{Type: KindThinking})
+				out.Content = append(out.Content, &Content{Type: KindThinking, ThinkingSignature: v.Item.EncryptedContent})
 				idx := len(out.Content) - 1
 				textIdx["reasoning:"+v.Item.ID] = idx
 				if !s.push(ctx, Event{Type: EventThinkingStart, ContentIndex: idx, Partial: out}) {
 					return ctx.Err()
+				}
+			}
+		case responses.ResponseOutputItemDoneEvent:
+			if v.Item.Type == "reasoning" && v.Item.EncryptedContent != "" {
+				key := "reasoning:" + v.Item.ID
+				if idx, ok := textIdx[key]; ok {
+					out.Content[idx].ThinkingSignature = v.Item.EncryptedContent
 				}
 			}
 		case responses.ResponseFunctionCallArgumentsDeltaEvent:

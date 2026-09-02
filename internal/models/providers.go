@@ -38,7 +38,7 @@ var extraProviders = []extraProvider{
 	{ID: "zai", Name: "Z.AI API key", DefaultAPI: "openai-completions", DefaultID: "glm-4.7", BaseURL: "https://api.z.ai/api/coding/paas/v4", Env: []string{"ZAI_API_KEY"}},
 	{ID: "zai-coding-cn", Name: "Z.AI Coding CN API key", DefaultAPI: "openai-completions", DefaultID: "glm-4.6v", BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4", Env: []string{"ZAI_CODING_CN_API_KEY"}},
 	{ID: "xai", Name: "xAI API key", DefaultAPI: "openai-responses", DefaultID: "grok-4.3", BaseURL: "https://api.x.ai/v1", Env: []string{"XAI_API_KEY", "GROK_API_KEY"}},
-	{ID: "fireworks", Name: "Fireworks API key", DefaultAPI: "anthropic-messages", DefaultID: "accounts/fireworks/models/deepseek-v4-flash", BaseURL: "https://api.fireworks.ai/inference", Env: []string{"FIREWORKS_API_KEY"}},
+	{ID: "fireworks", Name: "Fireworks API key", DefaultAPI: "anthropic-messages", DefaultID: "accounts/fireworks/models/deepseek-v4-flash-0731", BaseURL: "https://api.fireworks.ai/inference", Env: []string{"FIREWORKS_API_KEY"}},
 	{ID: "opencode-go", Name: "OpenCode API key", DefaultAPI: "openai-completions", DefaultID: "deepseek-v4-flash", BaseURL: "https://opencode.ai/zen/go/v1", Env: []string{"OPENCODE_API_KEY"}},
 	{ID: "github-copilot", Name: "GitHub Copilot token", DefaultAPI: "openai-completions", DefaultID: "claude-fable-5", BaseURL: "https://api.individual.githubcopilot.com", Env: []string{"COPILOT_GITHUB_TOKEN"}, Headers: map[string]string{
 		"User-Agent":             "GitHubCopilotChat/0.35.0",

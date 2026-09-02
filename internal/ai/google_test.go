@@ -41,6 +41,14 @@ func TestGoogleVertexClientConfig(t *testing.T) {
 	}
 }
 
+func TestGoogleBaseURLHTTPOptions(t *testing.T) {
+	c := &GoogleClient{APIKey: "k", BaseURL: "https://opencode.ai/zen"}
+	cfg := c.genaiConfig()
+	if cfg.HTTPOptions.BaseURL != "https://opencode.ai/zen" {
+		t.Fatalf("HTTPOptions.BaseURL = %q", cfg.HTTPOptions.BaseURL)
+	}
+}
+
 func TestGoogleVertexMissingAuth(t *testing.T) {
 	c := &GoogleClient{Vertex: true, Project: "p"}
 	if msg := c.missingAuth(); msg == "" {

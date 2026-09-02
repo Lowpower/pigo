@@ -26,7 +26,7 @@ func registerBuiltins() {
 
 	RegisterProvider(ProviderSpec{
 		ID:         "anthropic",
-		Env:        []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"},
+		Env:        []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"},
 		BaseURL:    "https://api.anthropic.com",
 		DefaultAPI: "anthropic-messages",
 		DefaultID:  "claude-sonnet-4",

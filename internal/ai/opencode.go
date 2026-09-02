@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -9,17 +10,12 @@ import (
 )
 
 // defaultOpenCodeBaseURL is the OpenCode Zen gateway base. The adapters append
-// /v1/messages (Anthropic) or /v1/chat/completions (OpenAI-compatible).
+// /v1/messages (Anthropic), /v1/chat/completions, /v1/responses, or Gemini paths.
 const defaultOpenCodeBaseURL = "https://opencode.ai/zen"
 
 // NewOpenCodeFromEnv builds a StreamFn for the OpenCode gateway from
 // OPENCODE_API_KEY (required) and OPENCODE_BASE_URL (optional; defaults to
 // OpenCode Zen; set it to the OpenCode Go base for that plan).
-//
-// OpenCode multiplexes several wire formats behind one key, so this routes each
-// request by model id: claude-* -> Anthropic Messages (x-api-key), everything
-// else -> OpenAI Chat Completions (Bearer). GPT models that require the OpenAI
-// Responses API are not supported.
 func NewOpenCodeFromEnv() (StreamFn, bool) {
 	key := os.Getenv("OPENCODE_API_KEY")
 	if key == "" {
@@ -29,22 +25,20 @@ func NewOpenCodeFromEnv() (StreamFn, bool) {
 	if base == "" {
 		base = defaultOpenCodeBaseURL
 	}
-	base = strings.TrimRight(base, "/")
-	httpClient := &http.Client{Timeout: 5 * time.Minute}
-
-	anthropic := (&AnthropicClient{BaseURL: base, APIKey: key, HTTPClient: httpClient}).StreamFn()
-	openai := (&OpenAICompletionsClient{BaseURL: base, APIKey: key, HTTPClient: httpClient}).StreamFn()
-
-	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
-		if isAnthropicModel(opts.Model) {
-			return anthropic(ctx, reqCtx, opts)
-		}
-		return openai(ctx, reqCtx, opts)
-	}, true
+	return openCodeMux(ClientConfig{
+		APIKey:     key,
+		BaseURL:    strings.TrimRight(base, "/"),
+		HTTPClient: &http.Client{Timeout: 5 * time.Minute},
+	}), true
 }
 
-// isAnthropicModel reports whether a model id uses the Anthropic Messages wire
-// format (Claude models on the gateway).
-func isAnthropicModel(model string) bool {
-	return strings.HasPrefix(strings.ToLower(model), "claude")
+func openCodeMux(cfg ClientConfig) StreamFn {
+	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+		api := guessOpenCodeAPI(opts.Model)
+		f, ok := LookupAPI(api)
+		if !ok {
+			return errorStreamProvider(opts.Model, api, fmt.Sprintf("unknown api %q", api)), nil
+		}
+		return f(cfg)(ctx, reqCtx, opts)
+	}
 }

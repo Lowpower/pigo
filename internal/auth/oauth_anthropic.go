@@ -138,7 +138,12 @@ func (anthropicOAuth) Refresh(ctx context.Context, cred Credential) (Credential,
 }
 
 func (anthropicOAuth) ToAuth(cred Credential) (ModelAuth, error) {
-	return ModelAuth{APIKey: cred.Access}, nil
+	return ModelAuth{
+		APIKey: cred.Access,
+		Headers: map[string]string{
+			"Authorization": "Bearer " + cred.Access,
+		},
+	}, nil
 }
 
 func exchangeAnthropicCode(ctx context.Context, code, state, verifier, redirect string) (Credential, error) {

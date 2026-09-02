@@ -57,6 +57,9 @@ func ambientAPIKey(provider string) string {
 		if k := os.Getenv("ANTHROPIC_API_KEY"); k != "" {
 			return k
 		}
+		if k := os.Getenv("ANTHROPIC_OAUTH_TOKEN"); k != "" {
+			return k
+		}
 		return os.Getenv("ANTHROPIC_AUTH_TOKEN")
 	}
 }
