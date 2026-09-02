@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +77,55 @@ func registerBuiltinAPIs() {
 			return openai(ctx, reqCtx, opts)
 		}
 	})
+	RegisterAPI("azure-openai-responses", func(cfg ClientConfig) StreamFn {
+		base := cfg.BaseURL
+		if base == "" {
+			base = azureResolvedBaseURL()
+		}
+		return (&OpenAIResponsesClient{BaseURL: base, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
+	})
+	RegisterAPI("google-vertex", func(cfg ClientConfig) StreamFn {
+		return (&GoogleClient{
+			APIKey:     cfg.APIKey,
+			Project:    envKey("GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT"),
+			Location:   envKey("GOOGLE_CLOUD_LOCATION", "GOOGLE_CLOUD_REGION"),
+			Headers:    cfg.Headers,
+			HTTPClient: httpClient(cfg),
+			Vertex:     true,
+		}).StreamFn()
+	})
+	RegisterAPI("mistral-conversations", func(cfg ClientConfig) StreamFn {
+		base := strings.TrimRight(cfg.BaseURL, "/")
+		if base == "" {
+			base = "https://api.mistral.ai"
+		}
+		return (&MistralClient{BaseURL: base, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
+	})
+	RegisterAPI("pi-messages", func(cfg ClientConfig) StreamFn {
+		return (&PiMessagesClient{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
+	})
+	RegisterAPI("openai-codex-responses", func(cfg ClientConfig) StreamFn {
+		headers := map[string]string{}
+		for k, v := range cfg.Headers {
+			headers[k] = v
+		}
+		if headers["originator"] == "" {
+			headers["originator"] = "pi"
+		}
+		if headers["OpenAI-Beta"] == "" {
+			headers["OpenAI-Beta"] = openaiBetaSSE
+		}
+		if headers["chatgpt-account-id"] == "" {
+			if id := extractCodexAccountID(cfg.APIKey); id != "" {
+				headers["chatgpt-account-id"] = id
+			}
+		}
+		base := strings.TrimRight(cfg.BaseURL, "/")
+		if base == "" {
+			base = defaultCodexBaseURL
+		}
+		return (&OpenAICodexClient{BaseURL: base, APIKey: cfg.APIKey, Headers: headers, HTTPClient: httpClient(cfg)}).StreamFn()
+	})
 }
 
 // RegisterAPI adds or replaces an API stream factory.
@@ -126,6 +176,27 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 				c.BaseURL = spec.BaseURL
 			}
 		}
+		if spec, ok := models.LookupProvider(provider); ok && len(spec.Headers) > 0 {
+			merged := make(map[string]string, len(spec.Headers)+len(c.Headers))
+			for k, v := range spec.Headers {
+				merged[k] = v
+			}
+			for k, v := range c.Headers {
+				merged[k] = v
+			}
+			c.Headers = merged
+		}
+		c.BaseURL = expandPlaceholders(c.BaseURL)
+		if provider == "github-copilot" {
+			merged := make(map[string]string, len(c.Headers)+3)
+			for k, v := range c.Headers {
+				merged[k] = v
+			}
+			for k, v := range buildCopilotDynamicHeaders(reqCtx.Messages) {
+				merged[k] = v
+			}
+			c.Headers = merged
+		}
 		api := models.APIFor(provider, opts.Model)
 		if api == "" {
 			api = "unknown"
@@ -141,6 +212,30 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 // StreamWithAuth builds a StreamFn from resolved provider auth.
 func StreamWithAuth(provider, apiKey, baseURL string, headers map[string]string) StreamFn {
 	return StreamFor(provider, ClientConfig{APIKey: apiKey, BaseURL: baseURL, Headers: headers})
+}
+
+var placeholderRE = regexp.MustCompile(`\{[A-Z][A-Z0-9_]*\}`)
+
+func expandPlaceholders(s string) string {
+	if s == "" || !strings.Contains(s, "{") {
+		return s
+	}
+	return placeholderRE.ReplaceAllStringFunc(s, func(tok string) string {
+		if v := os.Getenv(tok[1 : len(tok)-1]); v != "" {
+			return v
+		}
+		return tok
+	})
+}
+
+func azureResolvedBaseURL() string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("AZURE_OPENAI_BASE_URL")), "/"); v != "" {
+		return v
+	}
+	if res := strings.TrimSpace(os.Getenv("AZURE_OPENAI_RESOURCE_NAME")); res != "" {
+		return "https://" + res + ".openai.azure.com/openai/v1"
+	}
+	return ""
 }
 
 func envKey(names ...string) string {

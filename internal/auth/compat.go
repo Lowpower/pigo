@@ -84,6 +84,9 @@ func ApplyEnv(agentDir string) {
 				key = resolved
 			}
 		}
+		for env, val := range c.Env {
+			set(env, val)
+		}
 		switch id {
 		case "anthropic":
 			set("ANTHROPIC_API_KEY", key)
@@ -95,8 +98,17 @@ func ApplyEnv(agentDir string) {
 			set("OPENROUTER_API_KEY", key)
 		case "google":
 			set("GEMINI_API_KEY", key)
+		case "google-vertex":
+			set("GOOGLE_CLOUD_API_KEY", key)
 		case "amazon-bedrock":
 			set("AWS_BEARER_TOKEN_BEDROCK", key)
+		case "radius":
+			set("RADIUS_API_KEY", key)
+		case "mistral":
+			set("MISTRAL_API_KEY", key)
+		}
+		if id == "github-copilot" {
+			applyCopilotAvailableModels(c)
 		}
 	}
 }

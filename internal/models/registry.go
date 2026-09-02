@@ -14,6 +14,10 @@ type ProviderSpec struct {
 	DefaultAPI string
 	DefaultID  string
 	Models     []Model
+	// Name is the login/API-key prompt label; empty uses "<id> API key".
+	Name string
+	// Headers are default request headers merged in StreamFor (caller wins).
+	Headers map[string]string
 	// FilterModels optionally restricts catalog (e.g. GitHub Copilot).
 	FilterModels func([]Model) []Model
 	// RefreshModels optionally pulls a remote/dynamic catalog into store.

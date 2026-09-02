@@ -57,6 +57,65 @@ func TestStreamForSetsThinkingBudget(t *testing.T) {
 	}
 }
 
+func TestStreamForMergesProviderHeaders(t *testing.T) {
+	var got map[string]string
+	RegisterAPI("hdr-api", func(cfg ClientConfig) StreamFn {
+		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+			got = cfg.Headers
+			return ScriptedStreamFn("ok", 0)(ctx, reqCtx, opts)
+		}
+	})
+	models.RegisterProvider(models.ProviderSpec{
+		ID:         "hdr-prov",
+		DefaultAPI: "hdr-api",
+		DefaultID:  "m",
+		Headers:    map[string]string{"NVCF-POLL-SECONDS": "3600", "X-Default": "a"},
+		Models:     []models.Model{{Provider: "hdr-prov", ID: "m", API: "hdr-api"}},
+	})
+	stream, err := StreamFor("hdr-prov", ClientConfig{Headers: map[string]string{"X-Override": "b"}})(context.Background(), Context{}, Options{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	if got["NVCF-POLL-SECONDS"] != "3600" || got["X-Default"] != "a" || got["X-Override"] != "b" {
+		t.Fatalf("headers = %#v", got)
+	}
+}
+
+func TestStreamForExpandsBaseURLPlaceholders(t *testing.T) {
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "acct-1")
+	var gotBase string
+	RegisterAPI("ph-api", func(cfg ClientConfig) StreamFn {
+		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+			gotBase = cfg.BaseURL
+			return ScriptedStreamFn("ok", 0)(ctx, reqCtx, opts)
+		}
+	})
+	models.RegisterProvider(models.ProviderSpec{
+		ID:         "ph-prov",
+		DefaultAPI: "ph-api",
+		DefaultID:  "m",
+		BaseURL:    "https://example.test/accounts/{CLOUDFLARE_ACCOUNT_ID}/v1",
+		Models:     []models.Model{{Provider: "ph-prov", ID: "m", API: "ph-api"}},
+	})
+	stream, err := StreamFor("ph-prov", ClientConfig{})(context.Background(), Context{}, Options{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	if gotBase != "https://example.test/accounts/acct-1/v1" {
+		t.Fatalf("base = %q", gotBase)
+	}
+}
+
+func TestLookupRemainingNewAPIs(t *testing.T) {
+	for _, id := range []string{"google-vertex", "mistral-conversations", "pi-messages", "openai-codex-responses"} {
+		if _, ok := LookupAPI(id); !ok {
+			t.Errorf("missing api %s", id)
+		}
+	}
+}
+
 func TestStreamForUnknownAPIErrors(t *testing.T) {
 	models.RegisterProvider(models.ProviderSpec{
 		ID:         "no-api-prov",
