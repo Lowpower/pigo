@@ -191,35 +191,23 @@ func (c *OpenAICodexClient) dialWebSocket(ctx context.Context) (*websocket.Conn,
 	return conn, err
 }
 
-func (c *OpenAICodexClient) wsEventStream(ctx context.Context, conn *websocket.Conn, bodyMap map[string]any, opts Options) *EventStream {
+func (c *OpenAICodexClient) wsEventStream(ctx context.Context, acq wsAcquire, first []byte, bodyMap map[string]any, opts Options) *EventStream {
 	s := NewEventStream(16)
 	out := &AssistantMessage{
 		Role: RoleAssistant, Content: []*Content{}, API: "openai-codex-responses",
 		Provider: "openai-codex", Model: opts.Model, StopReason: StopPending,
 	}
 	go func() {
+		keep := false
 		defer s.end()
-		defer func() { _ = conn.Close() }()
-		payload := make(map[string]any, len(bodyMap)+1)
-		for k, v := range bodyMap {
-			payload[k] = v
-		}
-		payload["type"] = "response.create"
-		if err := conn.WriteJSON(payload); err != nil {
-			finishError(ctx, out, s, err.Error())
-			return
-		}
+		defer func() { acq.release(keep) }()
 		if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 			return
 		}
 		pr, pw := io.Pipe()
 		go func() {
 			defer func() { _ = pw.Close() }()
-			for {
-				_, data, err := conn.ReadMessage()
-				if err != nil {
-					return
-				}
+			write := func(data []byte) bool {
 				var meta struct {
 					Type string `json:"type"`
 				}
@@ -233,9 +221,19 @@ func (c *OpenAICodexClient) wsEventStream(ctx context.Context, conn *websocket.C
 					}
 				}
 				if _, err := fmt.Fprintf(pw, "data: %s\n\n", data); err != nil {
+					return false
+				}
+				return meta.Type == "response.completed" || meta.Type == "response.done" || meta.Type == "response.incomplete"
+			}
+			if write(first) {
+				return
+			}
+			for {
+				_, data, err := acq.conn.ReadMessage()
+				if err != nil {
 					return
 				}
-				if meta.Type == "response.completed" || meta.Type == "response.done" || meta.Type == "response.incomplete" {
+				if write(data) {
 					return
 				}
 			}
@@ -243,6 +241,14 @@ func (c *OpenAICodexClient) wsEventStream(ctx context.Context, conn *websocket.C
 		fake := &http.Response{StatusCode: http.StatusOK, Body: pr}
 		stream := ssestream.NewStream[responses.ResponseStreamEventUnion](ssestream.NewDecoder(fake), nil)
 		c.finishResponses(ctx, stream, out, s)
+		if out.StopReason != StopError && out.StopReason != StopAborted && opts.SessionID != "" && acq.entry != nil && out.ResponseID != "" {
+			acq.entry.continuation = &cachedWSContinuation{
+				lastRequestBody:   jsonCloneMap(bodyMap),
+				lastResponseID:    out.ResponseID,
+				lastResponseItems: continuationItems(out),
+			}
+			keep = true
+		}
 	}()
 	return s
 }
@@ -326,9 +332,9 @@ func (c *OpenAICodexClient) StreamFn() StreamFn {
 		}
 		tr := c.transport()
 		if tr != "sse" {
-			conn, err := c.dialWebSocket(ctx)
+			stream, err := c.streamWebSocket(ctx, bodyMap, opts)
 			if err == nil {
-				return c.wsEventStream(ctx, conn, bodyMap, opts), nil
+				return stream, nil
 			}
 			if tr == "websocket" {
 				return errorStreamProvider(opts.Model, "openai-codex-responses",

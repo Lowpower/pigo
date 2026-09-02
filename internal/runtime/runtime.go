@@ -729,7 +729,15 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 		Steering:        e.Steering,
 		FollowUp:        e.FollowUp,
 		NewUserMessages: newUsers,
+		SessionID:       e.sessionID(),
 	})
+}
+
+func (e *Engine) sessionID() string {
+	if e.Opts.Session != nil {
+		return e.Opts.Session.ID()
+	}
+	return ""
 }
 
 // AdoptSession attaches a session manager and records how many entries are already persisted.

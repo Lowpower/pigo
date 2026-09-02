@@ -198,6 +198,9 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 			c.Headers = merged
 		}
 		api := models.APIFor(provider, opts.Model)
+		if provider == "github-copilot" {
+			api = copilotStreamAPI(provider, opts.Model, api)
+		}
 		if api == "" {
 			api = "unknown"
 		}
@@ -207,6 +210,20 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 		}
 		return f(c)(ctx, reqCtx, opts)
 	}
+}
+
+func copilotStreamAPI(provider, model, api string) string {
+	spec, ok := models.LookupProvider(provider)
+	if !ok {
+		return api
+	}
+	if m, found := models.Lookup(provider, model); found && m.API != "" && m.API != spec.DefaultAPI {
+		return m.API
+	}
+	if guessed := guessCopilotAPI(model); guessed != "" {
+		return guessed
+	}
+	return api
 }
 
 // StreamWithAuth builds a StreamFn from resolved provider auth.

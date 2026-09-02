@@ -1,5 +1,7 @@
 package ai
 
+import "strings"
+
 func inferCopilotInitiator(messages []Message) string {
 	if len(messages) == 0 {
 		return "user"
@@ -32,4 +34,21 @@ func buildCopilotDynamicHeaders(messages []Message) map[string]string {
 		headers["Copilot-Vision-Request"] = "true"
 	}
 	return headers
+}
+
+func guessCopilotAPI(model string) string {
+	id := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(id, "claude"):
+		return "anthropic-messages"
+	case strings.HasPrefix(id, "gpt-5"),
+		strings.HasPrefix(id, "o1"),
+		strings.HasPrefix(id, "o3"),
+		strings.HasPrefix(id, "o4"),
+		strings.Contains(id, "codex"),
+		strings.HasPrefix(id, "grok"):
+		return "openai-responses"
+	default:
+		return ""
+	}
 }
