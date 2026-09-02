@@ -51,6 +51,7 @@ type Config struct {
 	// NewUserMessages are emitted as message_start/end after the first turn_start.
 	// Historical context messages are not re-emitted.
 	NewUserMessages []ai.Message
+	SessionID       string
 }
 
 // Run drives the agent loop and returns a stream of AgentEvents. The loop runs
@@ -175,7 +176,7 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 // events and returning the final assistant message. ok is false if the context
 // was cancelled while emitting.
 func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg Config, s *Stream) (*ai.AssistantMessage, bool) {
-	stream, err := sf(ctx, aiCtx, ai.Options{Model: cfg.Model, Thinking: cfg.Thinking})
+	stream, err := sf(ctx, aiCtx, ai.Options{Model: cfg.Model, Thinking: cfg.Thinking, SessionID: cfg.SessionID})
 	if err != nil {
 		msg := &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopError, ErrorMessage: err.Error()}
 		if !s.push(ctx, Event{Type: EventMessageEnd, Assistant: msg}) {

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -117,7 +118,13 @@ func (githubCopilotOAuth) Login(ix Interaction) (Credential, error) {
 	if err != nil {
 		return Credential{}, err
 	}
-	cred, err := refreshCopilotAccess(ctx, ghToken, enterprise)
+	cred, err := refreshCopilotAccessOpts(ctx, ghToken, enterprise, copilotModelsOpts{
+		EnablePolicies: true,
+		KnownModelIDs:  copilotKnownModelIDs(),
+		Notify: func(msg string) {
+			notifyProgress(ix, msg)
+		},
+	})
 	if err != nil {
 		return Credential{}, err
 	}
@@ -173,7 +180,34 @@ func applyCopilotAvailableModels(c Credential) {
 	}
 }
 
+type copilotModelsOpts struct {
+	EnablePolicies bool
+	KnownModelIDs  map[string]bool
+	Notify         func(string)
+}
+
+func copilotKnownModelIDs() map[string]bool {
+	spec, ok := models.LookupProvider("github-copilot")
+	if !ok {
+		return nil
+	}
+	out := make(map[string]bool, len(spec.Models)+1)
+	if spec.DefaultID != "" {
+		out[spec.DefaultID] = true
+	}
+	for _, m := range spec.Models {
+		if m.ID != "" {
+			out[m.ID] = true
+		}
+	}
+	return out
+}
+
 func refreshCopilotAccess(ctx context.Context, githubToken, enterprise string) (Credential, error) {
+	return refreshCopilotAccessOpts(ctx, githubToken, enterprise, copilotModelsOpts{})
+}
+
+func refreshCopilotAccessOpts(ctx context.Context, githubToken, enterprise string, opts copilotModelsOpts) (Credential, error) {
 	domain := "github.com"
 	if enterprise != "" {
 		domain = enterprise
@@ -210,7 +244,7 @@ func refreshCopilotAccess(ctx context.Context, githubToken, enterprise string) (
 		Refresh: githubToken,
 		Expires: exp - 5*60*1000,
 	}
-	ids, err := fetchCopilotAvailableModelIDs(ctx, cred.Access, enterprise)
+	ids, err := fetchCopilotAvailableModelIDs(ctx, cred.Access, enterprise, opts)
 	if err == nil {
 		cred = cred.withExtra("availableModelIds", ids)
 		applyCopilotAvailableModels(cred)
@@ -218,7 +252,7 @@ func refreshCopilotAccess(ctx context.Context, githubToken, enterprise string) (
 	return cred, nil
 }
 
-func fetchCopilotAvailableModelIDs(ctx context.Context, token, enterprise string) ([]string, error) {
+func fetchCopilotAvailableModelIDs(ctx context.Context, token, enterprise string, opts copilotModelsOpts) ([]string, error) {
 	base := copilotModelsBaseURL
 	if base == "" {
 		base = copilotBaseURL(token, enterprise)
@@ -228,13 +262,7 @@ func fetchCopilotAvailableModelIDs(ctx context.Context, token, enterprise string
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("authorization", "Bearer "+token)
-	req.Header.Set("user-agent", "GitHubCopilotChat/0.35.0")
-	req.Header.Set("editor-version", "vscode/1.107.0")
-	req.Header.Set("editor-plugin-version", "copilot-chat/0.35.0")
-	req.Header.Set("copilot-integration-id", "vscode-chat")
-	req.Header.Set("x-github-api-version", copilotAPIVersion)
+	applyCopilotAPIHeaders(req.Header, token, nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -244,11 +272,87 @@ func fetchCopilotAvailableModelIDs(ctx context.Context, token, enterprise string
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("copilot models failed (%d): %s", resp.StatusCode, b)
 	}
-	available, _, err := parseGitHubCopilotModelCatalog(b, allowFallback)
-	return available, err
+	available, policy, err := parseGitHubCopilotModelCatalog(b, allowFallback, opts.KnownModelIDs)
+	if err != nil {
+		return nil, err
+	}
+	if opts.EnablePolicies && len(policy) > 0 {
+		if opts.Notify != nil {
+			opts.Notify("Enabling models...")
+		}
+		enabled := enableCopilotModels(ctx, token, base, policy)
+		available = mergeCopilotModelIDs(available, enabled)
+	}
+	return available, nil
 }
 
-func parseGitHubCopilotModelCatalog(raw []byte, allowPolicyFallback bool) (available, policy []string, err error) {
+func applyCopilotAPIHeaders(h http.Header, token string, extra map[string]string) {
+	h.Set("accept", "application/json")
+	h.Set("authorization", "Bearer "+token)
+	h.Set("user-agent", "GitHubCopilotChat/0.35.0")
+	h.Set("editor-version", "vscode/1.107.0")
+	h.Set("editor-plugin-version", "copilot-chat/0.35.0")
+	h.Set("copilot-integration-id", "vscode-chat")
+	h.Set("x-github-api-version", copilotAPIVersion)
+	for k, v := range extra {
+		h.Set(k, v)
+	}
+}
+
+func enableCopilotModels(ctx context.Context, token, base string, ids []string) []string {
+	var enabled []string
+	for _, id := range ids {
+		ok, stop := enableCopilotModel(ctx, token, base, id)
+		if stop {
+			break
+		}
+		if ok {
+			enabled = append(enabled, id)
+		}
+	}
+	return enabled
+}
+
+func enableCopilotModel(ctx context.Context, token, base, modelID string) (ok, stop bool) {
+	policyURL := strings.TrimRight(base, "/") + "/models/" + url.PathEscape(modelID) + "/policy"
+	body := []byte(`{"state":"enabled"}`)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, policyURL, bytes.NewReader(body))
+	if err != nil {
+		return false, true
+	}
+	applyCopilotAPIHeaders(req.Header, token, map[string]string{
+		"content-type":       "application/json",
+		"openai-intent":      "chat-policy",
+		"x-interaction-type": "chat-policy",
+	})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, true
+		}
+		return false, false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return false, true
+	}
+	return resp.StatusCode >= 200 && resp.StatusCode < 300, false
+}
+
+func mergeCopilotModelIDs(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, id := range append(append([]string{}, a...), b...) {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+func parseGitHubCopilotModelCatalog(raw []byte, allowPolicyFallback bool, known map[string]bool) (available, policy []string, err error) {
 	var top map[string]any
 	if err := json.Unmarshal(raw, &top); err != nil {
 		return nil, nil, err
@@ -286,16 +390,26 @@ func parseGitHubCopilotModelCatalog(raw []byte, allowPolicyFallback bool) (avail
 		}
 		account = append(account, accountModel{id, state, picker})
 	}
+	var pickerIDs []string
 	for _, m := range account {
 		if m.pickerEnabled && m.policyState != "disabled" {
+			pickerIDs = append(pickerIDs, m.id)
+		}
+		if m.pickerEnabled && m.policyState != "disabled" && m.policyState != "unconfigured" {
 			available = append(available, m.id)
 		}
 	}
+	usePolicyFallback := allowPolicyFallback && len(pickerIDs) == 0
 	if len(available) == 0 && allowPolicyFallback {
 		for _, m := range account {
 			if m.policyState == "enabled" {
 				available = append(available, m.id)
 			}
+		}
+	}
+	for _, m := range account {
+		if m.policyState == "unconfigured" && known[m.id] && (m.pickerEnabled || usePolicyFallback) {
+			policy = append(policy, m.id)
 		}
 	}
 	return available, policy, nil

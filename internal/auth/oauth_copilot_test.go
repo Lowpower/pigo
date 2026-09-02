@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/models"
@@ -18,7 +19,7 @@ func TestParseGitHubCopilotModelCatalog(t *testing.T) {
     {"id":"no-tools","model_picker_enabled":true,"policy":{"state":"enabled"},"capabilities":{"supports":{"tool_calls":false}}}
   ]
 }`)
-	available, policy, err := parseGitHubCopilotModelCatalog(raw, false)
+	available, policy, err := parseGitHubCopilotModelCatalog(raw, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,12 +38,85 @@ func TestParseGitHubCopilotModelCatalogPolicyFallback(t *testing.T) {
     {"id":"policy-off","model_picker_enabled":false,"policy":{"state":"disabled"},"capabilities":{"supports":{"tool_calls":true}}}
   ]
 }`)
-	available, _, err := parseGitHubCopilotModelCatalog(raw, true)
+	available, _, err := parseGitHubCopilotModelCatalog(raw, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(available) != 1 || available[0] != "policy-on" {
 		t.Fatalf("available = %v", available)
+	}
+}
+
+func TestParseGitHubCopilotModelCatalogPolicyIDs(t *testing.T) {
+	raw := []byte(`{
+  "data": [
+    {"id":"keep","model_picker_enabled":true,"policy":{"state":"enabled"},"capabilities":{"supports":{"tool_calls":true}}},
+    {"id":"need-enable","model_picker_enabled":true,"policy":{"state":"unconfigured"},"capabilities":{"supports":{"tool_calls":true}}},
+    {"id":"unknown-unconfigured","model_picker_enabled":true,"policy":{"state":"unconfigured"},"capabilities":{"supports":{"tool_calls":true}}}
+  ]
+}`)
+	available, policy, err := parseGitHubCopilotModelCatalog(raw, false, map[string]bool{"keep": true, "need-enable": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(available) != 1 || available[0] != "keep" {
+		t.Fatalf("available = %v", available)
+	}
+	if len(policy) != 1 || policy[0] != "need-enable" {
+		t.Fatalf("policy = %v", policy)
+	}
+}
+
+func TestEnableCopilotModelsMergesAvailableIDs(t *testing.T) {
+	t.Cleanup(func() { models.ClearAvailableModelIDs("github-copilot") })
+	var policyPosts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/copilot_internal/v2/token":
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"token":"copilot-tok","expires_at":1999999999}`))
+		case r.URL.Path == "/models":
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[
+				{"id":"keep","model_picker_enabled":true,"policy":{"state":"enabled"},"capabilities":{"supports":{"tool_calls":true}}},
+				{"id":"need-enable","model_picker_enabled":true,"policy":{"state":"unconfigured"},"capabilities":{"supports":{"tool_calls":true}}}
+			]}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/policy"):
+			policyPosts++
+			if r.URL.Path != "/models/need-enable/policy" {
+				t.Errorf("policy path = %s", r.URL.Path)
+			}
+			if r.Header.Get("openai-intent") != "chat-policy" {
+				t.Errorf("openai-intent = %q", r.Header.Get("openai-intent"))
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	oldToken, oldModels := copilotTokenURL, copilotModelsBaseURL
+	copilotTokenURL = srv.URL + "/copilot_internal/v2/token"
+	copilotModelsBaseURL = srv.URL
+	t.Cleanup(func() {
+		copilotTokenURL = oldToken
+		copilotModelsBaseURL = oldModels
+	})
+
+	got, err := refreshCopilotAccessOpts(t.Context(), "gh-token", "", copilotModelsOpts{
+		EnablePolicies: true,
+		KnownModelIDs:  map[string]bool{"keep": true, "need-enable": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policyPosts != 1 {
+		t.Fatalf("policy posts = %d", policyPosts)
+	}
+	ids := extraStringSlice(got, "availableModelIds")
+	if len(ids) != 2 {
+		t.Fatalf("available = %v", ids)
 	}
 }
 

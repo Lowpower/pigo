@@ -66,6 +66,7 @@ type Options struct {
 	MaxTokens      int
 	Thinking       string // off|minimal|low|medium|high|xhigh|max
 	ThinkingBudget int    // token budget resolved from thinkingBudgets
+	SessionID      string // coding session id; Codex reuses a WebSocket per session
 }
 
 // StreamFn is the spine abstraction: given a request context it returns a stream

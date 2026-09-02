@@ -211,3 +211,139 @@ func TestOpenAICodexClientWebSocketFallsBackToSSE(t *testing.T) {
 		t.Fatal("expected sse fallback")
 	}
 }
+
+func TestCodexWebSocketInputDelta(t *testing.T) {
+	baseline := []any{
+		map[string]any{"role": "user", "content": "a"},
+	}
+	current := []any{
+		map[string]any{"role": "user", "content": "a"},
+		map[string]any{"role": "assistant", "content": "b"},
+		map[string]any{"role": "user", "content": "c"},
+	}
+	delta, ok := wsInputDelta(current, baseline)
+	if !ok || len(delta) != 2 {
+		t.Fatalf("delta=%v ok=%v", delta, ok)
+	}
+	if _, ok := wsInputDelta(current[:1], append(baseline, "x")); ok {
+		t.Fatal("mismatch should fail")
+	}
+}
+
+func TestOpenAICodexClientWebSocketConnectionLimitRetry(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		attempts++
+		if attempts == 1 {
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","code":"websocket_connection_limit_reached","message":"limit"}`))
+			return
+		}
+		for _, ev := range []string{
+			`{"type":"response.output_text.delta","item_id":"msg_1","delta":"Hello","content_index":0,"output_index":0,"sequence_number":1,"logprobs":[]}`,
+			`{"type":"response.output_text.delta","item_id":"msg_1","delta":", world","content_index":0,"output_index":0,"sequence_number":2,"logprobs":[]}`,
+			`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_1","status":"completed","usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}}`,
+		} {
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(ev)); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(resetCodexWebSocketCache)
+
+	client := &OpenAICodexClient{
+		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "websocket",
+		Headers: map[string]string{"originator": "pi", "chatgpt-account-id": "acct-1"},
+	}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "gpt-5.3-codex-spark", SessionID: "sess-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	if final == nil || final.Text() != "Hello, world" {
+		t.Fatalf("text = %v", final)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d", attempts)
+	}
+}
+
+func TestOpenAICodexClientWebSocketReusesSession(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	var upgrades int
+	var secondPrev string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrades++
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var payload map[string]any
+			_ = json.Unmarshal(data, &payload)
+			if prev, _ := payload["previous_response_id"].(string); prev != "" {
+				secondPrev = prev
+			}
+			for _, ev := range []string{
+				`{"type":"response.output_text.delta","item_id":"msg_1","delta":"Hello","content_index":0,"output_index":0,"sequence_number":1,"logprobs":[]}`,
+				`{"type":"response.output_text.delta","item_id":"msg_1","delta":", world","content_index":0,"output_index":0,"sequence_number":2,"logprobs":[]}`,
+				`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_1","status":"completed","usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}}`,
+			} {
+				if err := conn.WriteMessage(websocket.TextMessage, []byte(ev)); err != nil {
+					return
+				}
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(resetCodexWebSocketCache)
+
+	client := &OpenAICodexClient{
+		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "websocket",
+		Headers: map[string]string{"originator": "pi", "chatgpt-account-id": "acct-1"},
+	}
+	run := func(msgs []Message) *AssistantMessage {
+		stream, err := client.StreamFn()(context.Background(), Context{Messages: msgs}, Options{
+			Model: "gpt-5.3-codex-spark", SessionID: "sess-reuse",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, final := stream.Collect()
+		return final
+	}
+	if got := run([]Message{{Role: RoleUser, Content: "hi"}}); got == nil || got.Text() != "Hello, world" {
+		t.Fatalf("first = %v", got)
+	}
+	if got := run([]Message{
+		{Role: RoleUser, Content: "hi"},
+		{Role: RoleAssistant, Assistant: &AssistantMessage{Role: RoleAssistant, Content: []*Content{{Type: KindText, Text: "Hello, world"}}}},
+		{Role: RoleUser, Content: "again"},
+	}); got == nil || got.Text() != "Hello, world" {
+		t.Fatalf("second = %v", got)
+	}
+	if upgrades != 1 {
+		t.Fatalf("upgrades = %d", upgrades)
+	}
+	if secondPrev != "resp_1" {
+		t.Fatalf("previous_response_id = %q", secondPrev)
+	}
+}
