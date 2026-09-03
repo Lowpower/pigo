@@ -81,6 +81,16 @@ func TestHelpListsShareAndChangelog(t *testing.T) {
 	if !contains(text, "/llama") {
 		t.Fatalf("help missing /llama:\n%s", text)
 	}
+	if !contains(text, "/image") {
+		t.Fatalf("help missing /image:\n%s", text)
+	}
+}
+
+func TestParseImage(t *testing.T) {
+	c, ok := Parse("/image a red cube")
+	if !ok || c.Name != "image" || c.Rest != "a red cube" {
+		t.Fatalf("%+v ok=%v", c, ok)
+	}
 }
 
 func contains(s, sub string) bool {

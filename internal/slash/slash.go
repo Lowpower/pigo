@@ -65,6 +65,7 @@ func Builtins() []Command {
 		{Name: "tree", Description: "navigate session tree (switch branches)"},
 		{Name: "thinking", Description: "set thinking level"},
 		{Name: "scoped-models", Description: "Enable/disable models for Ctrl+P cycling"},
+		{Name: "image", Description: "generate an image from a prompt (OpenRouter)"},
 		{Name: "export", Description: "export the session (HTML default, or .html/.jsonl path)"},
 		{Name: "import", Description: "import and resume a session from a JSONL file"},
 		{Name: "share", Description: "share the session (Radius or private gist)"},

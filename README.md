@@ -77,6 +77,8 @@ golangci-lint run              # lint
 | `--export <session.jsonl> [out.html]` | Export session to HTML |
 | `--list-models` | List known models |
 | `auth login\|logout\|print-api-key\|check` | API-key credentials |
+| `server` / `client` | Unix JSONL RPC session server |
+| `/image` | Generate an image (OpenRouter) |
 
 Positional `@file` arguments are inlined as `<file name="...">` blocks (text only).
 
@@ -91,8 +93,8 @@ Go library (`internal/` stays private), does not load pi's in-process `*.ts`
 extensions (subprocess RPC only; host capabilities are in tree), and does not
 ship pi-tui, pi-telemetry, or the evals vitest harness — tests are `go test`.
 `pigo server` / `pigo client` speak JSONL RPC on a Unix socket (not
-`PI_EXPERIMENTAL` / CBOR). Image generation (`/image`) is being added on this
-issue.
+`PI_EXPERIMENTAL` / CBOR). `/image` generates images through OpenRouter
+(`OPENROUTER_API_KEY`).
 
 ## Layout
 
