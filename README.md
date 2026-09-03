@@ -84,6 +84,15 @@ Configuration is read from `~/.pigo/agent/settings.json` (override with
 `PIGO_CODING_AGENT_DIR`) and can also be overridden with `PIGO_`-prefixed environment
 variables.
 
+## Differences from pi
+
+pigo is a Go CLI/TUI, not a Node SDK or npm package. It does not export a stable
+Go library (`internal/` stays private), does not load pi's in-process `*.ts`
+extensions (subprocess RPC only; host capabilities are in tree), and does not
+ship pi-tui, pi-telemetry, or the evals vitest harness — tests are `go test`.
+Session server (`pigo server` / `pigo client`) and image generation (`/image`)
+are being added on this issue; they are not a port of `PI_EXPERIMENTAL`.
+
 ## Layout
 
 ```

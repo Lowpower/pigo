@@ -93,8 +93,6 @@ func TestTelemetryEnvOverridesSettings(t *testing.T) {
 	cfgOn := config.Config{EnableInstallTelemetry: &on}
 	cfgOff := config.Config{EnableInstallTelemetry: &off}
 
-	t.Setenv("PI_TELEMETRY", "0")
-	_ = os.Unsetenv("PI_TELEMETRY")
 	_ = os.Unsetenv("PIGO_TELEMETRY")
 	if !TelemetryAllowed(cfgOn) {
 		t.Fatal("settings on should allow telemetry")
@@ -103,17 +101,17 @@ func TestTelemetryEnvOverridesSettings(t *testing.T) {
 		t.Fatal("settings off should deny telemetry")
 	}
 
-	t.Setenv("PI_TELEMETRY", "0")
+	t.Setenv("PIGO_TELEMETRY", "0")
 	if TelemetryAllowed(cfgOn) {
-		t.Fatal("PI_TELEMETRY=0 should deny even when settings enable it")
+		t.Fatal("PIGO_TELEMETRY=0 should deny even when settings enable it")
 	}
-	t.Setenv("PI_TELEMETRY", "true")
+	t.Setenv("PIGO_TELEMETRY", "true")
 	if !TelemetryAllowed(cfgOff) {
-		t.Fatal("PI_TELEMETRY=true should allow even when settings disable it")
+		t.Fatal("PIGO_TELEMETRY=true should allow even when settings disable it")
 	}
 	t.Setenv("PIGO_TELEMETRY", "no")
 	if TelemetryAllowed(cfgOn) {
-		t.Fatal("PIGO_TELEMETRY should win over PI_TELEMETRY")
+		t.Fatal("PIGO_TELEMETRY=no should deny")
 	}
 }
 
