@@ -90,8 +90,9 @@ pigo is a Go CLI/TUI, not a Node SDK or npm package. It does not export a stable
 Go library (`internal/` stays private), does not load pi's in-process `*.ts`
 extensions (subprocess RPC only; host capabilities are in tree), and does not
 ship pi-tui, pi-telemetry, or the evals vitest harness — tests are `go test`.
-Session server (`pigo server` / `pigo client`) and image generation (`/image`)
-are being added on this issue; they are not a port of `PI_EXPERIMENTAL`.
+`pigo server` / `pigo client` speak JSONL RPC on a Unix socket (not
+`PI_EXPERIMENTAL` / CBOR). Image generation (`/image`) is being added on this
+issue.
 
 ## Layout
 

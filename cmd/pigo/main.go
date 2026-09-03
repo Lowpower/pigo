@@ -94,6 +94,8 @@ Environment:
   PIGO_OFFLINE                    Skip network at startup (also set by --offline)
   PIGO_SHARE_VIEWER_URL           Base URL for /share viewer
   PIGO_OAUTH_CALLBACK_HOST        OAuth callback bind host (default 127.0.0.1)
+  PIGO_SERVER_LISTEN              Default unix:// address for pigo server --listen
+  PIGO_SERVER_CONNECT             Default unix:// address for pigo client --connect
 `,
 		SilenceUsage: true,
 		Args:         cobra.ArbitraryArgs,
@@ -146,7 +148,7 @@ Environment:
 	cmd.Flags().BoolVar(&f.verbose, "verbose", false, "force verbose startup (overrides quietStartup)")
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
-	cmd.AddCommand(newAuthCmd(), newConfigCmd())
+	cmd.AddCommand(newAuthCmd(), newConfigCmd(), newServerCmd(), newClientCmd())
 	addPackageCommands(cmd)
 	return cmd
 }
