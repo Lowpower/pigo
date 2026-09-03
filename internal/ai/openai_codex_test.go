@@ -347,3 +347,76 @@ func TestOpenAICodexClientWebSocketReusesSession(t *testing.T) {
 		t.Fatalf("previous_response_id = %q", secondPrev)
 	}
 }
+
+func TestOpenAICodexRequestBodyProtocolFields(t *testing.T) {
+	c := &OpenAICodexClient{}
+	bodyMap, _, err := c.buildRequestBody(Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "gpt-5.3-codex-spark", Thinking: "low", SessionID: "sess-cache"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bodyMap["prompt_cache_key"] != "sess-cache" {
+		t.Fatalf("prompt_cache_key = %#v", bodyMap["prompt_cache_key"])
+	}
+	text, _ := bodyMap["text"].(map[string]any)
+	if text["verbosity"] != "low" {
+		t.Fatalf("text = %#v", bodyMap["text"])
+	}
+	include, _ := bodyMap["include"].([]string)
+	if len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("include = %#v", bodyMap["include"])
+	}
+	if bodyMap["tool_choice"] != "auto" || bodyMap["parallel_tool_calls"] != true {
+		t.Fatalf("tools knobs = %#v %#v", bodyMap["tool_choice"], bodyMap["parallel_tool_calls"])
+	}
+	reasoning, _ := bodyMap["reasoning"].(map[string]any)
+	if reasoning["effort"] != "low" || reasoning["summary"] != "auto" {
+		t.Fatalf("reasoning = %#v", bodyMap["reasoning"])
+	}
+}
+
+func TestOpenAICodexStickySSEAfterWSFailure(t *testing.T) {
+	t.Cleanup(resetCodexWebSocketCache)
+	var upgrades, posts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			upgrades++
+			http.Error(w, "no ws", http.StatusBadGateway)
+			return
+		}
+		posts++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(responsesFixture))
+	}))
+	defer srv.Close()
+
+	client := &OpenAICodexClient{
+		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "auto",
+	}
+	ctx := context.Background()
+	req := Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}
+	opts := Options{Model: "gpt-5.3-codex-spark", SessionID: "sess-sticky"}
+	stream, err := client.StreamFn()(ctx, req, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	if final == nil || final.Text() != "Hello, world" {
+		t.Fatalf("first = %+v", final)
+	}
+	stream, err = client.StreamFn()(ctx, req, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final = stream.Collect()
+	if final == nil || final.Text() != "Hello, world" {
+		t.Fatalf("second = %+v", final)
+	}
+	if upgrades != 1 {
+		t.Fatalf("upgrades = %d, want 1 (second request must stay on SSE)", upgrades)
+	}
+	if posts != 2 {
+		t.Fatalf("posts = %d, want 2", posts)
+	}
+}

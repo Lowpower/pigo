@@ -31,6 +31,8 @@ func TestOpenCodeRoutesByModel(t *testing.T) {
 			_, _ = w.Write([]byte(anthropicFixture))
 		case "/v1/chat/completions":
 			_, _ = w.Write([]byte(openAIFixture))
+		case "/v1/responses":
+			_, _ = w.Write([]byte(responsesFixture))
 		default:
 			http.NotFound(w, r)
 		}
@@ -65,6 +67,16 @@ func TestOpenCodeRoutesByModel(t *testing.T) {
 		t.Fatalf("deepseek final = %+v", finalB)
 	}
 
+	// GPT-5 -> OpenAI Responses endpoint with Bearer.
+	streamC, err := sf(context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("gpt-5 stream error: %v", err)
+	}
+	_, finalC := streamC.Collect()
+	if finalC == nil || finalC.Text() != "Hello, world" {
+		t.Fatalf("gpt-5 final = %+v", finalC)
+	}
+
 	mu.Lock()
 	defer mu.Unlock()
 	if hits["/v1/messages"] != "x-api-key" {
@@ -72,5 +84,8 @@ func TestOpenCodeRoutesByModel(t *testing.T) {
 	}
 	if hits["/v1/chat/completions"] != "Bearer zen-key" {
 		t.Errorf("deepseek did not hit /v1/chat/completions with Bearer; hits=%v", hits)
+	}
+	if hits["/v1/responses"] != "Bearer zen-key" {
+		t.Errorf("gpt-5 did not hit /v1/responses with Bearer; hits=%v", hits)
 	}
 }

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -66,6 +67,56 @@ func TestKimiToAuthBearer(t *testing.T) {
 	}
 	if a.Headers["Authorization"] != "Bearer abc" {
 		t.Fatalf("%+v", a)
+	}
+}
+
+func TestAnthropicToAuthBearer(t *testing.T) {
+	a, err := anthropicOAuth{}.ToAuth(Credential{Access: "sk-ant-oat-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Headers["Authorization"] != "Bearer sk-ant-oat-1" {
+		t.Fatalf("%+v", a)
+	}
+}
+
+func TestAnthropicAuthTokenResolveIsBearer(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "auth-token")
+	p, ok := Lookup("anthropic")
+	if !ok {
+		t.Fatal("missing anthropic")
+	}
+	res, err := Resolve(context.Background(), Open(t.TempDir()), p, ResolveOpts{})
+	if err != nil || res == nil {
+		t.Fatal(err, res)
+	}
+	if res.Source != "ANTHROPIC_AUTH_TOKEN" {
+		t.Fatalf("source = %q", res.Source)
+	}
+	if res.Auth.APIKey != "" {
+		t.Fatalf("AUTH_TOKEN leaked as APIKey: %+v", res.Auth)
+	}
+	if res.Auth.Headers["Authorization"] != "Bearer auth-token" {
+		t.Fatalf("headers = %#v", res.Auth.Headers)
+	}
+}
+
+func TestAnthropicOAuthTokenResolvePrefersOverAPIKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-api")
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "sk-ant-oat-env")
+	p, ok := Lookup("anthropic")
+	if !ok {
+		t.Fatal("missing anthropic")
+	}
+	res, err := Resolve(context.Background(), Open(t.TempDir()), p, ResolveOpts{})
+	if err != nil || res == nil {
+		t.Fatal(err, res)
+	}
+	if res.Source != "ANTHROPIC_OAUTH_TOKEN" || res.Auth.APIKey != "sk-ant-oat-env" {
+		t.Fatalf("%+v", res)
 	}
 }
 

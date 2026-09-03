@@ -67,6 +67,8 @@ type Options struct {
 	Thinking       string // off|minimal|low|medium|high|xhigh|max
 	ThinkingBudget int    // token budget resolved from thinkingBudgets
 	SessionID      string // coding session id; Codex reuses a WebSocket per session
+	CacheRetention string // none|short|long; forwarded on pi-messages
+	ToolChoice     string // auto|none|required; forwarded on pi-messages
 }
 
 // StreamFn is the spine abstraction: given a request context it returns a stream

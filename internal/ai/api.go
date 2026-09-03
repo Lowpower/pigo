@@ -53,7 +53,7 @@ func registerBuiltinAPIs() {
 		return (&OpenAIResponsesClient{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
 	})
 	RegisterAPI("google-generative-ai", func(cfg ClientConfig) StreamFn {
-		return (&GoogleClient{APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
+		return (&GoogleClient{APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
 	})
 	RegisterAPI("bedrock-converse-stream", func(cfg ClientConfig) StreamFn {
 		return (&BedrockClient{APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
@@ -66,27 +66,33 @@ func registerBuiltinAPIs() {
 		if base == "" {
 			base = defaultOpenCodeBaseURL
 		}
-		base = strings.TrimRight(base, "/")
-		hc := httpClient(cfg)
-		anthropic := (&AnthropicClient{BaseURL: base, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: hc}).StreamFn()
-		openai := (&OpenAICompletionsClient{BaseURL: base, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: hc}).StreamFn()
-		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
-			if isAnthropicModel(opts.Model) {
-				return anthropic(ctx, reqCtx, opts)
-			}
-			return openai(ctx, reqCtx, opts)
-		}
+		cfg.BaseURL = strings.TrimRight(base, "/")
+		return openCodeMux(cfg)
 	})
 	RegisterAPI("azure-openai-responses", func(cfg ClientConfig) StreamFn {
 		base := cfg.BaseURL
 		if base == "" {
 			base = azureResolvedBaseURL()
 		}
-		return (&OpenAIResponsesClient{BaseURL: base, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
+		headers := map[string]string{}
+		for k, v := range cfg.Headers {
+			headers[k] = v
+		}
+		if headers["api-version"] == "" {
+			headers["api-version"] = azureAPIVersion()
+		}
+		inner := (&OpenAIResponsesClient{
+			BaseURL: base, APIKey: cfg.APIKey, Headers: headers, HTTPClient: httpClient(cfg), API: "azure-openai-responses",
+		}).StreamFn()
+		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+			opts.Model = azureDeploymentName(opts.Model)
+			return inner(ctx, reqCtx, opts)
+		}
 	})
 	RegisterAPI("google-vertex", func(cfg ClientConfig) StreamFn {
 		return (&GoogleClient{
 			APIKey:     cfg.APIKey,
+			BaseURL:    cfg.BaseURL,
 			Project:    envKey("GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT"),
 			Location:   envKey("GOOGLE_CLOUD_LOCATION", "GOOGLE_CLOUD_REGION"),
 			Headers:    cfg.Headers,
@@ -197,10 +203,7 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 			}
 			c.Headers = merged
 		}
-		api := models.APIFor(provider, opts.Model)
-		if provider == "github-copilot" {
-			api = copilotStreamAPI(provider, opts.Model, api)
-		}
+		api := resolveWireAPI(provider, opts.Model, models.APIFor(provider, opts.Model))
 		if api == "" {
 			api = "unknown"
 		}

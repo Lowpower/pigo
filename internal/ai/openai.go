@@ -109,6 +109,13 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 	if opts.MaxTokens > 0 {
 		req["max_tokens"] = opts.MaxTokens
 	}
+	if effort := reasoningEffort(opts); effort != "" {
+		req["reasoning_effort"] = effort
+	}
+	if key := clampPromptCacheKey(opts.SessionID); key != "" {
+		req["prompt_cache_key"] = key
+	}
+	req["store"] = false
 	if len(reqCtx.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(reqCtx.Tools))
 		for _, t := range reqCtx.Tools {

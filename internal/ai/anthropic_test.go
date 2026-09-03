@@ -127,6 +127,62 @@ func TestAnthropicClientHTTP(t *testing.T) {
 	}
 }
 
+func TestAnthropicAuthTokenUsesBearerNotAPIKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") != "" {
+			t.Error("AUTH_TOKEN must not set x-api-key")
+		}
+		if r.Header.Get("Authorization") != "Bearer auth-tok" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		beta := r.Header.Get("anthropic-beta")
+		if strings.Contains(beta, "oauth-2025-04-20") {
+			t.Errorf("AUTH_TOKEN must not add oauth betas, got %q", beta)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(anthropicFixture))
+	}))
+	defer srv.Close()
+
+	client := &AnthropicClient{
+		BaseURL: srv.URL, HTTPClient: srv.Client(),
+		Headers: map[string]string{"Authorization": "Bearer auth-tok"},
+	}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "claude-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+}
+
+func TestAnthropicOAuthTokenUsesBearerAndOAuthBetas(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") != "" {
+			t.Error("oauth token must not set x-api-key")
+		}
+		if r.Header.Get("Authorization") != "Bearer sk-ant-oat-xyz" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		if !strings.Contains(r.Header.Get("anthropic-beta"), "oauth-2025-04-20") {
+			t.Errorf("beta = %q", r.Header.Get("anthropic-beta"))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(anthropicFixture))
+	}))
+	defer srv.Close()
+
+	client := &AnthropicClient{BaseURL: srv.URL, APIKey: "sk-ant-oat-xyz", HTTPClient: srv.Client()}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "claude-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+}
+
 func TestAnthropicClientHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

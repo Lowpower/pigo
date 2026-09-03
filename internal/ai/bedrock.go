@@ -2,8 +2,11 @@ package ai
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
+	"strings"
 
+	"github.com/Lowpower/pigo/internal/models"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -18,12 +21,40 @@ type BedrockClient struct {
 	HTTPClient *http.Client
 }
 
+type bearerRoundTripper struct {
+	base  http.RoundTripper
+	token string
+}
+
+func (b bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	r := req.Clone(req.Context())
+	r.Header.Set("Authorization", "Bearer "+b.token)
+	base := b.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(r)
+}
+
+func withBearerHTTP(client *http.Client, token string) *http.Client {
+	if client == nil {
+		client = &http.Client{}
+	}
+	out := *client
+	out.Transport = bearerRoundTripper{base: client.Transport, token: token}
+	return &out
+}
+
 // StreamFn returns a StreamFn bound to this client.
 func (c *BedrockClient) StreamFn() StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
 		loadOpts := []func(*awsconfig.LoadOptions) error{}
-		if c.HTTPClient != nil {
-			loadOpts = append(loadOpts, awsconfig.WithHTTPClient(c.HTTPClient))
+		httpClient := c.HTTPClient
+		if c.APIKey != "" {
+			httpClient = withBearerHTTP(httpClient, c.APIKey)
+		}
+		if httpClient != nil {
+			loadOpts = append(loadOpts, awsconfig.WithHTTPClient(httpClient))
 		}
 		awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
 		if err != nil {
@@ -55,6 +86,9 @@ func (c *BedrockClient) StreamFn() StreamFn {
 		if opts.MaxTokens > 0 {
 			input.InferenceConfig = &types.InferenceConfiguration{MaxTokens: aws.Int32(int32(opts.MaxTokens))}
 		}
+		if fields := bedrockThinkingFields(opts); fields != nil {
+			input.AdditionalModelRequestFields = document.NewLazyDocument(fields)
+		}
 
 		s := NewEventStream(16)
 		out := &AssistantMessage{
@@ -77,6 +111,20 @@ func (c *BedrockClient) StreamFn() StreamFn {
 	}
 }
 
+func bedrockThinkingFields(opts Options) map[string]any {
+	if reasoningEffort(opts) == "" && opts.ThinkingBudget <= 0 {
+		return nil
+	}
+	budget := opts.ThinkingBudget
+	if budget <= 0 {
+		budget = models.BudgetTokens(opts.Thinking)
+	}
+	if budget > 0 {
+		return map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": budget}}
+	}
+	return map[string]any{"thinking": map[string]any{"type": "adaptive"}}
+}
+
 func bedrockMessages(reqCtx Context) []types.Message {
 	var out []types.Message
 	for _, m := range reqCtx.Messages {
@@ -86,6 +134,8 @@ func bedrockMessages(reqCtx Context) []types.Message {
 				switch c.Type {
 				case KindText:
 					blocks = append(blocks, &types.ContentBlockMemberText{Value: c.Text})
+				case KindThinking:
+					blocks = append(blocks, bedrockReasoningBlock(c))
 				case KindToolCall:
 					blocks = append(blocks, &types.ContentBlockMemberToolUse{Value: types.ToolUseBlock{
 						ToolUseId: aws.String(c.ToolID),
@@ -98,11 +148,17 @@ func bedrockMessages(reqCtx Context) []types.Message {
 			continue
 		}
 		if m.Role == RoleToolResult || m.ToolCallID != "" {
+			content := []types.ToolResultContentBlock{&types.ToolResultContentBlockMemberText{Value: m.Content}}
+			for _, img := range m.Images {
+				if b := bedrockImageBlock(img); b != nil {
+					content = append(content, &types.ToolResultContentBlockMemberImage{Value: b.Value})
+				}
+			}
 			out = append(out, types.Message{
 				Role: types.ConversationRoleUser,
 				Content: []types.ContentBlock{&types.ContentBlockMemberToolResult{Value: types.ToolResultBlock{
 					ToolUseId: aws.String(m.ToolCallID),
-					Content:   []types.ToolResultContentBlock{&types.ToolResultContentBlockMemberText{Value: m.Content}},
+					Content:   content,
 				}}},
 			})
 			continue
@@ -111,17 +167,66 @@ func bedrockMessages(reqCtx Context) []types.Message {
 		if m.Role == RoleAssistant {
 			role = types.ConversationRoleAssistant
 		}
-		out = append(out, types.Message{
-			Role:    role,
-			Content: []types.ContentBlock{&types.ContentBlockMemberText{Value: m.Content}},
-		})
+		blocks := []types.ContentBlock{}
+		if m.Content != "" {
+			blocks = append(blocks, &types.ContentBlockMemberText{Value: m.Content})
+		}
+		for _, img := range m.Images {
+			if b := bedrockImageBlock(img); b != nil {
+				blocks = append(blocks, b)
+			}
+		}
+		if len(blocks) == 0 {
+			blocks = []types.ContentBlock{&types.ContentBlockMemberText{Value: m.Content}}
+		}
+		out = append(out, types.Message{Role: role, Content: blocks})
 	}
 	return out
+}
+
+func bedrockReasoningBlock(c *Content) types.ContentBlock {
+	if c.Redacted {
+		data, err := base64.StdEncoding.DecodeString(c.ThinkingSignature)
+		if err != nil {
+			data = []byte(c.ThinkingSignature)
+		}
+		return &types.ContentBlockMemberReasoningContent{
+			Value: &types.ReasoningContentBlockMemberRedactedContent{Value: data},
+		}
+	}
+	text := types.ReasoningTextBlock{Text: aws.String(c.Thinking)}
+	if c.ThinkingSignature != "" {
+		text.Signature = aws.String(c.ThinkingSignature)
+	}
+	return &types.ContentBlockMemberReasoningContent{
+		Value: &types.ReasoningContentBlockMemberReasoningText{Value: text},
+	}
+}
+
+func bedrockImageBlock(img ImageContent) *types.ContentBlockMemberImage {
+	data, err := base64.StdEncoding.DecodeString(img.Data)
+	if err != nil {
+		return nil
+	}
+	format := types.ImageFormatPng
+	switch strings.ToLower(img.MimeType) {
+	case "image/jpeg", "image/jpg":
+		format = types.ImageFormatJpeg
+	case "image/gif":
+		format = types.ImageFormatGif
+	case "image/webp":
+		format = types.ImageFormatWebp
+	}
+	return &types.ContentBlockMemberImage{Value: types.ImageBlock{
+		Format: format,
+		Source: &types.ImageSourceMemberBytes{Value: data},
+	}}
 }
 
 func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseStreamEventStream, out *AssistantMessage, s *EventStream) {
 	defer func() { _ = stream.Close() }()
 	textIdx := map[int32]int{}
+	thinkIdx := map[int32]int{}
 	toolIdx := map[int32]int{}
 	for ev := range stream.Events() {
 		switch v := ev.(type) {
@@ -159,6 +264,32 @@ func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseSt
 				out.Content[pos].Text += d.Value
 				if !s.push(ctx, Event{Type: EventTextDelta, ContentIndex: pos, Delta: d.Value, Partial: out}) {
 					return
+				}
+			case *types.ContentBlockDeltaMemberReasoningContent:
+				pos, ok := thinkIdx[idx]
+				if !ok {
+					out.Content = append(out.Content, &Content{Type: KindThinking})
+					pos = len(out.Content) - 1
+					thinkIdx[idx] = pos
+					if !s.push(ctx, Event{Type: EventThinkingStart, ContentIndex: pos, Partial: out}) {
+						return
+					}
+				}
+				block := out.Content[pos]
+				switch rd := d.Value.(type) {
+				case *types.ReasoningContentBlockDeltaMemberText:
+					block.Thinking += rd.Value
+					if !s.push(ctx, Event{Type: EventThinkingDelta, ContentIndex: pos, Delta: rd.Value, Partial: out}) {
+						return
+					}
+				case *types.ReasoningContentBlockDeltaMemberSignature:
+					block.ThinkingSignature += rd.Value
+				case *types.ReasoningContentBlockDeltaMemberRedactedContent:
+					block.Redacted = true
+					block.ThinkingSignature = base64.StdEncoding.EncodeToString(rd.Value)
+					if block.Thinking == "" {
+						block.Thinking = "[Reasoning redacted]"
+					}
 				}
 			case *types.ContentBlockDeltaMemberToolUse:
 				pos, ok := toolIdx[idx]
@@ -203,6 +334,8 @@ func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseSt
 		switch c.Type {
 		case KindText:
 			s.push(ctx, Event{Type: EventTextEnd, ContentIndex: i, Content: c.Text, Partial: out})
+		case KindThinking:
+			s.push(ctx, Event{Type: EventThinkingEnd, ContentIndex: i, Content: c.Thinking, Partial: out})
 		case KindToolCall:
 			if c.partialJSON != "" {
 				c.Arguments = parseStreamingJSON(c.partialJSON)

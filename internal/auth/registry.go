@@ -27,7 +27,7 @@ func registerBuiltins() {
 		ID: "anthropic",
 		APIKey: &APIKeyHandler{
 			Name:  "Anthropic API key",
-			Env:   []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"},
+			Env:   []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"},
 			Login: promptAPIKey("Anthropic API key"),
 		},
 		OAuth: anthropicOAuth{},
