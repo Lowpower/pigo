@@ -50,6 +50,11 @@ type agentEventMsg struct{ ev agent.Event }
 type agentClosedMsg struct{}
 type shareDoneMsg struct{ text string }
 type llamaDoneMsg struct{ text string }
+type imageGenMsg struct {
+	prompt string
+	images []ai.ImageContent
+	err    error
+}
 
 type queuedPrompt struct {
 	text   string
@@ -428,6 +433,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case llamaDoneMsg:
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg.text)})
 		return m, nil
+
+	case imageGenMsg:
+		return m.handleImageGen(msg)
 
 	case llamaCatalogMsg, llamaSearchTickMsg, llamaSearchResultMsg, llamaDetailsMsg, llamaActionDoneMsg:
 		return m.handleLlamaMsg(msg)
@@ -815,6 +823,8 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		return m.startTurn(body, nil)
 	case "llama":
 		return m.handleLlama(cmd.Rest)
+	case "image":
+		return m.startImageGen(cmd.Rest)
 	default:
 		if m.engine != nil && m.engine.DispatchCommand(cmd.Name, cmd.Rest) {
 			return m, nil
@@ -831,6 +841,44 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		return note("/" + cmd.Name + " is not implemented")
 	}
+}
+
+func (m Model) startImageGen(prompt string) (tea.Model, tea.Cmd) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("usage: /image <prompt>")})
+		return m, nil
+	}
+	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("generating image…")})
+	return m, func() tea.Msg {
+		imgs, err := ai.GenerateImages(context.Background(), prompt, "")
+		return imageGenMsg{prompt: prompt, images: imgs, err: err}
+	}
+}
+
+func (m Model) handleImageGen(msg imageGenMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("image error: " + msg.err.Error())})
+		return m, nil
+	}
+	m.history = append(m.history,
+		ai.Message{Role: ai.RoleUser, Content: msg.prompt},
+		ai.Message{Role: ai.RoleAssistant, Content: "generated image", Images: msg.images},
+	)
+	if m.engine != nil && m.engine.Opts.Session != nil {
+		_, _ = m.engine.Opts.Session.AppendMessage("user", map[string]any{"role": "user", "content": msg.prompt})
+		blocks := []any{map[string]any{"type": "text", "text": "generated image"}}
+		for _, img := range msg.images {
+			blocks = append(blocks, map[string]any{"type": "image", "data": img.Data, "mimeType": img.MimeType})
+		}
+		_, _ = m.engine.Opts.Session.AppendMessage("assistant", map[string]any{"role": "assistant", "content": blocks})
+	}
+	rendered := m.renderMarkdown("generated image")
+	for _, img := range msg.images {
+		rendered += "\n" + m.renderInlineImage(img)
+	}
+	m.transcript = append(m.transcript, entry{role: "assistant", rendered: rendered})
+	return m, nil
 }
 
 func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.Cmd) {

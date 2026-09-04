@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -534,6 +535,34 @@ func TestThemeOptsUsesResolvedThemeFiles(t *testing.T) {
 	opt = m.themeOpts("dark")
 	if len(opt.Extra) != 1 || opt.Extra[0] != "/cli.json" {
 		t.Fatalf("--no-themes Extra=%v", opt.Extra)
+	}
+}
+
+func TestSlashImageGenerates(t *testing.T) {
+	orig := ai.GenerateImages
+	t.Cleanup(func() { ai.GenerateImages = orig })
+	ai.GenerateImages = func(_ context.Context, prompt, _ string) ([]ai.ImageContent, error) {
+		if prompt != "a cube" {
+			t.Fatalf("prompt=%q", prompt)
+		}
+		return []ai.ImageContent{{Type: "image", MimeType: "image/png", Data: "AAA"}}, nil
+	}
+	m := New(testCfg())
+	m.editor.SetValue("/image")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "usage: /image") {
+		t.Fatalf("usage = %+v", m.transcript)
+	}
+
+	m.editor.SetValue("/image a cube")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("expected generate cmd")
+	}
+	m = send(m, cmd())
+	if len(m.history) != 2 || m.history[1].Images[0].Data != "AAA" {
+		t.Fatalf("history=%+v", m.history)
 	}
 }
 
