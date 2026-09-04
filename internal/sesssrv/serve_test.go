@@ -24,14 +24,14 @@ func TestUnixJSONLRoundTrip(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	go func() { _ = Serve(ctx, ln, func() (Session, error) { return newTestEngine(), nil }) }()
 
 	c, err := waitDial(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	in := strings.NewReader(`{"type":"prompt","message":"hi"}
 {"type":"quit"}

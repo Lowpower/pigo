@@ -30,7 +30,7 @@ func newServerCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer ln.Close()
+			defer func() { _ = ln.Close() }()
 			fmt.Fprintf(cmd.ErrOrStderr(), "pigo server listening on unix://%s\n", path)
 			return sesssrv.Serve(cmd.Context(), ln, func() (sesssrv.Session, error) {
 				return newServerEngine(cmd.Context())
@@ -59,7 +59,7 @@ func newClientCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 			return sesssrv.Bridge(cmd.Context(), conn, cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}

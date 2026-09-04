@@ -1,3 +1,4 @@
+// Package sesssrv serves JSONL RPC sessions on a Unix domain socket.
 package sesssrv
 
 import (

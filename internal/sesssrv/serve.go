@@ -50,7 +50,7 @@ func Serve(ctx context.Context, ln net.Listener, newSession NewSession) error {
 }
 
 func handleConn(ctx context.Context, conn net.Conn, newSession NewSession) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	sess, err := newSession()
 	if err != nil {
 		_ = json.NewEncoder(conn).Encode(map[string]any{"type": "error", "message": err.Error()})
