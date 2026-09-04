@@ -14,7 +14,7 @@ import (
 )
 
 func callbackHost() string {
-	if h := os.Getenv("PI_OAUTH_CALLBACK_HOST"); h != "" {
+	if h := os.Getenv("PIGO_OAUTH_CALLBACK_HOST"); h != "" {
 		return h
 	}
 	return "127.0.0.1"

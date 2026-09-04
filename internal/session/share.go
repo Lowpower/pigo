@@ -127,9 +127,9 @@ func Share(opts ShareOptions) (ShareResult, error) {
 	return ShareResult{ViewerURL: ShareViewerURL(gistID), GistURL: gistURL}, nil
 }
 
-// ShareViewerURL builds the gist viewer URL (PI_SHARE_VIEWER_URL overrides).
+// ShareViewerURL builds the gist viewer URL (PIGO_SHARE_VIEWER_URL overrides).
 func ShareViewerURL(gistID string) string {
-	base := os.Getenv("PI_SHARE_VIEWER_URL")
+	base := os.Getenv("PIGO_SHARE_VIEWER_URL")
 	if base == "" {
 		base = defaultShareViewerURL
 	}

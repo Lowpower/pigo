@@ -44,7 +44,7 @@ func TestWriteShareJSONLAddsPiShareEntry(t *testing.T) {
 }
 
 func TestShareViewerURLEnvOverride(t *testing.T) {
-	t.Setenv("PI_SHARE_VIEWER_URL", "https://example.test/s/")
+	t.Setenv("PIGO_SHARE_VIEWER_URL", "https://example.test/s/")
 	got := ShareViewerURL("abc123")
 	if got != "https://example.test/s/#abc123" {
 		t.Fatalf("got %q", got)

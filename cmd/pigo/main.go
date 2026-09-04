@@ -87,13 +87,13 @@ func newRootCmd() *cobra.Command {
 		Short: "pigo — a coding agent",
 		Long: `pigo — a coding agent
 
-pigo does not implement pi's PI_EXPERIMENTAL server/client transport.
-
 Environment:
   PIGO_CODING_AGENT_DIR           Agent config directory
   PIGO_CODING_AGENT_SESSION_DIR   Session storage directory (overridden by --session-dir)
-  PI_TELEMETRY / PIGO_TELEMETRY   Override install telemetry (1/true/yes or 0/false/no)
-  PI_EXPERIMENTAL                 Not supported; server/client commands are not ported
+  PIGO_TELEMETRY                  Override install telemetry (1/true/yes or 0/false/no)
+  PIGO_OFFLINE                    Skip network at startup (also set by --offline)
+  PIGO_SHARE_VIEWER_URL           Base URL for /share viewer
+  PIGO_OAUTH_CALLBACK_HOST        OAuth callback bind host (default 127.0.0.1)
 `,
 		SilenceUsage: true,
 		Args:         cobra.ArbitraryArgs,
