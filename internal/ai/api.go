@@ -207,6 +207,9 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 		if api == "" {
 			api = "unknown"
 		}
+		if provider == "cloudflare-ai-gateway" {
+			c.BaseURL = cloudflareGatewayBaseURL(api, c.BaseURL)
+		}
 		f, ok := LookupAPI(api)
 		if !ok {
 			return errorStreamProvider(opts.Model, api, fmt.Sprintf("unknown api %q", api)), nil
