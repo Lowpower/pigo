@@ -105,6 +105,33 @@ func guessCloudflareGatewayAPI(model string) string {
 	}
 }
 
+func cloudflareGatewaySuffix(api string) string {
+	switch api {
+	case "anthropic-messages":
+		return "/anthropic"
+	case "openai-responses":
+		return "/openai"
+	case "openai-completions":
+		return "/compat"
+	default:
+		return ""
+	}
+}
+
+func cloudflareGatewayBaseURL(api, base string) string {
+	want := cloudflareGatewaySuffix(api)
+	if want == "" || base == "" {
+		return base
+	}
+	trimmed := strings.TrimRight(base, "/")
+	for _, suf := range []string{"/anthropic", "/openai", "/compat"} {
+		if strings.HasSuffix(trimmed, suf) {
+			return strings.TrimSuffix(trimmed, suf) + want
+		}
+	}
+	return base
+}
+
 func guessFireworksAPI(model string) string {
 	id := strings.ToLower(strings.TrimSpace(model))
 	switch {
