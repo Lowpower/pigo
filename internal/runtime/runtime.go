@@ -17,7 +17,6 @@ import (
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
-	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/skills"
@@ -64,15 +63,16 @@ type Options struct {
 
 // Engine is a configured agent runner.
 type Engine struct {
-	Opts      Options
-	Stream    ai.StreamFn
-	Provider  string
-	Tools     *tools.Registry
-	Hosts     []*ext.Host
-	Skills    []skills.Skill
-	Templates []prompt.Template
-	Scoped    []models.Spec
-	System    string
+	Opts       Options
+	Stream     ai.StreamFn
+	Provider   string
+	Tools      *tools.Registry
+	Hosts      []*ext.Host
+	Skills     []skills.Skill
+	Templates  []prompt.Template
+	ThemeFiles []string // enabled theme files from pkgmgr.Resolve; CLI --theme stays on Opts.ThemePaths
+	Scoped     []models.Spec
+	System     string
 
 	Steering  func() []ai.Message
 	FollowUp  func() []ai.Message
@@ -183,7 +183,8 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	if len(opts.CLIExtensions) == 0 && len(opts.Extensions) > 0 {
 		opts.CLIExtensions = opts.Extensions
 	}
-	extSpecs := collectExtensionSpecs(ctx, opts)
+	rs := resolvePackageResources(ctx, opts)
+	extSpecs := collectExtensionSpecs(opts, rs)
 	opts.Extensions = extSpecs
 
 	var hosts []*ext.Host
@@ -195,10 +196,9 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		}
 	}
 
-	var sk []skills.Skill
-	if !opts.NoSkills {
-		sk, _ = skills.Discover(opts.Cwd, opts.AgentDir, opts.SkillPaths, true, opts.ProjectTrusted)
-	}
+	sk := loadSkills(opts, rs)
+	tpls := loadTemplates(opts, rs)
+	themeFiles := loadThemeFiles(opts, rs)
 
 	sys := prompt.Build(prompt.Options{
 		Cwd:              opts.Cwd,
@@ -213,15 +213,16 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	})
 
 	e := &Engine{
-		Opts:      opts,
-		Stream:    sf,
-		Provider:  provider,
-		Tools:     reg,
-		Hosts:     hosts,
-		Skills:    sk,
-		Templates: prompt.DiscoverTemplates(opts.Cwd, opts.AgentDir, opts.PromptPaths, !opts.NoPromptTpls, opts.ProjectTrusted),
-		Scoped:    scoped,
-		System:    sys,
+		Opts:       opts,
+		Stream:     sf,
+		Provider:   provider,
+		Tools:      reg,
+		Hosts:      hosts,
+		Skills:     sk,
+		Templates:  tpls,
+		ThemeFiles: themeFiles,
+		Scoped:     scoped,
+		System:     sys,
 	}
 	e.Steering = e.drainSteer
 	e.FollowUp = e.drainFollow
@@ -241,22 +242,6 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		}
 	}
 	return e, nil
-}
-
-func collectExtensionSpecs(ctx context.Context, opts Options) []string {
-	var specs []string
-	if !opts.NoExtensions {
-		m, err := pkgmgr.Open(opts.Cwd, opts.AgentDir, opts.ProjectTrusted)
-		if err == nil {
-			if rs, err := m.Resolve(ctx); err == nil {
-				for _, argv := range pkgmgr.SpawnArgv(rs) {
-					specs = append(specs, strings.Join(argv, " "))
-				}
-			}
-		}
-	}
-	specs = append(specs, opts.CLIExtensions...)
-	return specs
 }
 
 func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, unknown []ext.UnknownFlag) ([]*ext.Host, *tools.Registry, error) {
@@ -294,10 +279,7 @@ func (e *Engine) applyProjectTrust(ctx context.Context) {
 		if asBool(res["remember"]) {
 			_ = trust.Open(e.Opts.AgentDir).Set(e.Opts.Cwd, true)
 		}
-		if !e.Opts.NoSkills {
-			e.Skills, _ = skills.Discover(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SkillPaths, true, true)
-		}
-		e.Templates = prompt.DiscoverTemplates(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.PromptPaths, !e.Opts.NoPromptTpls, true)
+		e.applyResolved(resolvePackageResources(ctx, e.Opts))
 		e.System = prompt.Build(prompt.Options{
 			Cwd: e.Opts.Cwd, AgentDir: e.Opts.AgentDir, Custom: e.Opts.SystemPrompt,
 			Append: e.Opts.AppendSystem, NoContextFiles: e.Opts.NoContextFiles,
@@ -843,12 +825,8 @@ func (e *Engine) History() []ai.Message {
 // Reload rediscovers skills, extensions, and rebuilds the system prompt (/reload).
 func (e *Engine) Reload() {
 	ctx := context.Background()
-	if e.Opts.NoSkills {
-		e.Skills = nil
-	} else {
-		e.Skills, _ = skills.Discover(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SkillPaths, true, e.Opts.ProjectTrusted)
-	}
-	e.Templates = prompt.DiscoverTemplates(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.PromptPaths, !e.Opts.NoPromptTpls, e.Opts.ProjectTrusted)
+	rs := resolvePackageResources(ctx, e.Opts)
+	e.applyResolved(rs)
 
 	for _, h := range e.Hosts {
 		_ = h.Close()
@@ -869,7 +847,7 @@ func (e *Engine) Reload() {
 		reg = filterTools(reg, builtinAllow(e.Opts), e.Opts.ToolDeny)
 	}
 	if !e.Opts.NoTools {
-		specs := collectExtensionSpecs(ctx, e.Opts)
+		specs := collectExtensionSpecs(e.Opts, rs)
 		e.Opts.Extensions = specs
 		hosts, r, err := spawnExtensions(ctx, specs, reg, e.Opts.UnknownFlags)
 		if err == nil {
