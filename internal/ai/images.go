@@ -12,10 +12,10 @@ import (
 	"time"
 )
 
-const (
-	defaultImagesBaseURL = "https://openrouter.ai/api/v1"
-	DefaultImagesModel   = "google/gemini-2.5-flash-image"
-)
+const defaultImagesBaseURL = "https://openrouter.ai/api/v1"
+
+// DefaultImagesModel is the OpenRouter image model used when none is given.
+const DefaultImagesModel = "google/gemini-2.5-flash-image"
 
 // GenerateImagesFunc generates images from a text prompt.
 type GenerateImagesFunc func(ctx context.Context, prompt, model string) ([]ImageContent, error)
@@ -61,7 +61,7 @@ func generateOpenRouterImages(ctx context.Context, prompt, model string) ([]Imag
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
