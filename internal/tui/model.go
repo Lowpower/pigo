@@ -173,13 +173,13 @@ func (m *Model) applyTheme(th theme.Theme) {
 }
 
 func (m Model) themeOpts(name string) theme.LoadOptions {
-	opt := theme.LoadOptions{Name: name}
+	opt := theme.LoadOptions{Name: name, NoDiscovery: true}
 	if m.engine != nil {
-		opt.Cwd = m.engine.Opts.Cwd
-		opt.AgentDir = m.engine.Opts.AgentDir
-		opt.Extra = m.engine.Opts.ThemePaths
-		opt.NoDiscovery = m.engine.Opts.NoThemes
-		opt.NoProject = !m.engine.Opts.ProjectTrusted
+		extra := append([]string{}, m.engine.Opts.ThemePaths...)
+		if !m.engine.Opts.NoThemes {
+			extra = append(extra, m.engine.ThemeFiles...)
+		}
+		opt.Extra = extra
 	}
 	return opt
 }
@@ -765,6 +765,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			m.keys.Reload()
 		}
 		m.attachExtensions()
+		m.applyTheme(theme.LoadWith(m.themeOpts(m.cfg.Theme)))
 		return note("reloaded keybindings, skills, and context files")
 	case "copy":
 		text := lastAssistant(m.history)

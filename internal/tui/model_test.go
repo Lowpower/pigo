@@ -497,12 +497,16 @@ func TestSlashThemeLoadsFromAgentDir(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(agent, "themes"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	path := filepath.Join(agent, "themes", "disk.json")
 	body := `{"name":"disk","colors":{"accent":"#abcdef","error":"#ff0000","userMessageText":"#111111"}}`
-	if err := os.WriteFile(filepath.Join(agent, "themes", "disk.json"), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	m := New(testCfg())
-	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: agent, Cwd: t.TempDir()}}
+	m.engine = &runtime.Engine{
+		Opts:       runtime.Options{AgentDir: agent, Cwd: t.TempDir()},
+		ThemeFiles: []string{path},
+	}
 	m.editor.SetValue("/theme disk")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.theme.Name != "disk" {
@@ -510,6 +514,26 @@ func TestSlashThemeLoadsFromAgentDir(t *testing.T) {
 	}
 	if m.theme.Accent != "#abcdef" {
 		t.Fatalf("accent=%s", m.theme.Accent)
+	}
+}
+
+func TestThemeOptsUsesResolvedThemeFiles(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{
+		Opts:       runtime.Options{ThemePaths: []string{"/cli.json"}},
+		ThemeFiles: []string{"/enabled.json"},
+	}
+	opt := m.themeOpts("dark")
+	if !opt.NoDiscovery {
+		t.Fatal("theme catalog should not rescan agentDir")
+	}
+	if len(opt.Extra) != 2 || opt.Extra[0] != "/cli.json" || opt.Extra[1] != "/enabled.json" {
+		t.Fatalf("Extra=%v", opt.Extra)
+	}
+	m.engine.Opts.NoThemes = true
+	opt = m.themeOpts("dark")
+	if len(opt.Extra) != 1 || opt.Extra[0] != "/cli.json" {
+		t.Fatalf("--no-themes Extra=%v", opt.Extra)
 	}
 }
 
