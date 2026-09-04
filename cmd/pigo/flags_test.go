@@ -48,6 +48,13 @@ func TestPeelUnknownFlagsSkipsSubcommands(t *testing.T) {
 	if strings.Join(rest, ",") != "auth,login,--foo" {
 		t.Fatalf("rest=%v", rest)
 	}
+	rest, unknown = peelUnknownFlags([]string{"server", "--listen", "unix:///tmp/pigo.sock"})
+	if len(unknown) != 0 {
+		t.Fatalf("server unknown=%+v", unknown)
+	}
+	if strings.Join(rest, ",") != "server,--listen,unix:///tmp/pigo.sock" {
+		t.Fatalf("server rest=%v", rest)
+	}
 }
 
 func TestFormatUnclaimed(t *testing.T) {
