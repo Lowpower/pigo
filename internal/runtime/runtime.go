@@ -803,7 +803,7 @@ type promptPrep struct {
 
 func (e *Engine) preparePrompt(ctx context.Context, user string, images []ai.ImageContent) (promptPrep, error) {
 	if e.Compacting() {
-		return promptPrep{}, fmt.Errorf("Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.")
+		return promptPrep{}, fmt.Errorf("cannot submit a prompt while compaction is in progress")
 	}
 	if cmd, ok := slash.Parse(user); ok && e.DispatchCommand(cmd.Name, cmd.Rest) {
 		return promptPrep{Handled: true}, nil

@@ -10,9 +10,9 @@ import (
 const (
 	DefaultMaxLines = 2000
 	DefaultMaxBytes = 50 * 1024
+	// GrepMaxLineLength is the max rune length of a grep match line before truncation.
+	GrepMaxLineLength = 500
 )
-
-const GrepMaxLineLength = 500
 
 // Truncation is the result of TruncateTail / TruncateHead.
 type Truncation struct {

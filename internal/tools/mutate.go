@@ -25,12 +25,12 @@ func mutationKey(path string) string {
 	if err != nil {
 		abs = path
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return real
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
 	}
 	if _, err := os.Stat(abs); err == nil {
-		if real, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
-			return filepath.Join(real, filepath.Base(abs))
+		if dir, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+			return filepath.Join(dir, filepath.Base(abs))
 		}
 	}
 	return abs
