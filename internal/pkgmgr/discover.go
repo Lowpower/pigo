@@ -301,8 +301,8 @@ func sameResolved(a, b string) bool {
 }
 
 func canonicalPath(p string) string {
-	if real, err := filepath.EvalSymlinks(p); err == nil {
-		return real
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
 	}
 	return p
 }
