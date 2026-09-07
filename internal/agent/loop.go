@@ -57,8 +57,12 @@ type Config struct {
 	// PrepareNextTurn may rewrite the transcript after tool results, before
 	// the next provider call (threshold compaction).
 	PrepareNextTurn func(ctx context.Context, msgs []ai.Message) []ai.Message
-	// OnLifecycle is invoked after agent/turn/tool lifecycle events are pushed.
+	// OnLifecycle is invoked after lifecycle events are pushed, including
+	// message_start/update/end and tool_execution_update.
 	OnLifecycle func(Event)
+	// OnMessageEnd may replace a finalized assistant message before it is
+	// pushed as message_end and appended to the transcript.
+	OnMessageEnd func(*ai.AssistantMessage) *ai.AssistantMessage
 }
 
 // Run drives the agent loop and returns a stream of AgentEvents. The loop runs
@@ -85,7 +89,9 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 		ok := s.push(ctx, ev)
 		if ok && cfg.OnLifecycle != nil {
 			switch ev.Type {
-			case EventAgentStart, EventAgentEnd, EventTurnStart, EventTurnEnd, EventToolStart, EventToolEnd:
+			case EventAgentStart, EventAgentEnd, EventTurnStart, EventTurnEnd,
+				EventToolStart, EventToolEnd, EventMessageStart, EventMessageUpdate,
+				EventMessageEnd, EventToolUpdate:
 				cfg.OnLifecycle(ev)
 			}
 		}
@@ -135,7 +141,7 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 		}
 
 		aiCtx := ai.Context{System: reqCtx.System, Messages: toAIMessages(transcript), Tools: reqCtx.Tools}
-		message, ok := streamAssistant(ctx, sf, aiCtx, cfg, s)
+		message, ok := streamAssistant(ctx, sf, aiCtx, cfg, emit)
 		if !ok {
 			return
 		}
@@ -153,9 +159,9 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 		// next turn can continue; truncated calls are not executed.
 		if len(toolCalls) > 0 {
 			if message.StopReason == ai.StopLength {
-				toolResults, ok = failToolCalls(ctx, toolCalls, s)
+				toolResults, ok = failToolCalls(toolCalls, emit)
 			} else {
-				toolResults, ok = executeToolCalls(ctx, toolCalls, exec, cfg, s)
+				toolResults, ok = executeToolCalls(ctx, toolCalls, exec, cfg, emit)
 			}
 			if !ok {
 				return
@@ -195,7 +201,7 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 // streamAssistant consumes one provider turn, forwarding message_start/update/end
 // events and returning the final assistant message. ok is false if the context
 // was cancelled while emitting.
-func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg Config, s *Stream) (*ai.AssistantMessage, bool) {
+func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg Config, emit func(Event) bool) (*ai.AssistantMessage, bool) {
 	stream, err := sf(ctx, aiCtx, ai.Options{
 		Model:          cfg.Model,
 		Thinking:       cfg.Thinking,
@@ -205,17 +211,14 @@ func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg 
 	})
 	if err != nil {
 		msg := &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopError, ErrorMessage: err.Error()}
-		if !s.push(ctx, Event{Type: EventMessageEnd, Assistant: msg}) {
-			return nil, false
-		}
-		return msg, true
+		return emitAssistantEnd(cfg, emit, msg)
 	}
 
 	started := false
 	var final *ai.AssistantMessage
 	for ev := range stream.Events() {
 		if !started && ev.Partial != nil {
-			if !s.push(ctx, Event{Type: EventMessageStart, Assistant: ev.Partial}) {
+			if !emit(Event{Type: EventMessageStart, Assistant: ev.Partial}) {
 				return nil, false
 			}
 			started = true
@@ -225,7 +228,7 @@ func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg 
 		if msg == nil {
 			msg = ev.Message
 		}
-		if !s.push(ctx, Event{Type: EventMessageUpdate, Assistant: msg, AIEvent: &evCopy}) {
+		if !emit(Event{Type: EventMessageUpdate, Assistant: msg, AIEvent: &evCopy}) {
 			return nil, false
 		}
 		if ev.Type == ai.EventDone || ev.Type == ai.EventError {
@@ -235,21 +238,30 @@ func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg 
 	if final == nil {
 		final = &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopError, ErrorMessage: "provider stream ended without a terminal event"}
 	}
-	if !s.push(ctx, Event{Type: EventMessageEnd, Assistant: final}) {
+	return emitAssistantEnd(cfg, emit, final)
+}
+
+func emitAssistantEnd(cfg Config, emit func(Event) bool, msg *ai.AssistantMessage) (*ai.AssistantMessage, bool) {
+	if cfg.OnMessageEnd != nil {
+		if next := cfg.OnMessageEnd(msg); next != nil {
+			msg = next
+		}
+	}
+	if !emit(Event{Type: EventMessageEnd, Assistant: msg}) {
 		return nil, false
 	}
-	return final, true
+	return msg, true
 }
 
 // executeToolCalls runs the tool calls sequentially or in parallel. Tool-result
 // messages are returned in the model's source order regardless of completion
 // order. ok is false if the context was cancelled while emitting.
-func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, cfg Config, s *Stream) ([]Msg, bool) {
+func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, cfg Config, emit func(Event) bool) ([]Msg, bool) {
 	results := make([]Msg, len(calls))
 
 	run := func(i int) bool {
 		c := calls[i]
-		if !s.push(ctx, Event{Type: EventToolStart, ToolCallID: c.ID, ToolName: c.Name, Args: c.Args}) {
+		if !emit(Event{Type: EventToolStart, ToolCallID: c.ID, ToolName: c.Name, Args: c.Args}) {
 			return false
 		}
 		var (
@@ -258,7 +270,7 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 		)
 		if exec != nil {
 			toolCtx := tools.WithOutputUpdate(ctx, func(partial string) {
-				_ = s.push(ctx, Event{
+				_ = emit(Event{
 					Type:       EventToolUpdate,
 					ToolCallID: c.ID,
 					ToolName:   c.Name,
@@ -271,7 +283,7 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 			out, isError = fmt.Sprintf("no executor for tool %q", c.Name), true
 		}
 		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: isError}
-		return s.push(ctx, Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: isError})
+		return emit(Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: isError})
 	}
 
 	if cfg.ToolExecution == Parallel && len(calls) > 1 {
@@ -301,15 +313,15 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 	return results, true
 }
 
-func failToolCalls(ctx context.Context, calls []ToolCall, s *Stream) ([]Msg, bool) {
+func failToolCalls(calls []ToolCall, emit func(Event) bool) ([]Msg, bool) {
 	results := make([]Msg, len(calls))
 	for i, c := range calls {
-		if !s.push(ctx, Event{Type: EventToolStart, ToolCallID: c.ID, ToolName: c.Name, Args: c.Args}) {
+		if !emit(Event{Type: EventToolStart, ToolCallID: c.ID, ToolName: c.Name, Args: c.Args}) {
 			return nil, false
 		}
-		out := fmt.Sprintf("tool call aborted: assistant message truncated (stop reason length)")
+		out := "tool call aborted: assistant message truncated (stop reason length)"
 		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: true}
-		if !s.push(ctx, Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: true}) {
+		if !emit(Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: true}) {
 			return nil, false
 		}
 	}

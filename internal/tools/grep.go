@@ -37,13 +37,36 @@ func (grepTool) Description() string {
 
 func (grepTool) Schema() map[string]any { return schemaFor(&grepParams{}) }
 
-func (t grepTool) Execute(_ context.Context, args map[string]any) (string, bool) {
+func (t grepTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
 	var p grepParams
 	if err := decodeArgs(args, &p); err != nil {
 		return "invalid arguments: " + err.Error(), true
 	}
 	if p.Pattern == "" {
 		return "pattern is required", true
+	}
+
+	root := resolvePath(t.cwd, p.Path)
+	info, statErr := os.Stat(root)
+	if statErr != nil {
+		return statErr.Error(), true
+	}
+	var g *globMatcher
+	var err error
+	if p.Glob != "" {
+		if g, err = compileGlob(p.Glob); err != nil {
+			return "invalid glob: " + err.Error(), true
+		}
+	}
+	limit := grepDefaultLimit
+	if p.Limit > 0 {
+		limit = p.Limit
+	}
+
+	if rg, lookErr := lookRipgrep(); lookErr == nil && rg != "" {
+		if out, isErr, ok := grepRipgrep(ctx, rg, root, info.IsDir(), p, limit); ok {
+			return out, isErr
+		}
 	}
 
 	expr := p.Pattern
@@ -56,18 +79,6 @@ func (t grepTool) Execute(_ context.Context, args map[string]any) (string, bool)
 	re, err := regexp.Compile(expr)
 	if err != nil {
 		return "invalid pattern: " + err.Error(), true
-	}
-
-	root := resolvePath(t.cwd, p.Path)
-	var g *globMatcher
-	if p.Glob != "" {
-		if g, err = compileGlob(p.Glob); err != nil {
-			return "invalid glob: " + err.Error(), true
-		}
-	}
-	limit := grepDefaultLimit
-	if p.Limit > 0 {
-		limit = p.Limit
 	}
 
 	var out strings.Builder
@@ -107,10 +118,6 @@ func (t grepTool) Execute(_ context.Context, args map[string]any) (string, bool)
 		return true
 	}
 
-	info, statErr := os.Stat(root)
-	if statErr != nil {
-		return statErr.Error(), true
-	}
 	if !info.IsDir() {
 		searchFile(root, filepath.ToSlash(root))
 	} else {
@@ -125,16 +132,6 @@ func (t grepTool) Execute(_ context.Context, args map[string]any) (string, bool)
 		})
 	}
 
-	if count == 0 {
-		return "No matches found for " + p.Pattern, false
-	}
-	result := strings.TrimRight(out.String(), "\n")
-	if truncated {
-		result += fmt.Sprintf("\n[%d matches limit reached]", limit)
-	}
-	tr := TruncateHead(result, DefaultMaxLines, DefaultMaxBytes)
-	if tr.Truncated && !tr.FirstLineExceedsLimit {
-		result = tr.Content + fmt.Sprintf("\n[truncated to %s]", FormatSize(DefaultMaxBytes))
-	}
-	return result, false
+	text, isErr, _ := finishGrepResult(p.Pattern, out.String(), count, truncated, limit)
+	return text, isErr
 }

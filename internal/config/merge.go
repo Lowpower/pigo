@@ -291,6 +291,9 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	if out.Thinking == "" && out.DefaultThinkingLevel != "" {
 		out.Thinking = out.DefaultThinkingLevel
 	}
+	if out.Thinking == "" {
+		out.Thinking = "medium"
+	}
 	return out
 }
 

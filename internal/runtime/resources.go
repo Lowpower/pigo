@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/skills"
@@ -102,4 +103,40 @@ func resourceLoadRank(r pkgmgr.Resource) int {
 		rank++
 	}
 	return rank
+}
+
+func (e *Engine) extendResourcesFromExtensions(ctx context.Context, reason string) {
+	res := e.DispatchEvent(ctx, "resources_discover", map[string]any{
+		"cwd": e.Opts.Cwd, "reason": reason,
+	})
+	if paths := asStringSlice(res["skillPaths"]); len(paths) > 0 {
+		e.Opts.SkillPaths = append(e.Opts.SkillPaths, paths...)
+		more, _ := skills.Discover("", "", paths, false, false)
+		e.Skills = append(e.Skills, more...)
+	}
+	if paths := asStringSlice(res["promptPaths"]); len(paths) > 0 {
+		e.Opts.PromptPaths = append(e.Opts.PromptPaths, paths...)
+		e.Templates = append(e.Templates, prompt.DiscoverTemplates("", "", paths, false, false)...)
+	}
+	if paths := asStringSlice(res["themePaths"]); len(paths) > 0 {
+		e.ThemeFiles = append(e.ThemeFiles, paths...)
+	}
+}
+
+func (e *Engine) rebuildSystemPrompt() {
+	var toolDefs []ai.Tool
+	if e.Tools != nil {
+		toolDefs = e.Tools.AITools()
+	}
+	e.System = prompt.Build(prompt.Options{
+		Cwd:              e.Opts.Cwd,
+		AgentDir:         e.Opts.AgentDir,
+		Custom:           e.Opts.SystemPrompt,
+		Append:           e.Opts.AppendSystem,
+		NoContextFiles:   e.Opts.NoContextFiles,
+		ProjectTrusted:   e.Opts.ProjectTrusted,
+		Skills:           e.Skills,
+		Tools:            toolDefs,
+		IncludeToolHints: true,
+	})
 }

@@ -78,7 +78,16 @@ func (c *GoogleClient) StreamFn() StreamFn {
 		if msg := c.missingAuth(); msg != "" {
 			return errorStreamProvider(opts.Model, c.apiID(), msg), nil
 		}
-		client, err := genai.NewClient(ctx, c.genaiConfig())
+		clientCfg := c.genaiConfig()
+		if len(opts.ExtraHeaders) > 0 {
+			hdr := make(http.Header)
+			if clientCfg.HTTPOptions.Headers != nil {
+				hdr = clientCfg.HTTPOptions.Headers.Clone()
+			}
+			applyExtraHeaders(hdr, opts.ExtraHeaders)
+			clientCfg.HTTPOptions.Headers = hdr
+		}
+		client, err := genai.NewClient(ctx, clientCfg)
 		if err != nil {
 			return errorStreamProvider(opts.Model, c.apiID(), err.Error()), nil
 		}

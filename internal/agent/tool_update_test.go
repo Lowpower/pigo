@@ -45,6 +45,43 @@ func TestLoopEmitsToolExecutionUpdate(t *testing.T) {
 	}
 }
 
+func TestOnMessageEndReplacesAssistant(t *testing.T) {
+	var life []EventType
+	events := Run(context.Background(), scriptedProvider(textMessage("hello")), ai.Context{
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	}, nil, Config{
+		Model: "test",
+		OnLifecycle: func(ev Event) {
+			life = append(life, ev.Type)
+		},
+		OnMessageEnd: func(m *ai.AssistantMessage) *ai.AssistantMessage {
+			cp := *m
+			cp.ErrorMessage = "patched"
+			return &cp
+		},
+	}).Collect()
+
+	var saw bool
+	for _, ev := range events {
+		if ev.Type == EventMessageEnd && ev.Assistant != nil && ev.Assistant.ErrorMessage == "patched" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Fatalf("message_end not patched in %#v", eventTypes(events))
+	}
+	want := map[EventType]bool{
+		EventAgentStart: true, EventTurnStart: true, EventMessageStart: true,
+		EventMessageUpdate: true, EventMessageEnd: true, EventTurnEnd: true, EventAgentEnd: true,
+	}
+	for _, tpe := range life {
+		delete(want, tpe)
+	}
+	if len(want) > 0 {
+		t.Fatalf("OnLifecycle missing %v; got %v", want, life)
+	}
+}
+
 func TestToJSONToolExecutionUpdate(t *testing.T) {
 	got, err := ToJSON(Event{
 		Type:       EventToolUpdate,

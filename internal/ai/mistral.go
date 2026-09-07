@@ -35,6 +35,7 @@ func (c *MistralClient) StreamFn() StreamFn {
 		if err != nil {
 			return nil, err
 		}
+		body = transformRequestBody(opts, body)
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, chatCompletionsURL(c.BaseURL), bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -49,7 +50,7 @@ func (c *MistralClient) StreamFn() StreamFn {
 		if client == nil {
 			client = &http.Client{Timeout: 5 * time.Minute}
 		}
-		resp, err := client.Do(httpReq)
+		resp, err := doHTTP(client, httpReq, opts)
 		if err != nil {
 			return nil, err
 		}

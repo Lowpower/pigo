@@ -22,6 +22,33 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Theme != "default" {
 		t.Errorf("theme: got %q, want %q", cfg.Theme, "default")
 	}
+	if cfg.Thinking != "medium" {
+		t.Errorf("thinking: got %q, want %q", cfg.Thinking, "medium")
+	}
+}
+
+func TestLoadEmptyThinkingDefaultsMedium(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Thinking != "medium" {
+		t.Fatalf("thinking=%q, want medium", cfg.Thinking)
+	}
+}
+
+func TestLoadThinkingOffPreserved(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"thinking":"off"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Thinking != "off" {
+		t.Fatalf("thinking=%q, want off", cfg.Thinking)
+	}
 }
 
 func TestLoadEnvOverride(t *testing.T) {

@@ -2,9 +2,12 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 
+	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/ext"
 )
@@ -102,6 +105,52 @@ func imagesFromPayload(v any) []ai.ImageContent {
 	return out
 }
 
+func asStringSlice(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		return append([]string(nil), t...)
+	case []any:
+		var out []string
+		for _, item := range t {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func stringMap(v any) map[string]string {
+	m, ok := v.(map[string]any)
+	if !ok || m == nil {
+		return nil
+	}
+	out := map[string]string{}
+	for k, val := range m {
+		if val == nil {
+			out[k] = ""
+			continue
+		}
+		out[k] = fmt.Sprint(val)
+	}
+	return out
+}
+
+func headerMap(h http.Header) map[string]string {
+	if h == nil {
+		return map[string]string{}
+	}
+	out := map[string]string{}
+	for k, vs := range h {
+		if len(vs) > 0 {
+			out[k] = vs[0]
+		}
+	}
+	return out
+}
+
 func unclaimedAcross(hosts []*ext.Host, flags []ext.UnknownFlag) []ext.UnknownFlag {
 	var leftover []ext.UnknownFlag
 	for _, u := range flags {
@@ -117,6 +166,120 @@ func unclaimedAcross(hosts []*ext.Host, flags []ext.UnknownFlag) []ext.UnknownFl
 		}
 	}
 	return leftover
+}
+
+func (e *Engine) hasEvent(name string) bool {
+	for _, h := range e.Hosts {
+		if h != nil && h.Subscribed(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) onAgentLifecycle(ctx context.Context, ev agent.Event) {
+	switch ev.Type {
+	case agent.EventAgentStart:
+		e.DispatchEvent(ctx, "agent_start", map[string]any{})
+	case agent.EventAgentEnd:
+		e.DispatchEvent(ctx, "agent_end", map[string]any{})
+	case agent.EventTurnStart:
+		e.DispatchEvent(ctx, "turn_start", map[string]any{})
+	case agent.EventTurnEnd:
+		e.DispatchEvent(ctx, "turn_end", map[string]any{})
+	case agent.EventMessageStart, agent.EventMessageUpdate:
+		e.emitAgentJSONEvent(ctx, ev)
+	case agent.EventMessageEnd:
+		if ev.Assistant != nil {
+			return
+		}
+		e.emitAgentJSONEvent(ctx, ev)
+	case agent.EventToolUpdate:
+		e.emitAgentJSONEvent(ctx, ev)
+	}
+}
+
+func (e *Engine) emitAgentJSONEvent(ctx context.Context, ev agent.Event) {
+	name := string(ev.Type)
+	if !e.hasEvent(name) {
+		return
+	}
+	raw, err := agent.ToJSON(ev)
+	if err != nil {
+		return
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	payload := make(map[string]any, len(m))
+	for k, v := range m {
+		if k == "type" {
+			continue
+		}
+		payload[k] = v
+	}
+	e.DispatchEvent(ctx, name, payload)
+}
+
+func (e *Engine) rewriteAssistantMessageEnd(ctx context.Context, m *ai.AssistantMessage) *ai.AssistantMessage {
+	if m == nil || !e.hasEvent("message_end") {
+		return m
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return m
+	}
+	var asAny any
+	if json.Unmarshal(raw, &asAny) != nil {
+		return m
+	}
+	res := e.DispatchEvent(ctx, "message_end", map[string]any{"message": asAny})
+	v, ok := res["message"]
+	if !ok {
+		return m
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return m
+	}
+	var next ai.AssistantMessage
+	if json.Unmarshal(b, &next) != nil {
+		return m
+	}
+	if next.Role != "" && next.Role != m.Role {
+		return m
+	}
+	if next.Role == "" {
+		next.Role = m.Role
+	}
+	return &next
+}
+
+func (e *Engine) emitContext(ctx context.Context, msgs []ai.Message) []ai.Message {
+	if !e.hasEvent("context") {
+		return msgs
+	}
+	raw, err := json.Marshal(msgs)
+	if err != nil {
+		return msgs
+	}
+	var asAny any
+	if json.Unmarshal(raw, &asAny) != nil {
+		return msgs
+	}
+	res := e.DispatchEvent(ctx, "context", map[string]any{"messages": asAny})
+	if v, ok := res["messages"]; ok {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return msgs
+		}
+		var next []ai.Message
+		if json.Unmarshal(b, &next) == nil {
+			return next
+		}
+	}
+	return msgs
 }
 
 // UnclaimedFlags are leftover CLI flags no extension registered.

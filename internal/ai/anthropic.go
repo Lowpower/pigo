@@ -58,6 +58,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		if err != nil {
 			return nil, err
 		}
+		body = transformRequestBody(opts, body)
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(body))
 		if err != nil {
@@ -75,7 +76,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		if client == nil {
 			client = http.DefaultClient
 		}
-		resp, err := client.Do(httpReq)
+		resp, err := doHTTP(client, httpReq, opts)
 		if err != nil {
 			return nil, err
 		}
