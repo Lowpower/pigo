@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	"golang.org/x/term"
 
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
@@ -196,7 +197,14 @@ func (m Model) themeOpts(name string) theme.LoadOptions {
 }
 
 func markdownStyle() string {
-	if lipgloss.HasDarkBackground() {
+	return markdownStyleFor(term.IsTerminal(int(os.Stdout.Fd())), lipgloss.HasDarkBackground())
+}
+
+func markdownStyleFor(isTTY, dark bool) string {
+	if !isTTY {
+		return "notty"
+	}
+	if dark {
 		return "dark"
 	}
 	return "light"

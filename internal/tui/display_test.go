@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Lowpower/pigo/internal/config"
 )
@@ -84,20 +83,21 @@ func TestOutputPadAppliesToView(t *testing.T) {
 }
 
 func TestMarkdownStyleUsesCachedBackground(t *testing.T) {
-	lipgloss.SetHasDarkBackground(true)
-	t.Cleanup(func() { lipgloss.SetHasDarkBackground(true) })
-	if got := markdownStyle(); got != "dark" {
-		t.Fatalf("dark background: markdownStyle() = %q, want dark", got)
+	if got := markdownStyleFor(true, true); got != "dark" {
+		t.Fatalf("tty dark: markdownStyleFor() = %q, want dark", got)
 	}
-	lipgloss.SetHasDarkBackground(false)
-	if got := markdownStyle(); got != "light" {
-		t.Fatalf("light background: markdownStyle() = %q, want light", got)
+	if got := markdownStyleFor(true, false); got != "light" {
+		t.Fatalf("tty light: markdownStyleFor() = %q, want light", got)
+	}
+	if got := markdownStyleFor(false, true); got != "notty" {
+		t.Fatalf("pipe dark: markdownStyleFor() = %q, want notty", got)
+	}
+	if got := markdownStyleFor(false, false); got != "notty" {
+		t.Fatalf("pipe light: markdownStyleFor() = %q, want notty", got)
 	}
 }
 
 func TestWindowSizeRebuildDoesNotFillEditor(t *testing.T) {
-	lipgloss.SetHasDarkBackground(true)
-	t.Cleanup(func() { lipgloss.SetHasDarkBackground(true) })
 	m := New(testCfg())
 	m = send(m, tea.WindowSizeMsg{Width: 100, Height: 24})
 	if m.glam == nil {
