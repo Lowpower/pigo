@@ -343,6 +343,56 @@ func TestResolveDedupesSymlinkedAgentSkillsToAgents(t *testing.T) {
 	}
 }
 
+func TestResolveCanonicalDedupePrefersProjectAutoOverUserAuto(t *testing.T) {
+	isolateHome(t)
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shared := t.TempDir()
+	skill := writeSkillMD(t, filepath.Join(shared, "foo"), "# foo\n")
+	if err := os.MkdirAll(filepath.Join(cwd, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, filepath.Join(agent, "skills")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, filepath.Join(cwd, ".agents", "skills")); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := Open(cwd, agent, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.AutoInstall = false
+	rs, err := m.Resolve(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(skill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matches []Resource
+	for _, r := range skillResources(rs) {
+		got, err := filepath.EvalSymlinks(r.Path)
+		if err != nil {
+			got = r.Path
+		}
+		if got == want {
+			matches = append(matches, r)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("count=%d resources=%+v", len(matches), skillResources(rs))
+	}
+	if matches[0].Scope != "project" {
+		t.Fatalf("canonical collision should keep project auto, got %+v", matches[0])
+	}
+}
+
 func TestResolveUserAgentsOverrideRelativeToAgentsBase(t *testing.T) {
 	home := isolateHome(t)
 	agent := t.TempDir()
@@ -396,5 +446,50 @@ func TestResolveProjectAgentsOverrideRelativeToAgentsBase(t *testing.T) {
 	}
 	if r, _ := findSkill(rs, foo); r.BaseDir != filepath.Join(cwd, ".agents") {
 		t.Fatalf("project baseDir=%q", r.BaseDir)
+	}
+}
+
+func TestResolveAgentsSkillsIgnoresRootMarkdown(t *testing.T) {
+	isolateHome(t)
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillsDir := filepath.Join(cwd, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootMD := filepath.Join(skillsDir, "root-file.md")
+	if err := os.WriteFile(rootMD, []byte("root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := writeSkillMD(t, filepath.Join(skillsDir, "nested-skill"), "# nested\n")
+	childDir := filepath.Join(skillsDir, "child-skill")
+	if err := os.MkdirAll(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	childMD := filepath.Join(childDir, "child-skill.md")
+	if err := os.WriteFile(childMD, []byte("child"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := Open(cwd, agent, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.AutoInstall = false
+	rs, err := m.Resolve(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findSkill(rs, rootMD); ok {
+		t.Fatalf("root markdown should not resolve: %+v", skillResources(rs))
+	}
+	if _, ok := findSkill(rs, nested); !ok {
+		t.Fatalf("missing nested SKILL.md: %+v", skillResources(rs))
+	}
+	if _, ok := findSkill(rs, childMD); !ok {
+		t.Fatalf("missing nested markdown skill: %+v", skillResources(rs))
 	}
 }

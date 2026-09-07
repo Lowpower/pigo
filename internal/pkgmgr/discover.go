@@ -307,15 +307,38 @@ func canonicalPath(p string) string {
 	return p
 }
 
+func resourcePrecedence(r Resource) int {
+	if r.Origin == "package" {
+		return 4
+	}
+	rank := 2
+	if r.Scope == "project" {
+		rank = 0
+	}
+	if r.Source != "local" {
+		rank++
+	}
+	return rank
+}
+
 func dedupeResolvedByCanonical(rs []Resource) []Resource {
-	seen := make(map[string]bool, len(rs))
-	out := make([]Resource, 0, len(rs))
-	for _, r := range rs {
+	best := make(map[string]int, len(rs))
+	for i, r := range rs {
 		key := r.Type + "\x00" + canonicalPath(r.Path)
-		if seen[key] {
+		if j, ok := best[key]; ok {
+			if resourcePrecedence(r) < resourcePrecedence(rs[j]) {
+				best[key] = i
+			}
 			continue
 		}
-		seen[key] = true
+		best[key] = i
+	}
+	out := make([]Resource, 0, len(best))
+	for i, r := range rs {
+		key := r.Type + "\x00" + canonicalPath(r.Path)
+		if best[key] != i {
+			continue
+		}
 		out = append(out, r)
 	}
 	return out
