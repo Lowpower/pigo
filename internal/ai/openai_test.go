@@ -96,6 +96,8 @@ func TestOpenAICompletionsJoinsBaseURL(t *testing.T) {
 		{name: "v1 slash", suffix: "/v1/", wantPath: "/v1/chat/completions"},
 		{name: "nested openai v1", suffix: "/openai/v1", wantPath: "/openai/v1/chat/completions"},
 		{name: "v4 paas", suffix: "/api/coding/paas/v4", wantPath: "/api/coding/paas/v4/chat/completions"},
+		{name: "cloudflare compat", suffix: "/compat", wantPath: "/compat/chat/completions"},
+		{name: "cloudflare openai", suffix: "/openai", wantPath: "/openai/chat/completions"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
