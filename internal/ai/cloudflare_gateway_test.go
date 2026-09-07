@@ -53,8 +53,8 @@ func TestStreamForCloudflareGatewaySwitchesPathByAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	stream.Collect()
-	if !strings.Contains(gotPath, "/compat/") {
-		t.Fatalf("llama path = %q, want /compat/", gotPath)
+	if gotPath != "/v1/acct/gw/compat/chat/completions" {
+		t.Fatalf("llama path = %q, want /v1/acct/gw/compat/chat/completions", gotPath)
 	}
 }
 

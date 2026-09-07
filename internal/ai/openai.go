@@ -84,10 +84,12 @@ func StreamOpenAIReader(ctx context.Context, r io.Reader, model string) *EventSt
 
 // chatCompletionsURL joins a provider base URL with /chat/completions.
 // Bases that already end in /v1 or /v4 (OpenAI SDK style, groq, zai) must not
-// get another /v1 segment.
+// get another /v1 segment. Cloudflare AI Gateway /compat and /openai are also
+// SDK-style bases (POST .../compat/chat/completions, not .../compat/v1/...).
 func chatCompletionsURL(base string) string {
 	base = strings.TrimRight(base, "/")
-	if strings.HasSuffix(base, "/v1") || strings.HasSuffix(base, "/v4") {
+	if strings.HasSuffix(base, "/v1") || strings.HasSuffix(base, "/v4") ||
+		strings.HasSuffix(base, "/compat") || strings.HasSuffix(base, "/openai") {
 		return base + "/chat/completions"
 	}
 	return base + "/v1/chat/completions"
