@@ -87,7 +87,11 @@ func TestCopyUISettingsLeavesDefaultTools(t *testing.T) {
 }
 
 func TestApplyProjectEmptyThinkingDefaultsMedium(t *testing.T) {
-	got := ApplyProject(Config{}, t.TempDir(), false)
+	user, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ApplyProject(user, t.TempDir(), false)
 	if got.Thinking != "medium" {
 		t.Fatalf("thinking=%q, want medium", got.Thinking)
 	}

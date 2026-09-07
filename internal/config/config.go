@@ -406,7 +406,7 @@ func Load(configDir string) (Config, error) {
 	v.SetDefault("provider", "anthropic")
 	v.SetDefault("model", "claude-sonnet-4")
 	v.SetDefault("theme", "default")
-	v.SetDefault("thinking", "off")
+	v.SetDefault("thinking", "medium")
 	v.SetDefault("contextWindow", 200000)
 	v.SetDefault("compactionReserveTokens", 16384)
 	v.SetDefault("compactionKeepRecentTokens", 20000)

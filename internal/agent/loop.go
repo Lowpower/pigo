@@ -319,7 +319,7 @@ func failToolCalls(calls []ToolCall, emit func(Event) bool) ([]Msg, bool) {
 		if !emit(Event{Type: EventToolStart, ToolCallID: c.ID, ToolName: c.Name, Args: c.Args}) {
 			return nil, false
 		}
-		out := fmt.Sprintf("tool call aborted: assistant message truncated (stop reason length)")
+		out := "tool call aborted: assistant message truncated (stop reason length)"
 		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: true}
 		if !emit(Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: true}) {
 			return nil, false
