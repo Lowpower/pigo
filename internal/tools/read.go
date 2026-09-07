@@ -12,6 +12,7 @@ const readDefaultMaxLines = 2000
 // readTool returns the contents of a text file, or image content for supported images.
 type readTool struct {
 	autoResize bool
+	cwd        string
 }
 
 type readParams struct {
@@ -36,7 +37,8 @@ func (t readTool) Execute(_ context.Context, args map[string]any) (string, bool)
 	if p.Path == "" {
 		return "path is required", true
 	}
-	data, err := os.ReadFile(p.Path)
+	path := resolvePath(t.cwd, p.Path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return err.Error(), true
 	}

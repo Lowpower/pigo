@@ -2,4 +2,4 @@
 
 package tools
 
-func extraPlatformTools() []Tool { return nil }
+func extraPlatformTools(Options) []Tool { return nil }

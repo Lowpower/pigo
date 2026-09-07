@@ -11,7 +11,9 @@ const findDefaultLimit = 1000
 
 // findTool searches for files by glob pattern. Honors .gitignore; outside a git
 // repository it still applies .gitignore files (fd --no-require-git).
-type findTool struct{}
+type findTool struct {
+	cwd string
+}
 
 type findParams struct {
 	Pattern string `json:"pattern" jsonschema:"description=Glob pattern to match files, e.g. '*.go', '**/*.json', or 'src/**/*_test.go'"`
@@ -27,7 +29,7 @@ func (findTool) Description() string {
 
 func (findTool) Schema() map[string]any { return schemaFor(&findParams{}) }
 
-func (findTool) Execute(_ context.Context, args map[string]any) (string, bool) {
+func (t findTool) Execute(_ context.Context, args map[string]any) (string, bool) {
 	var p findParams
 	if err := decodeArgs(args, &p); err != nil {
 		return "invalid arguments: " + err.Error(), true
@@ -35,10 +37,7 @@ func (findTool) Execute(_ context.Context, args map[string]any) (string, bool) {
 	if p.Pattern == "" {
 		return "pattern is required", true
 	}
-	root := p.Path
-	if root == "" {
-		root = "."
-	}
+	root := resolvePath(t.cwd, p.Path)
 	g, err := compileGlob(p.Pattern)
 	if err != nil {
 		return "invalid glob pattern: " + err.Error(), true

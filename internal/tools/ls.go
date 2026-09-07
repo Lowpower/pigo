@@ -11,7 +11,9 @@ import (
 const lsDefaultLimit = 500
 
 // listTool lists directory contents. The tool name is "ls".
-type listTool struct{}
+type listTool struct {
+	cwd string
+}
 
 type lsParams struct {
 	Path  string `json:"path,omitempty" jsonschema:"description=Directory to list (default: current directory)"`
@@ -26,15 +28,12 @@ func (listTool) Description() string {
 
 func (listTool) Schema() map[string]any { return schemaFor(&lsParams{}) }
 
-func (listTool) Execute(_ context.Context, args map[string]any) (string, bool) {
+func (t listTool) Execute(_ context.Context, args map[string]any) (string, bool) {
 	var p lsParams
 	if err := decodeArgs(args, &p); err != nil {
 		return "invalid arguments: " + err.Error(), true
 	}
-	dir := p.Path
-	if dir == "" {
-		dir = "."
-	}
+	dir := resolvePath(t.cwd, p.Path)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err.Error(), true
