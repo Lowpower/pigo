@@ -574,7 +574,32 @@ func (m *Manager) resolve(ctx context.Context, trusted bool) ([]Resource, error)
 			addAuto(filepath.Join(proj, kind), kind, "project", proj, m.Project.ResourcePaths(kind))
 		}
 	}
-	return out, nil
+
+	addAgentsAuto := func(dir, scope, base string, overrides []string) {
+		for _, f := range collectAgentsSkillEntries(dir) {
+			add(f, scope, "top-level", "auto", KindSkills, base, IsEnabledByOverrides(f, overrides, base))
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	var userAgents string
+	if home != "" {
+		userAgents = filepath.Join(home, ".agents", "skills")
+	}
+	if trusted {
+		for _, dir := range collectAncestorAgentsSkillDirs(m.Cwd) {
+			if userAgents != "" && sameResolved(dir, userAgents) {
+				continue
+			}
+			addAgentsAuto(dir, "project", filepath.Dir(dir), m.Project.ResourcePaths(KindSkills))
+		}
+	}
+	if userAgents != "" {
+		addAgentsAuto(userAgents, "user", filepath.Dir(userAgents), m.User.ResourcePaths(KindSkills))
+	}
+	return dedupeResolvedByCanonical(out), nil
 }
 
 type pkgRef struct {
