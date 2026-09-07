@@ -210,6 +210,17 @@ func markdownStyleFor(isTTY, dark bool) string {
 	return "light"
 }
 
+func isTermQueryLeak(msg tea.KeyMsg) bool {
+	if msg.Paste || len(msg.Runes) == 0 {
+		return false
+	}
+	s := string(msg.Runes)
+	if strings.Contains(s, "]11;") || strings.Contains(s, "rgb:0000/") {
+		return true
+	}
+	return strings.Contains(s, "[1;1R")
+}
+
 func newRenderer(width int) *glamour.TermRenderer {
 	wrap := width - 2
 	if wrap < 20 {
@@ -269,6 +280,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleScopedRefresh(msg)
 
 	case tea.KeyMsg:
+		if isTermQueryLeak(msg) {
+			return m, nil
+		}
 		if m.sessionPickerActive() {
 			return m.handleSessionPickerKey(msg)
 		}
@@ -313,8 +327,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.complete.move(1)
 				return m, nil
 			}
-			if m.keyIs(msg, "tui.select.confirm") || m.keyIs(msg, "tui.input.submit") || m.keyIs(msg, "tui.input.tab") {
+			if m.keyIs(msg, "tui.input.tab") {
 				return m.applyCompletion()
+			}
+			if m.keyIs(msg, "tui.select.confirm") || m.keyIs(msg, "tui.input.submit") {
+				slash := strings.HasPrefix(m.complete.prefix, "/")
+				next, cmd := m.applyCompletion()
+				m = next.(Model)
+				if slash {
+					return m.submit()
+				}
+				return m, cmd
 			}
 			if m.keyIs(msg, "tui.select.cancel") || m.keyIs(msg, "app.interrupt") {
 				m.complete.hide()
@@ -1371,6 +1394,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		next, _ := m.openSessionPicker()
 		m = next.(Model)
 	}
+	drainPendingTTY()
 	var opts []tea.ProgramOption
 	if useAltScreen(m.cfg) {
 		opts = append(opts, tea.WithAltScreen())

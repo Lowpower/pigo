@@ -108,6 +108,14 @@ func TestWindowSizeRebuildDoesNotFillEditor(t *testing.T) {
 	}
 }
 
+func TestOSC11LeakKeysAreDropped(t *testing.T) {
+	m := New(testCfg())
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]11;rgb:0000/0000/0000\\[1;1R")})
+	if m.editor.Value() != "" {
+		t.Fatalf("OSC 11 reply leaked into editor: %q", m.editor.Value())
+	}
+}
+
 func TestHideThinkingFromSettings(t *testing.T) {
 	on := true
 	m := New(config.Config{HideThinkingBlock: &on, Theme: "default"})
