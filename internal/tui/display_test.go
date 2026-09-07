@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/Lowpower/pigo/internal/config"
 )
 
@@ -77,6 +79,32 @@ func TestOutputPadAppliesToView(t *testing.T) {
 	got := m.present("hello")
 	if !strings.HasPrefix(got, "  hello") {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestMarkdownStyleUsesCachedBackground(t *testing.T) {
+	if got := markdownStyleFor(true, true); got != "dark" {
+		t.Fatalf("tty dark: markdownStyleFor() = %q, want dark", got)
+	}
+	if got := markdownStyleFor(true, false); got != "light" {
+		t.Fatalf("tty light: markdownStyleFor() = %q, want light", got)
+	}
+	if got := markdownStyleFor(false, true); got != "notty" {
+		t.Fatalf("pipe dark: markdownStyleFor() = %q, want notty", got)
+	}
+	if got := markdownStyleFor(false, false); got != "notty" {
+		t.Fatalf("pipe light: markdownStyleFor() = %q, want notty", got)
+	}
+}
+
+func TestWindowSizeRebuildDoesNotFillEditor(t *testing.T) {
+	m := New(testCfg())
+	m = send(m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	if m.glam == nil {
+		t.Fatal("expected markdown renderer after resize")
+	}
+	if m.editor.Value() != "" {
+		t.Fatalf("resize leaked into editor: %q", m.editor.Value())
 	}
 }
 
