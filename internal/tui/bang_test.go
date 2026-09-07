@@ -123,6 +123,25 @@ func TestSlashTabCompletesUniqueCommand(t *testing.T) {
 	}
 }
 
+func TestEnterOnSlashCompleteSubmits(t *testing.T) {
+	m := editorModel()
+	m.editor.SetValue("/hotk")
+	m.refreshComplete(false)
+	if !m.complete.active {
+		t.Fatal("expected slash completions")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.editor.Value() != "" {
+		t.Fatalf("enter should submit, editor=%q", m.editor.Value())
+	}
+	if m.complete.active {
+		t.Fatal("complete should close")
+	}
+	if len(m.transcript) == 0 {
+		t.Fatal("expected /hotkeys output")
+	}
+}
+
 func TestSlashTabListsMultipleThenEnter(t *testing.T) {
 	m := editorModel()
 	m.editor.SetValue("/")
@@ -131,11 +150,11 @@ func TestSlashTabListsMultipleThenEnter(t *testing.T) {
 		t.Fatalf("expected command list, active=%v n=%d", m.complete.active, len(m.complete.items))
 	}
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.HasPrefix(m.editor.Value(), "/") {
-		t.Fatalf("apply = %q", m.editor.Value())
+	if m.editor.Value() != "" {
+		t.Fatalf("enter should submit the selected command, editor=%q", m.editor.Value())
 	}
 	if m.complete.active {
-		t.Fatal("list should close after apply")
+		t.Fatal("list should close after submit")
 	}
 }
 
