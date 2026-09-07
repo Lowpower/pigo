@@ -154,7 +154,7 @@ func TestRemainingNewAPIProvidersRegistered(t *testing.T) {
 		{"google-vertex", "google-vertex", "gemini-2.5-flash", false},
 		{"mistral", "mistral-conversations", "codestral-latest", true},
 		{"openai-codex", "openai-codex-responses", "gpt-5.3-codex-spark", true},
-		{"radius", "pi-messages", "", false},
+		{"radius", "pi-messages", "balanced", false},
 	}
 	for _, tc := range want {
 		spec, ok := LookupProvider(tc.id)

@@ -45,6 +45,7 @@ func registerBuiltins() {
 		Models: []Model{
 			{Provider: "openai", ID: "gpt-4o", API: "openai-responses", Cost: openaiCost["gpt-4o"], MaxTokens: 16384},
 			{Provider: "openai", ID: "gpt-4.1", API: "openai-responses", Cost: openaiCost["gpt-4.1"], MaxTokens: 32768},
+			{Provider: "openai", ID: "gpt-6-astra", API: "openai-responses", MaxTokens: 128000, Compat: &Compat{SupportsExplicitPromptCacheMode: true}},
 		},
 	})
 	RegisterProvider(ProviderSpec{
@@ -94,6 +95,7 @@ func registerBuiltins() {
 		Name:          "Radius API key",
 		Env:           []string{"RADIUS_API_KEY"},
 		DefaultAPI:    "pi-messages",
+		DefaultID:     "balanced",
 		RefreshModels: refreshRadius,
 	})
 }

@@ -221,6 +221,83 @@ func TestPiMessagesOptionsIncludesSessionAndToolChoice(t *testing.T) {
 	}
 }
 
+func TestBuildOpenAIRequestThinkingFormats(t *testing.T) {
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "fmt-test", DefaultAPI: "openai-completions", DefaultID: "m",
+		Models: []models.Model{
+			{Provider: "fmt-test", ID: "zai", Compat: &models.Compat{ThinkingFormat: "zai"}},
+			{Provider: "fmt-test", ID: "qwen", Compat: &models.Compat{ThinkingFormat: "qwen"}},
+			{Provider: "fmt-test", ID: "ds", Compat: &models.Compat{ThinkingFormat: "deepseek"}},
+			{Provider: "fmt-test", ID: "or", Compat: &models.Compat{ThinkingFormat: "openrouter"}},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("fmt-test") })
+
+	body, err := buildOpenAIRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
+		Options{Provider: "fmt-test", Model: "zai", Thinking: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	_ = json.Unmarshal(body, &req)
+	th, _ := req["thinking"].(map[string]any)
+	if th["type"] != "enabled" {
+		t.Fatalf("zai thinking = %#v", req["thinking"])
+	}
+	if _, ok := req["reasoning_effort"]; ok {
+		t.Fatalf("zai should drop reasoning_effort: %#v", req)
+	}
+
+	body, _ = buildOpenAIRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
+		Options{Provider: "fmt-test", Model: "qwen", Thinking: "low"})
+	_ = json.Unmarshal(body, &req)
+	if req["enable_thinking"] != true {
+		t.Fatalf("qwen = %#v", req)
+	}
+
+	body, _ = buildOpenAIRequest(Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		Tools:    []Tool{{Name: "read", Parameters: map[string]any{"type": "object"}, ConstrainedSampling: &ConstrainedSampling{Type: "json_schema", Strict: "prefer"}}},
+	}, Options{Provider: "fmt-test", Model: "ds", Thinking: "medium"})
+	_ = json.Unmarshal(body, &req)
+	th, _ = req["thinking"].(map[string]any)
+	if th["type"] != "enabled" {
+		t.Fatalf("deepseek = %#v", req["thinking"])
+	}
+	tools, _ := req["tools"].([]any)
+	fn, _ := tools[0].(map[string]any)["function"].(map[string]any)
+	if fn["strict"] != true {
+		t.Fatalf("strict = %#v", fn)
+	}
+}
+
+func TestBuildAnthropicMidConvoEffort(t *testing.T) {
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "ant-mid", DefaultAPI: "anthropic-messages", DefaultID: "claude",
+		Models: []models.Model{{Provider: "ant-mid", ID: "claude", Compat: &models.Compat{SupportsMidConvoEffort: true}}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("ant-mid") })
+	body, err := buildAnthropicRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
+		Options{Provider: "ant-mid", Model: "claude", Thinking: "high", CacheRetention: "long"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	_ = json.Unmarshal(body, &req)
+	th, _ := req["thinking"].(map[string]any)
+	if th["type"] != "adaptive" {
+		t.Fatalf("thinking = %#v", th)
+	}
+	bind, _ := th["block_binding"].(map[string]any)
+	if bind["prefix_mismatch_behavior"] != "drop_block" {
+		t.Fatalf("binding = %#v", bind)
+	}
+	oc, _ := req["output_config"].(map[string]any)
+	if oc["effort"] != "high" {
+		t.Fatalf("output_config = %#v", oc)
+	}
+}
+
 func TestGoogleContentsReplayThoughtSignaturesAndImages(t *testing.T) {
 	got := googleContents(Context{Messages: []Message{
 		{Role: RoleUser, Content: "look", Images: []ImageContent{{Type: "image", Data: "QQ==", MimeType: "image/png"}}},

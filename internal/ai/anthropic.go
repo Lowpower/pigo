@@ -69,7 +69,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		for k, v := range c.Headers {
 			httpReq.Header.Set(k, v)
 		}
-		applyAnthropicAuth(httpReq, c.APIKey)
+		applyAnthropicAuth(httpReq, c.APIKey, midConvoBetas(opts)...)
 
 		client := c.HTTPClient
 		if client == nil {
@@ -110,7 +110,7 @@ func StreamAnthropicReader(ctx context.Context, r io.Reader, model string) *Even
 	return s
 }
 
-func applyAnthropicAuth(req *http.Request, apiKey string) {
+func applyAnthropicAuth(req *http.Request, apiKey string, extraBetas ...string) {
 	authz := firstHeader(req, "Authorization")
 	oauth := isAnthropicOAuthToken(apiKey) || isAnthropicOAuthToken(strings.TrimPrefix(authz, "Bearer "))
 	if authz == "" && oauth && apiKey != "" {
@@ -120,14 +120,27 @@ func applyAnthropicAuth(req *http.Request, apiKey string) {
 	if authz == "" && apiKey != "" {
 		req.Header.Set("x-api-key", apiKey)
 	}
-	if req.Header.Get("anthropic-beta") != "" {
+	if req.Header.Get("anthropic-beta") == "" {
+		betas := "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+		if oauth {
+			betas = "claude-code-20250219,oauth-2025-04-20," + betas
+		}
+		req.Header.Set("anthropic-beta", betas)
+	}
+	if len(extraBetas) == 0 {
 		return
 	}
-	betas := "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
-	if oauth {
-		betas = "claude-code-20250219,oauth-2025-04-20," + betas
+	cur := req.Header.Get("anthropic-beta")
+	for _, b := range extraBetas {
+		if b == "" || strings.Contains(cur, b) {
+			continue
+		}
+		if cur != "" {
+			cur += ","
+		}
+		cur += b
 	}
-	req.Header.Set("anthropic-beta", betas)
+	req.Header.Set("anthropic-beta", cur)
 }
 
 func firstHeader(req *http.Request, name string) string {
@@ -169,7 +182,7 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 	}
 
 	msgs := AnthropicWireMessages(reqCtx.Messages)
-	applyAnthropicCacheControl(msgs)
+	applyAnthropicCacheControl(msgs, opts)
 
 	req := map[string]any{
 		"model":      opts.Model,
@@ -178,11 +191,12 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		"stream":     true,
 	}
 	if reqCtx.System != "" {
-		req["system"] = []map[string]any{{
+		sys := map[string]any{
 			"type":          "text",
 			"text":          reqCtx.System,
-			"cache_control": map[string]any{"type": "ephemeral"},
-		}}
+			"cache_control": anthropicCacheControl(opts),
+		}
+		req["system"] = []map[string]any{sys}
 	}
 	if len(reqCtx.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(reqCtx.Tools))
@@ -193,29 +207,49 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 				"input_schema": t.Parameters,
 			}
 			if i == len(reqCtx.Tools)-1 {
-				tool["cache_control"] = map[string]any{"type": "ephemeral"}
+				tool["cache_control"] = anthropicCacheControl(opts)
 			}
 			tools = append(tools, tool)
 		}
 		req["tools"] = tools
 		req["tool_choice"] = map[string]any{"type": "auto"}
 	}
-	budget := opts.ThinkingBudget
-	if budget == 0 {
-		budget = models.BudgetTokens(opts.Thinking)
-	}
-	if budget > 0 {
-		req["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
-		if maxTokens <= budget {
-			req["max_tokens"] = budget + 4096
+	if midConvoEffort(opts) {
+		req["thinking"] = map[string]any{
+			"type":    "adaptive",
+			"display": "summarized",
+			"block_binding": map[string]any{
+				"prefix_mismatch_behavior": "drop_block",
+			},
 		}
-	} else if reasoningEffort(opts) != "" {
-		req["thinking"] = map[string]any{"type": "adaptive"}
+		req["output_config"] = map[string]any{"effort": "high"}
+	} else {
+		budget := opts.ThinkingBudget
+		if budget == 0 {
+			budget = models.BudgetTokens(opts.Thinking)
+		}
+		if budget > 0 {
+			req["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
+			if maxTokens <= budget {
+				req["max_tokens"] = budget + 4096
+			}
+		} else if reasoningEffort(opts) != "" {
+			req["thinking"] = map[string]any{"type": "adaptive"}
+		}
 	}
 	return json.Marshal(req)
 }
 
-func applyAnthropicCacheControl(msgs []map[string]any) {
+func anthropicCacheControl(opts Options) map[string]any {
+	cc := map[string]any{"type": "ephemeral"}
+	if strings.EqualFold(opts.CacheRetention, "long") && longCacheOK(lookupCompat(opts)) {
+		cc["ttl"] = "1h"
+	}
+	return cc
+}
+
+func applyAnthropicCacheControl(msgs []map[string]any, opts Options) {
+	cc := anthropicCacheControl(opts)
 	for i := len(msgs) - 1; i >= 0; i-- {
 		role, _ := msgs[i]["role"].(string)
 		if role != RoleUser {
@@ -226,13 +260,13 @@ func applyAnthropicCacheControl(msgs []map[string]any) {
 			msgs[i]["content"] = []map[string]any{{
 				"type":          "text",
 				"text":          content,
-				"cache_control": map[string]any{"type": "ephemeral"},
+				"cache_control": cc,
 			}}
 		case []map[string]any:
 			if len(content) == 0 {
 				break
 			}
-			content[len(content)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
+			content[len(content)-1]["cache_control"] = cc
 			msgs[i]["content"] = content
 		}
 		return
