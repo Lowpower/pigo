@@ -1,8 +1,7 @@
 # pigo
 
 A CLI/TUI coding agent written in Go (agent loop, streaming LLM, built-in tools,
-TUI, session persistence, extensions). Remaining work is tracked as GitHub
-issues, not a phased migration plan.
+TUI, session persistence, extensions). Remaining work is tracked as GitHub issues.
 
 ## Install
 
@@ -36,9 +35,8 @@ go install github.com/Lowpower/pigo/cmd/pigo@latest
 ## Toolchain
 
 The Cloud Agent environment installs everything via
-[`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain,
-`golangci-lint`, and a read-only behaviour reference at `~/deps/pi` (for
-working GitHub issues; never imported).
+[`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain and
+`golangci-lint`.
 
 To set up locally:
 
@@ -86,15 +84,12 @@ Configuration is read from `~/.pigo/agent/settings.json` (override with
 `PIGO_CODING_AGENT_DIR`) and can also be overridden with `PIGO_`-prefixed environment
 variables.
 
-## Differences from pi
+## Notes
 
-pigo is a Go CLI/TUI, not a Node SDK or npm package. It does not export a stable
-Go library (`internal/` stays private), does not load pi's in-process `*.ts`
-extensions (subprocess RPC only; host capabilities are in tree), and does not
-ship pi-tui, pi-telemetry, or the evals vitest harness — tests are `go test`.
-`pigo server` / `pigo client` speak JSONL RPC on a Unix socket (not
-`PI_EXPERIMENTAL` / CBOR). `/image` generates images through OpenRouter
-(`OPENROUTER_API_KEY`).
+pigo is a Go CLI/TUI and does not export a stable Go library (`internal/` stays
+private). Extensions load as subprocess RPC only; host capabilities are in tree.
+Tests are `go test`. `pigo server` / `pigo client` speak JSONL RPC on a Unix
+socket. `/image` generates images through OpenRouter (`OPENROUTER_API_KEY`).
 
 ## Layout
 

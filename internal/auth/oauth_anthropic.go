@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// Ported from packages/ai/src/auth/oauth/anthropic.ts
 var (
 	anthropicClientID = mustB64("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl")
 	anthropicAuthURL  = "https://claude.ai/oauth/authorize"

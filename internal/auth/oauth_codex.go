@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// Ported from packages/ai/src/auth/oauth/openai-codex.ts
 const openaiCodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 var (
@@ -147,7 +146,7 @@ func (openaiCodexOAuth) Refresh(ctx context.Context, cred Credential) (Credentia
 
 func (openaiCodexOAuth) ToAuth(cred Credential) (ModelAuth, error) {
 	headers := map[string]string{
-		"originator":  "pi",
+		"originator":  "pigo",
 		"OpenAI-Beta": "responses=experimental",
 	}
 	id := cred.extraString("accountId")

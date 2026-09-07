@@ -55,7 +55,7 @@ func TestCodexToAuthHeaders(t *testing.T) {
 	if a.Headers["chatgpt-account-id"] != "acct-9" {
 		t.Fatalf("headers = %#v", a.Headers)
 	}
-	if a.Headers["originator"] != "pi" || a.Headers["OpenAI-Beta"] != "responses=experimental" {
+	if a.Headers["originator"] != "pigo" || a.Headers["OpenAI-Beta"] != "responses=experimental" {
 		t.Fatalf("headers = %#v", a.Headers)
 	}
 }

@@ -212,8 +212,8 @@ func TestBuildMistralRequestReasoningAndCache(t *testing.T) {
 	}
 }
 
-func TestPiMessagesOptionsIncludesSessionAndToolChoice(t *testing.T) {
-	got := piMessagesOptions(Options{
+func TestPigoMessagesOptionsIncludesSessionAndToolChoice(t *testing.T) {
+	got := pigoMessagesOptions(Options{
 		MaxTokens: 10, Thinking: "low", SessionID: "s1", CacheRetention: "short", ToolChoice: "auto",
 	})
 	if got["sessionId"] != "s1" || got["cacheRetention"] != "short" || got["toolChoice"] != "auto" || got["reasoning"] != "low" {

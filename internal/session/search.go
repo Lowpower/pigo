@@ -265,8 +265,8 @@ func BuildThread(sessions []Summary) []ThreadedRow {
 	for i, s := range sessions {
 		parent := filepath.Clean(s.ParentSession)
 		if parent != "" && parent != "." {
-			if pi, ok := byPath[parent]; ok && pi != i {
-				nodes[pi].children = append(nodes[pi].children, i)
+			if parentIdx, ok := byPath[parent]; ok && parentIdx != i {
+				nodes[parentIdx].children = append(nodes[parentIdx].children, i)
 				childOf[i] = true
 				continue
 			}

@@ -10,7 +10,7 @@ type extraProvider struct {
 	Headers    map[string]string
 }
 
-// Offline fallback ids come from the current pi.dev catalog (one model each).
+// Offline fallback ids (one model each).
 // PrepareCatalog overlays the remote list when network is allowed.
 var extraProviders = []extraProvider{
 	{ID: "ant-ling", Name: "Ant Ling API key", DefaultAPI: "openai-completions", DefaultID: "Ling-2.6-1T", BaseURL: "https://api.ant-ling.com/v1", Env: []string{"ANT_LING_API_KEY"}},

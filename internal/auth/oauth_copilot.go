@@ -14,7 +14,6 @@ import (
 	"github.com/Lowpower/pigo/internal/models"
 )
 
-// Ported from packages/ai/src/auth/oauth/github-copilot.ts
 var copilotClientID = mustB64("SXYxLmI1MDdhMDhjODdlY2ZlOTg=")
 
 type githubCopilotOAuth struct{}

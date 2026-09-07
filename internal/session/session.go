@@ -37,7 +37,7 @@ type Entry struct {
 	Message   json.RawMessage `json:"message,omitempty"`
 	Usage     *ai.Usage       `json:"usage,omitempty"`
 
-	// Label / branch_summary / session_info fields (top-level, like pi).
+	// Label / branch_summary / session_info fields (top-level).
 	TargetID string          `json:"targetId,omitempty"`
 	Label    *string         `json:"label,omitempty"`
 	Summary  string          `json:"summary,omitempty"`
@@ -45,7 +45,7 @@ type Entry struct {
 	Details  json.RawMessage `json:"details,omitempty"`
 	Name     string          `json:"name,omitempty"`
 
-	// Compaction / custom fields (top-level, like pi).
+	// Compaction / custom fields (top-level).
 	FirstKeptEntryID string          `json:"firstKeptEntryId,omitempty"`
 	TokensBefore     *int            `json:"tokensBefore,omitempty"`
 	FromHook         bool            `json:"fromHook,omitempty"`

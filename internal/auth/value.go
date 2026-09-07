@@ -28,7 +28,6 @@ func IsCommandConfigValue(config string) bool {
 }
 
 // ResolveConfigValue interpolates $ENV / ${ENV} or runs a !command.
-// Ported from packages/coding-agent/src/core/resolve-config-value.ts.
 func ResolveConfigValue(config string, env map[string]string) string {
 	if strings.HasPrefix(config, "!") {
 		return executeCommand(config)

@@ -20,10 +20,8 @@ import (
 )
 
 const (
-	defaultShareViewerURL = "https://pi.dev/session/"
-	defaultRadiusGateway  = "https://radius.pi.dev"
-	errGHMissing          = "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/"
-	errGHAuth             = "GitHub CLI is not logged in. Run 'gh auth login' first."
+	errGHMissing = "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/"
+	errGHAuth    = "GitHub CLI is not logged in. Run 'gh auth login' first."
 )
 
 type shareError string
@@ -124,19 +122,23 @@ func Share(opts ShareOptions) (ShareResult, error) {
 	if gistID == "" || gistID == gistURL {
 		return ShareResult{}, shareError("Failed to parse gist ID from gh output")
 	}
-	return ShareResult{ViewerURL: ShareViewerURL(gistID), GistURL: gistURL}, nil
+	viewer := ShareViewerURL(gistID)
+	if viewer == "" {
+		viewer = gistURL
+	}
+	return ShareResult{ViewerURL: viewer, GistURL: gistURL}, nil
 }
 
-// ShareViewerURL builds the gist viewer URL (PIGO_SHARE_VIEWER_URL overrides).
+// ShareViewerURL builds the gist viewer URL from PIGO_SHARE_VIEWER_URL.
 func ShareViewerURL(gistID string) string {
 	base := os.Getenv("PIGO_SHARE_VIEWER_URL")
 	if base == "" {
-		base = defaultShareViewerURL
+		return ""
 	}
 	return base + "#" + gistID
 }
 
-// WriteShareJSONL writes the current branch plus a pi.share custom entry.
+// WriteShareJSONL writes the current branch plus a pigo.share custom entry.
 func WriteShareJSONL(m *Manager, path string, systemPrompt string, tools []ai.Tool) error {
 	if m == nil {
 		return os.ErrInvalid
@@ -176,7 +178,7 @@ func WriteShareJSONL(m *Manager, path string, systemPrompt string, tools []ai.To
 	}
 	custom := map[string]any{
 		"type":       "custom",
-		"customType": "pi.share",
+		"customType": "pigo.share",
 		"id":         newUUID()[:8],
 		"parentId":   parent,
 		"timestamp":  ts,
@@ -235,9 +237,12 @@ func tryShareViaRadius(jsonlPath, agentDir string) (string, bool, error) {
 		return "", true, shareErrorf("Failed to upload Radius artifact: %v", err)
 	}
 	if gateway == "" {
-		gateway = defaultRadiusGateway
+		gateway = models.RadiusGateway()
 	}
-	u := strings.TrimRight(gateway, "/") + "/v1/artifacts?visibility=organization&title=Pi%20session"
+	if gateway == "" {
+		return "", false, nil
+	}
+	u := strings.TrimRight(gateway, "/") + "/v1/artifacts?visibility=organization&title=pigo%20session"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
@@ -278,7 +283,7 @@ func radiusToken(agentDir string) (token, gateway string, ok bool) {
 	if !found {
 		return "", "", false
 	}
-	gateway = defaultRadiusGateway
+	gateway = models.RadiusGateway()
 	if spec, okp := models.LookupProvider("radius"); okp && spec.BaseURL != "" {
 		gateway = spec.BaseURL
 	}

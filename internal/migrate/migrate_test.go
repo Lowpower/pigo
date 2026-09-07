@@ -11,7 +11,7 @@ import (
 func TestRunMovesSessionsCommandsToolsAndKeybindings(t *testing.T) {
 	agent := t.TempDir()
 	cwd := t.TempDir()
-	proj := filepath.Join(cwd, ".pi")
+	proj := filepath.Join(cwd, ".pigo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
 	}

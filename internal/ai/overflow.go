@@ -2,8 +2,6 @@ package ai
 
 import "regexp"
 
-// Ported from pi packages/ai/src/utils/overflow.ts (isContextOverflow).
-
 var overflowPatterns = compileAll([]string{
 	`prompt is too long`,
 	`request_too_large`,

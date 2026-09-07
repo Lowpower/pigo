@@ -2,8 +2,6 @@ package ai
 
 import "regexp"
 
-// Ported from pi packages/ai/src/utils/retry.ts (isRetryableAssistantError).
-
 func buildProviderErrorPattern(patterns []string) *regexp.Regexp {
 	return regexp.MustCompile("(?i)" + joinPattern(patterns))
 }
@@ -87,7 +85,7 @@ func IsRetryableAssistantError(message *AssistantMessage) bool {
 }
 
 // IsRetryableError is the session-level check: overflow is handled by
-// compaction, not retry (pi AgentSession._isRetryableError).
+// compaction, not retry.
 func IsRetryableError(message *AssistantMessage, contextWindow int) bool {
 	if message == nil {
 		return false

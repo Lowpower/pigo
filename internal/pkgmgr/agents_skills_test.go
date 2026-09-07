@@ -98,7 +98,7 @@ func TestCollectAncestorAgentsSkillDirsWalksPastFixtureWithoutGit(t *testing.T) 
 	}
 }
 
-func TestCollectSkillEntriesPiKeepsRootMarkdown(t *testing.T) {
+func TestCollectSkillEntriesKeepsRootMarkdown(t *testing.T) {
 	dir := t.TempDir()
 	rootMD := filepath.Join(dir, "root-file.md")
 	if err := os.WriteFile(rootMD, []byte("root"), 0o644); err != nil {
@@ -108,7 +108,7 @@ func TestCollectSkillEntriesPiKeepsRootMarkdown(t *testing.T) {
 	got := collectSkillEntries(dir)
 	joined := strings.Join(got, "\n")
 	if !strings.Contains(joined, rootMD) {
-		t.Fatalf("pi mode should keep root markdown: %v", got)
+		t.Fatalf("skill collection should keep root markdown: %v", got)
 	}
 	if !strings.Contains(joined, nested) {
 		t.Fatalf("missing nested SKILL.md: %v", got)

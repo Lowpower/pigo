@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// Ported from packages/ai/src/auth/oauth/xai.ts
 const (
 	xaiClientID = "b1a00492-073a-47ea-816f-4c329264a828"
 	xaiScope    = "openid profile email offline_access grok-cli:access api:access"
@@ -30,7 +29,7 @@ func (xaiOAuth) Login(ix Interaction) (Credential, error) {
 	body, status, err := postForm(ctx, xaiDeviceURL, url.Values{
 		"client_id": {xaiClientID},
 		"scope":     {xaiScope},
-		"referrer":  {"pi"},
+		"referrer":  {"pigo"},
 	})
 	if err != nil {
 		return Credential{}, err

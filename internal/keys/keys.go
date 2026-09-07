@@ -1,4 +1,4 @@
-// Package keys is the TUI/app keybinding table (ids match pi).
+// Package keys is the TUI/app keybinding table.
 package keys
 
 import (
@@ -29,7 +29,7 @@ type Def struct {
 	Description string
 }
 
-// UseWindowsKeys reports Win32 or WSL (pi useWindowsKeybindings).
+// UseWindowsKeys reports Win32 or WSL.
 func UseWindowsKeys() bool {
 	if runtime.GOOS == "windows" {
 		return true

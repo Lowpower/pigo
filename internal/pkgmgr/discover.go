@@ -76,7 +76,7 @@ func collectAutoExtensionEntries(dir string) []string {
 }
 
 func resolveExtensionEntries(dir string) []string {
-	manifest := readPiManifest(filepath.Join(dir, "package.json"))
+	manifest := readPigoManifest(filepath.Join(dir, "package.json"))
 	if len(manifest.Extensions) > 0 {
 		var entries []string
 		for _, rel := range manifest.Extensions {
@@ -103,28 +103,28 @@ func resolveExtensionEntries(dir string) []string {
 	return nil
 }
 
-func readPiManifest(packageJSON string) piManifest {
+func readPigoManifest(packageJSON string) pigoManifest {
 	b, err := os.ReadFile(packageJSON)
 	if err != nil {
-		return piManifest{}
+		return pigoManifest{}
 	}
 	var pkg struct {
-		Pi piManifest `json:"pi"`
+		Pigo pigoManifest `json:"pigo"`
 	}
 	if err := json.Unmarshal(b, &pkg); err != nil {
-		return piManifest{}
+		return pigoManifest{}
 	}
-	return pkg.Pi
+	return pkg.Pigo
 }
 
-type piManifest struct {
+type pigoManifest struct {
 	Extensions []string `json:"extensions"`
 	Skills     []string `json:"skills"`
 	Prompts    []string `json:"prompts"`
 	Themes     []string `json:"themes"`
 }
 
-func (m piManifest) entries(kind string) []string {
+func (m pigoManifest) entries(kind string) []string {
 	switch kind {
 	case KindExtensions:
 		return m.Extensions
@@ -157,7 +157,7 @@ func collectPackageFiles(packageRoot, kind string) []string {
 		}
 		return collectPackageExtensionFiles(packageRoot)
 	}
-	man := readPiManifest(filepath.Join(packageRoot, "package.json"))
+	man := readPigoManifest(filepath.Join(packageRoot, "package.json"))
 	if ents := man.entries(kind); len(ents) > 0 {
 		var out []string
 		for _, rel := range ents {

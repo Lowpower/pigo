@@ -184,8 +184,8 @@ func newUpdateCmd() *cobra.Command {
 			if len(args) > 0 {
 				source = args[0]
 			}
-			wantSelf := f.self || f.all || source == "self" || source == "pigo" || source == "pi"
-			wantExt := f.exts || f.all || f.extension != "" || (source != "" && source != "self" && source != "pigo" && source != "pi")
+			wantSelf := f.self || f.all || source == "self" || source == "pigo"
+			wantExt := f.exts || f.all || f.extension != "" || (source != "" && source != "self" && source != "pigo")
 			wantModels := f.models
 			if !wantSelf && !wantExt && !wantModels {
 				fmt.Fprintln(cmd.OutOrStdout(), "Extensions are skipped. Run pigo update --extensions to update extensions.")
@@ -202,7 +202,7 @@ func newUpdateCmd() *cobra.Command {
 					return err
 				}
 				upd := f.extension
-				if upd == "" && source != "" && source != "self" && source != "pigo" && source != "pi" {
+				if upd == "" && source != "" && source != "self" && source != "pigo" {
 					upd = source
 				}
 				if err := m.Update(cmd.Context(), upd); err != nil {

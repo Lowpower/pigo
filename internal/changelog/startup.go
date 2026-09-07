@@ -59,7 +59,11 @@ func reportInstallTelemetry(cfg config.Config) {
 		return
 	}
 	go func() {
-		u := installTelemetryURL + "?version=" + url.QueryEscape(version.Version)
+		u := os.Getenv("PIGO_INSTALL_TELEMETRY_URL")
+		if u == "" {
+			return
+		}
+		u += "?version=" + url.QueryEscape(version.Version)
 		req, err := http.NewRequest(http.MethodGet, u, nil)
 		if err != nil {
 			return

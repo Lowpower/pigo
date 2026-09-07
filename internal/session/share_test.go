@@ -12,7 +12,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 )
 
-func TestWriteShareJSONLAddsPiShareEntry(t *testing.T) {
+func TestWriteShareJSONLAddsShareEntry(t *testing.T) {
 	dir := t.TempDir()
 	m := New(t.TempDir(), dir)
 	_, _ = m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"})
@@ -34,7 +34,7 @@ func TestWriteShareJSONLAddsPiShareEntry(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
 		t.Fatal(err)
 	}
-	if last["type"] != "custom" || last["customType"] != "pi.share" {
+	if last["type"] != "custom" || last["customType"] != "pigo.share" {
 		t.Fatalf("last=%v", last)
 	}
 	data, _ := last["data"].(map[string]any)
@@ -70,7 +70,7 @@ func TestShareFallsBackToGist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.ViewerURL != "https://pi.dev/session/#deadbeef" {
+	if res.ViewerURL != "https://gist.github.com/u/deadbeef" {
 		t.Fatalf("viewer=%q", res.ViewerURL)
 	}
 	if !strings.Contains(res.String(), "Gist:") {

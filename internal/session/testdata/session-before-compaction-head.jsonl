@@ -1,0 +1,5 @@
+{"type":"session","id":"sess-fixture-1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/tmp/pigo","provider":"anthropic","modelId":"claude"}
+{"type":"message","id":"m1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"hello"}}
+{"type":"message","id":"m2","parentId":"m1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"}],"api":"anthropic-messages","provider":"anthropic","model":"claude"}}
+{"type":"compaction","id":"c1","parentId":"m2","timestamp":"2026-01-01T00:00:03.000Z","summary":"sum","firstKeptEntryId":"m2"}
+{"type":"message","id":"m3","parentId":"c1","timestamp":"2026-01-01T00:00:04.000Z","message":{"role":"user","content":"next"}}

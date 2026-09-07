@@ -10,8 +10,8 @@ import (
 
 // Theme is a named colour set for the TUI.
 //
-// Disk files may be the original 7-key object, or a pi theme
-// ({name, vars, colors}). Unknown keys are ignored. Known pi tokens
+// Disk files may be a 7-key colour object, or an extended theme
+// ({name, vars, colors}). Unknown keys are ignored. Known colour tokens
 // are kept in Colors and mapped onto the 7 TUI fields.
 type Theme struct {
 	Name      string `json:"name"`
@@ -22,7 +22,7 @@ type Theme struct {
 	Muted     string `json:"muted"`
 	Accent    string `json:"accent"`
 
-	// Colors is the resolved pi token map (accent, toolTitle, …). May be nil.
+	// Colors is the resolved token map (accent, toolTitle, …). May be nil.
 	Colors map[string]string `json:"-"`
 
 	ExportPageBg string `json:"-"`

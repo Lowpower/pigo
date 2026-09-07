@@ -11,9 +11,6 @@ import (
 	"github.com/Lowpower/pigo/internal/compaction"
 )
 
-// Ported from pi packages/coding-agent/src/core/agent-session.ts
-// (_prepareRetry / abortRetry / setAutoRetryEnabled / _willRetryAfterAgentEnd).
-
 // SetAutoRetryEnabled toggles settings.retry.enabled (in-memory; disk overlay is #14).
 func (e *Engine) SetAutoRetryEnabled(enabled bool) {
 	on := enabled

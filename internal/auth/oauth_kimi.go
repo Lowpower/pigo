@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// Ported from packages/ai/src/auth/oauth/kimi-coding.ts
 const kimiClientID = "17e5f671-d194-4dfb-9706-5516cb48c098"
 
 type kimiOAuth struct{}
