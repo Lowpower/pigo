@@ -397,7 +397,7 @@ func TestPrepareNextTurnRewritesTranscript(t *testing.T) {
 	cfg := Config{
 		Model:         "test",
 		ToolExecution: Sequential,
-		PrepareNextTurn: func(_ context.Context, msgs []ai.Message) []ai.Message {
+		PrepareNextTurn: func(_ context.Context, _ []ai.Message) []ai.Message {
 			return []ai.Message{{Role: ai.RoleUser, Content: "compacted"}}
 		},
 	}

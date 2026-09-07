@@ -41,7 +41,7 @@ func TestRunSelfUpdateInstallsRelease(t *testing.T) {
 			}},
 		})
 	})
-	mux.HandleFunc("/asset", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/asset", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(archive)
 	})
 	srv := httptest.NewServer(mux)
@@ -71,7 +71,7 @@ func TestRunSelfUpdateInstallsRelease(t *testing.T) {
 }
 
 func TestRunSelfUpdateMissingRelease(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = io.WriteString(w, "not found")
 	}))
