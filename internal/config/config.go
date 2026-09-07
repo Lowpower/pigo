@@ -438,6 +438,7 @@ func Load(configDir string) (Config, error) {
 		cfg.Thinking = cfg.DefaultThinkingLevel
 	}
 	applyThinkingAlias(configDir, &cfg)
+	applyThinkingDefault(&cfg)
 	applyNestedCompaction(&cfg)
 	fillPackagesFromFile(configDir, &cfg)
 	// Session current starts at the saved default (settings.json uses default*).
@@ -466,6 +467,12 @@ func applyThinkingAlias(configDir string, cfg *Config) {
 		return
 	}
 	cfg.Thinking = cfg.DefaultThinkingLevel
+}
+
+func applyThinkingDefault(cfg *Config) {
+	if cfg.Thinking == "" {
+		cfg.Thinking = "medium"
+	}
 }
 
 func fillPackagesFromFile(configDir string, cfg *Config) {

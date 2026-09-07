@@ -85,3 +85,10 @@ func TestCopyUISettingsLeavesDefaultTools(t *testing.T) {
 		t.Fatal("blockImages not copied")
 	}
 }
+
+func TestApplyProjectEmptyThinkingDefaultsMedium(t *testing.T) {
+	got := ApplyProject(Config{}, t.TempDir(), false)
+	if got.Thinking != "medium" {
+		t.Fatalf("thinking=%q, want medium", got.Thinking)
+	}
+}
