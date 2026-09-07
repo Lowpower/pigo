@@ -30,7 +30,7 @@ func TestOpenAICodexClientHTTP(t *testing.T) {
 		if !strings.HasSuffix(r.URL.Path, "/codex/responses") {
 			t.Errorf("path = %q", r.URL.Path)
 		}
-		if r.Header.Get("originator") != "pi" {
+		if r.Header.Get("originator") != "pigo" {
 			t.Errorf("originator = %q", r.Header.Get("originator"))
 		}
 		if r.Header.Get("OpenAI-Beta") != "responses=experimental" {
@@ -66,7 +66,7 @@ func TestOpenAICodexClientHTTP(t *testing.T) {
 
 	client := &OpenAICodexClient{
 		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "sse",
-		Headers: map[string]string{"originator": "pi", "OpenAI-Beta": "responses=experimental"},
+		Headers: map[string]string{"originator": "pigo", "OpenAI-Beta": "responses=experimental"},
 	}
 	stream, err := client.StreamFn()(context.Background(), Context{
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
@@ -157,7 +157,7 @@ func TestOpenAICodexClientWebSocket(t *testing.T) {
 
 	client := &OpenAICodexClient{
 		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "websocket",
-		Headers: map[string]string{"originator": "pi"},
+		Headers: map[string]string{"originator": "pigo"},
 	}
 	stream, err := client.StreamFn()(context.Background(), Context{
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
@@ -195,7 +195,7 @@ func TestOpenAICodexClientWebSocketFallsBackToSSE(t *testing.T) {
 
 	client := &OpenAICodexClient{
 		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "auto",
-		Headers: map[string]string{"originator": "pi", "OpenAI-Beta": "responses=experimental"},
+		Headers: map[string]string{"originator": "pigo", "OpenAI-Beta": "responses=experimental"},
 	}
 	stream, err := client.StreamFn()(context.Background(), Context{
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
@@ -263,7 +263,7 @@ func TestOpenAICodexClientWebSocketConnectionLimitRetry(t *testing.T) {
 
 	client := &OpenAICodexClient{
 		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "websocket",
-		Headers: map[string]string{"originator": "pi", "chatgpt-account-id": "acct-1"},
+		Headers: map[string]string{"originator": "pigo", "chatgpt-account-id": "acct-1"},
 	}
 	stream, err := client.StreamFn()(context.Background(), Context{
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
@@ -318,7 +318,7 @@ func TestOpenAICodexClientWebSocketReusesSession(t *testing.T) {
 
 	client := &OpenAICodexClient{
 		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "websocket",
-		Headers: map[string]string{"originator": "pi", "chatgpt-account-id": "acct-1"},
+		Headers: map[string]string{"originator": "pigo", "chatgpt-account-id": "acct-1"},
 	}
 	run := func(msgs []Message) *AssistantMessage {
 		stream, err := client.StreamFn()(context.Background(), Context{Messages: msgs}, Options{

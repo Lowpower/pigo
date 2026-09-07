@@ -40,9 +40,9 @@ func TestCollectAutoExtensionEntries(t *testing.T) {
 	}
 }
 
-func TestPiManifestExtensions(t *testing.T) {
+func TestPigoManifestExtensions(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"pi":{"extensions":["bin/ext"]}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"pigo":{"extensions":["bin/ext"]}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {

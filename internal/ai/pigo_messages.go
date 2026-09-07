@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-// PiMessagesClient posts {model, context, options} to {base}/messages and
+// PigoMessagesClient posts {model, context, options} to {base}/messages and
 // reads SSE events that already use pigo's event type names.
-type PiMessagesClient struct {
+type PigoMessagesClient struct {
 	BaseURL    string
 	APIKey     string
 	Headers    map[string]string
@@ -22,14 +22,14 @@ type PiMessagesClient struct {
 }
 
 // StreamFn returns a StreamFn bound to this client.
-func (c *PiMessagesClient) StreamFn() StreamFn {
+func (c *PigoMessagesClient) StreamFn() StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
 		if c.APIKey == "" {
-			return errorStreamProvider(opts.Model, "pi-messages", `No API key provided for provider "radius"`), nil
+			return errorStreamProvider(opts.Model, "pigo-messages", `No API key provided for provider "radius"`), nil
 		}
 		base := strings.TrimRight(c.BaseURL, "/")
 		if base == "" {
-			return errorStreamProvider(opts.Model, "pi-messages", "pi-messages requires a base URL"), nil
+			return errorStreamProvider(opts.Model, "pigo-messages", "pigo-messages requires a base URL"), nil
 		}
 		payload := map[string]any{
 			"model": opts.Model,
@@ -38,7 +38,7 @@ func (c *PiMessagesClient) StreamFn() StreamFn {
 				"messages":     reqCtx.Messages,
 				"tools":        reqCtx.Tools,
 			},
-			"options": piMessagesOptions(opts),
+			"options": pigoMessagesOptions(opts),
 		}
 		body, err := json.Marshal(payload)
 		if err != nil {
@@ -66,24 +66,24 @@ func (c *PiMessagesClient) StreamFn() StreamFn {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			msg, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			return errorStreamProvider(opts.Model, "pi-messages",
+			return errorStreamProvider(opts.Model, "pigo-messages",
 				fmt.Sprintf("%d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))), nil
 		}
 		s := NewEventStream(16)
 		out := &AssistantMessage{
-			Role: RoleAssistant, Content: []*Content{}, API: "pi-messages",
+			Role: RoleAssistant, Content: []*Content{}, API: "pigo-messages",
 			Provider: "radius", Model: opts.Model, StopReason: StopPending,
 		}
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamPiMessagesSSE(ctx, resp.Body, out, s)
+			streamPigoMessagesSSE(ctx, resp.Body, out, s)
 		}()
 		return s, nil
 	}
 }
 
-func piMessagesOptions(opts Options) map[string]any {
+func pigoMessagesOptions(opts Options) map[string]any {
 	o := map[string]any{}
 	if opts.MaxTokens > 0 {
 		o["maxTokens"] = opts.MaxTokens
@@ -103,7 +103,7 @@ func piMessagesOptions(opts Options) map[string]any {
 	return o
 }
 
-type piMessagesEvent struct {
+type pigoMessagesEvent struct {
 	Type         string     `json:"type"`
 	ContentIndex int        `json:"contentIndex"`
 	Delta        string     `json:"delta"`
@@ -117,7 +117,7 @@ type piMessagesEvent struct {
 	ResponseID   string     `json:"responseId"`
 }
 
-func streamPiMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream) {
+func streamPigoMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	var data strings.Builder
@@ -130,7 +130,7 @@ func streamPiMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessage
 		if payload == "[DONE]" {
 			return true
 		}
-		return handlePiMessagesEvent(ctx, payload, out, s)
+		return handlePigoMessagesEvent(ctx, payload, out, s)
 	}
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -146,12 +146,12 @@ func streamPiMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessage
 	}
 	_ = flush()
 	if out.StopReason == StopPending {
-		finishError(ctx, out, s, "pi-messages stream ended without a terminal event")
+		finishError(ctx, out, s, "pigo-messages stream ended without a terminal event")
 	}
 }
 
-func handlePiMessagesEvent(ctx context.Context, payload string, out *AssistantMessage, s *EventStream) bool {
-	var ev piMessagesEvent
+func handlePigoMessagesEvent(ctx context.Context, payload string, out *AssistantMessage, s *EventStream) bool {
+	var ev pigoMessagesEvent
 	if json.Unmarshal([]byte(payload), &ev) != nil {
 		return true
 	}
@@ -159,33 +159,33 @@ func handlePiMessagesEvent(ctx context.Context, payload string, out *AssistantMe
 	case "start":
 		return s.push(ctx, Event{Type: EventStart, Partial: out})
 	case "text_start":
-		ensurePiBlock(out, ev.ContentIndex, KindText)
+		ensureContentBlock(out, ev.ContentIndex, KindText)
 		return s.push(ctx, Event{Type: EventTextStart, ContentIndex: ev.ContentIndex, Partial: out})
 	case "text_delta":
-		ensurePiBlock(out, ev.ContentIndex, KindText)
+		ensureContentBlock(out, ev.ContentIndex, KindText)
 		out.Content[ev.ContentIndex].Text += ev.Delta
 		return s.push(ctx, Event{Type: EventTextDelta, ContentIndex: ev.ContentIndex, Delta: ev.Delta, Partial: out})
 	case "text_end":
-		ensurePiBlock(out, ev.ContentIndex, KindText)
+		ensureContentBlock(out, ev.ContentIndex, KindText)
 		if ev.Content != "" {
 			out.Content[ev.ContentIndex].Text = ev.Content
 		}
 		return s.push(ctx, Event{Type: EventTextEnd, ContentIndex: ev.ContentIndex, Content: out.Content[ev.ContentIndex].Text, Partial: out})
 	case "thinking_start":
-		ensurePiBlock(out, ev.ContentIndex, KindThinking)
+		ensureContentBlock(out, ev.ContentIndex, KindThinking)
 		return s.push(ctx, Event{Type: EventThinkingStart, ContentIndex: ev.ContentIndex, Partial: out})
 	case "thinking_delta":
-		ensurePiBlock(out, ev.ContentIndex, KindThinking)
+		ensureContentBlock(out, ev.ContentIndex, KindThinking)
 		out.Content[ev.ContentIndex].Thinking += ev.Delta
 		return s.push(ctx, Event{Type: EventThinkingDelta, ContentIndex: ev.ContentIndex, Delta: ev.Delta, Partial: out})
 	case "thinking_end":
-		ensurePiBlock(out, ev.ContentIndex, KindThinking)
+		ensureContentBlock(out, ev.ContentIndex, KindThinking)
 		if ev.Content != "" {
 			out.Content[ev.ContentIndex].Thinking = ev.Content
 		}
 		return s.push(ctx, Event{Type: EventThinkingEnd, ContentIndex: ev.ContentIndex, Content: out.Content[ev.ContentIndex].Thinking, Partial: out})
 	case "toolcall_start":
-		ensurePiBlock(out, ev.ContentIndex, KindToolCall)
+		ensureContentBlock(out, ev.ContentIndex, KindToolCall)
 		out.Content[ev.ContentIndex].ToolID = ev.ID
 		out.Content[ev.ContentIndex].ToolName = ev.ToolName
 		if out.Content[ev.ContentIndex].Arguments == nil {
@@ -193,13 +193,13 @@ func handlePiMessagesEvent(ctx context.Context, payload string, out *AssistantMe
 		}
 		return s.push(ctx, Event{Type: EventToolCallStart, ContentIndex: ev.ContentIndex, Partial: out})
 	case "toolcall_delta":
-		ensurePiBlock(out, ev.ContentIndex, KindToolCall)
+		ensureContentBlock(out, ev.ContentIndex, KindToolCall)
 		block := out.Content[ev.ContentIndex]
 		block.partialJSON += ev.Delta
 		block.Arguments = parseStreamingJSON(block.partialJSON)
 		return s.push(ctx, Event{Type: EventToolCallDelta, ContentIndex: ev.ContentIndex, Delta: ev.Delta, Partial: out})
 	case "toolcall_end":
-		ensurePiBlock(out, ev.ContentIndex, KindToolCall)
+		ensureContentBlock(out, ev.ContentIndex, KindToolCall)
 		block := out.Content[ev.ContentIndex]
 		if ev.ToolCall != nil {
 			if ev.ToolCall.ToolID != "" {
@@ -240,7 +240,7 @@ func handlePiMessagesEvent(ctx context.Context, payload string, out *AssistantMe
 	return true
 }
 
-func ensurePiBlock(out *AssistantMessage, idx int, kind ContentKind) {
+func ensureContentBlock(out *AssistantMessage, idx int, kind ContentKind) {
 	for len(out.Content) <= idx {
 		out.Content = append(out.Content, &Content{})
 	}

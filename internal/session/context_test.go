@@ -91,7 +91,7 @@ func TestRestoreAIMessagesUsesPiCompactionWrapper(t *testing.T) {
 
 func TestRestoreCustomMessageAndSkipCustom(t *testing.T) {
 	m := New(t.TempDir(), t.TempDir())
-	if _, err := m.AppendCustomEntry("pi.share", map[string]any{"id": "x"}); err != nil {
+	if _, err := m.AppendCustomEntry("pigo.share", map[string]any{"id": "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.AppendCustomMessage("note", "injected", true); err != nil {
@@ -103,9 +103,9 @@ func TestRestoreCustomMessageAndSkipCustom(t *testing.T) {
 	}
 }
 
-func TestPiCompactionJSONLRoundTrip(t *testing.T) {
+func TestCompactionJSONLRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "pi.jsonl")
+	path := filepath.Join(dir, "session.jsonl")
 	body := `{"type":"session","version":3,"id":"sid","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/tmp"}
 {"type":"message","id":"m1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"old"}}
 {"type":"message","id":"m2","parentId":"m1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","content":"ok"}}
@@ -252,9 +252,9 @@ func TestAppendCompactionJSONLOptionalFields(t *testing.T) {
 	}
 }
 
-func TestPiShapedJSONLFixtureRoundTrip(t *testing.T) {
+func TestShapedJSONLFixtureRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "pi-shaped.jsonl")
+	path := filepath.Join(dir, "shaped.jsonl")
 	body := `{"type":"session","version":3,"id":"sid","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/tmp"}
 {"type":"message","id":"m1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"old"}}
 {"type":"message","id":"m2","parentId":"m1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","content":"ok"}}
@@ -304,8 +304,8 @@ func TestPiShapedJSONLFixtureRoundTrip(t *testing.T) {
 	}
 }
 
-func TestOpenRealPiJSONLFixture(t *testing.T) {
-	src := filepath.Join("testdata", "pi-before-compaction-head.jsonl")
+func TestOpenJSONLFixture(t *testing.T) {
+	src := filepath.Join("testdata", "session-before-compaction-head.jsonl")
 	b, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatal(err)

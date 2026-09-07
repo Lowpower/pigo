@@ -10,7 +10,14 @@ import (
 	"time"
 )
 
-const defaultRadiusGateway = "https://radius.pi.dev"
+// RadiusGateway is RADIUS_GATEWAY or PIGO_RADIUS_GATEWAY (no built-in host).
+func RadiusGateway() string {
+	g := strings.TrimRight(strings.TrimSpace(os.Getenv("RADIUS_GATEWAY")), "/")
+	if g == "" {
+		g = strings.TrimRight(strings.TrimSpace(os.Getenv("PIGO_RADIUS_GATEWAY")), "/")
+	}
+	return g
+}
 
 type radiusGatewayConfig struct {
 	BaseURL string `json:"baseUrl"`
@@ -20,13 +27,10 @@ type radiusGatewayConfig struct {
 }
 
 func refreshRadius(store CatalogStore) error {
-	gateway := strings.TrimRight(strings.TrimSpace(os.Getenv("RADIUS_GATEWAY")), "/")
+	gateway := RadiusGateway()
 	key := os.Getenv("RADIUS_API_KEY")
 	if gateway == "" {
-		if key == "" {
-			return nil
-		}
-		gateway = defaultRadiusGateway
+		return nil
 	}
 	req, err := http.NewRequest(http.MethodGet, gateway+"/v1/config", nil)
 	if err != nil {
@@ -61,7 +65,7 @@ func refreshRadius(store CatalogStore) error {
 		out = append(out, Model{
 			Provider: "radius",
 			ID:       m.ID,
-			API:      "pi-messages",
+			API:      "pigo-messages",
 			BaseURL:  strings.TrimRight(cfg.BaseURL, "/"),
 		})
 	}

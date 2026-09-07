@@ -7,11 +7,20 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
 
-const radiusClientID = "pi-gateway"
+func radiusOAuthClientID() string {
+	if v := strings.TrimSpace(os.Getenv("RADIUS_CLIENT_ID")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("PIGO_RADIUS_CLIENT_ID")); v != "" {
+		return v
+	}
+	return "pigo-gateway"
+}
 
 type radiusOAuth struct {
 	name    string
@@ -74,7 +83,7 @@ func (r radiusOAuth) loginBrowser(ctx context.Context, ix Interaction) (Credenti
 	redirect := "http://127.0.0.1:1456/oauth/callback"
 	q := url.Values{
 		"response_type":         {"code"},
-		"client_id":             {radiusClientID},
+		"client_id":             {radiusOAuthClientID()},
 		"redirect_uri":          {redirect},
 		"scope":                 {"gateway offline_access"},
 		"state":                 {state},
@@ -91,7 +100,7 @@ func (r radiusOAuth) loginBrowser(ctx context.Context, ix Interaction) (Credenti
 	}
 	return r.token(ctx, url.Values{
 		"grant_type":    {"authorization_code"},
-		"client_id":     {radiusClientID},
+		"client_id":     {radiusOAuthClientID()},
 		"code":          {code},
 		"redirect_uri":  {redirect},
 		"code_verifier": {verifier},
@@ -100,7 +109,7 @@ func (r radiusOAuth) loginBrowser(ctx context.Context, ix Interaction) (Credenti
 
 func (r radiusOAuth) loginDevice(ctx context.Context, ix Interaction) (Credential, error) {
 	body, status, err := postForm(ctx, r.gateway+"/v1/oauth/device", url.Values{
-		"client_id": {radiusClientID},
+		"client_id": {radiusOAuthClientID()},
 		"scope":     {"gateway offline_access"},
 	})
 	if err != nil {
@@ -123,7 +132,7 @@ func (r radiusOAuth) loginDevice(ctx context.Context, ix Interaction) (Credentia
 	return pollDeviceCode(ctx, int(dev.Interval), int(dev.ExpiresIn), true, func() (devicePollResult[Credential], error) {
 		c, err := r.token(ctx, url.Values{
 			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-			"client_id":   {radiusClientID},
+			"client_id":   {radiusOAuthClientID()},
 			"device_code": {dev.DeviceCode},
 		})
 		if err != nil {
@@ -143,7 +152,7 @@ func (r radiusOAuth) loginDevice(ctx context.Context, ix Interaction) (Credentia
 func (r radiusOAuth) Refresh(ctx context.Context, cred Credential) (Credential, error) {
 	next, err := r.token(ctx, url.Values{
 		"grant_type":    {"refresh_token"},
-		"client_id":     {radiusClientID},
+		"client_id":     {radiusOAuthClientID()},
 		"refresh_token": {cred.Refresh},
 	})
 	if err != nil {

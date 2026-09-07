@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const piMessagesFixture = `data: {"type":"start"}
+const pigoMessagesFixture = `data: {"type":"start"}
 
 data: {"type":"text_start","contentIndex":0}
 
@@ -22,7 +22,7 @@ data: {"type":"done","reason":"stop","usage":{"input":1,"output":1,"totalTokens"
 
 `
 
-func TestPiMessagesClientHTTP(t *testing.T) {
+func TestPigoMessagesClientHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/messages" {
 			t.Errorf("path = %q", r.URL.Path)
@@ -32,7 +32,7 @@ func TestPiMessagesClientHTTP(t *testing.T) {
 		if err := json.Unmarshal(body, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload["model"] != "pi-qwen" {
+		if payload["model"] != "qwen" {
 			t.Errorf("model = %v", payload["model"])
 		}
 		ctx, _ := payload["context"].(map[string]any)
@@ -40,15 +40,15 @@ func TestPiMessagesClientHTTP(t *testing.T) {
 			t.Errorf("context = %#v", ctx)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(piMessagesFixture))
+		_, _ = w.Write([]byte(pigoMessagesFixture))
 	}))
 	defer srv.Close()
 
-	client := &PiMessagesClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+	client := &PigoMessagesClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
 	stream, err := client.StreamFn()(context.Background(), Context{
 		System:   "sys",
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
-	}, Options{Model: "pi-qwen"})
+	}, Options{Model: "qwen"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestPiMessagesClientHTTP(t *testing.T) {
 	if final == nil || final.Text() != "Hello" {
 		t.Fatalf("%+v", final)
 	}
-	if final.API != "pi-messages" || final.StopReason != StopStop {
+	if final.API != "pigo-messages" || final.StopReason != StopStop {
 		t.Fatalf("%+v", final)
 	}
 	if final.Usage.Input != 1 || final.Usage.Output != 1 {
@@ -64,14 +64,14 @@ func TestPiMessagesClientHTTP(t *testing.T) {
 	}
 }
 
-func TestStreamForPiMessages(t *testing.T) {
+func TestStreamForPigoMessages(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(piMessagesFixture))
+		_, _ = w.Write([]byte(pigoMessagesFixture))
 	}))
 	defer srv.Close()
 	stream, err := StreamFor("radius", ClientConfig{APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client()})(
-		context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "pi-qwen"})
+		context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "qwen"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,8 +81,8 @@ func TestStreamForPiMessages(t *testing.T) {
 	}
 }
 
-func TestPiMessagesRequiresBaseURL(t *testing.T) {
-	stream, err := (&PiMessagesClient{APIKey: "k"}).StreamFn()(context.Background(), Context{}, Options{Model: "x"})
+func TestPigoMessagesRequiresBaseURL(t *testing.T) {
+	stream, err := (&PigoMessagesClient{APIKey: "k"}).StreamFn()(context.Background(), Context{}, Options{Model: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}

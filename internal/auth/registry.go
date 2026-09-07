@@ -409,7 +409,7 @@ func registerRadiusAuth() {
 			Env:   []string{"RADIUS_API_KEY"},
 			Login: promptAPIKey("Radius API key"),
 		},
-		OAuth: NewRadiusOAuth("Radius", "https://radius.pi.dev"),
+		OAuth: NewRadiusOAuth("Radius", models.RadiusGateway()),
 	})
 }
 

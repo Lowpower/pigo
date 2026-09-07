@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	defaultCatalogBaseURL = "https://pi.dev"
 	remoteAttemptTimeout  = 4 * time.Second
 	remoteRefreshInterval = 4 * time.Hour
 )
@@ -127,12 +126,9 @@ func PrepareCatalog(agentDir, catalogBaseURL string, offline bool) error {
 	return nil
 }
 
-// DefaultCatalogBaseURL is https://pi.dev unless PIGO_CATALOG_BASE_URL is set.
+// DefaultCatalogBaseURL is PIGO_CATALOG_BASE_URL, or empty.
 func DefaultCatalogBaseURL() string {
-	if v := os.Getenv("PIGO_CATALOG_BASE_URL"); v != "" {
-		return v
-	}
-	return defaultCatalogBaseURL
+	return os.Getenv("PIGO_CATALOG_BASE_URL")
 }
 
 func refreshLocalProviders(store CatalogStore) {

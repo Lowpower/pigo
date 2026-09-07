@@ -17,11 +17,9 @@ var embedded string
 const (
 	githubRepo            = "Lowpower/pigo"
 	changelogLinkBasePath = ""
-	installTelemetryURL   = "https://pi.dev/api/report-install"
 )
 
 var (
-	legacyRepoRe         = regexp.MustCompile(`^https://github\.com/(?:badlogic|earendil-works)/pi-mono`)
 	urlSchemeRe          = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*:`)
 	inlineMarkdownLinkRe = regexp.MustCompile(`(!?\[[^\]\n]+\]\()([^\s)]+)((?:\s+[^)]*)?\))`)
 	versionHeaderRe      = regexp.MustCompile(`##\s+\[?(\d+)\.(\d+)\.(\d+)\]?`)
@@ -128,7 +126,7 @@ func NormalizeLinks(markdown, version string) string {
 }
 
 func normalizeLinkTarget(target, tag string) string {
-	canonical := legacyRepoRe.ReplaceAllString(target, "https://github.com/"+githubRepo)
+	canonical := target
 	repoURL := "https://github.com/" + githubRepo
 	for _, route := range []string{"blob", "tree"} {
 		for _, branch := range []string{"main", "master"} {

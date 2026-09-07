@@ -29,7 +29,7 @@ func (xaiOAuth) Login(ix Interaction) (Credential, error) {
 	body, status, err := postForm(ctx, xaiDeviceURL, url.Values{
 		"client_id": {xaiClientID},
 		"scope":     {xaiScope},
-		"referrer":  {"pi"},
+		"referrer":  {"pigo"},
 	})
 	if err != nil {
 		return Credential{}, err

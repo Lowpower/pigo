@@ -17,7 +17,7 @@ type Result struct {
 	Warnings []string
 }
 
-// Run applies one-time on-disk migrations for agentDir and the project .pi dir.
+// Run applies one-time on-disk migrations for agentDir and the project .pigo dir.
 func Run(cwd, agentDir string) Result {
 	var res Result
 	migrateSessionsFromAgentRoot(agentDir)
@@ -25,10 +25,8 @@ func Run(cwd, agentDir string) Result {
 	_ = keys.RewriteLegacyFile(filepath.Join(agentDir, "keybindings.json"))
 	migrateCommandsToPrompts(agentDir)
 	if cwd != "" {
-		migrateCommandsToPrompts(filepath.Join(cwd, ".pi"))
 		migrateCommandsToPrompts(filepath.Join(cwd, ".pigo"))
 		res.Warnings = append(res.Warnings, deprecatedExtensionDirs(agentDir, "Global")...)
-		res.Warnings = append(res.Warnings, deprecatedExtensionDirs(filepath.Join(cwd, ".pi"), "Project")...)
 		res.Warnings = append(res.Warnings, deprecatedExtensionDirs(filepath.Join(cwd, ".pigo"), "Project")...)
 	} else {
 		res.Warnings = append(res.Warnings, deprecatedExtensionDirs(agentDir, "Global")...)

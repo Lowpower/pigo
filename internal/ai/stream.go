@@ -76,8 +76,8 @@ type Options struct {
 	Thinking       string // off|minimal|low|medium|high|xhigh|max
 	ThinkingBudget int    // token budget resolved from thinkingBudgets
 	SessionID      string // coding session id; Codex reuses a WebSocket per session
-	CacheRetention string // none|short|long; forwarded on pi-messages
-	ToolChoice     string // auto|none|required; forwarded on pi-messages
+	CacheRetention string // none|short|long; forwarded on pigo-messages
+	ToolChoice     string // auto|none|required; forwarded on pigo-messages
 	Provider       string // catalog provider id for model lookup
 	// ExtraHeaders are applied on the outbound HTTP request after provider defaults.
 	ExtraHeaders map[string]string

@@ -19,7 +19,7 @@ func TestRefreshRadiusLoadsConfig(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"baseUrl": "https://messages.example",
 			"models": []map[string]any{
-				{"id": "pi-qwen", "name": "Qwen", "reasoning": true, "input": []string{"text"},
+				{"id": "qwen", "name": "Qwen", "reasoning": true, "input": []string{"text"},
 					"cost": map[string]any{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
 					"contextWindow": 128000, "maxTokens": 8192},
 			},
@@ -32,8 +32,8 @@ func TestRefreshRadiusLoadsConfig(t *testing.T) {
 	if err := refreshRadius(store); err != nil {
 		t.Fatal(err)
 	}
-	m, ok := Lookup("radius", "pi-qwen")
-	if !ok || m.API != "pi-messages" || m.BaseURL != "https://messages.example" {
+	m, ok := Lookup("radius", "qwen")
+	if !ok || m.API != "pigo-messages" || m.BaseURL != "https://messages.example" {
 		t.Fatalf("model = %+v ok=%v", m, ok)
 	}
 }

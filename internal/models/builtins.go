@@ -94,7 +94,7 @@ func registerBuiltins() {
 		ID:            "radius",
 		Name:          "Radius API key",
 		Env:           []string{"RADIUS_API_KEY"},
-		DefaultAPI:    "pi-messages",
+		DefaultAPI:    "pigo-messages",
 		DefaultID:     "balanced",
 		RefreshModels: refreshRadius,
 	})

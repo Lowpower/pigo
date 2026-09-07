@@ -108,8 +108,8 @@ func registerBuiltinAPIs() {
 		}
 		return (&MistralClient{BaseURL: base, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
 	})
-	RegisterAPI("pi-messages", func(cfg ClientConfig) StreamFn {
-		return (&PiMessagesClient{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
+	RegisterAPI("pigo-messages", func(cfg ClientConfig) StreamFn {
+		return (&PigoMessagesClient{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
 	})
 	RegisterAPI("openai-codex-responses", func(cfg ClientConfig) StreamFn {
 		headers := map[string]string{}
@@ -117,7 +117,7 @@ func registerBuiltinAPIs() {
 			headers[k] = v
 		}
 		if headers["originator"] == "" {
-			headers["originator"] = "pi"
+			headers["originator"] = "pigo"
 		}
 		if headers["OpenAI-Beta"] == "" {
 			headers["OpenAI-Beta"] = openaiBetaSSE

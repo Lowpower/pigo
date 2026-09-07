@@ -146,7 +146,7 @@ func (openaiCodexOAuth) Refresh(ctx context.Context, cred Credential) (Credentia
 
 func (openaiCodexOAuth) ToAuth(cred Credential) (ModelAuth, error) {
 	headers := map[string]string{
-		"originator":  "pi",
+		"originator":  "pigo",
 		"OpenAI-Beta": "responses=experimental",
 	}
 	id := cred.extraString("accountId")
