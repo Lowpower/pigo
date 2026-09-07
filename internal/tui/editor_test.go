@@ -238,6 +238,17 @@ func TestHotkeysListsEditorBindings(t *testing.T) {
 	}
 }
 
+func TestEditorUndoRestoresText(t *testing.T) {
+	e := newPromptEditor()
+	e.SetValue("hello")
+	e.pushUndo()
+	e.SetValue("hello!")
+	e.undoEdit()
+	if e.Value() != "hello" {
+		t.Fatalf("undo=%q", e.Value())
+	}
+}
+
 func mustDecodePNG() []byte {
 	const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 	b, err := base64.StdEncoding.DecodeString(b64)

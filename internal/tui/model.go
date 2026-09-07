@@ -131,6 +131,12 @@ type Model struct {
 	altScreen     bool
 	lastWidth     int
 	lastHeight    int
+	scrollOff     int
+	searchActive  bool
+	searchQuery   string
+	searchN       int
+	searchHits    []int
+	thinkingPick  listPicker
 
 	extHub     *extUIHub
 	extStatus  map[string]string
@@ -271,6 +277,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modelPickerActive() {
 			return m.handleModelPickerKey(msg)
 		}
+		if m.thinkingPickerActive() {
+			return m.handleThinkingPickerKey(msg)
+		}
 		if m.loginActive() {
 			return m.handleLoginKey(msg)
 		}
@@ -338,6 +347,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.keyIs(msg, "tui.input.submit") {
 			return m.submit()
+		}
+		if m.keyIs(msg, "app.message.copy") {
+			return m.copyLastAssistant()
+		}
+		if m.keyIs(msg, "app.message.dequeue") {
+			m.restoreQueuedToEditor()
+			return m, nil
+		}
+		if m.keyIs(msg, "app.suspend") {
+			return m, func() tea.Msg { return tea.Suspend() }
+		}
+		if m.altScreen {
+			if next, ok := m.handleAltScreenKey(msg); ok {
+				return next, nil
+			}
 		}
 		if m.keyIs(msg, "app.message.followUp") {
 			return m.queueFollowUp()
@@ -437,11 +461,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case imageGenMsg:
 		return m.handleImageGen(msg)
 
+	case tea.MouseMsg:
+		if m.altScreen {
+			return m.handleAltScreenMouse(msg)
+		}
+		return m, nil
+
 	case llamaCatalogMsg, llamaSearchTickMsg, llamaSearchResultMsg, llamaDetailsMsg, llamaActionDoneMsg:
 		return m.handleLlamaMsg(msg)
 	}
 
 	var cmd tea.Cmd
+	if key, ok := msg.(tea.KeyMsg); ok && m.keys != nil {
+		if key.Type == tea.KeyRunes || key.Type == tea.KeySpace ||
+			m.keyIs(key, "tui.input.newLine") ||
+			m.keyIs(key, "tui.editor.deleteCharBackward") ||
+			m.keyIs(key, "tui.editor.deleteCharForward") {
+			m.editor.pushUndo()
+		}
+	}
 	m.editor.ta, cmd = m.editor.ta.Update(msg)
 	if key, ok := msg.(tea.KeyMsg); ok && m.keys != nil {
 		m.editor.afterTextareaKey(key, m.keys)
@@ -589,8 +627,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			if m.engine != nil {
 				m.engine.Opts.Config.Thinking = cmd.Rest
 			}
+			return note("thinking = " + m.cfg.Thinking)
 		}
-		return note("thinking = " + m.cfg.Thinking)
+		return m.openThinkingPicker()
 	case "tools":
 		var names []string
 		reg := tools.Default()
@@ -1065,6 +1104,9 @@ func (m Model) View() string {
 	if m.modelPickerActive() {
 		return m.present(m.models.view())
 	}
+	if m.thinkingPickerActive() {
+		return m.present(m.thinkingPick.view())
+	}
 	if m.loginActive() {
 		return m.present(m.loginView())
 	}
@@ -1303,8 +1345,8 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 	if useAltScreen(m.cfg) {
 		opts = append(opts, tea.WithAltScreen())
 		m.altScreen = true
-	}
-	if m.cfg.CopyOnSelect() {
+		opts = append(opts, tea.WithMouseCellMotion())
+	} else if m.cfg.CopyOnSelect() {
 		opts = append(opts, tea.WithMouseCellMotion())
 	}
 	p := tea.NewProgram(m, opts...)

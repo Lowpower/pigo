@@ -132,6 +132,7 @@ var reservedActions = []string{
 	"app.editor.external",
 	"app.message.copy",
 	"app.message.followUp",
+	"app.message.dequeue",
 	"tui.input.submit",
 	"tui.select.confirm",
 	"tui.select.cancel",
@@ -435,6 +436,7 @@ func defaults(windows bool) map[string]Def {
 	follow := "alt+enter"
 	cycleBack := []string{"shift+ctrl+p", "ctrl+shift+p"}
 	pasteImg := "ctrl+v"
+	search := "ctrl+shift+f"
 	if windows {
 		undo = "alt+z"
 		if runtime.GOOS == "windows" {
@@ -443,6 +445,7 @@ func defaults(windows bool) map[string]Def {
 		follow = "ctrl+q"
 		cycleBack = []string{"alt+p"}
 		pasteImg = "alt+v"
+		search = "ctrl+f"
 	}
 	d := map[string]Def{
 		"tui.editor.cursorUp":           {Keys: strs("up"), Description: "Move cursor up, browsing older history at the top"},
@@ -482,6 +485,7 @@ func defaults(windows bool) map[string]Def {
 		"app.clear":                     {Keys: strs("ctrl+c"), Description: "clear editor (twice to quit)"},
 		"app.exit":                      {Keys: strs("ctrl+d"), Description: "exit when editor is empty"},
 		"app.suspend":                   {Keys: strs("ctrl+z"), Description: "Suspend to background"},
+		"app.thinking.save":             {Keys: strs("ctrl+s"), Description: "Save thinking level as default"},
 		"app.thinking.cycle":            {Keys: strs("shift+tab"), Description: "cycle thinking level"},
 		"app.model.cycleForward":        {Keys: strs("ctrl+p"), Description: "cycle model forward"},
 		"app.model.cycleBackward":       {Keys: cycleBack, Description: "cycle model backward"},
@@ -509,6 +513,20 @@ func defaults(windows bool) map[string]Def {
 		"app.models.toggleProvider":     {Keys: strs("ctrl+p"), Description: "Toggle all models for provider"},
 		"app.models.reorderUp":          {Keys: strs("alt+up"), Description: "Move model up in order"},
 		"app.models.reorderDown":        {Keys: strs("alt+down"), Description: "Move model down in order"},
+		"tui.altScreen.pageUp":          {Keys: strs("pageup"), Description: "Scroll viewport up one page"},
+		"tui.altScreen.pageDown":        {Keys: strs("pagedown"), Description: "Scroll viewport down one page"},
+		"tui.altScreen.halfPageUp":      {Description: "Scroll viewport up half a page"},
+		"tui.altScreen.halfPageDown":    {Description: "Scroll viewport down half a page"},
+		"tui.altScreen.lineUp":          {Description: "Scroll viewport up one line"},
+		"tui.altScreen.lineDown":        {Description: "Scroll viewport down one line"},
+		"tui.altScreen.previousPrompt":  {Keys: strs("ctrl+shift+up", "ctrl+up"), Description: "Jump to previous semantic prompt"},
+		"tui.altScreen.nextPrompt":      {Keys: strs("ctrl+shift+down", "ctrl+down"), Description: "Jump to next semantic prompt"},
+		"tui.altScreen.search":          {Keys: strs(search), Description: "Search the primary scroll view"},
+		"tui.altScreen.searchNext":      {Keys: strs("enter", "ctrl+g"), Description: "Select the next search match"},
+		"tui.altScreen.searchPrevious":  {Keys: strs("shift+enter", "ctrl+shift+g"), Description: "Select the previous search match"},
+		"tui.altScreen.searchClose":     {Keys: strs("esc"), Description: "Close transcript search"},
+		"tui.altScreen.top":             {Keys: strs("home"), Description: "Scroll viewport to top"},
+		"tui.altScreen.bottom":          {Keys: strs("end"), Description: "Scroll viewport to bottom"},
 	}
 	if runtime.GOOS == "windows" {
 		d["app.suspend"] = Def{Description: "Suspend to background"}
@@ -534,6 +552,10 @@ var helpOrder = []string{
 	"app.tools.expand",
 	"app.model.select",
 	"app.editor.external",
+	"app.message.copy",
+	"app.message.dequeue",
+	"app.suspend",
+	"tui.editor.undo",
 	"app.clipboard.pasteImage",
 	"tui.editor.yank",
 	"tui.editor.yankPop",
