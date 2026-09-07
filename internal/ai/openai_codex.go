@@ -271,12 +271,12 @@ func (c *OpenAICodexClient) wsEventStream(ctx context.Context, acq wsAcquire, fi
 }
 
 func (c *OpenAICodexClient) sseEventStream(ctx context.Context, body []byte, opts Options) (*EventStream, error) {
-	send := body
+	send := transformRequestBody(opts, body)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, resolveCodexURL(c.BaseURL), bytes.NewReader(send))
 	if err != nil {
 		return nil, err
 	}
-	if compressed := compressRequestBodyZstd(body); compressed != nil {
+	if compressed := compressRequestBodyZstd(send); compressed != nil {
 		send = compressed
 		httpReq.Body = io.NopCloser(bytes.NewReader(send))
 		httpReq.ContentLength = int64(len(send))
@@ -295,7 +295,7 @@ func (c *OpenAICodexClient) sseEventStream(ctx context.Context, body []byte, opt
 		httpReq.Header.Set("session-id", opts.SessionID)
 		httpReq.Header.Set("x-client-request-id", opts.SessionID)
 	}
-	resp, err := c.httpClient().Do(httpReq)
+	resp, err := doHTTP(c.httpClient(), httpReq, opts)
 	if err != nil {
 		return nil, err
 	}

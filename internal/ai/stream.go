@@ -1,6 +1,9 @@
 package ai
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // Role values for messages sent to a provider. RoleToolResult is "toolResult";
 // providers map it onto their wire format.
@@ -53,10 +56,10 @@ type ConstrainedSampling struct {
 
 // Tool is a provider-neutral tool definition (JSON Schema parameters).
 type Tool struct {
-	Name                string                `json:"name"`
-	Description         string                `json:"description"`
-	Parameters          map[string]any        `json:"parameters"`
-	ConstrainedSampling *ConstrainedSampling  `json:"constrainedSampling,omitempty"`
+	Name                string               `json:"name"`
+	Description         string               `json:"description"`
+	Parameters          map[string]any       `json:"parameters"`
+	ConstrainedSampling *ConstrainedSampling `json:"constrainedSampling,omitempty"`
 }
 
 // Context is the request context passed to a StreamFn (system prompt, messages,
@@ -77,6 +80,12 @@ type Options struct {
 	CacheRetention string // none|short|long; forwarded on pi-messages
 	ToolChoice     string // auto|none|required; forwarded on pi-messages
 	Provider       string // catalog provider id for model lookup
+	// ExtraHeaders are applied on the outbound HTTP request after provider defaults.
+	ExtraHeaders map[string]string
+	// TransformBody rewrites the JSON request body (before compression).
+	TransformBody func([]byte) []byte
+	// OnHTTPResponse observes the provider HTTP response.
+	OnHTTPResponse func(status int, header http.Header)
 }
 
 // StreamFn is the spine abstraction: given a request context it returns a stream
