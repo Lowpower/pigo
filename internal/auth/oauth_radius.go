@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-// Ported from packages/ai/src/auth/oauth/radius.ts
 const radiusClientID = "pi-gateway"
 
 type radiusOAuth struct {

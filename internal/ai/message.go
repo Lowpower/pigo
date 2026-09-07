@@ -55,7 +55,7 @@ type Content struct {
 	partialJSON string
 }
 
-// UsageCost is the dollar breakdown on Usage (pi packages/ai/src/types.ts).
+// UsageCost is the dollar breakdown on Usage.
 type UsageCost struct {
 	Input      float64 `json:"input"`
 	Output     float64 `json:"output"`

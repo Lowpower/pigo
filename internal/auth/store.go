@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// Store is the auth.json credential store (pi AuthStorage / CredentialStore).
+// Store is the auth.json credential store.
 type Store struct {
 	dir string
 	mu  sync.Mutex

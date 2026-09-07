@@ -6,7 +6,7 @@ import (
 )
 
 // BashContextText is the user-message text injected into the next LLM prompt
-// for a bashExecution entry. packages/coding-agent/src/core/messages.ts bashExecutionToText
+// for a bashExecution entry.
 func BashContextText(command, output string, cancelled bool, exitCode *int, truncated bool, fullOutputPath string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Ran `%s`\n", command)

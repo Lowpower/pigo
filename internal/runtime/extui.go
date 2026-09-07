@@ -35,7 +35,7 @@ func (e *Engine) setUIHandler(fn uiHandlerFunc) {
 }
 
 // RequestExtensionUI emits an RPC extension_ui_request. Dialog methods block
-// until extension_ui_response or timeout (pi rpc-mode.ts createDialogPromise).
+// until extension_ui_response or timeout.
 func (e *Engine) RequestExtensionUI(method string, fields map[string]any, timeout time.Duration) map[string]any {
 	e.DispatchEvent(context.Background(), "ui_prompt_start", map[string]any{"method": method})
 	defer e.DispatchEvent(context.Background(), "ui_prompt_end", map[string]any{"method": method})

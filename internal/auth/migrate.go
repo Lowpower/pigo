@@ -11,7 +11,7 @@ import (
 var errReadOnly = errors.New("read-only credential storage cannot modify auth.json")
 
 // Migrate copies oauth.json + settings.json apiKeys into auth.json when auth.json
-// is missing. Ported from packages/coding-agent/src/migrations.ts migrateAuthToAuthJson.
+// is missing.
 func Migrate(agentDir string) []string {
 	authPath := filepath.Join(agentDir, "auth.json")
 	if _, err := os.Stat(authPath); err == nil {

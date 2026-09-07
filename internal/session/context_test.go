@@ -322,7 +322,7 @@ func TestOpenRealPiJSONLFixture(t *testing.T) {
 		t.Fatalf("header=%+v", opened.Header())
 	}
 	if len(opened.Entries()) == 0 {
-		t.Fatal("expected entries from pi fixture")
+		t.Fatal("expected session entries from fixture")
 	}
 	msgs := RestoreAIMessages(ContextEntries(opened))
 	if len(msgs) == 0 {

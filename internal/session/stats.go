@@ -9,8 +9,7 @@ import (
 	"github.com/Lowpower/pigo/internal/compaction"
 )
 
-// Stats is the RPC get_session_stats payload (pi SessionStats).
-// packages/coding-agent/src/core/agent-session.ts
+// Stats is the RPC get_session_stats payload.
 type Stats struct {
 	SessionFile       string          `json:"sessionFile,omitempty"`
 	SessionID         string          `json:"sessionId"`
@@ -49,7 +48,7 @@ type TokenTotals struct {
 	Total      int `json:"total"`
 }
 
-// ContextUsage is current-window usage (pi ContextUsage).
+// ContextUsage is current-window token usage.
 type ContextUsage struct {
 	Tokens        *int     `json:"tokens"`
 	ContextWindow int      `json:"contextWindow"`
@@ -58,8 +57,6 @@ type ContextUsage struct {
 
 // CollectStats walks session entries. contextMsgs is the live branch used for
 // contextUsage (typically RestoreAIMessages). contextWindow 0 omits contextUsage.
-// Usage/cost aggregation matches pi getSessionStats / addUsageToTotals
-// (packages/coding-agent/src/core/agent-session.ts, usage-totals.ts).
 func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats {
 	s := Stats{}
 	if m != nil {
@@ -124,7 +121,7 @@ func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats
 	return s
 }
 
-// FormatInfo is the /session command text (pi handleSessionCommand).
+// FormatInfo is the /session command text.
 func FormatInfo(s Stats, name string) string {
 	var b strings.Builder
 	b.WriteString("Session Info\n\n")

@@ -76,7 +76,7 @@ type Config struct {
 	NpmCommand []string       `mapstructure:"-" json:"npmCommand,omitempty"`
 }
 
-// CompactionSettings is pi settings.compaction.
+// CompactionSettings is settings.compaction.
 type CompactionSettings struct {
 	Enabled          *bool `mapstructure:"enabled" json:"enabled,omitempty"`
 	ReserveTokens    int   `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
@@ -98,7 +98,7 @@ type ProviderRetrySettings struct {
 	MaxRetryDelayMs *int `mapstructure:"maxRetryDelayMs" json:"maxRetryDelayMs,omitempty"`
 }
 
-// BranchSummarySettings is pi settings.branchSummary.
+// BranchSummarySettings is settings.branchSummary.
 type BranchSummarySettings struct {
 	SkipPrompt    *bool `mapstructure:"skipPrompt" json:"skipPrompt,omitempty"`
 	ReserveTokens int   `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
@@ -198,7 +198,7 @@ func (c Config) CollapsedChangelog() bool {
 	return c.CollapseChangelog != nil && *c.CollapseChangelog
 }
 
-// InstallTelemetryEnabled reports whether changelog-detected updates ping pi.dev (default true).
+// InstallTelemetryEnabled reports whether changelog-detected updates send install telemetry (default true).
 func (c Config) InstallTelemetryEnabled() bool {
 	if c.EnableInstallTelemetry == nil {
 		return true
@@ -206,7 +206,7 @@ func (c Config) InstallTelemetryEnabled() bool {
 	return *c.EnableInstallTelemetry
 }
 
-// RetryEnabled reports whether auto-retry is on (default true, like pi).
+// RetryEnabled reports whether auto-retry is on (default true).
 func (c Config) RetryEnabled() bool {
 	if c.Retry.Enabled == nil {
 		return true

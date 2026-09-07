@@ -7,7 +7,6 @@ import (
 	"net/url"
 )
 
-// Ported from packages/ai/src/auth/oauth/openrouter.ts
 var (
 	openrouterAuthURL  = "https://openrouter.ai/auth"
 	openrouterTokenURL = "https://openrouter.ai/api/v1/auth/keys"

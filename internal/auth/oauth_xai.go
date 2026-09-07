@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// Ported from packages/ai/src/auth/oauth/xai.ts
 const (
 	xaiClientID = "b1a00492-073a-47ea-816f-4c329264a828"
 	xaiScope    = "openid profile email offline_access grok-cli:access api:access"

@@ -64,7 +64,7 @@ type SelectOption struct {
 	Description string
 }
 
-// Prompt is shown during login (pi AuthPrompt).
+// Prompt is shown during login.
 type Prompt struct {
 	Type        string
 	Message     string
@@ -83,7 +83,7 @@ const (
 	EventProgress = "progress"
 )
 
-// Event is a login notification (pi AuthEvent).
+// Event is a login notification.
 type Event struct {
 	Type             string
 	Message          string
@@ -95,7 +95,7 @@ type Event struct {
 	ExpiresInSeconds int
 }
 
-// Interaction is the login UI contract (pi AuthInteraction).
+// Interaction is the login UI contract.
 type Interaction struct {
 	Ctx    context.Context
 	Prompt func(Prompt) (string, error)

@@ -67,7 +67,7 @@ func (e *Engine) RunUserBash(ctx context.Context, command string, exclude bool, 
 	return RunBash(ctx, "", command, onChunk)
 }
 
-// RunBash executes command with the resolved shell in cwd (pi user bang / RPC bash).
+// RunBash executes command with the resolved shell in cwd.
 func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) BashResult {
 	cfg, err := shell.GetConfig()
 	if err != nil {

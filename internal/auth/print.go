@@ -86,7 +86,7 @@ type CheckResult struct {
 	Credentials string `json:"credentials,omitempty"`
 }
 
-// CheckProvider runs pi auth check.
+// CheckProvider reports whether a provider has usable credentials.
 func CheckProvider(ctx context.Context, agentDir, provider string, refresh, includeCreds bool) CheckResult {
 	if _, ok := Lookup(provider); !ok {
 		return CheckResult{Status: "not_ready", Provider: provider, Reason: "provider_not_found"}

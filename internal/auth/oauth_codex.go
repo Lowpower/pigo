@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// Ported from packages/ai/src/auth/oauth/openai-codex.ts
 const openaiCodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 var (

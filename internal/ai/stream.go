@@ -31,7 +31,6 @@ type Message struct {
 }
 
 // ImageContent is a base64 image attached to a user (or tool-result) message.
-// packages/ai/src/types.ts ImageContent
 type ImageContent struct {
 	Type     string `json:"type"`
 	Data     string `json:"data"`
