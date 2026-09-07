@@ -70,3 +70,18 @@ func TestFormatSize(t *testing.T) {
 		t.Fatalf("1024: %s", FormatSize(1024))
 	}
 }
+
+func TestTruncateHeadByBytes(t *testing.T) {
+	line := strings.Repeat("a", DefaultMaxBytes+50)
+	got := TruncateHead(line, DefaultMaxLines, DefaultMaxBytes)
+	if !got.Truncated || !got.FirstLineExceedsLimit {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestTruncateLine(t *testing.T) {
+	got := TruncateLine(strings.Repeat("x", 600), 500)
+	if !strings.HasSuffix(got, "... [truncated]") {
+		t.Fatalf("%s", got)
+	}
+}

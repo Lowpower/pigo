@@ -92,11 +92,11 @@ func (t grepTool) Execute(_ context.Context, args map[string]any) (string, bool)
 					if j == i {
 						sep = ":"
 					}
-					fmt.Fprintf(&out, "%s:%d%s%s\n", rel, j+1, sep, lines[j])
+					fmt.Fprintf(&out, "%s:%d%s%s\n", rel, j+1, sep, TruncateLine(lines[j], GrepMaxLineLength))
 				}
 				out.WriteString("--\n")
 			} else {
-				fmt.Fprintf(&out, "%s:%d:%s\n", rel, i+1, line)
+				fmt.Fprintf(&out, "%s:%d:%s\n", rel, i+1, TruncateLine(line, GrepMaxLineLength))
 			}
 			count++
 			if count >= limit {
@@ -131,6 +131,10 @@ func (t grepTool) Execute(_ context.Context, args map[string]any) (string, bool)
 	result := strings.TrimRight(out.String(), "\n")
 	if truncated {
 		result += fmt.Sprintf("\n[%d matches limit reached]", limit)
+	}
+	tr := TruncateHead(result, DefaultMaxLines, DefaultMaxBytes)
+	if tr.Truncated && !tr.FirstLineExceedsLimit {
+		result = tr.Content + fmt.Sprintf("\n[truncated to %s]", FormatSize(DefaultMaxBytes))
 	}
 	return result, false
 }

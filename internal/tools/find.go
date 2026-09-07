@@ -69,5 +69,9 @@ func (t findTool) Execute(_ context.Context, args map[string]any) (string, bool)
 	if truncated {
 		out += fmt.Sprintf("\n[%d results limit reached]", limit)
 	}
+	tr := TruncateHead(out, DefaultMaxLines, DefaultMaxBytes)
+	if tr.Truncated && !tr.FirstLineExceedsLimit {
+		out = tr.Content + fmt.Sprintf("\n[truncated to %s]", FormatSize(DefaultMaxBytes))
+	}
 	return out, false
 }

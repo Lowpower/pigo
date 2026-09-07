@@ -39,8 +39,10 @@ func (t writeTool) Execute(_ context.Context, args map[string]any) (string, bool
 			return err.Error(), true
 		}
 	}
-	if err := os.WriteFile(path, []byte(p.Content), 0o644); err != nil {
-		return err.Error(), true
-	}
-	return fmt.Sprintf("Wrote %d bytes to %s.", len(p.Content), path), false
+	return withFileMutation(path, func() (string, bool) {
+		if err := os.WriteFile(path, []byte(p.Content), 0o644); err != nil {
+			return err.Error(), true
+		}
+		return fmt.Sprintf("Wrote %d bytes to %s.", len(p.Content), path), false
+	})
 }

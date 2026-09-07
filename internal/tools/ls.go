@@ -67,5 +67,9 @@ func (t listTool) Execute(_ context.Context, args map[string]any) (string, bool)
 	if truncated {
 		out += fmt.Sprintf("\n[%d entries limit reached; use limit=%d for more]", limit, limit*2)
 	}
+	tr := TruncateHead(out, DefaultMaxLines, DefaultMaxBytes)
+	if tr.Truncated && !tr.FirstLineExceedsLimit {
+		out = tr.Content + fmt.Sprintf("\n[truncated to %s]", FormatSize(DefaultMaxBytes))
+	}
 	return out, false
 }

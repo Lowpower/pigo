@@ -490,6 +490,37 @@ func TestToolsShowcase(t *testing.T) {
 	show("bash", map[string]any{"command": "echo tools-work && uname -s"})
 }
 
+func TestBashRejectsHugeTimeout(t *testing.T) {
+	out, isErr := Default().Execute(context.Background(), "bash", map[string]any{
+		"command": "echo hi",
+		"timeout": 3_000_000_000,
+	})
+	if !isErr {
+		t.Fatalf("expected error, got %q", out)
+	}
+	if !strings.Contains(out, "maximum") {
+		t.Fatalf("%q", out)
+	}
+}
+
+func TestGrepTruncatesLongMatchLines(t *testing.T) {
+	dir := t.TempDir()
+	line := strings.Repeat("a", 300) + "needle" + strings.Repeat("b", 300)
+	path := filepath.Join(dir, "long.txt")
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, isErr := Default().Execute(context.Background(), "grep", map[string]any{
+		"path": dir, "pattern": "needle",
+	})
+	if isErr {
+		t.Fatalf("grep error: %s", out)
+	}
+	if !strings.Contains(out, "[truncated]") {
+		t.Fatalf("missing truncation marker: %s", out)
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

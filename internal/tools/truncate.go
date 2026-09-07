@@ -12,18 +12,21 @@ const (
 	DefaultMaxBytes = 50 * 1024
 )
 
-// Truncation is the result of TruncateTail.
+const GrepMaxLineLength = 500
+
+// Truncation is the result of TruncateTail / TruncateHead.
 type Truncation struct {
-	Content         string
-	Truncated       bool
-	TruncatedBy     string // "lines", "bytes", or empty
-	TotalLines      int
-	TotalBytes      int
-	OutputLines     int
-	OutputBytes     int
-	LastLinePartial bool
-	MaxLines        int
-	MaxBytes        int
+	Content               string
+	Truncated             bool
+	TruncatedBy           string // "lines", "bytes", or empty
+	TotalLines            int
+	TotalBytes            int
+	OutputLines           int
+	OutputBytes           int
+	LastLinePartial       bool
+	FirstLineExceedsLimit bool
+	MaxLines              int
+	MaxBytes              int
 }
 
 func splitLinesForCounting(content string) []string {
@@ -93,6 +96,72 @@ func TruncateTail(content string, maxLines, maxBytes int) Truncation {
 		OutputLines: len(output), OutputBytes: utf8ByteLen(joined),
 		LastLinePartial: lastLinePartial, MaxLines: maxLines, MaxBytes: maxBytes,
 	}
+}
+
+// TruncateHead keeps the first maxLines/maxBytes (complete lines only).
+func TruncateHead(content string, maxLines, maxBytes int) Truncation {
+	if maxLines <= 0 {
+		maxLines = DefaultMaxLines
+	}
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxBytes
+	}
+	totalBytes := utf8ByteLen(content)
+	lines := splitLinesForCounting(content)
+	totalLines := len(lines)
+	if totalLines <= maxLines && totalBytes <= maxBytes {
+		return Truncation{
+			Content: content, Truncated: false,
+			TotalLines: totalLines, TotalBytes: totalBytes,
+			OutputLines: totalLines, OutputBytes: totalBytes,
+			MaxLines: maxLines, MaxBytes: maxBytes,
+		}
+	}
+	if totalLines > 0 && utf8ByteLen(lines[0]) > maxBytes {
+		return Truncation{
+			Truncated: true, TruncatedBy: "bytes",
+			TotalLines: totalLines, TotalBytes: totalBytes,
+			FirstLineExceedsLimit: true, MaxLines: maxLines, MaxBytes: maxBytes,
+		}
+	}
+	output := make([]string, 0, maxLines)
+	outputBytes := 0
+	truncatedBy := "lines"
+	for i := 0; i < len(lines) && i < maxLines; i++ {
+		line := lines[i]
+		lineBytes := utf8ByteLen(line)
+		if i > 0 {
+			lineBytes++
+		}
+		if outputBytes+lineBytes > maxBytes {
+			truncatedBy = "bytes"
+			break
+		}
+		output = append(output, line)
+		outputBytes += lineBytes
+	}
+	if len(output) >= maxLines && outputBytes <= maxBytes {
+		truncatedBy = "lines"
+	}
+	joined := strings.Join(output, "\n")
+	return Truncation{
+		Content: joined, Truncated: true, TruncatedBy: truncatedBy,
+		TotalLines: totalLines, TotalBytes: totalBytes,
+		OutputLines: len(output), OutputBytes: utf8ByteLen(joined),
+		MaxLines: maxLines, MaxBytes: maxBytes,
+	}
+}
+
+// TruncateLine shortens a grep match line and appends a marker.
+func TruncateLine(line string, maxChars int) string {
+	if maxChars <= 0 {
+		maxChars = GrepMaxLineLength
+	}
+	if len([]rune(line)) <= maxChars {
+		return line
+	}
+	runes := []rune(line)
+	return string(runes[:maxChars]) + "... [truncated]"
 }
 
 func truncateStringToBytesFromEnd(s string, maxBytes int) string {

@@ -53,15 +53,20 @@ func (t editTool) Execute(_ context.Context, args map[string]any) (string, bool)
 		return "edits must contain at least one replacement", true
 	}
 	path := resolvePath(t.cwd, p.Path)
+	return withFileMutation(path, func() (string, bool) {
+		return t.applyEdits(path, p.Edits)
+	})
+}
 
+func (t editTool) applyEdits(path string, edits []editReplace) (string, bool) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err.Error(), true
 	}
 	original := string(raw)
 
-	spans := make([]editSpan, 0, len(p.Edits))
-	for i, e := range p.Edits {
+	spans := make([]editSpan, 0, len(edits))
+	for i, e := range edits {
 		if e.OldText == "" {
 			return fmt.Sprintf("edits[%d].oldText must not be empty", i), true
 		}

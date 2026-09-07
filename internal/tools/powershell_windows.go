@@ -5,7 +5,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/Lowpower/pigo/internal/shell"
 )
@@ -38,10 +37,11 @@ func (powershellTool) Execute(ctx context.Context, args map[string]any) (string,
 	if p.Command == "" {
 		return "command is required", true
 	}
-	runCtx := ctx
-	if p.Timeout > 0 {
-		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, time.Duration(p.Timeout)*time.Second)
+	runCtx, cancel, errMsg := timeoutContext(ctx, p.Timeout)
+	if errMsg != "" {
+		return errMsg, true
+	}
+	if cancel != nil {
 		defer cancel()
 	}
 	cfg, err := shell.GetPowerShellConfig()
