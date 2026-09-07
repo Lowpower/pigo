@@ -35,25 +35,30 @@ func NextThinkingLevel(current string) string {
 
 // Model is a known catalog entry used by --list-models and /model.
 type Model struct {
-	Provider  string `json:"provider,omitempty"`
-	ID        string `json:"id"`
-	API       string `json:"api,omitempty"`
-	BaseURL   string `json:"baseUrl,omitempty"`
-	Cost      *Cost  `json:"cost,omitempty"`
-	MaxTokens int    `json:"maxTokens,omitempty"`
-	Compat    *Compat `json:"compat,omitempty"`
+	Provider         string             `json:"provider,omitempty"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name,omitempty"`
+	API              string             `json:"api,omitempty"`
+	BaseURL          string             `json:"baseUrl,omitempty"`
+	Cost             *Cost              `json:"cost,omitempty"`
+	MaxTokens        int                `json:"maxTokens,omitempty"`
+	ContextWindow    int                `json:"contextWindow,omitempty"`
+	Reasoning        *bool              `json:"reasoning,omitempty"`
+	Input            []string           `json:"input,omitempty"`
+	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap,omitempty"`
+	Compat           *Compat            `json:"compat,omitempty"`
 }
 
 // Compat is optional per-model wire-protocol knobs from the catalog overlay.
 type Compat struct {
-	ThinkingFormat                    string `json:"thinkingFormat,omitempty"`
-	SupportsMidConvoEffort            bool   `json:"supportsMidConvoEffort,omitempty"`
-	SupportsReasoningEffort           bool   `json:"supportsReasoningEffort,omitempty"`
-	SupportsExplicitPromptCacheMode   bool   `json:"supportsExplicitPromptCacheMode,omitempty"`
-	VLLMPriority                      any    `json:"vllmPriority,omitempty"`
-	ChatTemplateKwargs                any    `json:"chatTemplateKwargs,omitempty"`
-	ChatTemplateArgs                  any    `json:"chatTemplateArgs,omitempty"`
-	SupportsLongCacheRetention        *bool  `json:"supportsLongCacheRetention,omitempty"`
+	ThinkingFormat                  string `json:"thinkingFormat,omitempty"`
+	SupportsMidConvoEffort          bool   `json:"supportsMidConvoEffort,omitempty"`
+	SupportsReasoningEffort         bool   `json:"supportsReasoningEffort,omitempty"`
+	SupportsExplicitPromptCacheMode bool   `json:"supportsExplicitPromptCacheMode,omitempty"`
+	VLLMPriority                    any    `json:"vllmPriority,omitempty"`
+	ChatTemplateKwargs              any    `json:"chatTemplateKwargs,omitempty"`
+	ChatTemplateArgs                any    `json:"chatTemplateArgs,omitempty"`
+	SupportsLongCacheRetention      *bool  `json:"supportsLongCacheRetention,omitempty"`
 }
 
 // Cost is catalog pricing in dollars per million tokens.

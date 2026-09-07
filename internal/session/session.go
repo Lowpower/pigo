@@ -54,6 +54,10 @@ type Entry struct {
 	Display          *bool           `json:"display,omitempty"`
 	Data             json.RawMessage `json:"data,omitempty"`
 
+	Provider      string `json:"provider,omitempty"`
+	ModelID       string `json:"modelId,omitempty"`
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
+
 	// role is used only for the buffer-until-assistant flush rule; not serialized.
 	role string
 }
