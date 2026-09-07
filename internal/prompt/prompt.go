@@ -56,10 +56,10 @@ func Build(opts Options) string {
 			b.WriteString("\n</project_context>\n")
 		}
 	}
-	if hasRead(opts.Tools) && len(opts.Skills) > 0 {
+	if tool := skillFileReadTool(opts.Tools); tool != "" && len(opts.Skills) > 0 {
 		b.WriteString("\n")
-		b.WriteString(skills.FormatForPrompt(opts.Skills))
-		b.WriteString("\nWhen a skill is relevant, read its file and follow it.\n")
+		b.WriteString(skills.FormatForPrompt(opts.Skills, tool))
+		b.WriteByte('\n')
 	}
 	if opts.Cwd != "" {
 		b.WriteString("\nCurrent working directory: ")
@@ -72,13 +72,17 @@ func Build(opts Options) string {
 	return b.String()
 }
 
-func hasRead(tools []ai.Tool) bool {
+func skillFileReadTool(tools []ai.Tool) string {
+	have := map[string]bool{}
 	for _, t := range tools {
-		if t.Name == "read" {
-			return true
+		have[t.Name] = true
+	}
+	for _, name := range []string{"read", "bash"} {
+		if have[name] {
+			return name
 		}
 	}
-	return false
+	return ""
 }
 
 func loadContextFiles(cwd, agentDir string, trusted bool) string {

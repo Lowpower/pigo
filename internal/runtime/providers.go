@@ -328,7 +328,7 @@ func (e *Engine) bindStream(provider string) ai.StreamFn {
 	if fn != nil {
 		return e.gatedStream(fn)
 	}
-	if sf := boundStream(e.Opts.AgentDir, provider); sf != nil {
+	if sf := boundStream(e.Opts.AgentDir, provider, e.Opts.Config.Transport); sf != nil {
 		return e.gatedStream(sf)
 	}
 	return e.gatedStream(nil)

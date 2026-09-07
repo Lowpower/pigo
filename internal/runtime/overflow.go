@@ -35,7 +35,7 @@ func (e *Engine) prepareOverflow(ctx context.Context, last []agent.Msg) bool {
 	}
 	willRetry := msg.StopReason != ai.StopStop
 	if !willRetry {
-		_, _, _ = e.runCompaction(ctx, "overflow", agent.MessagesFromTranscript(last), e.compactionSettings(), false)
+		_, _ = e.runCompaction(ctx, "overflow", agent.MessagesFromTranscript(last), e.compactionSettings(), false)
 		return false
 	}
 	if e.overflowAttempted {
@@ -51,7 +51,7 @@ func (e *Engine) prepareOverflow(ctx context.Context, last []agent.Msg) bool {
 	}
 	e.overflowAttempted = true
 	hist := stripLastAssistant(last)
-	_, _, err := e.runCompaction(ctx, "overflow", hist, e.compactionSettings(), true)
+	_, err := e.runCompaction(ctx, "overflow", hist, e.compactionSettings(), true)
 	return err == nil
 }
 

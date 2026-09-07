@@ -1002,3 +1002,41 @@ func TestPrintJSONWritesSessionHeader(t *testing.T) {
 		t.Fatalf("header=%v", header)
 	}
 }
+
+func TestRPCClearQueue(t *testing.T) {
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.PushSteer("steer-me")
+	e.PushFollow("follow-me")
+	in := strings.NewReader(`{"id":"c1","type":"clear_queue"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	rows := decodeRPCRows(t, out.String())
+	var got map[string]any
+	for _, r := range rows {
+		if r["type"] == "response" && r["command"] == "clear_queue" {
+			got = r
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("missing clear_queue response in %s", out.String())
+	}
+	data, _ := got["data"].(map[string]any)
+	steer, _ := data["steering"].([]any)
+	follow, _ := data["followUp"].([]any)
+	if len(steer) != 1 || steer[0] != "steer-me" || len(follow) != 1 || follow[0] != "follow-me" {
+		t.Fatalf("data=%v", data)
+	}
+	if n := e.pendingCount(); n != 0 {
+		t.Fatalf("pending=%d", n)
+	}
+}

@@ -92,13 +92,22 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			wg.Wait()
 			return nil
 		case "abort":
-			e.AbortRetry()
+			e.AbortCompact()
 			stateMu.Lock()
 			if cancel != nil {
 				cancel()
 			}
 			stateMu.Unlock()
 			reply(id, "abort", true, nil, "")
+		case "clear_queue":
+			steer, follow := e.TakeQueues()
+			if steer == nil {
+				steer = []string{}
+			}
+			if follow == nil {
+				follow = []string{}
+			}
+			reply(id, "clear_queue", true, map[string]any{"steering": steer, "followUp": follow}, "")
 		case "prompt":
 			behavior, _ := raw["streamingBehavior"].(string)
 			imgs := parseRPCImages(raw)
@@ -239,15 +248,15 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			stateMu.Lock()
 			hist := history
 			stateMu.Unlock()
-			outHist, summary, err := e.CompactNow(ctx, hist, custom)
+			outHist, err := e.CompactNowResult(ctx, hist, custom)
 			if err != nil {
 				reply(id, "compact", false, nil, err.Error())
 				break
 			}
 			stateMu.Lock()
-			history = outHist
+			history = outHist.Messages
 			stateMu.Unlock()
-			reply(id, "compact", true, map[string]any{"summary": summary}, "")
+			reply(id, "compact", true, compactPayload(outHist), "")
 		case "set_auto_compaction":
 			enabled, _ := raw["enabled"].(bool)
 			on := enabled

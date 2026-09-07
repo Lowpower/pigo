@@ -387,3 +387,26 @@ func TestLoopInjectsSteeringBeforeNextLLMCall(t *testing.T) {
 		t.Fatalf("steering message missing from second LLM call: %+v", second)
 	}
 }
+
+func TestPrepareNextTurnRewritesTranscript(t *testing.T) {
+	provider := scriptedProvider(
+		toolCallMessage("tc1", "read", map[string]any{"path": "x"}),
+		textMessage("after"),
+	)
+	exec := ToolFunc(func(_ context.Context, _ ToolCall) (string, bool) { return "tool-out", false })
+	cfg := Config{
+		Model:         "test",
+		ToolExecution: Sequential,
+		PrepareNextTurn: func(_ context.Context, msgs []ai.Message) []ai.Message {
+			return []ai.Message{{Role: ai.RoleUser, Content: "compacted"}}
+		},
+	}
+	events := Run(context.Background(), provider, ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: "go"}}}, exec, cfg).Collect()
+	last := events[len(events)-1]
+	if last.Type != EventAgentEnd {
+		t.Fatalf("last = %s", last.Type)
+	}
+	if len(last.Messages) < 2 || last.Messages[0].Text != "compacted" {
+		t.Fatalf("transcript = %+v", last.Messages)
+	}
+}

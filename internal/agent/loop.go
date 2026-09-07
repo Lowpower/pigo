@@ -52,6 +52,11 @@ type Config struct {
 	// Historical context messages are not re-emitted.
 	NewUserMessages []ai.Message
 	SessionID       string
+	Provider        string
+	CacheRetention  string
+	// PrepareNextTurn may rewrite the transcript after tool results, before
+	// the next provider call (threshold compaction).
+	PrepareNextTurn func(ctx context.Context, msgs []ai.Message) []ai.Message
 }
 
 // Run drives the agent loop and returns a stream of AgentEvents. The loop runs
@@ -154,6 +159,10 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 					return
 				}
 			}
+			if cfg.PrepareNextTurn != nil {
+				next := cfg.PrepareNextTurn(ctx, toAIMessages(transcript))
+				transcript = transcriptFromAI(next)
+			}
 		}
 
 		if !emit(Event{Type: EventTurnEnd, Assistant: message, ToolResults: toolResults}) {
@@ -176,7 +185,13 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 // events and returning the final assistant message. ok is false if the context
 // was cancelled while emitting.
 func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg Config, s *Stream) (*ai.AssistantMessage, bool) {
-	stream, err := sf(ctx, aiCtx, ai.Options{Model: cfg.Model, Thinking: cfg.Thinking, SessionID: cfg.SessionID})
+	stream, err := sf(ctx, aiCtx, ai.Options{
+		Model:          cfg.Model,
+		Thinking:       cfg.Thinking,
+		SessionID:      cfg.SessionID,
+		Provider:       cfg.Provider,
+		CacheRetention: cfg.CacheRetention,
+	})
 	if err != nil {
 		msg := &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopError, ErrorMessage: err.Error()}
 		if !s.push(ctx, Event{Type: EventMessageEnd, Assistant: msg}) {
@@ -355,6 +370,14 @@ func MessagesFromTranscript(transcript []Msg) []ai.Message {
 		default:
 			out = append(out, ai.Message{Role: ai.RoleUser, Content: m.Text, Images: m.Images})
 		}
+	}
+	return out
+}
+
+func transcriptFromAI(msgs []ai.Message) []Msg {
+	out := make([]Msg, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, msgFromAI(m))
 	}
 	return out
 }
