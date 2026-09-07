@@ -100,10 +100,10 @@ func (m Model) handleAltScreenKey(msg tea.KeyMsg) (tea.Model, bool) {
 		m.scrollBy(-1)
 		return m, true
 	case m.keyIs(msg, "tui.altScreen.previousPrompt"):
-		m.scrollBy(max(3, page/4))
+		m.jumpPrompt(-1)
 		return m, true
 	case m.keyIs(msg, "tui.altScreen.nextPrompt"):
-		m.scrollBy(-max(3, page/4))
+		m.jumpPrompt(1)
 		return m, true
 	case m.keyIs(msg, "tui.altScreen.top"):
 		m.scrollTop()
@@ -177,4 +177,46 @@ func (m *Model) jumpSearch() {
 		remain = 1
 	}
 	m.scrollOff = remain
+}
+
+func (m *Model) jumpPrompt(dir int) {
+	var hits []int
+	for i, e := range m.transcript {
+		if e.role == "user" {
+			hits = append(hits, i)
+		}
+	}
+	if len(hits) == 0 {
+		page := m.height - 1
+		if page < 1 {
+			page = 1
+		}
+		m.scrollBy(-dir * max(3, page/4))
+		return
+	}
+	current := len(m.transcript) - m.scrollOff
+	if current < 0 {
+		current = 0
+	}
+	if current >= len(m.transcript) {
+		current = len(m.transcript) - 1
+	}
+	switch {
+	case dir < 0:
+		for i := len(hits) - 1; i >= 0; i-- {
+			if hits[i] < current {
+				m.scrollOff = max(1, len(m.transcript)-hits[i])
+				return
+			}
+		}
+		m.scrollOff = max(1, len(m.transcript)-hits[0])
+	default:
+		for _, hit := range hits {
+			if hit > current {
+				m.scrollOff = max(1, len(m.transcript)-hit)
+				return
+			}
+		}
+		m.scrollOff = 0
+	}
 }

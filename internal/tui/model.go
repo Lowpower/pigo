@@ -413,6 +413,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.keyIs(msg, "app.session.resume") {
 			return m.openSessionPicker()
 		}
+		if m.keyIs(msg, "app.session.new") {
+			return m.startNewSession()
+		}
 		if m.keyIs(msg, "app.editor.external") {
 			return m.openExternalEditor()
 		}
@@ -526,8 +529,12 @@ func (m Model) cycleModel(backward bool) (tea.Model, tea.Cmd) {
 
 func (m Model) cycleThinking() (tea.Model, tea.Cmd) {
 	if m.engine != nil {
-		level := m.engine.CycleThinking()
+		level, ok := m.engine.CycleThinkingOK()
 		m.cfg = m.engine.Opts.Config
+		if !ok {
+			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("model does not support thinking")})
+			return m, nil
+		}
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("thinking = " + level)})
 		return m, nil
 	}
@@ -573,6 +580,19 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.startTurn(text, images)
+}
+
+func (m Model) startNewSession() (tea.Model, tea.Cmd) {
+	note := func(s string) (tea.Model, tea.Cmd) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		return m, nil
+	}
+	if m.engine != nil && !m.engine.NewSession("") {
+		return note("new session cancelled")
+	}
+	m.history = nil
+	m.transcript = nil
+	return note("started a new session")
 }
 
 func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
@@ -650,17 +670,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		return note("skills: " + strings.Join(names, ", "))
 	case "new":
-		m.history = nil
-		m.transcript = nil
-		if m.engine != nil {
-			cwd, _ := os.Getwd()
-			if m.engine.Opts.Cwd != "" {
-				cwd = m.engine.Opts.Cwd
-			}
-			s := session.NewAt(cwd, m.engine.Opts.AgentDir, m.engine.Opts.SessionDir)
-			m.engine.AdoptSession(s)
-		}
-		return note("started a new session")
+		return m.startNewSession()
 	case "compact":
 		if m.engine == nil {
 			return note("compaction requires a runtime engine")
@@ -808,12 +818,13 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("reload requires a runtime engine")
 		}
 		m.engine.Reload()
+		m.cfg = m.engine.Opts.Config
 		if m.keys != nil {
 			m.keys.Reload()
 		}
 		m.attachExtensions()
 		m.applyTheme(theme.LoadWith(m.themeOpts(m.cfg.Theme)))
-		return note("reloaded keybindings, skills, and context files")
+		return note("reloaded keybindings, skills, settings, and context files")
 	case "copy":
 		text := lastAssistant(m.history)
 		if text == "" {
@@ -921,6 +932,10 @@ func (m Model) handleImageGen(msg imageGenMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.Cmd) {
+	if m.engine != nil && m.engine.Compacting() {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while compaction is in progress.")})
+		return m, nil
+	}
 	m.editor.AddHistory(text)
 	m.editor.Reset()
 	m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})

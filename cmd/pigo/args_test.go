@@ -233,3 +233,18 @@ func TestResolveSessionDirOrder(t *testing.T) {
 		t.Fatalf("env=%q", got)
 	}
 }
+
+func TestInvalidThinkingWarns(t *testing.T) {
+	clearCatalogEnvs(t)
+	cmd := newRootCmd()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"--thinking", "nope", "--list-models", "--offline", "--config-dir", t.TempDir()})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errBuf.String(), "Invalid thinking level") {
+		t.Fatalf("stderr=%q stdout=%q", errBuf.String(), out.String())
+	}
+}

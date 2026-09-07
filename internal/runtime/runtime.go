@@ -90,9 +90,9 @@ type Engine struct {
 	BeforeTree func(session.TreePrep) session.TreeHookResult
 	AfterTree  func(oldLeaf, newLeaf string)
 
-	retryMu      sync.Mutex
-	retryCancel  context.CancelFunc
-	retryAttempt int
+	retryMu       sync.Mutex
+	retryCancel   context.CancelFunc
+	retryAttempt  int
 	compactCancel context.CancelFunc
 
 	extCommands       []extCommand
@@ -240,6 +240,10 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 			return inner(ctx, req, opt)
 		}
 	}
+	e.DispatchEvent(ctx, "session_start", map[string]any{
+		"sessionId": e.sessionID(),
+		"cwd":       e.Opts.Cwd,
+	})
 	return e, nil
 }
 
@@ -269,10 +273,11 @@ func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, u
 
 func (e *Engine) builtinRegistry() *tools.Registry {
 	return tools.NewBuiltins(tools.Options{
-		AutoResize:  e.Opts.Config.AutoResize(),
-		ShellPrefix: e.Opts.Config.ShellPrefix(),
-		Cwd:         e.Opts.Cwd,
-		EnvFn:       e.sessionToolEnv,
+		AutoResize:   e.Opts.Config.AutoResize(),
+		ShellPrefix:  e.Opts.Config.ShellPrefix(),
+		Cwd:          e.Opts.Cwd,
+		EnvFn:        e.sessionToolEnv,
+		ImageCapable: func() bool { return e.currentModel().SupportsImage() },
 	})
 }
 
@@ -342,16 +347,52 @@ func (e *Engine) emitSession(v any) {
 	}
 }
 
+func (e *Engine) recordEntry(entry *session.Entry, err error) {
+	if err == nil && entry != nil {
+		e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
+	}
+}
+
+func (e *Engine) currentModel() models.Model {
+	provider := e.Provider
+	id := e.Opts.Config.ResolvedModel()
+	if m, ok := models.Lookup(provider, id); ok {
+		return m
+	}
+	return models.Model{Provider: provider, ID: id}
+}
+
+func (e *Engine) sessionHook(event string) bool {
+	hook := e.DispatchEvent(context.Background(), event, map[string]any{
+		"sessionId": e.sessionID(),
+		"cwd":       e.Opts.Cwd,
+	})
+	return !hookCancelled(hook)
+}
+
+func (e *Engine) beginSessionChange(event string) bool {
+	if !e.sessionHook(event) {
+		return false
+	}
+	e.DispatchEvent(context.Background(), "session_shutdown", map[string]any{"sessionId": e.sessionID()})
+	return true
+}
+
+func (e *Engine) finishSessionChange() {
+	e.DispatchEvent(context.Background(), "session_start", map[string]any{
+		"sessionId": e.sessionID(),
+		"cwd":       e.Opts.Cwd,
+	})
+}
+
+func hookCancelled(m map[string]any) bool {
+	return asBool(m["cancel"]) || asBool(m["cancelled"])
+}
+
 func (e *Engine) setCompacting(v bool) {
 	e.mu.Lock()
 	e.compacting = v
 	e.mu.Unlock()
-}
-
-func (e *Engine) isCompacting() bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.compacting
 }
 
 func (e *Engine) pendingCount() int {
@@ -515,6 +556,7 @@ func compactPayload(r CompactResult) map[string]any {
 	}
 }
 
+// AbortCompact cancels an in-flight compact and any retry wait.
 func (e *Engine) AbortCompact() {
 	e.AbortRetry()
 	e.mu.Lock()
@@ -711,7 +753,14 @@ func (e *Engine) Executor() agent.ToolExecutor {
 			}
 			return reason, true
 		}
+		e.DispatchEvent(ctx, "tool_execution_start", map[string]any{
+			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
+		})
 		result, isErr := e.Tools.Execute(ctx, c.Name, c.Args)
+		e.DispatchEvent(ctx, "tool_execution_end", map[string]any{
+			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
+			"content": result, "isError": isErr,
+		})
 		post := e.DispatchEvent(ctx, "tool_result", map[string]any{
 			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
 			"content": result, "isError": isErr,
@@ -746,16 +795,19 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 	return r.Messages, r.Summary, err
 }
 
-// RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
-func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent) *agent.Stream {
-	e.mu.Lock()
-	e.stopAfterTools = false
-	e.mu.Unlock()
+type promptPrep struct {
+	User    string
+	Images  []ai.ImageContent
+	Handled bool
+}
 
-	if cmd, ok := slash.Parse(user); ok && e.DispatchCommand(cmd.Name, cmd.Rest) {
-		return agent.Finished(nil)
+func (e *Engine) preparePrompt(ctx context.Context, user string, images []ai.ImageContent) (promptPrep, error) {
+	if e.Compacting() {
+		return promptPrep{}, fmt.Errorf("Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.")
 	}
-
+	if cmd, ok := slash.Parse(user); ok && e.DispatchCommand(cmd.Name, cmd.Rest) {
+		return promptPrep{Handled: true}, nil
+	}
 	source := e.Opts.InputSource
 	if source == "" {
 		source = "cli"
@@ -765,7 +817,7 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 	})
 	action := asString(in["action"])
 	if action == "handled" {
-		return agent.Finished(nil)
+		return promptPrep{Handled: true}, nil
 	}
 	if action == "transform" {
 		if t := asString(in["text"]); t != "" {
@@ -775,7 +827,6 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 			images = imgs
 		}
 	}
-
 	if cmd, ok := slash.Parse(user); ok && !slash.IsBuiltin(cmd.Name) && !e.hasCommand(cmd.Name) {
 		if expanded, ok := prompt.ExpandTemplate(user, e.Templates); ok {
 			user = expanded
@@ -784,6 +835,26 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 				user = body
 			}
 		}
+	}
+	return promptPrep{User: user, Images: images}, nil
+}
+
+// RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
+func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent) *agent.Stream {
+	return e.runPrompt(ctx, history, user, images, true)
+}
+
+func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent, prepare bool) *agent.Stream {
+	e.mu.Lock()
+	e.stopAfterTools = false
+	e.mu.Unlock()
+
+	if prepare {
+		prep, err := e.preparePrompt(ctx, user, images)
+		if err != nil || prep.Handled {
+			return agent.Finished(nil)
+		}
+		user, images = prep.User, prep.Images
 	}
 
 	sys := e.System
@@ -826,6 +897,18 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 		SessionID:       e.sessionID(),
 		Provider:        e.Provider,
 		CacheRetention:  e.Opts.Config.CacheRetention(),
+		OnLifecycle: func(ev agent.Event) {
+			switch ev.Type {
+			case agent.EventAgentStart:
+				e.DispatchEvent(ctx, "agent_start", map[string]any{})
+			case agent.EventAgentEnd:
+				e.DispatchEvent(ctx, "agent_end", map[string]any{})
+			case agent.EventTurnStart:
+				e.DispatchEvent(ctx, "turn_start", map[string]any{})
+			case agent.EventTurnEnd:
+				e.DispatchEvent(ctx, "turn_end", map[string]any{})
+			}
+		},
 		PrepareNextTurn: func(ctx context.Context, msgs []ai.Message) []ai.Message {
 			out, _, err := e.MaybeCompact(ctx, msgs)
 			if err != nil {
@@ -850,7 +933,37 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 		e.persisted = 0
 		return
 	}
-	e.persisted = len(s.Entries())
+	e.persisted = len(session.RestoreAIMessages(session.ContextEntries(s)))
+}
+
+// NewSession starts a fresh session, emitting shutdown/start extension events.
+func (e *Engine) NewSession(parent string) bool {
+	if !e.beginSessionChange("session_before_switch") {
+		return false
+	}
+	if e.Opts.Session != nil {
+		e.Opts.Session = session.NewAt(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SessionDir)
+		if parent != "" {
+			e.Opts.Session.SetParentSession(parent)
+		}
+	}
+	e.persisted = 0
+	e.finishSessionChange()
+	return true
+}
+
+// SwitchSession opens a session file after extension hooks.
+func (e *Engine) SwitchSession(path string) (*session.Manager, error) {
+	m, err := session.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if !e.beginSessionChange("session_before_switch") {
+		return nil, nil
+	}
+	e.AdoptSession(m)
+	e.finishSessionChange()
+	return m, nil
 }
 
 // NavigateTree moves the session leaf. Callers must not invoke this while streaming.
@@ -876,6 +989,27 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 		CustomInstructions:  opts.CustomInstructions,
 		ReplaceInstructions: opts.ReplaceInstructions,
 		Label:               opts.Label,
+	}
+	extTree := e.DispatchEvent(ctx, "session_before_tree", map[string]any{
+		"targetId":           targetID,
+		"oldLeafId":          oldLeaf,
+		"commonAncestorId":   ancestor,
+		"userWantsSummary":   opts.Summarize,
+		"customInstructions": opts.CustomInstructions,
+		"label":              opts.Label,
+	})
+	if hookCancelled(extTree) {
+		return session.NavigateResult{Cancelled: true, OldLeafID: oldLeaf, NewLeafID: oldLeaf}, nil
+	}
+	if s := asString(extTree["customInstructions"]); s != "" {
+		opts.CustomInstructions = s
+	}
+	if s := asString(extTree["label"]); s != "" {
+		opts.Label = s
+	}
+	if s := asString(extTree["summary"]); s != "" {
+		opts.Summary = s
+		opts.FromHook = true
 	}
 	if e.BeforeTree != nil {
 		hook := e.BeforeTree(prep)
@@ -923,6 +1057,11 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 	if e.AfterTree != nil {
 		e.AfterTree(res.OldLeafID, res.NewLeafID)
 	}
+	e.DispatchEvent(ctx, "session_tree", map[string]any{
+		"oldLeafId": res.OldLeafID,
+		"newLeafId": res.NewLeafID,
+		"cancelled": res.Cancelled,
+	})
 	return res, nil
 }
 
@@ -946,6 +1085,27 @@ func (e *Engine) History() []ai.Message {
 // Reload rediscovers skills, extensions, and rebuilds the system prompt (/reload).
 func (e *Engine) Reload() {
 	ctx := context.Background()
+	if e.Opts.AgentDir != "" {
+		loaded, err := config.Load(e.Opts.AgentDir)
+		if err == nil {
+			if e.Opts.UserConfig != nil {
+				*e.Opts.UserConfig = loaded
+			}
+			e.Opts.Config = config.ApplyProject(loaded, e.Opts.Cwd, e.Opts.ProjectTrusted)
+			if e.Opts.CLIProvider != "" {
+				e.Opts.Config.Provider = e.Opts.CLIProvider
+				e.Opts.Config.DefaultProvider = e.Opts.CLIProvider
+				e.Provider = e.Opts.CLIProvider
+			}
+			if e.Opts.CLIModel != "" {
+				e.Opts.Config.Model = e.Opts.CLIModel
+				e.Opts.Config.DefaultModel = e.Opts.CLIModel
+			}
+			if e.Opts.CLIThinking != "" {
+				e.Opts.Config.Thinking = e.Opts.CLIThinking
+			}
+		}
+	}
 	rs := resolvePackageResources(ctx, e.Opts)
 	e.applyResolved(rs)
 
@@ -1022,7 +1182,7 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 			entry, err = e.Opts.Session.AppendMessage("user", payload)
 		}
 		if err == nil && entry != nil {
-			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
+			e.recordEntry(entry, nil)
 		}
 	}
 	e.persisted = len(msgs)
@@ -1065,9 +1225,48 @@ func (e *Engine) PersistEnabledModels(patterns *[]string) error {
 
 // CycleThinking steps thinking levels (shift+tab).
 func (e *Engine) CycleThinking() string {
-	next := models.NextThinkingLevel(e.Opts.Config.Thinking)
-	e.Opts.Config.Thinking = next
-	return next
+	level, _ := e.CycleThinkingOK()
+	return level
+}
+
+// CycleThinkingOK cycles thinking for reasoning models. ok is false when the
+// current model does not support thinking.
+func (e *Engine) CycleThinkingOK() (string, bool) {
+	m := e.currentModel()
+	if !m.SupportsReasoning() {
+		return e.Opts.Config.Thinking, false
+	}
+	cur := models.ClampThinking(e.Opts.Config.Thinking, m)
+	next := models.NextThinkingLevelIn(cur, m.ThinkingLevelsFor())
+	return e.SetThinkingLevel(next, false), true
+}
+
+// SetThinkingLevel clamps and applies a thinking level. persist writes settings.json.
+func (e *Engine) SetThinkingLevel(level string, persist bool) string {
+	m := e.currentModel()
+	effective := models.ClampThinking(level, m)
+	if !m.SupportsReasoning() {
+		effective = "off"
+	}
+	prev := e.Opts.Config.Thinking
+	e.Opts.Config.Thinking = effective
+	if persist {
+		e.Opts.Config.DefaultThinkingLevel = level
+		if e.Opts.UserConfig != nil {
+			e.Opts.UserConfig.Thinking = effective
+			e.Opts.UserConfig.DefaultThinkingLevel = level
+		}
+	}
+	if effective != prev {
+		if e.Opts.Session != nil {
+			entry, err := e.Opts.Session.AppendThinkingLevelChange(effective)
+			e.recordEntry(entry, err)
+		}
+		e.DispatchEvent(context.Background(), "thinking_level_select", map[string]any{
+			"level": effective, "previousLevel": prev,
+		})
+	}
+	return effective
 }
 
 // ApplyModel sets the session provider/model without writing settings.json.
@@ -1100,6 +1299,8 @@ func (e *Engine) RefreshSessionConfig() {
 }
 
 func (e *Engine) setModel(provider, id, thinking string, persist bool) {
+	prevProvider := e.Provider
+	prevID := e.Opts.Config.ResolvedModel()
 	if provider != "" {
 		e.Provider = provider
 		e.Opts.Config.Provider = provider
@@ -1127,16 +1328,21 @@ func (e *Engine) setModel(provider, id, thinking string, persist bool) {
 		}
 	}
 	if thinking != "" {
-		e.Opts.Config.Thinking = thinking
-		if persist {
-			e.Opts.Config.DefaultThinkingLevel = thinking
-			if e.Opts.UserConfig != nil {
-				e.Opts.UserConfig.Thinking = thinking
-				e.Opts.UserConfig.DefaultThinkingLevel = thinking
-			}
-		}
+		e.SetThinkingLevel(thinking, persist)
 	} else if lvl := e.Opts.Config.ModelThinkingLevel(e.Provider, e.Opts.Config.ResolvedModel()); lvl != "" {
-		e.Opts.Config.Thinking = lvl
+		e.SetThinkingLevel(lvl, persist)
+	} else {
+		e.SetThinkingLevel(e.Opts.Config.Thinking, persist)
+	}
+	if e.Provider != prevProvider || e.Opts.Config.ResolvedModel() != prevID {
+		if e.Opts.Session != nil {
+			entry, err := e.Opts.Session.AppendModelChange(e.Provider, e.Opts.Config.ResolvedModel())
+			e.recordEntry(entry, err)
+		}
+		e.DispatchEvent(context.Background(), "model_select", map[string]any{
+			"provider": e.Provider, "modelId": e.Opts.Config.ResolvedModel(),
+			"previousProvider": prevProvider, "previousModelId": prevID,
+		})
 	}
 }
 
@@ -1146,12 +1352,7 @@ func (e *Engine) PersistThinking(level string) error {
 	if level == "" {
 		return nil
 	}
-	e.Opts.Config.Thinking = level
-	e.Opts.Config.DefaultThinkingLevel = level
-	if e.Opts.UserConfig != nil {
-		e.Opts.UserConfig.Thinking = level
-		e.Opts.UserConfig.DefaultThinkingLevel = level
-	}
+	e.SetThinkingLevel(level, true)
 	if e.Opts.AgentDir == "" {
 		return nil
 	}
@@ -1207,6 +1408,10 @@ func printStopErr(last []agent.Msg) error {
 
 // PrintJSON writes NDJSON agent events (--mode json).
 func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string, images []ai.ImageContent) error {
+	return e.printJSON(ctx, out, history, user, images, true)
+}
+
+func (e *Engine) printJSON(ctx context.Context, out io.Writer, history []ai.Message, user string, images []ai.ImageContent, prepare bool) error {
 	enc := json.NewEncoder(out)
 	write := e.onSessionEvent
 	if write == nil {
@@ -1223,7 +1428,7 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	for {
 		var stream *agent.Stream
 		if !continued {
-			stream = e.RunPrompt(ctx, hist, user, images)
+			stream = e.runPrompt(ctx, hist, user, images, prepare)
 		} else {
 			stream = e.runLoop(ctx, hist, nil)
 		}

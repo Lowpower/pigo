@@ -21,6 +21,7 @@ type extWidgetMsg struct {
 	lines          []string
 }
 type extTitleMsg struct{ title string }
+type extEditorTextMsg struct{ text string }
 type extUIReqMsg struct {
 	method string
 	args   map[string]any
@@ -75,6 +76,10 @@ func (m *Model) attachExtensions() {
 				title, _ = args["text"].(string)
 			}
 			hub.send(extTitleMsg{title: title})
+			return map[string]any{}
+		case "set_editor_text":
+			text, _ := args["text"].(string)
+			hub.send(extEditorTextMsg{text: text})
 			return map[string]any{}
 		}
 		if method != "select" && method != "confirm" && method != "input" {
@@ -152,6 +157,9 @@ func (m Model) handleExtMsg(msg tea.Msg) (Model, bool) {
 		return m, true
 	case extTitleMsg:
 		m.extTitle = x.title
+		return m, true
+	case extEditorTextMsg:
+		m.editor.SetValue(x.text)
 		return m, true
 	case extUIReqMsg:
 		if m.extUI.active {

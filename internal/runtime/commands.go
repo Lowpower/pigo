@@ -48,7 +48,7 @@ func (e *Engine) SlashCommands() []slash.Command {
 	defer e.mu.Unlock()
 	out := make([]slash.Command, 0, len(e.extCommands))
 	for _, c := range e.extCommands {
-		out = append(out, slash.Command{Name: c.Name, Description: c.Description})
+		out = append(out, slash.Command{Name: c.Name, Description: c.Description, Source: "extension", Path: c.Host.Name()})
 	}
 	return out
 }

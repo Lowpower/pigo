@@ -170,6 +170,10 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 	sandbox.SetAgentDir(agentDir)
 	sandbox.SetNoSandbox(f.noSandbox)
+	if f.thinking != "" && !models.IsThinkingLevel(f.thinking) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: Invalid thinking level %q. Valid values: %s\n", f.thinking, strings.Join(models.ThinkingLevels, ", "))
+		f.thinking = ""
+	}
 	fileCfg, err := config.Load(agentDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)

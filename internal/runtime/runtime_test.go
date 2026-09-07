@@ -1040,3 +1040,82 @@ func TestRPCClearQueue(t *testing.T) {
 		t.Fatalf("pending=%d", n)
 	}
 }
+
+func TestRPCPromptRejectedDuringCompaction(t *testing.T) {
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.setCompacting(true)
+	in := strings.NewReader(`{"type":"prompt","message":"hi"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"success":false`) {
+		t.Fatalf("expected failure: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "compaction") {
+		t.Fatalf("missing compaction error: %s", out.String())
+	}
+}
+
+func TestSetThinkingLevelRecordsSession(t *testing.T) {
+	sess := session.New(t.TempDir(), t.TempDir())
+	e := &Engine{Opts: Options{Session: sess, Config: config.Config{Thinking: "off"}}}
+	if got := e.SetThinkingLevel("high", false); got != "high" {
+		t.Fatalf("got %s", got)
+	}
+	found := false
+	for _, en := range sess.Entries() {
+		if en.Type == "thinking_level_change" && en.ThinkingLevel == "high" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("entries=%+v", sess.Entries())
+	}
+}
+
+func TestRPCGetAvailableThinkingLevelsOmitsUnmappedXHigh(t *testing.T) {
+	e := &Engine{
+		Provider: "anthropic",
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	in := strings.NewReader(`{"type":"get_available_thinking_levels"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if strings.Contains(s, `"xhigh"`) || strings.Contains(s, `"max"`) {
+		t.Fatalf("xhigh/max should be omitted: %s", s)
+	}
+	if !strings.Contains(s, `"high"`) {
+		t.Fatalf("missing high: %s", s)
+	}
+}
+
+func TestAdoptSessionPersistedCountsAIMessages(t *testing.T) {
+	sess := session.New(t.TempDir(), t.TempDir())
+	if _, err := sess.AppendModelChange("openai", "gpt-4o"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"}); err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{}
+	e.AdoptSession(sess)
+	if e.persisted != 2 {
+		t.Fatalf("persisted=%d want 2", e.persisted)
+	}
+}

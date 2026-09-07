@@ -57,6 +57,8 @@ type Config struct {
 	// PrepareNextTurn may rewrite the transcript after tool results, before
 	// the next provider call (threshold compaction).
 	PrepareNextTurn func(ctx context.Context, msgs []ai.Message) []ai.Message
+	// OnLifecycle is invoked after agent/turn/tool lifecycle events are pushed.
+	OnLifecycle func(Event)
 }
 
 // Run drives the agent loop and returns a stream of AgentEvents. The loop runs
@@ -79,7 +81,16 @@ func Run(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolExecut
 }
 
 func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolExecutor, cfg Config, s *Stream) {
-	emit := func(ev Event) bool { return s.push(ctx, ev) }
+	emit := func(ev Event) bool {
+		ok := s.push(ctx, ev)
+		if ok && cfg.OnLifecycle != nil {
+			switch ev.Type {
+			case EventAgentStart, EventAgentEnd, EventTurnStart, EventTurnEnd, EventToolStart, EventToolEnd:
+				cfg.OnLifecycle(ev)
+			}
+		}
+		return ok
+	}
 
 	// Seed the transcript from the request's messages, preserving assistant
 	// tool-call blocks and toolResult pairing.
