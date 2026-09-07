@@ -367,3 +367,34 @@ func TestResolveUserAgentsOverrideRelativeToAgentsBase(t *testing.T) {
 		t.Fatalf("bar should stay enabled: %+v", r)
 	}
 }
+
+func TestResolveProjectAgentsOverrideRelativeToAgentsBase(t *testing.T) {
+	isolateHome(t)
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foo := writeSkillMD(t, filepath.Join(cwd, ".agents", "skills", "foo"), "# foo\n")
+	bar := writeSkillMD(t, filepath.Join(cwd, ".agents", "skills", "bar"), "# bar\n")
+
+	m, err := Open(cwd, agent, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.AutoInstall = false
+	m.Project.Skills = []string{"-skills/foo"}
+	rs, err := m.Resolve(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := findSkill(rs, foo); !ok || r.Enabled {
+		t.Fatalf("project foo should be disabled: %+v", r)
+	}
+	if r, ok := findSkill(rs, bar); !ok || !r.Enabled {
+		t.Fatalf("project bar should stay enabled: %+v", r)
+	}
+	if r, _ := findSkill(rs, foo); r.BaseDir != filepath.Join(cwd, ".agents") {
+		t.Fatalf("project baseDir=%q", r.BaseDir)
+	}
+}
