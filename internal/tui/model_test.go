@@ -22,7 +22,8 @@ import (
 )
 
 func testCfg() config.Config {
-	return config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Theme: "default"}
+	z := 0
+	return config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Theme: "default", OutputPad: &z}
 }
 
 func send(m tea.Model, msg tea.Msg) Model {
@@ -658,5 +659,51 @@ func TestSkillCommandsDisabled(t *testing.T) {
 	}
 	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "not implemented") {
 		t.Fatalf("transcript=%+v", m.transcript)
+	}
+}
+
+func TestCopyDequeueAndThinkingPicker(t *testing.T) {
+	m := New(testCfg())
+	m.history = []ai.Message{{Role: ai.RoleAssistant, Content: "copy-me"}}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	if m.clipOSC == "" || !strings.Contains(m.clipOSC, "\x1b]52;c;") {
+		t.Fatalf("clipOSC=%q", m.clipOSC)
+	}
+
+	m.queued = []queuedPrompt{{text: "queued-text"}}
+	m = send(m, tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	if !strings.Contains(m.editor.Value(), "queued-text") {
+		t.Fatalf("editor=%q", m.editor.Value())
+	}
+
+	m.editor.SetValue("/thinking")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.thinkingPickerActive() {
+		t.Fatal("expected thinking picker")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.thinkingPickerActive() {
+		t.Fatal("picker should close on enter")
+	}
+	if m.cfg.Thinking == "" {
+		t.Fatal("thinking should be set")
+	}
+}
+
+func TestAltScreenWheelScroll(t *testing.T) {
+	m := New(testCfg())
+	m.altScreen = true
+	m.height = 10
+	m = send(m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	if m.scrollOff != 1 {
+		t.Fatalf("wheel up off=%d", m.scrollOff)
+	}
+	m = send(m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress, Alt: true})
+	if m.scrollOff != 1+5 {
+		t.Fatalf("alt wheel off=%d", m.scrollOff)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnd})
+	if m.scrollOff != 0 {
+		t.Fatalf("end should jump to latest, off=%d", m.scrollOff)
 	}
 }

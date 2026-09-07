@@ -3,6 +3,7 @@ package tui
 import (
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -40,8 +41,18 @@ func (m Model) withLayout(s string) string {
 	if n := m.cfg.OutputPadN(); n > 0 {
 		s = padLines(s, n)
 	}
-	if m.altScreen && m.cfg.ScrollbarEnabled() && m.height > 0 {
-		s = clipWithScrollbar(s, m.height)
+	if m.altScreen && m.height > 0 {
+		if m.cfg.ScrollbarEnabled() {
+			s = clipWithScrollbar(s, m.height, m.scrollOff)
+		} else {
+			s = clipWindow(s, m.height, m.scrollOff)
+		}
+		if m.scrollOff > 0 {
+			s = withJumpLatest(s)
+		}
+		if m.searchActive {
+			s = withSearchBar(s, m.searchQuery, m.searchN, len(m.searchHits))
+		}
 	}
 	if m.cfg.TerminalProgress() {
 		s = progressOSC(m.running || m.bashRunning) + s
@@ -70,23 +81,74 @@ func progressOSC(running bool) string {
 	return "\x1b]9;4;0\x1b\\"
 }
 
-func clipWithScrollbar(s string, height int) string {
-	lines := strings.Split(s, "\n")
-	total := len(lines)
+func clipWindow(s string, height, offsetFromBottom int) string {
+	lines, _, total := clipWindowLines(s, height, offsetFromBottom)
 	if total <= height {
 		return s
 	}
-	start := total - height
-	lines = lines[start:]
-	thumb := (start + height - 1) * (len(lines) - 1) / max(1, total-1)
+	return strings.Join(lines, "\n")
+}
+
+func clipWindowLines(s string, height, offsetFromBottom int) (vis []string, start, total int) {
+	lines := strings.Split(s, "\n")
+	total = len(lines)
+	if total <= height {
+		return lines, 0, total
+	}
+	maxOff := total - height
+	if offsetFromBottom < 0 {
+		offsetFromBottom = 0
+	}
+	if offsetFromBottom > maxOff {
+		offsetFromBottom = maxOff
+	}
+	start = total - height - offsetFromBottom
+	return lines[start : start+height], start, total
+}
+
+func clipWithScrollbar(s string, height, offsetFromBottom int) string {
+	vis, start, total := clipWindowLines(s, height, offsetFromBottom)
+	if total <= height {
+		return s
+	}
+	thumb := start * (len(vis) - 1) / max(1, total-1)
 	if thumb < 0 {
 		thumb = 0
 	}
-	if thumb >= len(lines) {
-		thumb = len(lines) - 1
+	if thumb >= len(vis) {
+		thumb = len(vis) - 1
 	}
-	lines[thumb] += " ▐"
+	vis[thumb] += " ▐"
+	return strings.Join(vis, "\n")
+}
+
+func withJumpLatest(s string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) == 0 {
+		return "↓ Jump to latest"
+	}
+	lines[len(lines)-1] = "↓ Jump to latest"
 	return strings.Join(lines, "\n")
+}
+
+func withSearchBar(s, query string, idx, n int) string {
+	label := "search: " + query
+	if n > 0 {
+		label += "  " + itoa(idx+1) + "/" + itoa(n)
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) == 0 {
+		return label
+	}
+	if len(lines) == 1 {
+		return lines[0] + "\n" + label
+	}
+	lines[len(lines)-1] = label
+	return strings.Join(lines, "\n")
+}
+
+func itoa(n int) string {
+	return strconv.Itoa(n)
 }
 
 func indentMarkdownCodeBlocks(src, indent string) string {

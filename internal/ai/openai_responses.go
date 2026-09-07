@@ -65,6 +65,16 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 		if key := clampPromptCacheKey(opts.SessionID); key != "" {
 			params.PromptCacheKey = param.NewOpt(key)
 		}
+		extra := map[string]any{}
+		if promptCacheRetention24h(opts) {
+			extra["prompt_cache_retention"] = "24h"
+		}
+		if cacheOpts := promptCacheOptions(opts); cacheOpts != nil {
+			extra["prompt_cache_options"] = cacheOpts
+		}
+		if len(extra) > 0 {
+			params.SetExtraFields(extra)
+		}
 		if effort := reasoningEffort(opts); effort != "" {
 			params.Reasoning = shared.ReasoningParam{
 				Effort:  shared.ReasoningEffort(effort),
@@ -78,7 +88,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 				ft := responses.FunctionToolParam{
 					Name:       t.Name,
 					Parameters: t.Parameters,
-					Strict:     param.NewOpt(false),
+					Strict:     param.NewOpt(toolStrict(t)),
 				}
 				if t.Description != "" {
 					ft.Description = param.NewOpt(t.Description)

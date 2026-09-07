@@ -45,11 +45,18 @@ func (m Message) Text() string {
 	return m.Content
 }
 
+// ConstrainedSampling asks providers to constrain tool-argument decoding.
+type ConstrainedSampling struct {
+	Type   string `json:"type,omitempty"`
+	Strict string `json:"strict,omitempty"`
+}
+
 // Tool is a provider-neutral tool definition (JSON Schema parameters).
 type Tool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
+	Name                string                `json:"name"`
+	Description         string                `json:"description"`
+	Parameters          map[string]any        `json:"parameters"`
+	ConstrainedSampling *ConstrainedSampling  `json:"constrainedSampling,omitempty"`
 }
 
 // Context is the request context passed to a StreamFn (system prompt, messages,
@@ -69,6 +76,7 @@ type Options struct {
 	SessionID      string // coding session id; Codex reuses a WebSocket per session
 	CacheRetention string // none|short|long; forwarded on pi-messages
 	ToolChoice     string // auto|none|required; forwarded on pi-messages
+	Provider       string // catalog provider id for model lookup
 }
 
 // StreamFn is the spine abstraction: given a request context it returns a stream

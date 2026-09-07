@@ -54,6 +54,10 @@ type Entry struct {
 	Display          *bool           `json:"display,omitempty"`
 	Data             json.RawMessage `json:"data,omitempty"`
 
+	Provider      string `json:"provider,omitempty"`
+	ModelID       string `json:"modelId,omitempty"`
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
+
 	// role is used only for the buffer-until-assistant flush rule; not serialized.
 	role string
 }
@@ -101,6 +105,26 @@ func New(cwd, agentDir string) *Manager {
 		file:     filepath.Join(dir, fmt.Sprintf("%s_%s.jsonl", fileTimestamp(ts), id)),
 		persist:  true,
 	}
+}
+
+// NewWithID starts a session with a caller-supplied id.
+func NewWithID(cwd, agentDir, id, sessionDir string) *Manager {
+	m := NewAt(cwd, agentDir, sessionDir)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return m
+	}
+	m.id = id
+	m.header.ID = id
+	m.file = filepath.Join(m.dir, fmt.Sprintf("%s_%s.jsonl", fileTimestamp(m.header.Timestamp), id))
+	return m
+}
+
+// InMemory returns a non-persisted session, optionally with a fixed id.
+func InMemory(cwd, id string) *Manager {
+	m := NewWithID(cwd, "", id, "")
+	m.persist = false
+	return m
 }
 
 // NewAt starts a session stored in sessionDir (empty means the default cwd encoding).

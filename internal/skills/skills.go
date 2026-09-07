@@ -177,8 +177,18 @@ func parseYAMLMap(s string) map[string]string {
 }
 
 // FormatForPrompt renders the <available_skills> XML block.
-func FormatForPrompt(skills []Skill) string {
+// fileReadTool is "read" (default) or "bash".
+func FormatForPrompt(skills []Skill, fileReadTool ...string) string {
+	tool := "read"
+	if len(fileReadTool) > 0 && fileReadTool[0] != "" {
+		tool = fileReadTool[0]
+	}
 	var b strings.Builder
+	if tool == "bash" {
+		b.WriteString("Use bash to load a skill's file when the task matches its description.\n")
+	} else {
+		b.WriteString("Use the read tool to load a skill's file when the task matches its description.\n")
+	}
 	b.WriteString("<available_skills>\n")
 	for _, s := range skills {
 		if s.DisableLLM {

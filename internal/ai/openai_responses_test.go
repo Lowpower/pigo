@@ -72,6 +72,33 @@ func TestOpenAIResponsesClientHTTP(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesPromptCacheOptions(t *testing.T) {
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &payload)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(responsesFixture))
+	}))
+	defer srv.Close()
+
+	client := &OpenAIResponsesClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Provider: "openai", Model: "gpt-6-astra", CacheRetention: "long", SessionID: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	opts, _ := payload["prompt_cache_options"].(map[string]any)
+	if opts["ttl"] != "30m" {
+		t.Fatalf("prompt_cache_options = %#v payload=%#v", opts, payload)
+	}
+	if _, ok := payload["prompt_cache_retention"]; ok {
+		t.Fatalf("should not send 24h retention with explicit cache mode: %#v", payload)
+	}
+}
+
 func TestStreamForAzureOpenAIResponses(t *testing.T) {
 	t.Setenv("AZURE_OPENAI_API_VERSION", "")
 	t.Setenv("AZURE_OPENAI_DEPLOYMENT_NAME_MAP", "gpt-4=my-dep")

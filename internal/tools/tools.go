@@ -39,8 +39,12 @@ func NewRegistry(ts ...Tool) *Registry {
 
 // Options configures built-in tool runtime behaviour.
 type Options struct {
-	AutoResize  bool
-	ShellPrefix string
+	AutoResize   bool
+	ShellPrefix  string
+	Cwd          string
+	Env          map[string]string
+	EnvFn        func() map[string]string
+	ImageCapable func() bool
 }
 
 // Default returns a registry with the built-in tools. powershell is Windows-only.
@@ -51,15 +55,15 @@ func Default() *Registry {
 // NewBuiltins builds the built-in tool set with runtime options.
 func NewBuiltins(opt Options) *Registry {
 	ts := []Tool{
-		readTool{autoResize: opt.AutoResize},
-		writeTool{},
-		editTool{},
-		bashTool{prefix: opt.ShellPrefix},
-		grepTool{},
-		findTool{},
-		listTool{},
+		readTool{autoResize: opt.AutoResize, cwd: opt.Cwd, imageCapable: opt.ImageCapable},
+		writeTool{cwd: opt.Cwd},
+		editTool{cwd: opt.Cwd},
+		bashTool{prefix: opt.ShellPrefix, cwd: opt.Cwd, env: opt.Env, envFn: opt.EnvFn},
+		grepTool{cwd: opt.Cwd},
+		findTool{cwd: opt.Cwd},
+		listTool{cwd: opt.Cwd},
 	}
-	ts = append(ts, extraPlatformTools()...)
+	ts = append(ts, extraPlatformTools(opt)...)
 	return NewRegistry(ts...)
 }
 
@@ -67,7 +71,12 @@ func NewBuiltins(opt Options) *Registry {
 func (r *Registry) AITools() []ai.Tool {
 	out := make([]ai.Tool, 0, len(r.order))
 	for _, t := range r.order {
-		out = append(out, ai.Tool{Name: t.Name(), Description: t.Description(), Parameters: t.Schema()})
+		out = append(out, ai.Tool{
+			Name:                t.Name(),
+			Description:         t.Description(),
+			Parameters:          t.Schema(),
+			ConstrainedSampling: preferConstrainedSampling(t.Name()),
+		})
 	}
 	return out
 }

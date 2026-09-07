@@ -1002,3 +1002,120 @@ func TestPrintJSONWritesSessionHeader(t *testing.T) {
 		t.Fatalf("header=%v", header)
 	}
 }
+
+func TestRPCClearQueue(t *testing.T) {
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.PushSteer("steer-me")
+	e.PushFollow("follow-me")
+	in := strings.NewReader(`{"id":"c1","type":"clear_queue"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	rows := decodeRPCRows(t, out.String())
+	var got map[string]any
+	for _, r := range rows {
+		if r["type"] == "response" && r["command"] == "clear_queue" {
+			got = r
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("missing clear_queue response in %s", out.String())
+	}
+	data, _ := got["data"].(map[string]any)
+	steer, _ := data["steering"].([]any)
+	follow, _ := data["followUp"].([]any)
+	if len(steer) != 1 || steer[0] != "steer-me" || len(follow) != 1 || follow[0] != "follow-me" {
+		t.Fatalf("data=%v", data)
+	}
+	if n := e.pendingCount(); n != 0 {
+		t.Fatalf("pending=%d", n)
+	}
+}
+
+func TestRPCPromptRejectedDuringCompaction(t *testing.T) {
+	e := &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.setCompacting(true)
+	in := strings.NewReader(`{"type":"prompt","message":"hi"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"success":false`) {
+		t.Fatalf("expected failure: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "compaction") {
+		t.Fatalf("missing compaction error: %s", out.String())
+	}
+}
+
+func TestSetThinkingLevelRecordsSession(t *testing.T) {
+	sess := session.New(t.TempDir(), t.TempDir())
+	e := &Engine{Opts: Options{Session: sess, Config: config.Config{Thinking: "off"}}}
+	if got := e.SetThinkingLevel("high", false); got != "high" {
+		t.Fatalf("got %s", got)
+	}
+	found := false
+	for _, en := range sess.Entries() {
+		if en.Type == "thinking_level_change" && en.ThinkingLevel == "high" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("entries=%+v", sess.Entries())
+	}
+}
+
+func TestRPCGetAvailableThinkingLevelsOmitsUnmappedXHigh(t *testing.T) {
+	e := &Engine{
+		Provider: "anthropic",
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	in := strings.NewReader(`{"type":"get_available_thinking_levels"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if strings.Contains(s, `"xhigh"`) || strings.Contains(s, `"max"`) {
+		t.Fatalf("xhigh/max should be omitted: %s", s)
+	}
+	if !strings.Contains(s, `"high"`) {
+		t.Fatalf("missing high: %s", s)
+	}
+}
+
+func TestAdoptSessionPersistedCountsAIMessages(t *testing.T) {
+	sess := session.New(t.TempDir(), t.TempDir())
+	if _, err := sess.AppendModelChange("openai", "gpt-4o"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"}); err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{}
+	e.AdoptSession(sess)
+	if e.persisted != 2 {
+		t.Fatalf("persisted=%d want 2", e.persisted)
+	}
+}

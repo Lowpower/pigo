@@ -41,8 +41,8 @@ func TestVersionFlag(t *testing.T) {
 }
 
 func TestExpandShortFlags(t *testing.T) {
-	got := expandShortFlags([]string{"-nt", "-ns", "-nc", "-p", "hi", "--", "-nt"})
-	want := []string{"--no-tools", "--no-skills", "--no-context-files", "-p", "hi", "--", "-nt"}
+	got := expandShortFlags([]string{"-nt", "-ns", "-nc", "-np", "-p", "hi", "--", "-nt"})
+	want := []string{"--no-tools", "--no-skills", "--no-context-files", "--no-prompt-templates", "-p", "hi", "--", "-nt"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("got %v want %v", got, want)
 	}
@@ -231,5 +231,20 @@ func TestResolveSessionDirOrder(t *testing.T) {
 	}
 	if got := resolveSessionDir("", "", ""); got != "/from-env" {
 		t.Fatalf("env=%q", got)
+	}
+}
+
+func TestInvalidThinkingWarns(t *testing.T) {
+	clearCatalogEnvs(t)
+	cmd := newRootCmd()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"--thinking", "nope", "--list-models", "--offline", "--config-dir", t.TempDir()})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errBuf.String(), "Invalid thinking level") {
+		t.Fatalf("stderr=%q stdout=%q", errBuf.String(), out.String())
 	}
 }

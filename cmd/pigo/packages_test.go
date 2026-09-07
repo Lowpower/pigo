@@ -54,27 +54,17 @@ func TestPackageInstallListRemove(t *testing.T) {
 
 func TestUpdateSelfNotImplemented(t *testing.T) {
 	t.Setenv("PIGO_CODING_AGENT_DIR", t.TempDir())
+	t.Setenv("PIGO_OFFLINE", "1")
 	root := newRootCmd()
 	var out bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&out)
-	root.SetArgs([]string{"update"})
-	err := root.Execute()
-	if err == nil || !strings.Contains(err.Error(), "self-update") {
-		t.Fatalf("err=%v out=%s", err, out.String())
-	}
-	if !strings.Contains(out.String(), "Extensions are skipped") {
-		t.Fatalf("missing skip note: %s", out.String())
-	}
-
-	root = newRootCmd()
-	out.Reset()
-	root.SetOut(&out)
-	root.SetErr(&out)
 	root.SetArgs([]string{"update", "--models"})
-	err = root.Execute()
-	if err == nil || !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("models err=%v", err)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("models err=%v out=%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "skipped model catalog") {
+		t.Fatalf("models: %s", out.String())
 	}
 }
 

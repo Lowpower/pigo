@@ -210,6 +210,85 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.treeAction(msg, "app.tree.foldOrUp", "ctrl+left", "alt+left") {
+		m.tree.foldOrUp()
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.unfoldOrDown", "ctrl+right", "alt+right") {
+		m.tree.unfoldOrDown()
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.editLabel", "shift+l") {
+		m.overlay = overlayTreeLabel
+		n, ok := m.tree.current()
+		if ok {
+			m.tree.labelBuf = n.node.Label
+		}
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.toggleLabelTimestamp", "shift+t") {
+		m.tree.showLabelTime = !m.tree.showLabelTime
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.filter.default", "ctrl+d") {
+		m.tree.filter = filterDefault
+		m.tree.folded = map[string]bool{}
+		m.tree.rebuild()
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.filter.noTools", "ctrl+t") {
+		if m.tree.filter == filterNoTools {
+			m.tree.filter = filterDefault
+		} else {
+			m.tree.filter = filterNoTools
+		}
+		m.tree.folded = map[string]bool{}
+		m.tree.rebuild()
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.filter.userOnly", "ctrl+u") {
+		if m.tree.filter == filterUserOnly {
+			m.tree.filter = filterDefault
+		} else {
+			m.tree.filter = filterUserOnly
+		}
+		m.tree.folded = map[string]bool{}
+		m.tree.rebuild()
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.filter.labeledOnly", "ctrl+l") {
+		if m.tree.filter == filterLabeledOnly {
+			m.tree.filter = filterDefault
+		} else {
+			m.tree.filter = filterLabeledOnly
+		}
+		m.tree.folded = map[string]bool{}
+		m.tree.rebuild()
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.filter.all", "ctrl+a") {
+		if m.tree.filter == filterAll {
+			m.tree.filter = filterDefault
+		} else {
+			m.tree.filter = filterAll
+		}
+		m.tree.folded = map[string]bool{}
+		m.tree.rebuild()
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.filter.cycleForward", "ctrl+o") {
+		m.tree.filter = cycleFilter(m.tree.filter, false)
+		m.tree.folded = map[string]bool{}
+		m.tree.rebuild()
+		return m, nil
+	}
+	if m.treeAction(msg, "app.tree.filter.cycleBackward", "shift+ctrl+o", "ctrl+shift+o") {
+		m.tree.filter = cycleFilter(m.tree.filter, true)
+		m.tree.folded = map[string]bool{}
+		m.tree.rebuild()
+		return m, nil
+	}
+
 	switch key {
 	case "up":
 		if len(m.tree.vis) > 0 {
@@ -225,10 +304,6 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.tree.vis) > 0 {
 			m.tree.cursor = min(len(m.tree.vis)-1, m.tree.cursor+max(5, m.height/2))
 		}
-	case "ctrl+left", "alt+left":
-		m.tree.foldOrUp()
-	case "ctrl+right", "alt+right":
-		m.tree.unfoldOrDown()
 	case "ctrl+x":
 		return m.copyTreeSelection()
 	case "enter":
@@ -256,58 +331,6 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.overlay = overlayNone
 		return m, nil
-	case "ctrl+d":
-		m.tree.filter = filterDefault
-		m.tree.folded = map[string]bool{}
-		m.tree.rebuild()
-	case "ctrl+t":
-		if m.tree.filter == filterNoTools {
-			m.tree.filter = filterDefault
-		} else {
-			m.tree.filter = filterNoTools
-		}
-		m.tree.folded = map[string]bool{}
-		m.tree.rebuild()
-	case "ctrl+u":
-		if m.tree.filter == filterUserOnly {
-			m.tree.filter = filterDefault
-		} else {
-			m.tree.filter = filterUserOnly
-		}
-		m.tree.folded = map[string]bool{}
-		m.tree.rebuild()
-	case "ctrl+l":
-		if m.tree.filter == filterLabeledOnly {
-			m.tree.filter = filterDefault
-		} else {
-			m.tree.filter = filterLabeledOnly
-		}
-		m.tree.folded = map[string]bool{}
-		m.tree.rebuild()
-	case "ctrl+a":
-		if m.tree.filter == filterAll {
-			m.tree.filter = filterDefault
-		} else {
-			m.tree.filter = filterAll
-		}
-		m.tree.folded = map[string]bool{}
-		m.tree.rebuild()
-	case "ctrl+o":
-		m.tree.filter = cycleFilter(m.tree.filter, false)
-		m.tree.folded = map[string]bool{}
-		m.tree.rebuild()
-	case "shift+ctrl+o", "ctrl+shift+o":
-		m.tree.filter = cycleFilter(m.tree.filter, true)
-		m.tree.folded = map[string]bool{}
-		m.tree.rebuild()
-	case "shift+l":
-		m.overlay = overlayTreeLabel
-		n, ok := m.tree.current()
-		if ok {
-			m.tree.labelBuf = n.node.Label
-		}
-	case "shift+t":
-		m.tree.showLabelTime = !m.tree.showLabelTime
 	case "backspace":
 		if m.tree.query != "" {
 			r := []rune(m.tree.query)
@@ -323,6 +346,19 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m Model) treeAction(msg tea.KeyMsg, action string, legacy ...string) bool {
+	if m.keys != nil {
+		return m.keyIs(msg, action)
+	}
+	k := msg.String()
+	for _, l := range legacy {
+		if k == l {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *treeOverlay) foldOrUp() {

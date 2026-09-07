@@ -13,6 +13,8 @@ type Command struct {
 	Aliases     []string
 	Description string
 	Rest        string // arguments after the command name
+	Source      string
+	Path        string
 }
 
 // Parse splits a line that starts with '/' into a command. ok is false if the
@@ -83,7 +85,7 @@ func Builtins() []Command {
 		{Name: "new", Description: "start a new session"},
 		{Name: "compact", Description: "manually compact the session context"},
 		{Name: "resume", Description: "resume a session (opens selector UI)"},
-		{Name: "reload", Description: "reload keybindings, skills, prompts, themes, and context files"},
+		{Name: "reload", Description: "reload keybindings, skills, prompts, themes, settings, and context files"},
 		{Name: "quit", Aliases: []string{"exit", "q"}, Description: "quit pigo"},
 		{Name: "provider", Description: "show or set the provider"},
 		{Name: "theme", Description: "show or set the theme"},

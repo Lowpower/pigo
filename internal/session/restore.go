@@ -174,3 +174,24 @@ func FindByIDAt(cwd, agentDir, id, sessionDir string) (*Manager, error) {
 	}
 	return nil, os.ErrNotExist
 }
+
+// FindExactIDAt opens the session whose header id equals id exactly.
+func FindExactIDAt(cwd, agentDir, id, sessionDir string) (*Manager, error) {
+	if id == "" {
+		return nil, os.ErrNotExist
+	}
+	paths, err := listSessionFilesAt(cwd, agentDir, sessionDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, pth := range paths {
+		h, _, err := Load(pth)
+		if err != nil {
+			continue
+		}
+		if h.ID == id {
+			return Open(pth)
+		}
+	}
+	return nil, os.ErrNotExist
+}

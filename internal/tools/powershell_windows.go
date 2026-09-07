@@ -5,14 +5,16 @@ package tools
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/Lowpower/pigo/internal/shell"
 )
 
 const powershellUTF8 = "try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}\n"
 
-type powershellTool struct{}
+type powershellTool struct {
+	cwd string
+	env map[string]string
+}
 
 type powershellParams struct {
 	Command string `json:"command" jsonschema:"description=PowerShell command to execute"`
@@ -35,10 +37,11 @@ func (powershellTool) Execute(ctx context.Context, args map[string]any) (string,
 	if p.Command == "" {
 		return "command is required", true
 	}
-	runCtx := ctx
-	if p.Timeout > 0 {
-		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, time.Duration(p.Timeout)*time.Second)
+	runCtx, cancel, errMsg := timeoutContext(ctx, p.Timeout)
+	if errMsg != "" {
+		return errMsg, true
+	}
+	if cancel != nil {
 		defer cancel()
 	}
 	cfg, err := shell.GetPowerShellConfig()
@@ -46,7 +49,13 @@ func (powershellTool) Execute(ctx context.Context, args map[string]any) (string,
 		return err.Error(), true
 	}
 	cmd := shell.CommandContext(runCtx, cfg, powershellUTF8+p.Command)
+	if t.cwd != "" {
+		cmd.Dir = t.cwd
+	}
+	applyExtraEnv(cmd, t.env)
 	return runStreamed(runCtx, cmd, p.Timeout, "pigo-powershell")
 }
 
-func extraPlatformTools() []Tool { return []Tool{powershellTool{}} }
+func extraPlatformTools(opt Options) []Tool {
+	return []Tool{powershellTool{cwd: opt.Cwd, env: opt.Env}}
+}

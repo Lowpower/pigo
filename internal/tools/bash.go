@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"time"
 
 	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/shell"
@@ -14,6 +13,9 @@ import (
 // bashTool executes a shell command via shell.GetConfig (Git Bash / PATH / WSL).
 type bashTool struct {
 	prefix string
+	cwd    string
+	env    map[string]string
+	envFn  func() map[string]string
 }
 
 type bashParams struct {
@@ -38,10 +40,11 @@ func (t bashTool) Execute(ctx context.Context, args map[string]any) (string, boo
 		return "command is required", true
 	}
 
-	runCtx := ctx
-	if p.Timeout > 0 {
-		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, time.Duration(p.Timeout)*time.Second)
+	runCtx, cancel, errMsg := timeoutContext(ctx, p.Timeout)
+	if errMsg != "" {
+		return errMsg, true
+	}
+	if cancel != nil {
 		defer cancel()
 	}
 
@@ -50,14 +53,18 @@ func (t bashTool) Execute(ctx context.Context, args map[string]any) (string, boo
 		command = t.prefix + "\n" + command
 	}
 
-	cmd, err := bashCmd(runCtx, command, "")
+	extra := t.env
+	if t.envFn != nil {
+		extra = t.envFn()
+	}
+	cmd, err := bashCmd(runCtx, command, t.cwd, extra)
 	if err != nil {
 		return err.Error(), true
 	}
 	return runStreamed(runCtx, cmd, p.Timeout, "pigo-bash")
 }
 
-func bashCmd(ctx context.Context, command, dir string) (*exec.Cmd, error) {
+func bashCmd(ctx context.Context, command, dir string, extra map[string]string) (*exec.Cmd, error) {
 	cfg, err := shell.GetConfig()
 	if err != nil {
 		return nil, err
@@ -77,5 +84,6 @@ func bashCmd(ctx context.Context, command, dir string) (*exec.Cmd, error) {
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	applyExtraEnv(cmd, extra)
 	return cmd, nil
 }

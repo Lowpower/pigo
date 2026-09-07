@@ -24,21 +24,44 @@ func (c Config) ImageWidthCells() int {
 	return *c.Terminal.ImageWidthCells
 }
 
+func firstEnv(names ...string) string {
+	for _, n := range names {
+		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func parseOnOffAuto(v string, auto bool) (enabled bool, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1", "yes", "on":
+		return true, true
+	case "false", "0", "no", "off":
+		return false, true
+	case "auto":
+		return auto, true
+	default:
+		return false, false
+	}
+}
+
 // HyperlinksEnabled reports whether OSC 8 file links should be emitted.
-// "auto" follows tty; unset defaults to auto.
+// "auto" follows tty; unset defaults to auto. PIGO_HYPERLINKS / PI_HYPERLINKS win.
 func (c Config) HyperlinksEnabled(tty bool) bool {
+	if v := firstEnv("PIGO_HYPERLINKS", "PI_HYPERLINKS"); v != "" {
+		if on, ok := parseOnOffAuto(v, tty); ok {
+			return on
+		}
+	}
 	switch v := c.Terminal.Hyperlinks.(type) {
 	case bool:
 		return v
 	case string:
-		switch strings.ToLower(strings.TrimSpace(v)) {
-		case "true", "1", "yes":
-			return true
-		case "false", "0", "no":
-			return false
-		default:
-			return tty
+		if on, ok := parseOnOffAuto(v, tty); ok {
+			return on
 		}
+		return tty
 	default:
 		return tty
 	}
@@ -82,8 +105,24 @@ func (c Config) AutocompleteVisible() int {
 	return n
 }
 
+func parseImageProtocol(v, detected string) string {
+	s := strings.ToLower(strings.TrimSpace(v))
+	switch s {
+	case "kitty", "iterm2":
+		return s
+	case "false", "off", "none", "0":
+		return ""
+	case "auto", "true", "":
+		return detected
+	}
+	return detected
+}
+
 // ImageProtocol is kitty, iterm2, or empty to disable. detected is the TTY guess.
 func (c Config) ImageProtocol(detected string) string {
+	if v := firstEnv("PIGO_IMAGE_PROTOCOL", "PI_IMAGE_PROTOCOL"); v != "" {
+		return parseImageProtocol(v, detected)
+	}
 	switch v := c.Terminal.Images.(type) {
 	case bool:
 		if !v {
@@ -91,15 +130,7 @@ func (c Config) ImageProtocol(detected string) string {
 		}
 		return detected
 	case string:
-		s := strings.ToLower(strings.TrimSpace(v))
-		switch s {
-		case "kitty", "iterm2":
-			return s
-		case "false", "off", "none", "0":
-			return ""
-		case "auto", "true", "":
-			return detected
-		}
+		return parseImageProtocol(v, detected)
 	}
 	return detected
 }
@@ -154,10 +185,10 @@ func (c Config) EditorPadX() int {
 	return *c.EditorPaddingX
 }
 
-// OutputPadN is settings.outputPad (default 0).
+// OutputPadN is settings.outputPad (default 1).
 func (c Config) OutputPadN() int {
 	if c.OutputPad == nil || *c.OutputPad < 0 {
-		return 0
+		return 1
 	}
 	return *c.OutputPad
 }
@@ -177,16 +208,15 @@ func (c Config) TerminalProgress() bool {
 	return c.Terminal.ShowTerminalProgress != nil && *c.Terminal.ShowTerminalProgress
 }
 
-// TrueColorMode is "on", "off", or "auto".
-func (c Config) TrueColorMode() string {
-	switch v := c.Terminal.TrueColor.(type) {
+func trueColorMode(v any) string {
+	switch t := v.(type) {
 	case bool:
-		if v {
+		if t {
 			return "on"
 		}
 		return "off"
 	case string:
-		s := strings.ToLower(strings.TrimSpace(v))
+		s := strings.ToLower(strings.TrimSpace(t))
 		switch s {
 		case "true", "1", "yes", "on":
 			return "on"
@@ -197,14 +227,33 @@ func (c Config) TrueColorMode() string {
 	return "auto"
 }
 
-// CopyOnSelect reports whether fullscreen mouse-select copy is enabled.
-func (c Config) CopyOnSelect() bool {
-	return c.FullscreenCopyOnSelect != nil && *c.FullscreenCopyOnSelect
+// TrueColorMode is "on", "off", or "auto". PIGO_TRUE_COLOR / PI_TRUE_COLOR win.
+func (c Config) TrueColorMode() string {
+	if v := firstEnv("PIGO_TRUE_COLOR", "PI_TRUE_COLOR"); v != "" {
+		return trueColorMode(v)
+	}
+	return trueColorMode(c.Terminal.TrueColor)
 }
 
-// ScrollbarEnabled reports whether a fullscreen scrollbar should be drawn.
+// CopyOnSelect reports whether fullscreen mouse-select copy is enabled (default true).
+func (c Config) CopyOnSelect() bool {
+	if c.FullscreenCopyOnSelect == nil {
+		return true
+	}
+	return *c.FullscreenCopyOnSelect
+}
+
+// ScrollbarEnabled reports whether a fullscreen scrollbar should be drawn (default true).
 func (c Config) ScrollbarEnabled() bool {
-	return c.FullscreenScrollbar != nil && *c.FullscreenScrollbar
+	if c.FullscreenScrollbar == nil {
+		return true
+	}
+	return *c.FullscreenScrollbar
+}
+
+// CacheRetention is PIGO_CACHE_RETENTION / PI_CACHE_RETENTION (none|short|long).
+func (c Config) CacheRetention() string {
+	return firstEnv("PIGO_CACHE_RETENTION", "PI_CACHE_RETENTION")
 }
 
 // WebSocketConnectTimeout is settings.websocketConnectTimeoutMs when set.

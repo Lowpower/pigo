@@ -133,7 +133,7 @@ Environment:
 	cmd.Flags().BoolVar(&f.offline, "offline", false, "skip network at startup (sets PIGO_OFFLINE=1)")
 	cmd.Flags().StringVar(&f.export, "export", "", "export a session JSONL to HTML and exit")
 	cmd.Flags().StringVar(&f.fork, "fork", "", "fork session file or id into a new session")
-	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "resume session by id prefix")
+	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "use exact project session id, creating it if missing")
 	cmd.Flags().StringVarP(&f.name, "name", "n", "", "set session display name")
 	cmd.Flags().StringVar(&f.apiKey, "api-key", "", "API key for this process (does not persist)")
 	cmd.Flags().BoolVar(&f.noBuiltinTools, "no-builtin-tools", false, "disable built-in tools (extensions still load)")
@@ -154,6 +154,9 @@ Environment:
 }
 
 func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
+	if os.Getenv("AI_AGENT") == "" {
+		_ = os.Setenv("AI_AGENT", "pigo")
+	}
 	if v, _ := cmd.Flags().GetBool("version"); v {
 		fmt.Fprintf(cmd.OutOrStdout(), "pigo %s\n", version.Version)
 		return nil
@@ -167,6 +170,10 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 	sandbox.SetAgentDir(agentDir)
 	sandbox.SetNoSandbox(f.noSandbox)
+	if f.thinking != "" && !models.IsThinkingLevel(f.thinking) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: Invalid thinking level %q. Valid values: %s\n", f.thinking, strings.Join(models.ThinkingLevels, ", "))
+		f.thinking = ""
+	}
 	fileCfg, err := config.Load(agentDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -336,53 +343,56 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 
 	var sess *session.Manager
-	if !f.noSession {
-		switch {
-		case f.fork != "":
-			src, err2 := session.FindByIDAt(cwd, agentDir, f.fork, sessionDir)
-			if err2 != nil {
-				src, err2 = session.Open(f.fork)
-			}
-			if err2 != nil {
-				return fmt.Errorf("fork: %w", err2)
-			}
-			sess, err = src.Fork(cwd, agentDir)
-			if err != nil {
-				return fmt.Errorf("fork session: %w", err)
-			}
-		case f.sessionPath != "":
-			sess, err = session.Open(f.sessionPath)
-			if err != nil {
-				sess, err = session.FindByIDAt(cwd, agentDir, f.sessionPath, sessionDir)
-			}
-			if err != nil {
-				return fmt.Errorf("open session: %w", err)
-			}
-		case f.sessionID != "":
-			sess, err = session.FindByIDAt(cwd, agentDir, f.sessionID, sessionDir)
-			if err != nil {
-				return fmt.Errorf("session-id: %w", err)
-			}
-		case f.continueSession:
+	switch {
+	case f.noSession:
+		if f.sessionID != "" {
+			sess = session.InMemory(cwd, f.sessionID)
+		}
+	case f.fork != "":
+		src, err2 := session.FindByIDAt(cwd, agentDir, f.fork, sessionDir)
+		if err2 != nil {
+			src, err2 = session.Open(f.fork)
+		}
+		if err2 != nil {
+			return fmt.Errorf("fork: %w", err2)
+		}
+		sess, err = src.Fork(cwd, agentDir)
+		if err != nil {
+			return fmt.Errorf("fork session: %w", err)
+		}
+	case f.sessionPath != "":
+		sess, err = session.Open(f.sessionPath)
+		if err != nil {
+			sess, err = session.FindByIDAt(cwd, agentDir, f.sessionPath, sessionDir)
+		}
+		if err != nil {
+			return fmt.Errorf("open session: %w", err)
+		}
+	case f.sessionID != "":
+		sess, err = session.FindExactIDAt(cwd, agentDir, f.sessionID, sessionDir)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: No project session found with id '%s'; creating a new session with that id.\n", f.sessionID)
+			sess = session.NewWithID(cwd, agentDir, f.sessionID, sessionDir)
+		}
+	case f.continueSession:
+		sess, err = session.ContinueRecentAt(cwd, agentDir, sessionDir)
+		if err != nil {
+			return fmt.Errorf("continue session: %w", err)
+		}
+	case f.resume:
+		if tui.ShouldOpenResumePicker(mode, f.resume, f.sessionID, f.sessionPath, f.fork, f.noSession) {
+			sess = nil
+		} else {
 			sess, err = session.ContinueRecentAt(cwd, agentDir, sessionDir)
 			if err != nil {
-				return fmt.Errorf("continue session: %w", err)
+				return fmt.Errorf("resume session: %w", err)
 			}
-		case f.resume:
-			if tui.ShouldOpenResumePicker(mode, f.resume, f.sessionID, f.sessionPath, f.fork, f.noSession) {
-				sess = nil
-			} else {
-				sess, err = session.ContinueRecentAt(cwd, agentDir, sessionDir)
-				if err != nil {
-					return fmt.Errorf("resume session: %w", err)
-				}
-			}
-		default:
-			sess = session.NewAt(cwd, agentDir, sessionDir)
 		}
-		if f.name != "" && sess != nil {
-			sess.SetName(f.name)
-		}
+	default:
+		sess = session.NewAt(cwd, agentDir, sessionDir)
+	}
+	if f.name != "" && sess != nil {
+		sess.SetName(f.name)
 	}
 
 	exts := f.extension

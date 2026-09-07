@@ -127,3 +127,32 @@ func TestBufferUntilAssistantThenFlush(t *testing.T) {
 		t.Errorf("roles = %v, want [user assistant toolResult]", roles)
 	}
 }
+
+func TestAppendModelAndThinkingChange(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendModelChange("openai", "gpt-4o"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendThinkingLevelChange("high"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	var types []string
+	for _, e := range m.Entries() {
+		types = append(types, e.Type)
+	}
+	if len(types) < 4 || types[0] != "model_change" || types[1] != "thinking_level_change" {
+		t.Fatalf("%v", types)
+	}
+	if m.Entries()[0].Provider != "openai" || m.Entries()[0].ModelID != "gpt-4o" {
+		t.Fatalf("%+v", m.Entries()[0])
+	}
+	if m.Entries()[1].ThinkingLevel != "high" {
+		t.Fatalf("%+v", m.Entries()[1])
+	}
+}

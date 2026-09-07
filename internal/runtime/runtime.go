@@ -90,9 +90,10 @@ type Engine struct {
 	BeforeTree func(session.TreePrep) session.TreeHookResult
 	AfterTree  func(oldLeaf, newLeaf string)
 
-	retryMu      sync.Mutex
-	retryCancel  context.CancelFunc
-	retryAttempt int
+	retryMu       sync.Mutex
+	retryCancel   context.CancelFunc
+	retryAttempt  int
+	compactCancel context.CancelFunc
 
 	extCommands       []extCommand
 	extProviderIDs    map[string]bool
@@ -159,7 +160,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 			opts.Config.Thinking = lvl
 		}
 	}
-	sf := boundStream(opts.AgentDir, provider)
+	sf := boundStream(opts.AgentDir, provider, opts.Config.Transport)
 	if sf == nil {
 		sf, _ = ai.DefaultStreamFn()
 	}
@@ -168,10 +169,13 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		MaxRetries: opts.Config.ProviderRetryMaxRetries(),
 		MaxDelay:   opts.Config.ProviderRetryMaxDelay(),
 	})
-	reg := tools.NewBuiltins(tools.Options{
-		AutoResize:  opts.Config.AutoResize(),
-		ShellPrefix: opts.Config.ShellPrefix(),
-	})
+	e := &Engine{
+		Opts:     opts,
+		Stream:   sf,
+		Provider: provider,
+		Scoped:   scoped,
+	}
+	reg := e.builtinRegistry()
 	if opts.NoTools {
 		reg = tools.NewRegistry()
 	} else if opts.NoBuiltinTools {
@@ -186,6 +190,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	rs := resolvePackageResources(ctx, opts)
 	extSpecs := collectExtensionSpecs(opts, rs)
 	opts.Extensions = extSpecs
+	e.Opts = opts
 
 	var hosts []*ext.Host
 	if !opts.NoTools {
@@ -212,18 +217,12 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		IncludeToolHints: true,
 	})
 
-	e := &Engine{
-		Opts:       opts,
-		Stream:     sf,
-		Provider:   provider,
-		Tools:      reg,
-		Hosts:      hosts,
-		Skills:     sk,
-		Templates:  tpls,
-		ThemeFiles: themeFiles,
-		Scoped:     scoped,
-		System:     sys,
-	}
+	e.Tools = reg
+	e.Hosts = hosts
+	e.Skills = sk
+	e.Templates = tpls
+	e.ThemeFiles = themeFiles
+	e.System = sys
 	e.Steering = e.drainSteer
 	e.FollowUp = e.drainFollow
 	e.applyProviders()
@@ -241,6 +240,10 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 			return inner(ctx, req, opt)
 		}
 	}
+	e.DispatchEvent(ctx, "session_start", map[string]any{
+		"sessionId": e.sessionID(),
+		"cwd":       e.Opts.Cwd,
+	})
 	return e, nil
 }
 
@@ -266,6 +269,45 @@ func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, u
 		}
 	}
 	return hosts, reg, nil
+}
+
+func (e *Engine) builtinRegistry() *tools.Registry {
+	return tools.NewBuiltins(tools.Options{
+		AutoResize:   e.Opts.Config.AutoResize(),
+		ShellPrefix:  e.Opts.Config.ShellPrefix(),
+		Cwd:          e.Opts.Cwd,
+		EnvFn:        e.sessionToolEnv,
+		ImageCapable: func() bool { return e.currentModel().SupportsImage() },
+	})
+}
+
+func (e *Engine) sessionToolEnv() map[string]string {
+	m := map[string]string{"AI_AGENT": "pigo"}
+	if e == nil {
+		return m
+	}
+	if e.Opts.Session != nil {
+		id := e.Opts.Session.ID()
+		m["PIGO_SESSION_ID"] = id
+		m["PI_SESSION_ID"] = id
+		if f := e.Opts.Session.File(); f != "" {
+			m["PIGO_SESSION_FILE"] = f
+			m["PI_SESSION_FILE"] = f
+		}
+	}
+	if e.Provider != "" {
+		m["PIGO_PROVIDER"] = e.Provider
+		m["PI_PROVIDER"] = e.Provider
+	}
+	if model := e.Opts.Config.ResolvedModel(); model != "" {
+		m["PIGO_MODEL"] = model
+		m["PI_MODEL"] = model
+	}
+	if lvl := strings.TrimSpace(e.Opts.Config.Thinking); lvl != "" {
+		m["PIGO_REASONING_LEVEL"] = lvl
+		m["PI_REASONING_LEVEL"] = lvl
+	}
+	return m
 }
 
 func (e *Engine) applyProjectTrust(ctx context.Context) {
@@ -305,16 +347,52 @@ func (e *Engine) emitSession(v any) {
 	}
 }
 
+func (e *Engine) recordEntry(entry *session.Entry, err error) {
+	if err == nil && entry != nil {
+		e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
+	}
+}
+
+func (e *Engine) currentModel() models.Model {
+	provider := e.Provider
+	id := e.Opts.Config.ResolvedModel()
+	if m, ok := models.Lookup(provider, id); ok {
+		return m
+	}
+	return models.Model{Provider: provider, ID: id}
+}
+
+func (e *Engine) sessionHook(event string) bool {
+	hook := e.DispatchEvent(context.Background(), event, map[string]any{
+		"sessionId": e.sessionID(),
+		"cwd":       e.Opts.Cwd,
+	})
+	return !hookCancelled(hook)
+}
+
+func (e *Engine) beginSessionChange(event string) bool {
+	if !e.sessionHook(event) {
+		return false
+	}
+	e.DispatchEvent(context.Background(), "session_shutdown", map[string]any{"sessionId": e.sessionID()})
+	return true
+}
+
+func (e *Engine) finishSessionChange() {
+	e.DispatchEvent(context.Background(), "session_start", map[string]any{
+		"sessionId": e.sessionID(),
+		"cwd":       e.Opts.Cwd,
+	})
+}
+
+func hookCancelled(m map[string]any) bool {
+	return asBool(m["cancel"]) || asBool(m["cancelled"])
+}
+
 func (e *Engine) setCompacting(v bool) {
 	e.mu.Lock()
 	e.compacting = v
 	e.mu.Unlock()
-}
-
-func (e *Engine) isCompacting() bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.compacting
 }
 
 func (e *Engine) pendingCount() int {
@@ -342,8 +420,23 @@ func (e *Engine) maxTokens() int {
 	return models.MaxTokens(provider, e.Opts.Config.ResolvedModel())
 }
 
+// CompactResult is the outcome of a manual or threshold compaction.
+type CompactResult struct {
+	Messages             []ai.Message
+	Summary              string
+	FirstKeptEntryID     string
+	TokensBefore         int
+	EstimatedTokensAfter int
+}
+
 // CompactNow runs a manual compaction (RPC compact), including customInstructions.
 func (e *Engine) CompactNow(ctx context.Context, msgs []ai.Message, customInstructions string) ([]ai.Message, string, error) {
+	r, err := e.CompactNowResult(ctx, msgs, customInstructions)
+	return r.Messages, r.Summary, err
+}
+
+// CompactNowResult is CompactNow with the full compact payload.
+func (e *Engine) CompactNowResult(ctx context.Context, msgs []ai.Message, customInstructions string) (CompactResult, error) {
 	s := e.compactionSettings()
 	s.CustomInstructions = customInstructions
 	return e.runCompaction(ctx, "manual", msgs, s, false)
@@ -360,58 +453,118 @@ func (e *Engine) compactionSettings() compaction.Settings {
 	return s
 }
 
-func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Message, s compaction.Settings, willRetry bool) ([]ai.Message, string, error) {
+func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Message, s compaction.Settings, willRetry bool) (CompactResult, error) {
+	cctx, cancel := context.WithCancel(ctx)
+	e.mu.Lock()
+	e.compactCancel = cancel
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		e.compactCancel = nil
+		e.mu.Unlock()
+		cancel()
+	}()
+
 	e.setCompacting(true)
 	defer e.setCompacting(false)
-	hook := e.DispatchEvent(ctx, "session_before_compact", map[string]any{
+	cut := compaction.FindCutIndex(msgs, s.KeepRecentTokens)
+	tokensBefore := compaction.EstimateContextTokens(msgs)
+	keep := ""
+	if e.Opts.Session != nil {
+		keep = session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, cut)
+	}
+	resultOf := func(messages []ai.Message, summary string) CompactResult {
+		return CompactResult{
+			Messages:             messages,
+			Summary:              summary,
+			FirstKeptEntryID:     keep,
+			TokensBefore:         tokensBefore,
+			EstimatedTokensAfter: compaction.EstimateContextTokens(messages),
+		}
+	}
+
+	hook := e.DispatchEvent(cctx, "session_before_compact", map[string]any{
 		"reason": reason, "willRetry": false, "customInstructions": s.CustomInstructions,
 	})
 	if asBool(hook["cancel"]) {
-		return msgs, "", nil
+		return resultOf(msgs, ""), nil
 	}
 	if replacement := asString(hook["compaction"]); replacement != "" {
 		e.emitSession(map[string]any{"type": "compaction_start", "reason": reason})
 		if e.Opts.Session != nil {
-			keep := session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, compaction.FindCutIndex(msgs, s.KeepRecentTokens))
-			tokens := compaction.EstimateContextTokens(msgs)
-			if entry, err := e.Opts.Session.AppendCompaction(replacement, keep, tokens); err == nil && entry != nil {
+			if entry, err := e.Opts.Session.AppendCompaction(replacement, keep, tokensBefore); err == nil && entry != nil {
 				e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 			}
 		}
+		out := resultOf(msgs, replacement)
 		e.emitSession(map[string]any{
 			"type": "compaction_end", "reason": reason,
-			"result": map[string]any{"summary": replacement}, "aborted": false, "willRetry": false,
+			"result": compactPayload(out), "aborted": false, "willRetry": false,
 		})
-		return msgs, replacement, nil
+		e.DispatchEvent(cctx, "session_compact", map[string]any{
+			"reason": reason, "summary": replacement, "firstKeptEntryId": keep, "fromExtension": true,
+		})
+		return out, nil
 	}
 	e.emitSession(map[string]any{"type": "compaction_start", "reason": reason})
-	var out []ai.Message
+	var compacted []ai.Message
 	var summary string
-	err := e.withSummarizationRetry(ctx, map[string]any{"source": "compaction", "reason": reason}, func() error {
+	err := e.withSummarizationRetry(cctx, map[string]any{"source": "compaction", "reason": reason}, func() error {
 		var cerr error
-		out, summary, cerr = compaction.Compact(ctx, e.Stream, e.Opts.Config.ResolvedModel(), msgs, s)
+		compacted, summary, cerr = compaction.Compact(cctx, e.Stream, e.Opts.Config.ResolvedModel(), msgs, s)
 		return cerr
 	})
 	if err != nil {
+		aborted := errors.Is(err, compaction.ErrSummarizeAborted) || errors.Is(err, context.Canceled)
 		e.emitSession(map[string]any{
 			"type": "compaction_end", "reason": reason,
-			"result": nil, "aborted": errors.Is(err, compaction.ErrSummarizeAborted) || errors.Is(err, context.Canceled),
+			"result": nil, "aborted": aborted,
 			"willRetry": false, "errorMessage": err.Error(),
 		})
-		return msgs, "", err
+		e.DispatchEvent(cctx, "session_compact_failed", map[string]any{
+			"reason": reason, "aborted": aborted, "errorMessage": err.Error(),
+		})
+		return resultOf(msgs, ""), err
 	}
+	if compacted == nil {
+		compacted = msgs
+	}
+	out := resultOf(compacted, summary)
 	if summary != "" && e.Opts.Session != nil {
-		keep := session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, compaction.FindCutIndex(msgs, s.KeepRecentTokens))
-		tokens := compaction.EstimateContextTokens(msgs)
-		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokens); err == nil && entry != nil {
+		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokensBefore); err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 		}
 	}
 	e.emitSession(map[string]any{
 		"type": "compaction_end", "reason": reason,
-		"result": map[string]any{"summary": summary}, "aborted": false, "willRetry": willRetry,
+		"result": compactPayload(out), "aborted": false, "willRetry": willRetry,
 	})
-	return out, summary, nil
+	if summary != "" {
+		e.DispatchEvent(cctx, "session_compact", map[string]any{
+			"reason": reason, "summary": summary, "firstKeptEntryId": keep, "fromExtension": false,
+		})
+	}
+	return out, nil
+}
+
+func compactPayload(r CompactResult) map[string]any {
+	return map[string]any{
+		"summary":              r.Summary,
+		"firstKeptEntryId":     r.FirstKeptEntryID,
+		"tokensBefore":         r.TokensBefore,
+		"estimatedTokensAfter": r.EstimatedTokensAfter,
+	}
+}
+
+// AbortCompact cancels an in-flight compact and any retry wait.
+func (e *Engine) AbortCompact() {
+	e.AbortRetry()
+	e.mu.Lock()
+	c := e.compactCancel
+	e.mu.Unlock()
+	if c != nil {
+		c()
+	}
 }
 
 func (e *Engine) queueTexts() (steering, follow []string) {
@@ -600,7 +753,14 @@ func (e *Engine) Executor() agent.ToolExecutor {
 			}
 			return reason, true
 		}
+		e.DispatchEvent(ctx, "tool_execution_start", map[string]any{
+			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
+		})
 		result, isErr := e.Tools.Execute(ctx, c.Name, c.Args)
+		e.DispatchEvent(ctx, "tool_execution_end", map[string]any{
+			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
+			"content": result, "isError": isErr,
+		})
 		post := e.DispatchEvent(ctx, "tool_result", map[string]any{
 			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
 			"content": result, "isError": isErr,
@@ -631,19 +791,23 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 	if !compaction.ShouldCompact(compaction.EstimateContextTokens(msgs), window, s) {
 		return msgs, "", nil
 	}
-	return e.runCompaction(ctx, "threshold", msgs, s, false)
+	r, err := e.runCompaction(ctx, "threshold", msgs, s, false)
+	return r.Messages, r.Summary, err
 }
 
-// RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
-func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent) *agent.Stream {
-	e.mu.Lock()
-	e.stopAfterTools = false
-	e.mu.Unlock()
+type promptPrep struct {
+	User    string
+	Images  []ai.ImageContent
+	Handled bool
+}
 
-	if cmd, ok := slash.Parse(user); ok && e.DispatchCommand(cmd.Name, cmd.Rest) {
-		return agent.Finished(nil)
+func (e *Engine) preparePrompt(ctx context.Context, user string, images []ai.ImageContent) (promptPrep, error) {
+	if e.Compacting() {
+		return promptPrep{}, fmt.Errorf("cannot submit a prompt while compaction is in progress")
 	}
-
+	if cmd, ok := slash.Parse(user); ok && e.DispatchCommand(cmd.Name, cmd.Rest) {
+		return promptPrep{Handled: true}, nil
+	}
 	source := e.Opts.InputSource
 	if source == "" {
 		source = "cli"
@@ -653,7 +817,7 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 	})
 	action := asString(in["action"])
 	if action == "handled" {
-		return agent.Finished(nil)
+		return promptPrep{Handled: true}, nil
 	}
 	if action == "transform" {
 		if t := asString(in["text"]); t != "" {
@@ -663,7 +827,6 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 			images = imgs
 		}
 	}
-
 	if cmd, ok := slash.Parse(user); ok && !slash.IsBuiltin(cmd.Name) && !e.hasCommand(cmd.Name) {
 		if expanded, ok := prompt.ExpandTemplate(user, e.Templates); ok {
 			user = expanded
@@ -672,6 +835,26 @@ func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user strin
 				user = body
 			}
 		}
+	}
+	return promptPrep{User: user, Images: images}, nil
+}
+
+// RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
+func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent) *agent.Stream {
+	return e.runPrompt(ctx, history, user, images, true)
+}
+
+func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent, prepare bool) *agent.Stream {
+	e.mu.Lock()
+	e.stopAfterTools = false
+	e.mu.Unlock()
+
+	if prepare {
+		prep, err := e.preparePrompt(ctx, user, images)
+		if err != nil || prep.Handled {
+			return agent.Finished(nil)
+		}
+		user, images = prep.User, prep.Images
 	}
 
 	sys := e.System
@@ -712,6 +895,27 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 		FollowUp:        e.FollowUp,
 		NewUserMessages: newUsers,
 		SessionID:       e.sessionID(),
+		Provider:        e.Provider,
+		CacheRetention:  e.Opts.Config.CacheRetention(),
+		OnLifecycle: func(ev agent.Event) {
+			switch ev.Type {
+			case agent.EventAgentStart:
+				e.DispatchEvent(ctx, "agent_start", map[string]any{})
+			case agent.EventAgentEnd:
+				e.DispatchEvent(ctx, "agent_end", map[string]any{})
+			case agent.EventTurnStart:
+				e.DispatchEvent(ctx, "turn_start", map[string]any{})
+			case agent.EventTurnEnd:
+				e.DispatchEvent(ctx, "turn_end", map[string]any{})
+			}
+		},
+		PrepareNextTurn: func(ctx context.Context, msgs []ai.Message) []ai.Message {
+			out, _, err := e.MaybeCompact(ctx, msgs)
+			if err != nil {
+				return msgs
+			}
+			return out
+		},
 	})
 }
 
@@ -729,7 +933,37 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 		e.persisted = 0
 		return
 	}
-	e.persisted = len(s.Entries())
+	e.persisted = len(session.RestoreAIMessages(session.ContextEntries(s)))
+}
+
+// NewSession starts a fresh session, emitting shutdown/start extension events.
+func (e *Engine) NewSession(parent string) bool {
+	if !e.beginSessionChange("session_before_switch") {
+		return false
+	}
+	if e.Opts.Session != nil {
+		e.Opts.Session = session.NewAt(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SessionDir)
+		if parent != "" {
+			e.Opts.Session.SetParentSession(parent)
+		}
+	}
+	e.persisted = 0
+	e.finishSessionChange()
+	return true
+}
+
+// SwitchSession opens a session file after extension hooks.
+func (e *Engine) SwitchSession(path string) (*session.Manager, error) {
+	m, err := session.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if !e.beginSessionChange("session_before_switch") {
+		return nil, nil
+	}
+	e.AdoptSession(m)
+	e.finishSessionChange()
+	return m, nil
 }
 
 // NavigateTree moves the session leaf. Callers must not invoke this while streaming.
@@ -755,6 +989,27 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 		CustomInstructions:  opts.CustomInstructions,
 		ReplaceInstructions: opts.ReplaceInstructions,
 		Label:               opts.Label,
+	}
+	extTree := e.DispatchEvent(ctx, "session_before_tree", map[string]any{
+		"targetId":           targetID,
+		"oldLeafId":          oldLeaf,
+		"commonAncestorId":   ancestor,
+		"userWantsSummary":   opts.Summarize,
+		"customInstructions": opts.CustomInstructions,
+		"label":              opts.Label,
+	})
+	if hookCancelled(extTree) {
+		return session.NavigateResult{Cancelled: true, OldLeafID: oldLeaf, NewLeafID: oldLeaf}, nil
+	}
+	if s := asString(extTree["customInstructions"]); s != "" {
+		opts.CustomInstructions = s
+	}
+	if s := asString(extTree["label"]); s != "" {
+		opts.Label = s
+	}
+	if s := asString(extTree["summary"]); s != "" {
+		opts.Summary = s
+		opts.FromHook = true
 	}
 	if e.BeforeTree != nil {
 		hook := e.BeforeTree(prep)
@@ -802,6 +1057,11 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 	if e.AfterTree != nil {
 		e.AfterTree(res.OldLeafID, res.NewLeafID)
 	}
+	e.DispatchEvent(ctx, "session_tree", map[string]any{
+		"oldLeafId": res.OldLeafID,
+		"newLeafId": res.NewLeafID,
+		"cancelled": res.Cancelled,
+	})
 	return res, nil
 }
 
@@ -825,6 +1085,27 @@ func (e *Engine) History() []ai.Message {
 // Reload rediscovers skills, extensions, and rebuilds the system prompt (/reload).
 func (e *Engine) Reload() {
 	ctx := context.Background()
+	if e.Opts.AgentDir != "" {
+		loaded, err := config.Load(e.Opts.AgentDir)
+		if err == nil {
+			if e.Opts.UserConfig != nil {
+				*e.Opts.UserConfig = loaded
+			}
+			e.Opts.Config = config.ApplyProject(loaded, e.Opts.Cwd, e.Opts.ProjectTrusted)
+			if e.Opts.CLIProvider != "" {
+				e.Opts.Config.Provider = e.Opts.CLIProvider
+				e.Opts.Config.DefaultProvider = e.Opts.CLIProvider
+				e.Provider = e.Opts.CLIProvider
+			}
+			if e.Opts.CLIModel != "" {
+				e.Opts.Config.Model = e.Opts.CLIModel
+				e.Opts.Config.DefaultModel = e.Opts.CLIModel
+			}
+			if e.Opts.CLIThinking != "" {
+				e.Opts.Config.Thinking = e.Opts.CLIThinking
+			}
+		}
+	}
 	rs := resolvePackageResources(ctx, e.Opts)
 	e.applyResolved(rs)
 
@@ -835,10 +1116,7 @@ func (e *Engine) Reload() {
 	e.Hosts = nil
 	e.extCommands = nil
 	e.extStreams = nil
-	reg := tools.NewBuiltins(tools.Options{
-		AutoResize:  e.Opts.Config.AutoResize(),
-		ShellPrefix: e.Opts.Config.ShellPrefix(),
-	})
+	reg := e.builtinRegistry()
 	if e.Opts.NoTools {
 		reg = tools.NewRegistry()
 	} else if e.Opts.NoBuiltinTools {
@@ -904,7 +1182,7 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 			entry, err = e.Opts.Session.AppendMessage("user", payload)
 		}
 		if err == nil && entry != nil {
-			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
+			e.recordEntry(entry, nil)
 		}
 	}
 	e.persisted = len(msgs)
@@ -947,9 +1225,48 @@ func (e *Engine) PersistEnabledModels(patterns *[]string) error {
 
 // CycleThinking steps thinking levels (shift+tab).
 func (e *Engine) CycleThinking() string {
-	next := models.NextThinkingLevel(e.Opts.Config.Thinking)
-	e.Opts.Config.Thinking = next
-	return next
+	level, _ := e.CycleThinkingOK()
+	return level
+}
+
+// CycleThinkingOK cycles thinking for reasoning models. ok is false when the
+// current model does not support thinking.
+func (e *Engine) CycleThinkingOK() (string, bool) {
+	m := e.currentModel()
+	if !m.SupportsReasoning() {
+		return e.Opts.Config.Thinking, false
+	}
+	cur := models.ClampThinking(e.Opts.Config.Thinking, m)
+	next := models.NextThinkingLevelIn(cur, m.ThinkingLevelsFor())
+	return e.SetThinkingLevel(next, false), true
+}
+
+// SetThinkingLevel clamps and applies a thinking level. persist writes settings.json.
+func (e *Engine) SetThinkingLevel(level string, persist bool) string {
+	m := e.currentModel()
+	effective := models.ClampThinking(level, m)
+	if !m.SupportsReasoning() {
+		effective = "off"
+	}
+	prev := e.Opts.Config.Thinking
+	e.Opts.Config.Thinking = effective
+	if persist {
+		e.Opts.Config.DefaultThinkingLevel = level
+		if e.Opts.UserConfig != nil {
+			e.Opts.UserConfig.Thinking = effective
+			e.Opts.UserConfig.DefaultThinkingLevel = level
+		}
+	}
+	if effective != prev {
+		if e.Opts.Session != nil {
+			entry, err := e.Opts.Session.AppendThinkingLevelChange(effective)
+			e.recordEntry(entry, err)
+		}
+		e.DispatchEvent(context.Background(), "thinking_level_select", map[string]any{
+			"level": effective, "previousLevel": prev,
+		})
+	}
+	return effective
 }
 
 // ApplyModel sets the session provider/model without writing settings.json.
@@ -982,6 +1299,8 @@ func (e *Engine) RefreshSessionConfig() {
 }
 
 func (e *Engine) setModel(provider, id, thinking string, persist bool) {
+	prevProvider := e.Provider
+	prevID := e.Opts.Config.ResolvedModel()
 	if provider != "" {
 		e.Provider = provider
 		e.Opts.Config.Provider = provider
@@ -1009,10 +1328,35 @@ func (e *Engine) setModel(provider, id, thinking string, persist bool) {
 		}
 	}
 	if thinking != "" {
-		e.Opts.Config.Thinking = thinking
+		e.SetThinkingLevel(thinking, persist)
 	} else if lvl := e.Opts.Config.ModelThinkingLevel(e.Provider, e.Opts.Config.ResolvedModel()); lvl != "" {
-		e.Opts.Config.Thinking = lvl
+		e.SetThinkingLevel(lvl, persist)
+	} else {
+		e.SetThinkingLevel(e.Opts.Config.Thinking, persist)
 	}
+	if e.Provider != prevProvider || e.Opts.Config.ResolvedModel() != prevID {
+		if e.Opts.Session != nil {
+			entry, err := e.Opts.Session.AppendModelChange(e.Provider, e.Opts.Config.ResolvedModel())
+			e.recordEntry(entry, err)
+		}
+		e.DispatchEvent(context.Background(), "model_select", map[string]any{
+			"provider": e.Provider, "modelId": e.Opts.Config.ResolvedModel(),
+			"previousProvider": prevProvider, "previousModelId": prevID,
+		})
+	}
+}
+
+// PersistThinking writes the thinking level as the saved default.
+func (e *Engine) PersistThinking(level string) error {
+	level = strings.TrimSpace(level)
+	if level == "" {
+		return nil
+	}
+	e.SetThinkingLevel(level, true)
+	if e.Opts.AgentDir == "" {
+		return nil
+	}
+	return config.Save(e.Opts.AgentDir, e.persistableConfig())
 }
 
 // PrintText streams a prompt to out as plain text (--mode text / --print).
@@ -1064,6 +1408,10 @@ func printStopErr(last []agent.Msg) error {
 
 // PrintJSON writes NDJSON agent events (--mode json).
 func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Message, user string, images []ai.ImageContent) error {
+	return e.printJSON(ctx, out, history, user, images, true)
+}
+
+func (e *Engine) printJSON(ctx context.Context, out io.Writer, history []ai.Message, user string, images []ai.ImageContent, prepare bool) error {
 	enc := json.NewEncoder(out)
 	write := e.onSessionEvent
 	if write == nil {
@@ -1080,7 +1428,7 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	for {
 		var stream *agent.Stream
 		if !continued {
-			stream = e.RunPrompt(ctx, hist, user, images)
+			stream = e.runPrompt(ctx, hist, user, images, prepare)
 		} else {
 			stream = e.runLoop(ctx, hist, nil)
 		}
@@ -1132,7 +1480,7 @@ func (e *Engine) PrintJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	return printStopErr(last)
 }
 
-func boundStream(agentDir, provider string) ai.StreamFn {
+func boundStream(agentDir, provider, transport string) ai.StreamFn {
 	if provider == "" {
 		return nil
 	}
@@ -1141,20 +1489,23 @@ func boundStream(agentDir, provider string) ai.StreamFn {
 		return nil
 	}
 	store := auth.Open(agentDir)
+	stream := func(key, base string, headers map[string]string) ai.StreamFn {
+		return ai.StreamFor(provider, ai.ClientConfig{APIKey: key, BaseURL: base, Headers: headers, Transport: transport})
+	}
 	return func(ctx context.Context, reqCtx ai.Context, opts ai.Options) (*ai.EventStream, error) {
 		res, err := auth.Resolve(ctx, store, p, auth.ResolveOpts{})
 		if err != nil {
-			return ai.StreamWithAuth(provider, "", "", nil)(ctx, reqCtx, opts)
+			return stream("", "", nil)(ctx, reqCtx, opts)
 		}
 		if res == nil {
 			key := auth.APIKey(agentDir, provider)
 			if key == "" {
 				if auth.CheckAuth(store, provider) != nil {
-					return ai.StreamWithAuth(provider, "", "", nil)(ctx, reqCtx, opts)
+					return stream("", "", nil)(ctx, reqCtx, opts)
 				}
 				return ai.EchoStreamFn()(ctx, reqCtx, opts)
 			}
-			return ai.StreamWithAuth(provider, key, "", nil)(ctx, reqCtx, opts)
+			return stream(key, "", nil)(ctx, reqCtx, opts)
 		}
 		key := res.Auth.APIKey
 		if key == "" {
@@ -1165,6 +1516,6 @@ func boundStream(agentDir, provider string) ai.StreamFn {
 				return ai.EchoStreamFn()(ctx, reqCtx, opts)
 			}
 		}
-		return ai.StreamWithAuth(provider, key, res.Auth.BaseURL, res.Auth.Headers)(ctx, reqCtx, opts)
+		return stream(key, res.Auth.BaseURL, res.Auth.Headers)(ctx, reqCtx, opts)
 	}
 }

@@ -58,12 +58,16 @@ func TestPadLinesAndProgressOSC(t *testing.T) {
 	if !strings.Contains(progressOSC(false), "9;4;0") {
 		t.Fatal("idle progress")
 	}
-	clipped := clipWithScrollbar(strings.Repeat("x\n", 10), 3)
+	clipped := clipWithScrollbar(strings.Repeat("x\n", 10), 3, 0)
 	if strings.Count(clipped, "\n") != 2 {
 		t.Fatalf("clipped lines=%q", clipped)
 	}
 	if !strings.Contains(clipped, "▐") {
 		t.Fatalf("missing thumb: %q", clipped)
+	}
+	up := clipWithScrollbar(strings.Repeat("x\n", 10), 3, 5)
+	if !strings.Contains(up, "x") {
+		t.Fatalf("offset clip=%q", up)
 	}
 }
 

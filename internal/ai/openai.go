@@ -121,13 +121,18 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 	if len(reqCtx.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(reqCtx.Tools))
 		for _, t := range reqCtx.Tools {
+			fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters}
+			if toolStrict(t) {
+				fn["strict"] = true
+			}
 			tools = append(tools, map[string]any{
 				"type":     "function",
-				"function": map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters},
+				"function": fn,
 			})
 		}
 		req["tools"] = tools
 	}
+	applyThinkingFormat(req, opts)
 	return json.Marshal(req)
 }
 

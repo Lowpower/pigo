@@ -167,6 +167,29 @@ func (m *Manager) AppendCompaction(summary, firstKeptEntryID string, tokensBefor
 	return m.appendEntry(e)
 }
 
+// AppendModelChange records a provider/model switch on the current branch.
+func (m *Manager) AppendModelChange(provider, modelID string) (*Entry, error) {
+	e := &Entry{
+		Type:      "model_change",
+		ID:        newUUID(),
+		Timestamp: isoNow(),
+		Provider:  provider,
+		ModelID:   modelID,
+	}
+	return m.appendEntry(e)
+}
+
+// AppendThinkingLevelChange records a thinking-level switch on the current branch.
+func (m *Manager) AppendThinkingLevelChange(level string) (*Entry, error) {
+	e := &Entry{
+		Type:          "thinking_level_change",
+		ID:            newUUID(),
+		Timestamp:     isoNow(),
+		ThinkingLevel: level,
+	}
+	return m.appendEntry(e)
+}
+
 // AppendCustomEntry records an extension custom entry (not sent to the LLM).
 func (m *Manager) AppendCustomEntry(customType string, data any) (*Entry, error) {
 	var raw json.RawMessage

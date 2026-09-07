@@ -78,6 +78,45 @@ func TestRestoreAIMessagesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestNewWithIDAndExactLookup(t *testing.T) {
+	agentDir := t.TempDir()
+	cwd := t.TempDir()
+	m := NewWithID(cwd, agentDir, "exact-session", "")
+	if m.ID() != "exact-session" {
+		t.Fatalf("id=%s", m.ID())
+	}
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := FindExactIDAt(cwd, agentDir, "exact-session", "")
+	if err != nil || got.ID() != "exact-session" {
+		t.Fatalf("exact = %v %v", got, err)
+	}
+	if _, err := FindExactIDAt(cwd, agentDir, "exact", ""); err == nil {
+		t.Fatal("prefix must not match exact lookup")
+	}
+}
+
+func TestInMemoryDoesNotWrite(t *testing.T) {
+	cwd := t.TempDir()
+	m := InMemory(cwd, "ephemeral-id")
+	if m.ID() != "ephemeral-id" {
+		t.Fatalf("id=%s", m.ID())
+	}
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(m.File()); !os.IsNotExist(err) {
+		t.Fatalf("in-memory session wrote %s: %v", m.File(), err)
+	}
+}
+
 func TestRestoreAIMessagesBashExecution(t *testing.T) {
 	m := New(t.TempDir(), t.TempDir())
 	code := 0

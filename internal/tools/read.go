@@ -7,11 +7,11 @@ import (
 	"strings"
 )
 
-const readDefaultMaxLines = 2000
-
 // readTool returns the contents of a text file, or image content for supported images.
 type readTool struct {
-	autoResize bool
+	autoResize   bool
+	cwd          string
+	imageCapable func() bool
 }
 
 type readParams struct {
@@ -23,7 +23,7 @@ type readParams struct {
 func (t readTool) Name() string { return "read" }
 
 func (readTool) Description() string {
-	return "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated for large files; use offset (1-indexed) and limit to page through them."
+	return fmt.Sprintf("Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to %d lines or %dKB (whichever is hit first). Use offset (1-indexed) and limit to page through them.", DefaultMaxLines, DefaultMaxBytes/1024)
 }
 
 func (readTool) Schema() map[string]any { return schemaFor(&readParams{}) }
@@ -36,41 +36,65 @@ func (t readTool) Execute(_ context.Context, args map[string]any) (string, bool)
 	if p.Path == "" {
 		return "path is required", true
 	}
-	data, err := os.ReadFile(p.Path)
+	path := resolvePath(t.cwd, p.Path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return err.Error(), true
 	}
 	if mime := sniffImageMIME(data); mime != "" {
 		processed, ok := processImage(data, mime, t.autoResize)
-		if !ok {
-			return "Read image file [" + mime + "]\n[Image omitted: could not be converted to a supported inline image format.]", false
+		note := ""
+		if t.imageCapable != nil && !t.imageCapable() {
+			note = "\n[Current model does not support images. The image will be omitted from this request.]"
 		}
-		return encodeImageResult(imageReadNote(processed.mimeType), processed), false
+		if !ok {
+			return "Read image file [" + mime + "]\n[Image omitted: could not be converted to a supported inline image format.]" + note, false
+		}
+		return encodeImageResult(imageReadNote(processed.mimeType)+note, processed), false
 	}
 
-	lines := strings.Split(string(data), "\n")
+	allLines := strings.Split(string(data), "\n")
+	totalFileLines := len(allLines)
 	start := 0
 	if p.Offset > 0 {
 		start = p.Offset - 1
 	}
-	if start > len(lines) {
-		start = len(lines)
+	if start >= totalFileLines {
+		return fmt.Sprintf("Offset %d is beyond end of file (%d lines total)", p.Offset, totalFileLines), true
 	}
-	lines = lines[start:]
-
-	limit := readDefaultMaxLines
-	if p.Limit > 0 && p.Limit < limit {
-		limit = p.Limit
+	var selected string
+	userLimited := false
+	if p.Limit > 0 {
+		end := start + p.Limit
+		if end > totalFileLines {
+			end = totalFileLines
+		} else {
+			userLimited = end < totalFileLines
+		}
+		selected = strings.Join(allLines[start:end], "\n")
+	} else {
+		selected = strings.Join(allLines[start:], "\n")
 	}
-	truncated := false
-	if len(lines) > limit {
-		lines = lines[:limit]
-		truncated = true
+	tr := TruncateHead(selected, DefaultMaxLines, DefaultMaxBytes)
+	startDisplay := start + 1
+	if tr.FirstLineExceedsLimit {
+		firstSize := FormatSize(utf8ByteLen(allLines[start]))
+		return fmt.Sprintf("[Line %d is %s, exceeds %s limit. Use bash: sed -n '%dp' %s | head -c %d]",
+			startDisplay, firstSize, FormatSize(DefaultMaxBytes), startDisplay, p.Path, DefaultMaxBytes), false
 	}
-
-	out := strings.Join(lines, "\n")
-	if truncated {
-		out += fmt.Sprintf("\n[truncated to %d lines; continue with offset=%d]", limit, start+limit+1)
+	out := tr.Content
+	if tr.Truncated {
+		endDisplay := startDisplay + tr.OutputLines - 1
+		next := endDisplay + 1
+		if tr.TruncatedBy == "lines" {
+			out += fmt.Sprintf("\n\n[Showing lines %d-%d of %d. Use offset=%d to continue.]", startDisplay, endDisplay, totalFileLines, next)
+		} else {
+			out += fmt.Sprintf("\n\n[Showing lines %d-%d of %d (%s limit). Use offset=%d to continue.]", startDisplay, endDisplay, totalFileLines, FormatSize(DefaultMaxBytes), next)
+		}
+	} else if userLimited {
+		remaining := totalFileLines - (start + p.Limit)
+		next := start + p.Limit + 1
+		out += fmt.Sprintf("\n\n[%d more lines in file. Use offset=%d to continue.]", remaining, next)
 	}
 	return out, false
 }

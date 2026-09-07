@@ -131,6 +131,12 @@ type Model struct {
 	altScreen     bool
 	lastWidth     int
 	lastHeight    int
+	scrollOff     int
+	searchActive  bool
+	searchQuery   string
+	searchN       int
+	searchHits    []int
+	thinkingPick  listPicker
 
 	extHub     *extUIHub
 	extStatus  map[string]string
@@ -271,6 +277,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modelPickerActive() {
 			return m.handleModelPickerKey(msg)
 		}
+		if m.thinkingPickerActive() {
+			return m.handleThinkingPickerKey(msg)
+		}
 		if m.loginActive() {
 			return m.handleLoginKey(msg)
 		}
@@ -339,6 +348,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.keyIs(msg, "tui.input.submit") {
 			return m.submit()
 		}
+		if m.keyIs(msg, "app.message.copy") {
+			return m.copyLastAssistant()
+		}
+		if m.keyIs(msg, "app.message.dequeue") {
+			m.restoreQueuedToEditor()
+			return m, nil
+		}
+		if m.keyIs(msg, "app.suspend") {
+			return m, func() tea.Msg { return tea.Suspend() }
+		}
+		if m.altScreen {
+			if next, ok := m.handleAltScreenKey(msg); ok {
+				return next, nil
+			}
+		}
 		if m.keyIs(msg, "app.message.followUp") {
 			return m.queueFollowUp()
 		}
@@ -389,6 +413,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.keyIs(msg, "app.session.resume") {
 			return m.openSessionPicker()
 		}
+		if m.keyIs(msg, "app.session.new") {
+			return m.startNewSession()
+		}
 		if m.keyIs(msg, "app.editor.external") {
 			return m.openExternalEditor()
 		}
@@ -437,11 +464,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case imageGenMsg:
 		return m.handleImageGen(msg)
 
+	case tea.MouseMsg:
+		if m.altScreen {
+			return m.handleAltScreenMouse(msg)
+		}
+		return m, nil
+
 	case llamaCatalogMsg, llamaSearchTickMsg, llamaSearchResultMsg, llamaDetailsMsg, llamaActionDoneMsg:
 		return m.handleLlamaMsg(msg)
 	}
 
 	var cmd tea.Cmd
+	if key, ok := msg.(tea.KeyMsg); ok && m.keys != nil {
+		if key.Type == tea.KeyRunes || key.Type == tea.KeySpace ||
+			m.keyIs(key, "tui.input.newLine") ||
+			m.keyIs(key, "tui.editor.deleteCharBackward") ||
+			m.keyIs(key, "tui.editor.deleteCharForward") {
+			m.editor.pushUndo()
+		}
+	}
 	m.editor.ta, cmd = m.editor.ta.Update(msg)
 	if key, ok := msg.(tea.KeyMsg); ok && m.keys != nil {
 		m.editor.afterTextareaKey(key, m.keys)
@@ -488,8 +529,12 @@ func (m Model) cycleModel(backward bool) (tea.Model, tea.Cmd) {
 
 func (m Model) cycleThinking() (tea.Model, tea.Cmd) {
 	if m.engine != nil {
-		level := m.engine.CycleThinking()
+		level, ok := m.engine.CycleThinkingOK()
 		m.cfg = m.engine.Opts.Config
+		if !ok {
+			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("model does not support thinking")})
+			return m, nil
+		}
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("thinking = " + level)})
 		return m, nil
 	}
@@ -535,6 +580,19 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.startTurn(text, images)
+}
+
+func (m Model) startNewSession() (tea.Model, tea.Cmd) {
+	note := func(s string) (tea.Model, tea.Cmd) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		return m, nil
+	}
+	if m.engine != nil && !m.engine.NewSession("") {
+		return note("new session cancelled")
+	}
+	m.history = nil
+	m.transcript = nil
+	return note("started a new session")
 }
 
 func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
@@ -589,8 +647,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			if m.engine != nil {
 				m.engine.Opts.Config.Thinking = cmd.Rest
 			}
+			return note("thinking = " + m.cfg.Thinking)
 		}
-		return note("thinking = " + m.cfg.Thinking)
+		return m.openThinkingPicker()
 	case "tools":
 		var names []string
 		reg := tools.Default()
@@ -611,17 +670,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		return note("skills: " + strings.Join(names, ", "))
 	case "new":
-		m.history = nil
-		m.transcript = nil
-		if m.engine != nil {
-			cwd, _ := os.Getwd()
-			if m.engine.Opts.Cwd != "" {
-				cwd = m.engine.Opts.Cwd
-			}
-			s := session.NewAt(cwd, m.engine.Opts.AgentDir, m.engine.Opts.SessionDir)
-			m.engine.AdoptSession(s)
-		}
-		return note("started a new session")
+		return m.startNewSession()
 	case "compact":
 		if m.engine == nil {
 			return note("compaction requires a runtime engine")
@@ -769,12 +818,13 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			return note("reload requires a runtime engine")
 		}
 		m.engine.Reload()
+		m.cfg = m.engine.Opts.Config
 		if m.keys != nil {
 			m.keys.Reload()
 		}
 		m.attachExtensions()
 		m.applyTheme(theme.LoadWith(m.themeOpts(m.cfg.Theme)))
-		return note("reloaded keybindings, skills, and context files")
+		return note("reloaded keybindings, skills, settings, and context files")
 	case "copy":
 		text := lastAssistant(m.history)
 		if text == "" {
@@ -882,6 +932,10 @@ func (m Model) handleImageGen(msg imageGenMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.Cmd) {
+	if m.engine != nil && m.engine.Compacting() {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while compaction is in progress.")})
+		return m, nil
+	}
 	m.editor.AddHistory(text)
 	m.editor.Reset()
 	m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
@@ -1064,6 +1118,9 @@ func (m Model) View() string {
 	}
 	if m.modelPickerActive() {
 		return m.present(m.models.view())
+	}
+	if m.thinkingPickerActive() {
+		return m.present(m.thinkingPick.view())
 	}
 	if m.loginActive() {
 		return m.present(m.loginView())
@@ -1303,8 +1360,8 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 	if useAltScreen(m.cfg) {
 		opts = append(opts, tea.WithAltScreen())
 		m.altScreen = true
-	}
-	if m.cfg.CopyOnSelect() {
+		opts = append(opts, tea.WithMouseCellMotion())
+	} else if m.cfg.CopyOnSelect() {
 		opts = append(opts, tea.WithMouseCellMotion())
 	}
 	p := tea.NewProgram(m, opts...)

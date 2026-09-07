@@ -19,6 +19,7 @@ type ClientConfig struct {
 	BaseURL    string
 	Headers    map[string]string
 	HTTPClient *http.Client
+	Transport  string
 }
 
 // APIFactory builds a StreamFn from resolved client config.
@@ -130,7 +131,7 @@ func registerBuiltinAPIs() {
 		if base == "" {
 			base = defaultCodexBaseURL
 		}
-		return (&OpenAICodexClient{BaseURL: base, APIKey: cfg.APIKey, Headers: headers, HTTPClient: httpClient(cfg)}).StreamFn()
+		return (&OpenAICodexClient{BaseURL: base, APIKey: cfg.APIKey, Headers: headers, HTTPClient: httpClient(cfg), Transport: cfg.Transport}).StreamFn()
 	})
 }
 
@@ -173,6 +174,9 @@ func httpClient(cfg ClientConfig) *http.Client {
 func StreamFor(provider string, cfg ClientConfig) StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
 		opts.ThinkingBudget = models.BudgetTokens(opts.Thinking)
+		if opts.Provider == "" {
+			opts.Provider = provider
+		}
 		c := cfg
 		if m, ok := models.Lookup(provider, opts.Model); ok && m.BaseURL != "" && c.BaseURL == "" {
 			c.BaseURL = m.BaseURL

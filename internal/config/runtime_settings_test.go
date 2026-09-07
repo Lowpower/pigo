@@ -10,6 +10,14 @@ import (
 )
 
 func TestRuntimeSettingDefaults(t *testing.T) {
+	t.Setenv("PIGO_HYPERLINKS", "")
+	t.Setenv("PI_HYPERLINKS", "")
+	t.Setenv("PIGO_TRUE_COLOR", "")
+	t.Setenv("PI_TRUE_COLOR", "")
+	t.Setenv("PIGO_IMAGE_PROTOCOL", "")
+	t.Setenv("PI_IMAGE_PROTOCOL", "")
+	t.Setenv("PIGO_CACHE_RETENTION", "")
+	t.Setenv("PI_CACHE_RETENTION", "")
 	var c Config
 	if !c.AutoResize() {
 		t.Fatal("autoResize default true")
@@ -35,11 +43,17 @@ func TestRuntimeSettingDefaults(t *testing.T) {
 	if c.ProviderRetryMaxDelay() != 60*time.Second {
 		t.Fatalf("delay=%s", c.ProviderRetryMaxDelay())
 	}
-	if c.EditorPadX() != 0 || c.OutputPadN() != 0 || c.HardwareCursor() || c.ClearOnShrink() || c.TerminalProgress() {
-		t.Fatal("tui extras default off")
+	if c.EditorPadX() != 0 || c.OutputPadN() != 1 || c.HardwareCursor() || c.ClearOnShrink() || c.TerminalProgress() {
+		t.Fatal("tui extras default")
+	}
+	if !c.CopyOnSelect() || !c.ScrollbarEnabled() {
+		t.Fatal("fullscreen copy/scrollbar default true")
 	}
 	if c.TrueColorMode() != "auto" {
 		t.Fatalf("trueColor=%s", c.TrueColorMode())
+	}
+	if c.CacheRetention() != "" {
+		t.Fatalf("cacheRetention=%q", c.CacheRetention())
 	}
 }
 
@@ -176,6 +190,34 @@ func TestSetEnableAnalyticsMintsTrackingID(t *testing.T) {
 	c.SetEnableAnalytics(true)
 	if c.TrackingID != first {
 		t.Fatalf("id changed on re-enable: %q vs %q", c.TrackingID, first)
+	}
+}
+
+func TestEnvOverridesTerminalSettings(t *testing.T) {
+	var c Config
+	t.Setenv("PI_HYPERLINKS", "0")
+	if c.HyperlinksEnabled(true) {
+		t.Fatal("PI_HYPERLINKS=0 should disable")
+	}
+	t.Setenv("PIGO_HYPERLINKS", "1")
+	if !c.HyperlinksEnabled(false) {
+		t.Fatal("PIGO_HYPERLINKS wins over PI_HYPERLINKS")
+	}
+	t.Setenv("PI_TRUE_COLOR", "1")
+	if c.TrueColorMode() != "on" {
+		t.Fatalf("trueColor=%s", c.TrueColorMode())
+	}
+	t.Setenv("PI_IMAGE_PROTOCOL", "none")
+	if c.ImageProtocol("kitty") != "" {
+		t.Fatalf("proto=%q", c.ImageProtocol("kitty"))
+	}
+	t.Setenv("PI_CACHE_RETENTION", "long")
+	if c.CacheRetention() != "long" {
+		t.Fatalf("retention=%q", c.CacheRetention())
+	}
+	t.Setenv("PIGO_CACHE_RETENTION", "none")
+	if c.CacheRetention() != "none" {
+		t.Fatalf("pigo retention=%q", c.CacheRetention())
 	}
 }
 

@@ -130,15 +130,59 @@ func (m *Manager) CreateBranchedSession(leafID, cwd, agentDir string) (*Manager,
 	child := NewAt(cwd, agentDir, m.dir)
 	child.header.ParentSession = m.file
 	copied := make([]*Entry, 0, len(path))
-	for i, e := range path {
+	replacement := map[string]string{}
+	var pending []string
+	var parentID *string
+	for _, e := range path {
+		if e.Type == "label" {
+			pending = append(pending, e.ID)
+			continue
+		}
+		for _, labelID := range pending {
+			replacement[labelID] = e.ID
+		}
+		pending = nil
 		ce := e
-		if i == 0 {
-			ce.ParentID = nil
-		} else {
-			prev := copied[i-1].ID
-			ce.ParentID = &prev
+		ce.ParentID = parentID
+		if ce.Type == "compaction" && ce.FirstKeptEntryID != "" {
+			if next, ok := replacement[ce.FirstKeptEntryID]; ok {
+				ce.FirstKeptEntryID = next
+			}
 		}
 		copied = append(copied, &ce)
+		id := ce.ID
+		parentID = &id
+	}
+	keptIDs := map[string]bool{}
+	for _, e := range copied {
+		keptIDs[e.ID] = true
+	}
+	labels, labelTS := resolvedLabels(path)
+	lastID := ""
+	if len(copied) > 0 {
+		lastID = copied[len(copied)-1].ID
+	}
+	for target, label := range labels {
+		if !keptIDs[target] {
+			continue
+		}
+		le := &Entry{
+			Type:      "label",
+			ID:        newUUID(),
+			Timestamp: labelTS[target],
+			TargetID:  target,
+		}
+		if le.Timestamp == "" {
+			le.Timestamp = isoNow()
+		}
+		l := label
+		le.Label = &l
+		if lastID != "" {
+			prev := lastID
+			le.ParentID = &prev
+		}
+		copied = append(copied, le)
+		lastID = le.ID
 	}
 	child.entries = copied
 	child.leafID = copied[len(copied)-1].ID

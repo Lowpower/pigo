@@ -16,6 +16,7 @@ import (
 )
 
 const rpcAlreadyStreaming = "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
+const rpcCompacting = "Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry."
 
 // ServeRPC is a JSONL stdin/stdout RPC mode.
 func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -45,6 +46,12 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 		}
 		h.SetUI(func(method string, args map[string]any, timeout time.Duration) map[string]any {
 			return e.RequestExtensionUI(method, args, timeout)
+		})
+		h.SetNotify(func(level, text string) {
+			emit(map[string]any{"type": "extension_ui_request", "method": "notify", "level": level, "text": text})
+		})
+		h.SetStatus(func(key, text string) {
+			emit(map[string]any{"type": "extension_ui_request", "method": "setStatus", "key": key, "text": text})
 		})
 	}
 	defer func() {
@@ -92,13 +99,22 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			wg.Wait()
 			return nil
 		case "abort":
-			e.AbortRetry()
+			e.AbortCompact()
 			stateMu.Lock()
 			if cancel != nil {
 				cancel()
 			}
 			stateMu.Unlock()
 			reply(id, "abort", true, nil, "")
+		case "clear_queue":
+			steer, follow := e.TakeQueues()
+			if steer == nil {
+				steer = []string{}
+			}
+			if follow == nil {
+				follow = []string{}
+			}
+			reply(id, "clear_queue", true, map[string]any{"steering": steer, "followUp": follow}, "")
 		case "prompt":
 			behavior, _ := raw["streamingBehavior"].(string)
 			imgs := parseRPCImages(raw)
@@ -117,6 +133,19 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			}
 			if isRunning {
 				reply(id, "prompt", false, nil, rpcAlreadyStreaming)
+				continue
+			}
+			if e.Compacting() {
+				reply(id, "prompt", false, nil, rpcCompacting)
+				continue
+			}
+			prep, err := e.preparePrompt(ctx, msg, imgs)
+			if err != nil {
+				reply(id, "prompt", false, nil, err.Error())
+				continue
+			}
+			if prep.Handled {
+				reply(id, "prompt", true, nil, "")
 				continue
 			}
 			stateMu.Lock()
@@ -142,10 +171,10 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 					}
 					stateMu.Unlock()
 				}()
-				if err := e.PrintJSON(cctx, out, hist, msg, imgs); err != nil {
+				if err := e.printJSON(cctx, out, hist, msg, imgs, false); err != nil {
 					emit(map[string]any{"type": "error", "message": err.Error(), "id": id})
 				}
-			}(msg, hist, imgs, cctx, id)
+			}(prep.User, hist, prep.Images, cctx, id)
 		case "steer":
 			e.PushSteerImages(msg, parseRPCImages(raw))
 			reply(id, "steer", true, nil, "")
@@ -154,11 +183,9 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			reply(id, "follow_up", true, nil, "")
 		case "new_session":
 			parent, _ := raw["parentSession"].(string)
-			if e.Opts.Session != nil {
-				e.Opts.Session = session.NewAt(e.Opts.Cwd, e.Opts.AgentDir, e.Opts.SessionDir)
-				if parent != "" {
-					e.Opts.Session.SetParentSession(parent)
-				}
+			if !e.NewSession(parent) {
+				reply(id, "new_session", true, map[string]any{"cancelled": true}, "")
+				break
 			}
 			stateMu.Lock()
 			history = nil
@@ -182,7 +209,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				"model":                 map[string]string{"provider": e.Opts.Config.ResolvedProvider(), "id": e.Opts.Config.ResolvedModel()},
 				"thinkingLevel":         e.Opts.Config.Thinking,
 				"isStreaming":           isStreaming,
-				"isCompacting":          e.isCompacting(),
+				"isCompacting":          e.Compacting(),
 				"steeringMode":          queueMode(e.Opts.Config.SteeringMode),
 				"followUpMode":          queueMode(e.Opts.Config.FollowUpMode),
 				"sessionFile":           sfile,
@@ -195,8 +222,20 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 		case "set_model":
 			provider, _ := raw["provider"].(string)
 			modelID, _ := raw["modelId"].(string)
+			if modelID != "" {
+				p := provider
+				if p == "" {
+					p = e.Provider
+				}
+				if _, ok := models.Lookup(p, modelID); !ok {
+					if _, known := models.LookupProvider(p); known {
+						reply(id, "set_model", false, nil, "model not found: "+p+"/"+modelID)
+						break
+					}
+				}
+			}
 			e.ApplyModel(provider, modelID, "")
-			reply(id, "set_model", true, map[string]any{"provider": e.Opts.Config.ResolvedProvider(), "id": e.Opts.Config.ResolvedModel()}, "")
+			reply(id, "set_model", true, rpcModelPayload(e.currentModel()), "")
 		case "cycle_model":
 			next, ok := e.CycleModel(false)
 			if !ok {
@@ -204,28 +243,32 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				break
 			}
 			reply(id, "cycle_model", true, map[string]any{
-				"model":         map[string]string{"provider": next.Provider, "id": next.ID},
+				"model":         rpcModelPayload(next.Model),
 				"thinkingLevel": e.Opts.Config.Thinking,
 				"isScoped":      len(e.Scoped) > 0,
 			}, "")
 		case "get_available_models":
 			ids := auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))
-			var list []map[string]string
+			var list []map[string]any
 			for _, m := range models.Available(ids) {
-				list = append(list, map[string]string{"provider": m.Provider, "id": m.ID, "api": m.API})
+				list = append(list, rpcModelPayload(m))
 			}
 			reply(id, "get_available_models", true, map[string]any{"models": list}, "")
 		case "set_thinking_level":
 			level, _ := raw["level"].(string)
-			e.Opts.Config.Thinking = level
+			level = e.SetThinkingLevel(level, false)
 			emit(map[string]any{"type": "thinking_level_changed", "level": level})
-			reply(id, "set_thinking_level", true, nil, "")
+			reply(id, "set_thinking_level", true, map[string]any{"level": level}, "")
 		case "cycle_thinking_level":
-			level := e.CycleThinking()
+			level, ok := e.CycleThinkingOK()
+			if !ok {
+				reply(id, "cycle_thinking_level", true, map[string]any{"level": nil}, "")
+				break
+			}
 			emit(map[string]any{"type": "thinking_level_changed", "level": level})
 			reply(id, "cycle_thinking_level", true, map[string]any{"level": level}, "")
 		case "get_available_thinking_levels":
-			reply(id, "get_available_thinking_levels", true, map[string]any{"levels": models.ThinkingLevels}, "")
+			reply(id, "get_available_thinking_levels", true, map[string]any{"levels": e.currentModel().ThinkingLevelsFor()}, "")
 		case "set_steering_mode":
 			mode, _ := raw["mode"].(string)
 			e.Opts.Config.SteeringMode = mode
@@ -239,15 +282,15 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			stateMu.Lock()
 			hist := history
 			stateMu.Unlock()
-			outHist, summary, err := e.CompactNow(ctx, hist, custom)
+			outHist, err := e.CompactNowResult(ctx, hist, custom)
 			if err != nil {
 				reply(id, "compact", false, nil, err.Error())
 				break
 			}
 			stateMu.Lock()
-			history = outHist
+			history = outHist.Messages
 			stateMu.Unlock()
-			reply(id, "compact", true, map[string]any{"summary": summary}, "")
+			reply(id, "compact", true, compactPayload(outHist), "")
 		case "set_auto_compaction":
 			enabled, _ := raw["enabled"].(bool)
 			on := enabled
@@ -324,16 +367,20 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			if e.Opts.Session != nil {
 				e.Opts.Session.SetName(name)
 			}
+			e.DispatchEvent(context.Background(), "session_info_changed", map[string]any{"name": name})
 			emit(map[string]any{"type": "session_info_changed", "name": name})
 			reply(id, "set_session_name", true, nil, "")
 		case "switch_session":
 			path, _ := raw["sessionPath"].(string)
-			m, err := session.Open(path)
+			m, err := e.SwitchSession(path)
 			if err != nil {
 				reply(id, "switch_session", false, nil, err.Error())
 				break
 			}
-			e.AdoptSession(m)
+			if m == nil {
+				reply(id, "switch_session", true, map[string]any{"cancelled": true}, "")
+				break
+			}
 			stateMu.Lock()
 			history = e.History()
 			stateMu.Unlock()
@@ -343,12 +390,18 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				reply(id, "clone", false, nil, "no session")
 				break
 			}
+			if !e.sessionHook("session_before_fork") {
+				reply(id, "clone", true, map[string]any{"cancelled": true}, "")
+				break
+			}
 			child, err := e.Opts.Session.Fork(e.Opts.Cwd, e.Opts.AgentDir)
 			if err != nil {
 				reply(id, "clone", false, nil, err.Error())
 				break
 			}
+			e.DispatchEvent(context.Background(), "session_shutdown", map[string]any{"sessionId": e.sessionID()})
 			e.AdoptSession(child)
+			e.finishSessionChange()
 			stateMu.Lock()
 			history = e.History()
 			stateMu.Unlock()
@@ -359,12 +412,18 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				reply(id, "fork", false, nil, "no session")
 				break
 			}
+			if !e.sessionHook("session_before_fork") {
+				reply(id, "fork", true, map[string]any{"text": "", "cancelled": true}, "")
+				break
+			}
 			child, text, err := e.Opts.Session.ForkFrom(entryID, e.Opts.Cwd, e.Opts.AgentDir, "before")
 			if err != nil {
 				reply(id, "fork", false, nil, err.Error())
 				break
 			}
+			e.DispatchEvent(context.Background(), "session_shutdown", map[string]any{"sessionId": e.sessionID()})
 			e.AdoptSession(child)
+			e.finishSessionChange()
 			stateMu.Lock()
 			history = e.History()
 			stateMu.Unlock()
@@ -469,18 +528,18 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			}
 			reply(id, "export_html", true, map[string]any{"path": path}, "")
 		case "get_commands":
-			var cmds []map[string]string
+			var cmds []map[string]any
 			for _, c := range slash.Builtins() {
-				cmds = append(cmds, map[string]string{"name": c.Name, "description": c.Description, "source": "builtin"})
+				cmds = append(cmds, rpcCommand(c.Name, c.Description, "builtin", "", "user"))
 			}
 			for _, c := range e.SlashCommands() {
-				cmds = append(cmds, map[string]string{"name": c.Name, "description": c.Description, "source": "extension"})
+				cmds = append(cmds, rpcCommand(c.Name, c.Description, "extension", c.Path, "temporary"))
 			}
 			for _, t := range e.Templates {
-				cmds = append(cmds, map[string]string{"name": t.Name, "description": t.Description, "source": "prompt"})
+				cmds = append(cmds, rpcCommand(t.Name, t.Description, "prompt", t.FilePath, t.Source))
 			}
 			for _, s := range e.Skills {
-				cmds = append(cmds, map[string]string{"name": s.Name, "description": s.Description, "source": "skill"})
+				cmds = append(cmds, rpcCommand(s.Name, s.Description, "skill", s.FilePath, s.Source))
 			}
 			reply(id, "get_commands", true, map[string]any{"commands": cmds}, "")
 		case "get_session_stats":
@@ -553,6 +612,40 @@ func lastAssistantText(msgs []ai.Message) string {
 		}
 	}
 	return ""
+}
+
+func rpcModelPayload(m models.Model) map[string]any {
+	out := map[string]any{
+		"provider":      m.Provider,
+		"id":            m.ID,
+		"api":           m.API,
+		"name":          m.Name,
+		"reasoning":     m.SupportsReasoning(),
+		"input":         m.Input,
+		"maxTokens":     m.MaxTokens,
+		"contextWindow": m.ContextWindow,
+	}
+	if m.Cost != nil {
+		out["cost"] = m.Cost
+	}
+	return out
+}
+
+func rpcCommand(name, description, source, path, scope string) map[string]any {
+	if scope == "" {
+		scope = "temporary"
+	}
+	return map[string]any{
+		"name":        name,
+		"description": description,
+		"source":      source,
+		"sourceInfo": map[string]any{
+			"path":   path,
+			"source": source,
+			"scope":  scope,
+			"origin": "top-level",
+		},
+	}
 }
 
 func strField(raw map[string]any, key string) string {

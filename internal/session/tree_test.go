@@ -73,6 +73,50 @@ func TestCreateBranchedSessionKeepsPath(t *testing.T) {
 	}
 }
 
+func TestCreateBranchedSessionStripsLabelsAndRemapsCompaction(t *testing.T) {
+	dir := t.TempDir()
+	cwd := t.TempDir()
+	m := New(cwd, dir)
+	u, _ := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"})
+	label, err := m.AppendLabel(u.ID, "bookmark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"})
+	if _, err := m.AppendCompaction("summary", label.ID, 10); err != nil {
+		t.Fatal(err)
+	}
+	comp := m.Entries()[len(m.Entries())-1]
+	child, err := m.CreateBranchedSession(comp.ID, cwd, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inPath []string
+	var firstKept string
+	recreated := false
+	for _, e := range child.Entries() {
+		if e.Type == "compaction" {
+			firstKept = e.FirstKeptEntryID
+		}
+		if e.Type == "label" {
+			recreated = true
+			continue
+		}
+		inPath = append(inPath, e.Type)
+	}
+	for _, typ := range inPath {
+		if typ == "label" {
+			t.Fatalf("label remained in conversation path: %v", inPath)
+		}
+	}
+	if firstKept != a.ID {
+		t.Fatalf("firstKept = %q want remapped assistant %q (label was %q)", firstKept, a.ID, label.ID)
+	}
+	if !recreated {
+		t.Fatal("expected label to be rewritten after the path")
+	}
+}
+
 func TestForkFromBeforeUserMessage(t *testing.T) {
 	dir := t.TempDir()
 	cwd := t.TempDir()

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/skills"
 )
 
 func TestBuildIncludesContextAndCwd(t *testing.T) {
@@ -136,5 +137,22 @@ func TestDiscoverTemplates(t *testing.T) {
 	withProj := DiscoverTemplates(cwd, agent, nil, true, true)
 	if len(withProj) != 2 {
 		t.Fatalf("trusted templates = %+v", withProj)
+	}
+}
+
+func TestBuildInjectsSkillsWithBashOnly(t *testing.T) {
+	got := Build(Options{
+		Skills: []skills.Skill{{Name: "demo", Description: "Do the demo", FilePath: "/tmp/SKILL.md"}},
+		Tools:  []ai.Tool{{Name: "bash"}},
+	})
+	if !strings.Contains(got, "Use bash to load a skill") || !strings.Contains(got, `name="demo"`) {
+		t.Fatalf("bash skills missing:\n%s", got)
+	}
+	none := Build(Options{
+		Skills: []skills.Skill{{Name: "demo", Description: "Do the demo", FilePath: "/tmp/SKILL.md"}},
+		Tools:  []ai.Tool{{Name: "edit"}},
+	})
+	if strings.Contains(none, "<available_skills>") {
+		t.Fatalf("skills leaked without read/bash:\n%s", none)
 	}
 }

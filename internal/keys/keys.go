@@ -132,6 +132,7 @@ var reservedActions = []string{
 	"app.editor.external",
 	"app.message.copy",
 	"app.message.followUp",
+	"app.message.dequeue",
 	"tui.input.submit",
 	"tui.select.confirm",
 	"tui.select.cancel",
@@ -435,6 +436,7 @@ func defaults(windows bool) map[string]Def {
 	follow := "alt+enter"
 	cycleBack := []string{"shift+ctrl+p", "ctrl+shift+p"}
 	pasteImg := "ctrl+v"
+	search := "ctrl+shift+f"
 	if windows {
 		undo = "alt+z"
 		if runtime.GOOS == "windows" {
@@ -443,6 +445,7 @@ func defaults(windows bool) map[string]Def {
 		follow = "ctrl+q"
 		cycleBack = []string{"alt+p"}
 		pasteImg = "alt+v"
+		search = "ctrl+f"
 	}
 	d := map[string]Def{
 		"tui.editor.cursorUp":           {Keys: strs("up"), Description: "Move cursor up, browsing older history at the top"},
@@ -482,6 +485,7 @@ func defaults(windows bool) map[string]Def {
 		"app.clear":                     {Keys: strs("ctrl+c"), Description: "clear editor (twice to quit)"},
 		"app.exit":                      {Keys: strs("ctrl+d"), Description: "exit when editor is empty"},
 		"app.suspend":                   {Keys: strs("ctrl+z"), Description: "Suspend to background"},
+		"app.thinking.save":             {Keys: strs("ctrl+s"), Description: "Save thinking level as default"},
 		"app.thinking.cycle":            {Keys: strs("shift+tab"), Description: "cycle thinking level"},
 		"app.model.cycleForward":        {Keys: strs("ctrl+p"), Description: "cycle model forward"},
 		"app.model.cycleBackward":       {Keys: cycleBack, Description: "cycle model backward"},
@@ -498,6 +502,17 @@ func defaults(windows bool) map[string]Def {
 		"app.session.tree":              {Description: "Open session tree"},
 		"app.session.fork":              {Description: "Fork current session"},
 		"app.session.resume":            {Description: "Resume a session"},
+		"app.tree.foldOrUp":             {Keys: strs("ctrl+left", "alt+left"), Description: "Fold tree branch or move up"},
+		"app.tree.unfoldOrDown":         {Keys: strs("ctrl+right", "alt+right"), Description: "Unfold tree branch or move down"},
+		"app.tree.editLabel":            {Keys: strs("shift+l"), Description: "Edit tree label"},
+		"app.tree.toggleLabelTimestamp": {Keys: strs("shift+t"), Description: "Toggle tree label timestamps"},
+		"app.tree.filter.default":       {Keys: strs("ctrl+d"), Description: "Tree filter: default view"},
+		"app.tree.filter.noTools":       {Keys: strs("ctrl+t"), Description: "Tree filter: hide tool results"},
+		"app.tree.filter.userOnly":      {Keys: strs("ctrl+u"), Description: "Tree filter: user messages only"},
+		"app.tree.filter.labeledOnly":   {Keys: strs("ctrl+l"), Description: "Tree filter: labeled entries only"},
+		"app.tree.filter.all":           {Keys: strs("ctrl+a"), Description: "Tree filter: show all entries"},
+		"app.tree.filter.cycleForward":  {Keys: strs("ctrl+o"), Description: "Tree filter: cycle forward"},
+		"app.tree.filter.cycleBackward": {Keys: strs("shift+ctrl+o", "ctrl+shift+o"), Description: "Tree filter: cycle backward"},
 		"app.session.togglePath":        {Keys: strs("ctrl+p"), Description: "Toggle session path display"},
 		"app.session.toggleSort":        {Keys: strs("ctrl+s"), Description: "Toggle session sort mode"},
 		"app.session.rename":            {Keys: strs("ctrl+r"), Description: "Rename session"},
@@ -509,6 +524,20 @@ func defaults(windows bool) map[string]Def {
 		"app.models.toggleProvider":     {Keys: strs("ctrl+p"), Description: "Toggle all models for provider"},
 		"app.models.reorderUp":          {Keys: strs("alt+up"), Description: "Move model up in order"},
 		"app.models.reorderDown":        {Keys: strs("alt+down"), Description: "Move model down in order"},
+		"tui.altScreen.pageUp":          {Keys: strs("pageup"), Description: "Scroll viewport up one page"},
+		"tui.altScreen.pageDown":        {Keys: strs("pagedown"), Description: "Scroll viewport down one page"},
+		"tui.altScreen.halfPageUp":      {Description: "Scroll viewport up half a page"},
+		"tui.altScreen.halfPageDown":    {Description: "Scroll viewport down half a page"},
+		"tui.altScreen.lineUp":          {Description: "Scroll viewport up one line"},
+		"tui.altScreen.lineDown":        {Description: "Scroll viewport down one line"},
+		"tui.altScreen.previousPrompt":  {Keys: strs("ctrl+shift+up", "ctrl+up"), Description: "Jump to previous semantic prompt"},
+		"tui.altScreen.nextPrompt":      {Keys: strs("ctrl+shift+down", "ctrl+down"), Description: "Jump to next semantic prompt"},
+		"tui.altScreen.search":          {Keys: strs(search), Description: "Search the primary scroll view"},
+		"tui.altScreen.searchNext":      {Keys: strs("enter", "ctrl+g"), Description: "Select the next search match"},
+		"tui.altScreen.searchPrevious":  {Keys: strs("shift+enter", "ctrl+shift+g"), Description: "Select the previous search match"},
+		"tui.altScreen.searchClose":     {Keys: strs("esc"), Description: "Close transcript search"},
+		"tui.altScreen.top":             {Keys: strs("home"), Description: "Scroll viewport to top"},
+		"tui.altScreen.bottom":          {Keys: strs("end"), Description: "Scroll viewport to bottom"},
 	}
 	if runtime.GOOS == "windows" {
 		d["app.suspend"] = Def{Description: "Suspend to background"}
@@ -534,6 +563,10 @@ var helpOrder = []string{
 	"app.tools.expand",
 	"app.model.select",
 	"app.editor.external",
+	"app.message.copy",
+	"app.message.dequeue",
+	"app.suspend",
+	"tui.editor.undo",
 	"app.clipboard.pasteImage",
 	"tui.editor.yank",
 	"tui.editor.yankPop",

@@ -35,6 +35,7 @@ type promptEditor struct {
 	pastes map[int]string
 	pasteN int
 	jump   string // "", "forward", "backward"
+	undo   []string
 
 	readImage func() *clipImage
 	readText  func() string
@@ -88,6 +89,29 @@ func (e *promptEditor) applyComplete(prefix string, item completeItem) {
 	e.refreshPrompt()
 }
 
+func (e *promptEditor) pushUndo() {
+	cur := e.ta.Value()
+	if n := len(e.undo); n > 0 && e.undo[n-1] == cur {
+		return
+	}
+	e.undo = append(e.undo, cur)
+	if len(e.undo) > 50 {
+		e.undo = e.undo[len(e.undo)-50:]
+	}
+}
+
+func (e *promptEditor) undoEdit() {
+	if len(e.undo) == 0 {
+		return
+	}
+	last := e.undo[len(e.undo)-1]
+	e.undo = e.undo[:len(e.undo)-1]
+	e.last = ""
+	e.exitHistory()
+	e.ta.SetValue(last)
+	e.refreshPrompt()
+}
+
 func (e *promptEditor) Value() string { return e.ta.Value() }
 
 func (e *promptEditor) View() string { return e.ta.View() }
@@ -136,6 +160,7 @@ func (e *promptEditor) insert(text string) {
 	if text == "" {
 		return
 	}
+	e.pushUndo()
 	e.last = ""
 	e.exitHistory()
 	e.ta.InsertString(text)
@@ -143,6 +168,7 @@ func (e *promptEditor) insert(text string) {
 }
 
 func (e *promptEditor) insertPaste(raw string) {
+	e.pushUndo()
 	e.last = ""
 	e.exitHistory()
 	text := normalizePaste(raw)
@@ -198,6 +224,9 @@ func (e *promptEditor) handle(msg tea.KeyMsg, kb *keys.Manager) bool {
 	}
 	key := msg.String()
 	switch {
+	case kb.Matches(key, "tui.editor.undo"):
+		e.undoEdit()
+		return true
 	case kb.Matches(key, "tui.editor.jumpForward"):
 		e.jump = "forward"
 		return true
@@ -217,15 +246,19 @@ func (e *promptEditor) handle(msg tea.KeyMsg, kb *keys.Manager) bool {
 		e.navigateHistory(1)
 		return true
 	case kb.Matches(key, "tui.editor.deleteWordBackward"):
+		e.pushUndo()
 		e.deleteWord(true)
 		return true
 	case kb.Matches(key, "tui.editor.deleteWordForward"):
+		e.pushUndo()
 		e.deleteWord(false)
 		return true
 	case kb.Matches(key, "tui.editor.deleteToLineStart"):
+		e.pushUndo()
 		e.deleteToLineEdge(true)
 		return true
 	case kb.Matches(key, "tui.editor.deleteToLineEnd"):
+		e.pushUndo()
 		e.deleteToLineEdge(false)
 		return true
 	case kb.Matches(key, "tui.editor.cursorUp"):
