@@ -254,12 +254,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.lastWidth, m.lastHeight = msg.Width, msg.Height
 		m.width, m.height = msg.Width, msg.Height
-		edW := min(msg.Width, maxEditorWidth) - 2*m.cfg.EditorPadX()
+		edW := m.layoutWidth() - 2*m.cfg.EditorPadX()
 		if edW < 20 {
 			edW = 20
 		}
 		m.editor.SetWidth(edW)
-		wrap := min(msg.Width, maxEditorWidth) - m.cfg.OutputPadN()
+		wrap := m.layoutWidth() - m.cfg.OutputPadN()
 		m.glam = newRenderer(wrap)
 		return m, tea.Batch(cmds...)
 
@@ -1173,28 +1173,28 @@ func (m Model) View() string {
 		return m.present(m.forkView())
 	}
 
-	var b strings.Builder
-	b.WriteString(m.titleStyle.Render("pigo"))
-	b.WriteString("  ")
-	b.WriteString(m.metaStyle.Render(fmt.Sprintf("provider=%s  model=%s  theme=%s", m.providerLabel(), m.cfg.ResolvedModel(), m.cfg.Theme)))
-	b.WriteString("\n\n")
+	var body strings.Builder
+	body.WriteString(m.titleStyle.Render("pigo"))
+	body.WriteString("  ")
+	body.WriteString(m.metaStyle.Render(fmt.Sprintf("provider=%s  model=%s  theme=%s", m.providerLabel(), m.cfg.ResolvedModel(), m.cfg.Theme)))
+	body.WriteString("\n\n")
 
 	for _, e := range m.transcript {
 		switch e.role {
 		case "thinking":
 			if m.hideThinking {
-				b.WriteString(m.metaStyle.Render("Thinking…"))
+				body.WriteString(m.metaStyle.Render("Thinking…"))
 			} else if e.rendered != "" {
-				b.WriteString(e.rendered)
+				body.WriteString(e.rendered)
 			} else {
-				b.WriteString(m.metaStyle.Render(e.thinking))
+				body.WriteString(m.metaStyle.Render(e.thinking))
 			}
 		case "tool":
 			if e.partial {
-				b.WriteString(e.rendered)
-				if body := strings.TrimRight(previewTail(e.toolOut, 20), "\n"); body != "" {
-					b.WriteByte('\n')
-					b.WriteString(m.toolStyle.Render(indent(body)))
+				body.WriteString(e.rendered)
+				if out := strings.TrimRight(previewTail(e.toolOut, 20), "\n"); out != "" {
+					body.WriteByte('\n')
+					body.WriteString(m.toolStyle.Render(indent(out)))
 				}
 			} else if e.toolOut != "" {
 				style := m.toolStyle
@@ -1205,69 +1205,73 @@ func (m Model) View() string {
 				}
 				text, imgs := splitToolImages(e.toolOut)
 				if text != "" || len(imgs) == 0 {
-					b.WriteString(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBody(text, m.toolsExpanded))))
+					body.WriteString(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBody(text, m.toolsExpanded))))
 				} else {
-					b.WriteString(style.Render("  " + mark))
+					body.WriteString(style.Render("  " + mark))
 				}
 				for _, img := range imgs {
-					b.WriteByte('\n')
+					body.WriteByte('\n')
 					out := m.renderInlineImage(img)
 					if strings.HasPrefix(out, "\x1b") {
-						b.WriteString(out)
+						body.WriteString(out)
 					} else {
-						b.WriteString(style.Render(out))
+						body.WriteString(style.Render(out))
 					}
 				}
 			} else {
-				b.WriteString(e.rendered)
+				body.WriteString(e.rendered)
 			}
 		default:
-			b.WriteString(e.rendered)
+			body.WriteString(e.rendered)
 		}
-		b.WriteString("\n\n")
+		body.WriteString("\n\n")
 	}
 
 	if m.streamingThinking != "" {
 		if m.hideThinking {
-			b.WriteString(m.metaStyle.Render("Thinking…"))
+			body.WriteString(m.metaStyle.Render("Thinking…"))
 		} else {
-			b.WriteString(m.metaStyle.Render(m.streamingThinking))
+			body.WriteString(m.metaStyle.Render(m.streamingThinking))
 		}
-		b.WriteString("\n\n")
+		body.WriteString("\n\n")
 	}
 	if m.streamingActive && m.streaming != "" {
-		b.WriteString(m.streamStyle.Render(transformMermaid(m.streaming, m.mermaidOpts(true))))
-		b.WriteString("\n\n")
+		body.WriteString(m.streamStyle.Render(transformMermaid(m.streaming, m.mermaidOpts(true))))
+		body.WriteString("\n\n")
 	}
 	if m.running {
-		b.WriteString(m.metaStyle.Render("…working (Ctrl+C to interrupt)"))
-		b.WriteString("\n\n")
+		body.WriteString(m.metaStyle.Render("…working (Ctrl+C to interrupt)"))
+		body.WriteString("\n\n")
 	}
 	if m.bashRunning {
 		header := "$ " + m.bashCommand
-		b.WriteString(m.toolStyle.Render(header))
-		if body := strings.TrimRight(previewTail(m.bashLive, 20), "\n"); body != "" {
-			b.WriteByte('\n')
-			b.WriteString(indent(body))
+		body.WriteString(m.toolStyle.Render(header))
+		if out := strings.TrimRight(previewTail(m.bashLive, 20), "\n"); out != "" {
+			body.WriteByte('\n')
+			body.WriteString(indent(out))
 		}
-		b.WriteByte('\n')
-		b.WriteString(m.metaStyle.Render("…bash (Esc to cancel)"))
-		b.WriteString("\n\n")
+		body.WriteByte('\n')
+		body.WriteString(m.metaStyle.Render("…bash (Esc to cancel)"))
+		body.WriteString("\n\n")
 	}
 
-	b.WriteString(m.widgets("aboveEditor"))
+	var dock strings.Builder
+	dock.WriteString(m.widgets("aboveEditor"))
 	ed := m.editor.View()
 	if n := m.cfg.EditorPadX(); n > 0 {
 		ed = padLines(ed, n)
 	}
-	b.WriteString(ed)
-	b.WriteString("\n")
-	b.WriteString(m.widgets("belowEditor"))
+	dock.WriteString(ed)
+	dock.WriteString("\n")
+	dock.WriteString(m.widgets("belowEditor"))
 	if m.complete.active {
-		b.WriteString(m.complete.view())
+		dock.WriteString(m.complete.view())
 	}
-	b.WriteString(m.footerStyle.Render(m.footerText()))
-	return m.withTitle(m.present(b.String()))
+	dock.WriteString(m.footerStyle.Render(m.footerText()))
+	if m.altScreen && m.height > 0 {
+		return m.withTitle(m.layoutFullscreen(body.String(), dock.String()))
+	}
+	return m.withTitle(m.present(body.String() + dock.String()))
 }
 
 type pendingNav struct {
@@ -1328,15 +1332,19 @@ func (m Model) providerLabel() string {
 	return "(none yet)"
 }
 
-func (m Model) mermaidWidth() int {
+func (m Model) layoutWidth() int {
 	w := m.width
 	if w <= 0 {
-		w = 80
+		return 80
 	}
-	if w > maxEditorWidth {
-		w = maxEditorWidth
+	if m.altScreen {
+		return w
 	}
-	wrap := w - 2
+	return min(w, maxEditorWidth)
+}
+
+func (m Model) mermaidWidth() int {
+	wrap := m.layoutWidth() - 2
 	if wrap < 20 {
 		wrap = 20
 	}
