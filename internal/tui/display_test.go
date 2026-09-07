@@ -73,6 +73,27 @@ func TestPadLinesAndProgressOSC(t *testing.T) {
 	}
 }
 
+func TestClipWindowPadsShortContent(t *testing.T) {
+	got := clipWindow("hi", 5, 0)
+	if n := viewLineCount(got); n != 5 {
+		t.Fatalf("pad lines=%d, want 5; got=%q", n, got)
+	}
+	if !strings.HasPrefix(got, "hi") {
+		t.Fatalf("short content should stay at the top: %q", got)
+	}
+	bar := clipWithScrollbar("hi", 4, 0)
+	if n := viewLineCount(bar); n != 4 {
+		t.Fatalf("scrollbar pad lines=%d, want 4; got=%q", n, bar)
+	}
+	if strings.Contains(bar, "▐") {
+		t.Fatalf("short content should not grow a thumb: %q", bar)
+	}
+	clipped := clipWindow(strings.Repeat("x\n", 10), 3, 0)
+	if n := viewLineCount(clipped); n != 3 {
+		t.Fatalf("tall clip lines=%d, want 3", n)
+	}
+}
+
 func TestOutputPadAppliesToView(t *testing.T) {
 	n := 2
 	m := New(config.Config{Theme: "default", OutputPad: &n})

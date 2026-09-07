@@ -42,22 +42,65 @@ func (m Model) withLayout(s string) string {
 		s = padLines(s, n)
 	}
 	if m.altScreen && m.height > 0 {
-		if m.cfg.ScrollbarEnabled() {
-			s = clipWithScrollbar(s, m.height, m.scrollOff)
-		} else {
-			s = clipWindow(s, m.height, m.scrollOff)
-		}
-		if m.scrollOff > 0 {
-			s = withJumpLatest(s)
-		}
-		if m.searchActive {
-			s = withSearchBar(s, m.searchQuery, m.searchN, len(m.searchHits))
-		}
+		s = m.clipRegion(s, m.height)
 	}
 	if m.cfg.TerminalProgress() {
 		s = progressOSC(m.running || m.bashRunning) + s
 	}
 	return s
+}
+
+func (m Model) clipRegion(s string, height int) string {
+	if height <= 0 {
+		return s
+	}
+	if m.cfg.ScrollbarEnabled() {
+		s = clipWithScrollbar(s, height, m.scrollOff)
+	} else {
+		s = clipWindow(s, height, m.scrollOff)
+	}
+	if m.scrollOff > 0 {
+		s = withJumpLatest(s)
+	}
+	if m.searchActive {
+		s = withSearchBar(s, m.searchQuery, m.searchN, len(m.searchHits))
+	}
+	return s
+}
+
+func (m Model) layoutFullscreen(body, dock string) string {
+	if n := m.cfg.OutputPadN(); n > 0 {
+		body = padLines(body, n)
+		dock = padLines(dock, n)
+	}
+	dock = strings.TrimRight(dock, "\n")
+	dockH := lineCount(dock)
+	var s string
+	if dockH >= m.height {
+		s = m.clipRegion(joinBodyDock(body, dock), m.height)
+	} else {
+		body = m.clipRegion(body, m.height-dockH)
+		s = joinBodyDock(body, dock)
+	}
+	if m.cfg.TerminalProgress() {
+		s = progressOSC(m.running || m.bashRunning) + s
+	}
+	return m.withClip(s)
+}
+
+func joinBodyDock(body, dock string) string {
+	bodyLines := strings.Split(body, "\n")
+	if dock == "" {
+		return strings.Join(bodyLines, "\n")
+	}
+	return strings.Join(append(bodyLines, strings.Split(dock, "\n")...), "\n")
+}
+
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
 }
 
 func padLines(s string, n int) string {
@@ -82,9 +125,12 @@ func progressOSC(running bool) string {
 }
 
 func clipWindow(s string, height, offsetFromBottom int) string {
-	lines, _, total := clipWindowLines(s, height, offsetFromBottom)
-	if total <= height {
+	if height <= 0 {
 		return s
+	}
+	lines, _, total := clipWindowLines(s, height, offsetFromBottom)
+	if total < height {
+		lines = append(lines, make([]string, height-total)...)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -107,9 +153,15 @@ func clipWindowLines(s string, height, offsetFromBottom int) (vis []string, star
 }
 
 func clipWithScrollbar(s string, height, offsetFromBottom int) string {
+	if height <= 0 {
+		return s
+	}
 	vis, start, total := clipWindowLines(s, height, offsetFromBottom)
 	if total <= height {
-		return s
+		if total < height {
+			vis = append(vis, make([]string, height-total)...)
+		}
+		return strings.Join(vis, "\n")
 	}
 	thumb := start * (len(vis) - 1) / max(1, total-1)
 	if thumb < 0 {
