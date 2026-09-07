@@ -3,6 +3,8 @@
 A CLI/TUI coding agent written in Go (agent loop, streaming LLM, built-in tools,
 TUI, session persistence, extensions). Remaining work is tracked as GitHub issues.
 
+User docs: [docs/README.md](docs/README.md). Samples: [examples/](examples/).
+
 ## Install
 
 Download the archive for your OS from
@@ -87,15 +89,17 @@ variables.
 ## Notes
 
 pigo is a Go CLI/TUI and does not export a stable Go library (`internal/` stays
-private). Extensions load as subprocess RPC only; host capabilities are in tree.
-Tests are `go test`. `pigo server` / `pigo client` speak JSONL RPC on a Unix
-socket. `/image` generates images through OpenRouter (`OPENROUTER_API_KEY`).
+private). Embed from `--mode rpc`, `--mode json`, or `pigo server` / `pigo client`.
+Extensions load as subprocess RPC only; host capabilities are in tree.
+Tests are `go test`. `/image` generates images through OpenRouter
+(`OPENROUTER_API_KEY`).
 
 ## Layout
 
 ```
 cmd/pigo/            # entrypoint (cobra)
-examples/extensions/ # sample extension (hello tool)
+docs/                # user documentation
+examples/            # extensions, skill, prompt, theme samples
 internal/
 ├── ai/            # StreamFn + provider adapters
 ├── agent/         # agent loop, tool scheduling, cancellation
