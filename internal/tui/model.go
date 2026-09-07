@@ -195,12 +195,19 @@ func (m Model) themeOpts(name string) theme.LoadOptions {
 	return opt
 }
 
+func markdownStyle() string {
+	if lipgloss.HasDarkBackground() {
+		return "dark"
+	}
+	return "light"
+}
+
 func newRenderer(width int) *glamour.TermRenderer {
 	wrap := width - 2
 	if wrap < 20 {
 		wrap = 20
 	}
-	r, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(wrap))
+	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(markdownStyle()), glamour.WithWordWrap(wrap))
 	if err != nil {
 		return nil
 	}
