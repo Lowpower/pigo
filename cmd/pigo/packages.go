@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/trust"
 )
@@ -42,11 +45,11 @@ func addPackageFlags(cmd *cobra.Command, f *packageFlags, localOK, updateOK bool
 	cmd.Flags().BoolVarP(&f.approve, "approve", "a", false, "trust project-local files for this command")
 	cmd.Flags().BoolVar(&f.noApprove, "no-approve", false, "ignore project-local files for this command")
 	if updateOK {
-		cmd.Flags().BoolVar(&f.self, "self", false, "update pigo only (not implemented)")
+		cmd.Flags().BoolVar(&f.self, "self", false, "update pigo only")
 		cmd.Flags().BoolVar(&f.exts, "extensions", false, "update installed packages only")
-		cmd.Flags().BoolVar(&f.models, "models", false, "refresh model catalogs only (not implemented)")
+		cmd.Flags().BoolVar(&f.models, "models", false, "refresh model catalogs only")
 		cmd.Flags().BoolVar(&f.all, "all", false, "update pigo and installed packages")
-		cmd.Flags().BoolVar(&f.force, "force", false, "reinstall pigo even if current (not implemented)")
+		cmd.Flags().BoolVar(&f.force, "force", false, "reinstall pigo even if current")
 		cmd.Flags().StringVar(&f.extension, "extension", "", "update one package only")
 	}
 }
@@ -189,7 +192,9 @@ func newUpdateCmd() *cobra.Command {
 				wantSelf = true
 			}
 			if wantModels {
-				return fmt.Errorf("model catalog refresh is not implemented")
+				if err := refreshModelCatalogs(cmd); err != nil {
+					return err
+				}
 			}
 			if wantExt {
 				m, err := openPackageManager(f)
@@ -210,7 +215,7 @@ func newUpdateCmd() *cobra.Command {
 				}
 			}
 			if wantSelf {
-				return fmt.Errorf("pigo cannot self-update this installation")
+				return runSelfUpdate(cmd.Context(), "", f.force)
 			}
 			return nil
 		},
@@ -218,14 +223,30 @@ func newUpdateCmd() *cobra.Command {
 	addPackageFlags(cmd, &f, false, true)
 	cmd.Long = `Update pigo, installed packages, or model catalogs.
 
-  pigo update                 Update pigo only (not implemented)
+  pigo update                 Update pigo only
   pigo update --extensions    Update installed packages
-  pigo update --models        Refresh model catalogs (not implemented)
-  pigo update --self          Same as update with no args (not implemented)
-  pigo update --all           Packages then self-update (self not implemented)
+  pigo update --models        Refresh model catalogs
+  pigo update --self          Same as update with no args
+  pigo update --all           Packages then self-update
   pigo update <source>        Update one package
 `
 	return cmd
+}
+
+func refreshModelCatalogs(cmd *cobra.Command) error {
+	if os.Getenv("PIGO_OFFLINE") != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Offline: skipped model catalog refresh")
+		return nil
+	}
+	agentDir := config.DefaultConfigDir()
+	store := models.OpenFileStore(filepath.Join(agentDir, "models-store.json"))
+	base := models.DefaultCatalogBaseURL()
+	failed := models.RefreshAll(cmd.Context(), store, base, true)
+	if len(failed) > 0 {
+		return fmt.Errorf("catalog refresh failed: %s", strings.Join(failed, ", "))
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "Refreshed model catalogs")
+	return nil
 }
 
 func addPackageCommands(root *cobra.Command) {
