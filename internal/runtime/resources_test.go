@@ -64,6 +64,22 @@ func templateNames(ts []prompt.Template) []string {
 	return out
 }
 
+func TestNewLoadsUserAgentsSkills(t *testing.T) {
+	home := isolateHome(t)
+	writeSkill(t, filepath.Join(home, ".agents"), "fromhome", "From user agents")
+	agent := t.TempDir()
+	cwd := t.TempDir()
+
+	e, err := New(context.Background(), testEngineOpts(agent, cwd))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if names := skillNames(e.Skills); len(names) != 1 || names[0] != "fromhome" {
+		t.Fatalf("user ~/.agents/skills = %v", names)
+	}
+}
+
 func TestNewHonorsDisabledSkillOverride(t *testing.T) {
 	agent := t.TempDir()
 	cwd := t.TempDir()
