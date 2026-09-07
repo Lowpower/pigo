@@ -2,7 +2,11 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/agent"
@@ -62,15 +66,67 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				})
 			},
 		})
+	case "context":
+		_ = ext.Serve(ext.Handler{
+			Name:   "context-ext",
+			Events: []string{"context"},
+			OnEvent: func(string, map[string]any) map[string]any {
+				return map[string]any{
+					"messages": []any{map[string]any{"role": "user", "content": "from-ext"}},
+				}
+			},
+		})
+	case "resources":
+		_ = ext.Serve(ext.Handler{
+			Name:   "res-ext",
+			Events: []string{"resources_discover"},
+			OnEvent: func(string, map[string]any) map[string]any {
+				return map[string]any{"skillPaths": []string{os.Getenv("PIGO_EXT_SKILLS")}}
+			},
+		})
+	case "headers":
+		_ = ext.Serve(ext.Handler{
+			Name:   "hdr-ext",
+			Events: []string{"before_provider_headers"},
+			OnEvent: func(string, map[string]any) map[string]any {
+				return map[string]any{"headers": map[string]any{"X-Pigo-Test": "1"}}
+			},
+		})
+	case "messages":
+		_ = ext.Serve(ext.Handler{
+			Name: "msg-ext",
+			Events: []string{
+				"message_start", "message_update", "message_end", "tool_execution_update",
+			},
+			OnEvent: func(event string, payload map[string]any) map[string]any {
+				if p := os.Getenv("PIGO_EXT_LOG"); p != "" {
+					f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+					if err == nil {
+						_, _ = fmt.Fprintln(f, event)
+						_ = f.Close()
+					}
+				}
+				if event != "message_end" {
+					return nil
+				}
+				msg, _ := payload["message"].(map[string]any)
+				if msg == nil {
+					return nil
+				}
+				msg["errorMessage"] = "from-ext"
+				return map[string]any{"message": msg}
+			},
+		})
 	}
 	os.Exit(0)
 }
 
-func spawnRuntimeExt(t *testing.T, kind string, unknown []ext.UnknownFlag) *ext.Host {
+func spawnRuntimeExt(t *testing.T, kind string, unknown []ext.UnknownFlag, extraEnv ...string) *ext.Host {
 	t.Helper()
+	env := append([]string{"PIGO_RUNTIME_EXT=" + kind}, extraEnv...)
 	h, err := ext.Spawn(context.Background(), "runtime-ext",
 		[]string{os.Args[0], "-test.run=^TestRuntimeHelperProcess$"},
-		ext.Options{Env: []string{"PIGO_RUNTIME_EXT=" + kind}, UnknownFlags: unknown})
+		ext.Options{Env: env, UnknownFlags: unknown})
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -148,5 +204,124 @@ func TestBindExtensionStream(t *testing.T) {
 	_, msg := es.Collect()
 	if msg == nil || msg.Text() != "hello from capdemo" {
 		t.Fatalf("got %+v", msg)
+	}
+}
+
+func TestGatedStreamContextReplacesMessages(t *testing.T) {
+	h := spawnRuntimeExt(t, "context", nil)
+	var seen []ai.Message
+	inner := func(ctx context.Context, req ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		seen = append([]ai.Message(nil), req.Messages...)
+		return textReply("ok")(ctx, req, ai.Options{})
+	}
+	e := &Engine{
+		Hosts: []*ext.Host{h},
+		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	e.Stream = e.gatedStream(inner)
+	_ = e.RunPrompt(context.Background(), nil, "original", nil).Collect()
+	if len(seen) != 1 || seen[0].Content != "from-ext" {
+		t.Fatalf("messages=%+v", seen)
+	}
+}
+
+func TestResourcesDiscoverInjectsSkills(t *testing.T) {
+	dir := t.TempDir()
+	body := "---\nname: ext-skill\ndescription: From extension\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := spawnRuntimeExt(t, "resources", nil, "PIGO_EXT_SKILLS="+dir)
+	e := &Engine{
+		Hosts: []*ext.Host{h},
+		Tools: tools.Default(),
+		Opts:  Options{Cwd: t.TempDir()},
+	}
+	e.extendResourcesFromExtensions(context.Background(), "startup")
+	e.rebuildSystemPrompt()
+	if !strings.Contains(e.System, "ext-skill") {
+		t.Fatalf("system prompt missing injected skill:\n%s", e.System)
+	}
+}
+
+func TestGatedStreamBeforeProviderHeaders(t *testing.T) {
+	h := spawnRuntimeExt(t, "headers", nil)
+	var got map[string]string
+	inner := func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		got = opts.ExtraHeaders
+		return textReply("ok")(ctx, req, ai.Options{})
+	}
+	e := &Engine{
+		Hosts: []*ext.Host{h},
+		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	e.Stream = e.gatedStream(inner)
+	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
+	if got["X-Pigo-Test"] != "1" {
+		t.Fatalf("headers=%v", got)
+	}
+}
+
+type streamyTool struct{}
+
+func (streamyTool) Name() string        { return "streamy" }
+func (streamyTool) Description() string { return "stream" }
+func (streamyTool) Schema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (streamyTool) Execute(ctx context.Context, _ map[string]any) (string, bool) {
+	if fn := tools.OutputUpdate(ctx); fn != nil {
+		fn("partial-out")
+	}
+	return "done", false
+}
+
+func TestMessageAndToolUpdateEvents(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "events.log")
+	h := spawnRuntimeExt(t, "messages", nil, "PIGO_EXT_LOG="+logPath)
+	var n int32
+	e := &Engine{
+		Hosts: []*ext.Host{h},
+		Tools: tools.NewRegistry(streamyTool{}),
+		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
+		Stream: func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+			if atomic.AddInt32(&n, 1) == 1 {
+				return ai.EmitMessage(ctx, &ai.AssistantMessage{
+					Role:       ai.RoleAssistant,
+					StopReason: ai.StopToolUse,
+					Content: []*ai.Content{{
+						Type: ai.KindToolCall, ToolID: "1", ToolName: "streamy",
+						Arguments: map[string]any{},
+					}},
+				}), nil
+			}
+			return textReply("ok")(ctx, req, opts)
+		},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	events := e.RunPrompt(context.Background(), nil, "go", nil).Collect()
+	var end *ai.AssistantMessage
+	for _, ev := range events {
+		if ev.Type == agent.EventMessageEnd && ev.Assistant != nil && ev.Assistant.StopReason == ai.StopStop {
+			end = ev.Assistant
+		}
+	}
+	if end == nil || end.ErrorMessage != "from-ext" {
+		t.Fatalf("message_end replacement = %+v", end)
+	}
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	for _, want := range []string{"message_start", "message_update", "message_end", "tool_execution_update"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("log missing %s:\n%s", want, got)
+		}
 	}
 }

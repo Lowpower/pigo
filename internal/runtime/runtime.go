@@ -160,6 +160,9 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 			opts.Config.Thinking = lvl
 		}
 	}
+	if opts.Config.Thinking == "" {
+		opts.Config.Thinking = "medium"
+	}
 	sf := boundStream(opts.AgentDir, provider, opts.Config.Transport)
 	if sf == nil {
 		sf, _ = ai.DefaultStreamFn()
@@ -243,7 +246,10 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.DispatchEvent(ctx, "session_start", map[string]any{
 		"sessionId": e.sessionID(),
 		"cwd":       e.Opts.Cwd,
+		"reason":    "startup",
 	})
+	e.extendResourcesFromExtensions(ctx, "startup")
+	e.rebuildSystemPrompt()
 	return e, nil
 }
 
@@ -898,16 +904,10 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 		Provider:        e.Provider,
 		CacheRetention:  e.Opts.Config.CacheRetention(),
 		OnLifecycle: func(ev agent.Event) {
-			switch ev.Type {
-			case agent.EventAgentStart:
-				e.DispatchEvent(ctx, "agent_start", map[string]any{})
-			case agent.EventAgentEnd:
-				e.DispatchEvent(ctx, "agent_end", map[string]any{})
-			case agent.EventTurnStart:
-				e.DispatchEvent(ctx, "turn_start", map[string]any{})
-			case agent.EventTurnEnd:
-				e.DispatchEvent(ctx, "turn_end", map[string]any{})
-			}
+			e.onAgentLifecycle(ctx, ev)
+		},
+		OnMessageEnd: func(m *ai.AssistantMessage) *ai.AssistantMessage {
+			return e.rewriteAssistantMessageEnd(ctx, m)
 		},
 		PrepareNextTurn: func(ctx context.Context, msgs []ai.Message) []ai.Message {
 			out, _, err := e.MaybeCompact(ctx, msgs)
@@ -1140,17 +1140,13 @@ func (e *Engine) Reload() {
 		e.Stream = fn
 	}
 
-	e.System = prompt.Build(prompt.Options{
-		Cwd:              e.Opts.Cwd,
-		AgentDir:         e.Opts.AgentDir,
-		Custom:           e.Opts.SystemPrompt,
-		Append:           e.Opts.AppendSystem,
-		NoContextFiles:   e.Opts.NoContextFiles,
-		ProjectTrusted:   e.Opts.ProjectTrusted,
-		Skills:           e.Skills,
-		Tools:            e.Tools.AITools(),
-		IncludeToolHints: true,
+	e.DispatchEvent(ctx, "session_start", map[string]any{
+		"sessionId": e.sessionID(),
+		"cwd":       e.Opts.Cwd,
+		"reason":    "reload",
 	})
+	e.extendResourcesFromExtensions(ctx, "reload")
+	e.rebuildSystemPrompt()
 }
 
 // PersistTranscript writes new agent messages to the session file.

@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -235,18 +237,6 @@ func envNames(ref string) []string {
 	return nil
 }
 
-func stringMap(v any) map[string]string {
-	m, ok := v.(map[string]any)
-	if !ok || m == nil {
-		return nil
-	}
-	out := map[string]string{}
-	for k, val := range m {
-		out[k] = fmt.Sprint(val)
-	}
-	return out
-}
-
 type extOAuth struct {
 	host *ext.Host
 	name string
@@ -349,6 +339,34 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 				StopReason: ai.StopStop,
 				Content:    []*ai.Content{},
 			}), nil
+		}
+		req.Messages = e.emitContext(ctx, req.Messages)
+		if e.hasEvent("before_provider_headers") {
+			res := e.DispatchEvent(ctx, "before_provider_headers", map[string]any{"headers": map[string]any{}})
+			opts.ExtraHeaders = stringMap(res["headers"])
+		}
+		if e.hasEvent("before_provider_request") {
+			opts.TransformBody = func(body []byte) []byte {
+				var payload any
+				if err := json.Unmarshal(body, &payload); err != nil {
+					return body
+				}
+				res := e.DispatchEvent(ctx, "before_provider_request", map[string]any{"payload": payload})
+				if p, ok := res["payload"]; ok {
+					b, err := json.Marshal(p)
+					if err == nil {
+						return b
+					}
+				}
+				return body
+			}
+		}
+		if e.hasEvent("after_provider_response") {
+			opts.OnHTTPResponse = func(status int, header http.Header) {
+				e.DispatchEvent(ctx, "after_provider_response", map[string]any{
+					"status": status, "headers": headerMap(header),
+				})
+			}
 		}
 		return fn(ctx, req, opts)
 	}
