@@ -200,10 +200,14 @@ func collectResourceFiles(dir, kind string) []string {
 }
 
 func collectSkillEntries(dir string) []string {
-	return collectSkillEntriesAt(dir, dir)
+	return collectSkillEntriesAt(dir, dir, false)
 }
 
-func collectSkillEntriesAt(dir, root string) []string {
+func collectAgentsSkillEntries(dir string) []string {
+	return collectSkillEntriesAt(dir, dir, true)
+}
+
+func collectSkillEntriesAt(dir, root string, agents bool) []string {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -235,14 +239,107 @@ func collectSkillEntriesAt(dir, root string) []string {
 			}
 		}
 		if info.Mode().IsRegular() {
-			if strings.HasSuffix(name, ".md") && dir == root {
+			includeMD := strings.HasSuffix(name, ".md") &&
+				((agents && dir != root) || (!agents && dir == root))
+			if includeMD {
 				out = append(out, full)
 			}
 			continue
 		}
 		if info.IsDir() {
-			out = append(out, collectSkillEntriesAt(full, root)...)
+			out = append(out, collectSkillEntriesAt(full, root, agents)...)
 		}
+	}
+	return out
+}
+
+func findGitRepoRoot(startDir string) string {
+	dir := startDir
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+func collectAncestorAgentsSkillDirs(startDir string) []string {
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		dir = filepath.Clean(startDir)
+	}
+	gitRoot := findGitRepoRoot(dir)
+	var out []string
+	for {
+		out = append(out, filepath.Join(dir, ".agents", "skills"))
+		if gitRoot != "" && dir == gitRoot {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return out
+}
+
+func resolvedPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return abs
+}
+
+func sameResolved(a, b string) bool {
+	return resolvedPath(a) == resolvedPath(b)
+}
+
+func canonicalPath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
+}
+
+func resourcePrecedence(r Resource) int {
+	if r.Origin == "package" {
+		return 4
+	}
+	rank := 2
+	if r.Scope == "project" {
+		rank = 0
+	}
+	if r.Source != "local" {
+		rank++
+	}
+	return rank
+}
+
+func dedupeResolvedByCanonical(rs []Resource) []Resource {
+	best := make(map[string]int, len(rs))
+	for i, r := range rs {
+		key := r.Type + "\x00" + canonicalPath(r.Path)
+		if j, ok := best[key]; ok {
+			if resourcePrecedence(r) < resourcePrecedence(rs[j]) {
+				best[key] = i
+			}
+			continue
+		}
+		best[key] = i
+	}
+	out := make([]Resource, 0, len(best))
+	for i, r := range rs {
+		key := r.Type + "\x00" + canonicalPath(r.Path)
+		if best[key] != i {
+			continue
+		}
+		out = append(out, r)
 	}
 	return out
 }
