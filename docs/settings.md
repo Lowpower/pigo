@@ -35,7 +35,8 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `terminal.{showImages,imageWidthCells,hyperlinks,images,clearOnShrink,showTerminalProgress,trueColor}` | TUI terminal |
 | `markdown.{mermaid,codeBlockIndent}` | Markdown rendering |
 | `images.{blockImages,autoResize}` | Image attachments (autoResize default true, max edge 2000) |
-| `tuiMode` / `fullscreenExitOutput` | TUI layout |
+| `tuiMode` / `fullscreenExitOutput` | TUI layout (`regular` keeps native terminal selection; `fullscreen` uses the alternate screen) |
+| `fullscreenCopyOnSelect` | Fullscreen only: copy the mouse selection on release (default true). When false, the highlight stays and `Ctrl+X` copies it |
 | `quietStartup` | Skip startup notes |
 | `httpProxy` / `httpIdleTimeoutMs` / `websocketConnectTimeoutMs` | Networking |
 | `hideThinkingBlock` / `showCacheMissNotices` | Display |

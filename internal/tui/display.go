@@ -34,7 +34,7 @@ func (m Model) linkPath(display, raw string) string {
 }
 
 func (m Model) present(s string) string {
-	return m.withClip(m.withLayout(s))
+	return m.finishView(m.withLayout(s))
 }
 
 func (m Model) withLayout(s string) string {
@@ -44,10 +44,15 @@ func (m Model) withLayout(s string) string {
 	if m.altScreen && m.height > 0 {
 		s = m.clipRegion(s, m.height)
 	}
+	return s
+}
+
+func (m Model) finishView(s string) string {
+	s = m.withSelection(s)
 	if m.cfg.TerminalProgress() {
 		s = progressOSC(m.running || m.bashRunning) + s
 	}
-	return s
+	return m.withClip(s)
 }
 
 func (m Model) clipRegion(s string, height int) string {
@@ -82,10 +87,7 @@ func (m Model) layoutFullscreen(body, dock string) string {
 		body = m.clipRegion(body, m.height-dockH)
 		s = joinBodyDock(body, dock)
 	}
-	if m.cfg.TerminalProgress() {
-		s = progressOSC(m.running || m.bashRunning) + s
-	}
-	return m.withClip(s)
+	return m.finishView(s)
 }
 
 func joinBodyDock(body, dock string) string {

@@ -138,6 +138,7 @@ type Model struct {
 	searchN       int
 	searchHits    []int
 	thinkingPick  listPicker
+	sel           textSel
 
 	extHub     *extUIHub
 	extStatus  map[string]string
@@ -387,7 +388,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.submit()
 		}
 		if m.keyIs(msg, "app.message.copy") {
-			return m.copyLastAssistant()
+			return m.copySelectionOrAssistant()
 		}
 		if m.keyIs(msg, "app.message.dequeue") {
 			m.restoreQueuedToEditor()
@@ -1407,8 +1408,8 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 	if useAltScreen(m.cfg) {
 		opts = append(opts, tea.WithAltScreen())
 		m.altScreen = true
-		opts = append(opts, tea.WithMouseCellMotion())
-	} else if m.cfg.CopyOnSelect() {
+	}
+	if useMouseTracking(m.cfg) {
 		opts = append(opts, tea.WithMouseCellMotion())
 	}
 	p := tea.NewProgram(m, opts...)
@@ -1432,6 +1433,19 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 
 func useAltScreen(cfg config.Config) bool {
 	return cfg.TuiMode() == "fullscreen"
+}
+
+// useMouseTracking is true only in fullscreen, so regular mode keeps native
+// terminal selection and copy/paste.
+func useMouseTracking(cfg config.Config) bool {
+	return useAltScreen(cfg)
+}
+
+func tuiModeScreenCmd(fullscreen bool) tea.Cmd {
+	if fullscreen {
+		return tea.Sequence(tea.EnterAltScreen, tea.EnableMouseCellMotion)
+	}
+	return tea.Sequence(tea.DisableMouse, tea.ExitAltScreen)
 }
 
 func fullscreenExitText(m Model) string {

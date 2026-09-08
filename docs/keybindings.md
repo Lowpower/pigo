@@ -37,4 +37,6 @@ Editor motions follow emacs-style ctrl/alt chords (`ctrl+a`/`e`, `ctrl+w`,
 `ctrl+k`, `ctrl+y`, …). Tree, session picker, model editor, and fullscreen
 search have their own action ids (`app.tree.*`, `app.session.*`,
 `app.models.*`, `tui.altScreen.*`). Empty `Keys` in the default table means
-unbound until set in `keybindings.json`.
+unbound until set in `keybindings.json`. In fullscreen, `app.message.copy`
+copies the active mouse selection when one exists, otherwise the last
+assistant message.

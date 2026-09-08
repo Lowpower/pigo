@@ -8,6 +8,16 @@ import (
 
 const altWheelMultiplier = 5
 
+func (m Model) copySelectionOrAssistant() (tea.Model, tea.Cmd) {
+	if m.altScreen {
+		if text := m.selectedText(); text != "" {
+			m.clipOSC = osc52(text)
+			return m, nil
+		}
+	}
+	return m.copyLastAssistant()
+}
+
 func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
 	text := lastAssistant(m.history)
 	if text == "" {
@@ -130,9 +140,36 @@ func (m Model) handleAltScreenMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if ev.Action == tea.MouseActionRelease && ev.Button == tea.MouseButtonLeft && m.scrollOff > 0 {
-		if m.height > 0 && ev.Y >= m.height-1 {
-			m.scrollBottom()
+	if ev.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+	switch ev.Action {
+	case tea.MouseActionPress:
+		m.sel = textSel{active: true, dragging: true, ax: ev.X, ay: ev.Y, fx: ev.X, fy: ev.Y}
+	case tea.MouseActionMotion:
+		if m.sel.dragging {
+			m.sel.fx = ev.X
+			m.sel.fy = ev.Y
+			m.sel.dragged = true
+		}
+	case tea.MouseActionRelease:
+		if m.sel.dragging {
+			m.sel.fx = ev.X
+			m.sel.fy = ev.Y
+			m.sel.dragging = false
+		}
+		if !m.sel.dragged {
+			m.sel = textSel{}
+			if m.scrollOff > 0 && m.height > 0 && ev.Y >= m.height-1 {
+				m.scrollBottom()
+			}
+			return m, nil
+		}
+		m.sel.active = true
+		if m.cfg.CopyOnSelect() {
+			if text := m.selectedText(); text != "" {
+				m.clipOSC = osc52(text)
+			}
 		}
 	}
 	return m, nil
