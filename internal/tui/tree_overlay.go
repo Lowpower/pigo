@@ -542,6 +542,12 @@ func (m Model) treeView() string {
 	if width <= 0 {
 		width = 80
 	}
+	if m.altScreen && m.cfg.ScrollbarEnabled() {
+		width -= 2
+		if width < 1 {
+			width = 1
+		}
+	}
 	for _, line := range clipTreeRows(rows, width) {
 		b.WriteString(line)
 		b.WriteByte('\n')

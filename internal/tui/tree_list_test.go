@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 
 	"github.com/Lowpower/pigo/internal/session"
 )
@@ -134,11 +137,63 @@ func TestClipTreeRowsKeepsGutter(t *testing.T) {
 	if !strings.HasPrefix(out[0], "› ") {
 		t.Fatalf("gutter lost: %q", out[0])
 	}
-	if len([]rune(out[0])) > 20 {
-		t.Fatalf("not clipped: %q", out[0])
+	if runewidth.StringWidth(out[0]) > 20 {
+		t.Fatalf("not clipped: %q width=%d", out[0], runewidth.StringWidth(out[0]))
 	}
 	if strings.HasPrefix(strings.TrimPrefix(out[0], "› "), "xxx") && !strings.Contains(out[0], "x") {
 		t.Fatal("expected panned body")
+	}
+}
+
+func TestClipTreeRowsCJKDoesNotExceedDisplayWidth(t *testing.T) {
+	const width = 20
+	rows := []treeViewRow{
+		{gutter: "› ", body: strings.Repeat("测", 40), anchorCol: 0, selected: true},
+		{gutter: "  ", body: strings.Repeat("文", 40), selected: false},
+	}
+	out := clipTreeRows(rows, width)
+	if len(out) != 2 {
+		t.Fatalf("len=%d", len(out))
+	}
+	if !strings.HasPrefix(out[0], "› ") {
+		t.Fatalf("gutter lost: %q", out[0])
+	}
+	for i, line := range out {
+		if !utf8.ValidString(line) {
+			t.Fatalf("row %d invalid utf8: %q", i, line)
+		}
+		if w := runewidth.StringWidth(line); w > width {
+			t.Fatalf("row %d display width %d > %d: %q", i, w, width, line)
+		}
+	}
+}
+
+func TestEntryDisplayNormDoesNotSplitUTF8(t *testing.T) {
+	long := strings.Repeat("测", 80) + "修 bug、写测试"
+	cases := []struct {
+		role    string
+		content string
+	}{
+		{"user", long},
+		{"assistant", long},
+	}
+	for _, tc := range cases {
+		e := session.Entry{Type: "message"}
+		raw, err := json.Marshal(map[string]any{"role": tc.role, "content": tc.content})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.Message = raw
+		got := entryDisplay(e, nil, nil)
+		if !utf8.ValidString(got) {
+			t.Fatalf("%s entryDisplay invalid utf8: %q", tc.role, got)
+		}
+		if strings.ContainsRune(got, utf8.RuneError) {
+			t.Fatalf("%s entryDisplay contains replacement rune: %q", tc.role, got)
+		}
+		if !strings.Contains(got, "测") {
+			t.Fatalf("%s entryDisplay dropped CJK: %q", tc.role, got)
+		}
 	}
 }
 
