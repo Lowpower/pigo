@@ -64,6 +64,7 @@ func (m *Model) refreshSettingsItems() {
 		{"install-telemetry", "Install telemetry", "Send an anonymous version/update ping after changelog-detected updates", boolText(m.cfg.InstallTelemetryEnabled())},
 		{"tui-mode", "TUI mode", "Interface layout; fullscreen uses the alternate screen", m.cfg.TuiMode()},
 		{"fullscreen-exit-output", "Fullscreen exit output", "Print the transcript or a resume hint when leaving fullscreen", m.cfg.FullscreenExit()},
+		{"fullscreen-copy-on-select", "Copy on select", "Automatically copy selected text in fullscreen mode", boolText(m.cfg.CopyOnSelect())},
 	}
 	items := make([]pickerItem, 0, len(rows))
 	for _, r := range rows {
@@ -116,7 +117,7 @@ func nextChoice(cur string, values []string) string {
 
 func (m Model) settingChoices(id string) []string {
 	switch id {
-	case "autocompact", "show-images", "block-images", "collapse-changelog", "install-telemetry", "auto-resize-images", "hide-thinking", "cache-miss-notices":
+	case "autocompact", "show-images", "block-images", "collapse-changelog", "install-telemetry", "auto-resize-images", "hide-thinking", "cache-miss-notices", "fullscreen-copy-on-select":
 		return []string{"true", "false"}
 	case "steering-mode", "follow-up-mode":
 		return []string{"one-at-a-time", "all"}
@@ -186,6 +187,8 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.TuiMode()
 	case "fullscreen-exit-output":
 		return m.cfg.FullscreenExit()
+	case "fullscreen-copy-on-select":
+		return boolText(m.cfg.CopyOnSelect())
 	default:
 		return ""
 	}
@@ -245,13 +248,15 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 	case "tui-mode":
 		patch(func(c *config.Config) { c.TUIMode = value })
 		m.altScreen = value == "fullscreen"
-		if m.altScreen {
-			cmd = tea.EnterAltScreen
-		} else {
-			cmd = tea.ExitAltScreen
+		if !m.altScreen {
+			m.sel = textSel{}
 		}
+		cmd = tuiModeScreenCmd(m.altScreen)
 	case "fullscreen-exit-output":
 		patch(func(c *config.Config) { c.FullscreenExitOutput = value })
+	case "fullscreen-copy-on-select":
+		on := value == "true"
+		patch(func(c *config.Config) { c.FullscreenCopyOnSelect = &on })
 	}
 	m.persistSettings()
 	return cmd

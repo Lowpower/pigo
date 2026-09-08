@@ -12,7 +12,10 @@ otherwise print/text mode.
 | `--mode json` | JSONL agent events on stdout ([json.md](json.md)) |
 | `--mode rpc` | JSONL request/response on stdin/stdout ([rpc.md](rpc.md)) |
 
-`--tui-mode` is `regular` or `fullscreen`.
+`--tui-mode` is `regular` or `fullscreen`. Regular mode leaves mouse selection
+to the terminal (drag, then copy with the terminal's shortcut). Fullscreen
+owns the mouse: drag to highlight, and `fullscreenCopyOnSelect` (default true)
+copies the selection; otherwise `Ctrl+X` copies it.
 
 ## Root flags
 
