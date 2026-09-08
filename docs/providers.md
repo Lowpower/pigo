@@ -26,7 +26,9 @@ Copilot, OpenRouter, Kimi, xAI, Radius). See [auth.md](auth.md).
 
 ## Custom providers
 
-1. **models.json** — add a provider id and models ([models.md](models.md)).
+1. **models.json** — add a provider id, models, and optional `apiKey`
+   ([models.md](models.md)). Unknown ids get API-key login (`pigo auth login <id>`
+   or a key under that id in `auth.json`).
 2. **Extension** — `register_provider` plus `OnStream` / OAuth hooks
    ([extensions.md](extensions.md)). The `capdemo` example serves a scripted
    stream with no network.

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/session"
@@ -1099,6 +1102,77 @@ func TestRPCGetAvailableThinkingLevelsOmitsUnmappedXHigh(t *testing.T) {
 	}
 	if !strings.Contains(s, `"high"`) {
 		t.Fatalf("missing high: %s", s)
+	}
+}
+
+func TestBoundStreamUsesModelsJSONCustomProvider(t *testing.T) {
+	var gotAuth, gotPath, gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("authorization")
+		gotPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		_ = json.Unmarshal(body, &payload)
+		gotModel, _ = payload["model"].(string)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n"))
+	}))
+	t.Cleanup(srv.Close)
+	dir := t.TempDir()
+	t.Cleanup(func() {
+		auth.UnregisterProvider("co-stream")
+		models.ClearOverlays()
+		models.UnregisterProvider("co-stream")
+	})
+	body := `{
+  "providers": {
+    "co-stream": {
+      "baseUrl": "` + srv.URL + `/v1",
+      "api": "openai-completions",
+      "apiKey": "sk-test",
+      "models": [{"id": "GLM-5.3"}]
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(context.Background(), Options{
+		Cwd:          t.TempDir(),
+		AgentDir:     dir,
+		Offline:      true,
+		NoExtensions: true,
+		NoTools:      true,
+		CLIProvider:  "co-stream",
+		CLIModel:     "GLM-5.3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if e.Provider != "co-stream" {
+		t.Fatalf("provider = %q", e.Provider)
+	}
+	stream, err := e.Stream(context.Background(), ai.Context{
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "hi"}},
+	}, ai.Options{Model: "GLM-5.3", Provider: "co-stream"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	if final == nil || final.Text() != "ok" {
+		t.Fatalf("final = %+v", final)
+	}
+	if gotAuth != "Bearer sk-test" {
+		t.Fatalf("authorization = %q", gotAuth)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotModel != "GLM-5.3" {
+		t.Fatalf("model = %q", gotModel)
 	}
 }
 

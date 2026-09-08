@@ -12,6 +12,7 @@ type userModelsFile struct {
 type userProvider struct {
 	BaseURL string  `json:"baseUrl"`
 	API     string  `json:"api"`
+	APIKey  string  `json:"apiKey"`
 	Models  []Model `json:"models"`
 }
 
@@ -21,6 +22,7 @@ func LoadUserJSON(path string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			setUserJSONProviders(nil)
 			return nil
 		}
 		return err
@@ -29,7 +31,14 @@ func LoadUserJSON(path string) error {
 	if err := json.Unmarshal(b, &file); err != nil {
 		return err
 	}
+	specs := make([]UserJSONProvider, 0, len(file.Providers))
 	for id, p := range file.Providers {
+		specs = append(specs, UserJSONProvider{
+			ID:      id,
+			BaseURL: p.BaseURL,
+			API:     p.API,
+			APIKey:  p.APIKey,
+		})
 		models := make([]Model, 0, len(p.Models))
 		for _, m := range p.Models {
 			m.Provider = id
@@ -64,5 +73,6 @@ func LoadUserJSON(path string) error {
 		}
 		SetUserOverlay(id, models)
 	}
+	setUserJSONProviders(specs)
 	return nil
 }

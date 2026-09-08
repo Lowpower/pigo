@@ -233,6 +233,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	if err := models.PrepareCatalog(agentDir, catalogURL, offline); err != nil {
 		return fmt.Errorf("models.json: %w", err)
 	}
+	auth.RegisterUserJSON()
 	if f.listModels {
 		q := f.listModelsQuery
 		if q == "" && len(args) > 0 {
