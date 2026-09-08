@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/version"
 )
@@ -174,6 +175,43 @@ func TestListModelsEmptyWithoutAuth(t *testing.T) {
 	}
 	if strings.TrimSpace(out.String()) != "" {
 		t.Fatalf("want empty list, got %q", out.String())
+	}
+}
+
+func TestListModelsIncludesModelsJSONCustomProvider(t *testing.T) {
+	clearCatalogEnvs(t)
+	dir := t.TempDir()
+	t.Cleanup(func() {
+		auth.UnregisterProvider("co-list")
+		models.ClearOverlays()
+		models.UnregisterProvider("co-list")
+	})
+	body := `{
+  "providers": {
+    "co-list": {
+      "baseUrl": "https://example.invalid/v1",
+      "api": "openai-completions",
+      "apiKey": "sk-test",
+      "models": [{"id": "GLM-5.3", "name": "GLM-5.3"}]
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--list-models", "--offline", "--config-dir", dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "co-list/GLM-5.3") {
+		t.Fatalf("missing custom provider: %s", s)
+	}
+	if !strings.Contains(s, "openai-completions") {
+		t.Fatalf("missing api: %s", s)
 	}
 }
 

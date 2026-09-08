@@ -11,7 +11,8 @@ pigo auth print-bearer-token --min-expiry 60
 pigo auth check --json
 ```
 
-TUI: `/login`, `/logout`. `--api-key` sets a process-only key.
+`pigo auth login <id>` also stores a key for a custom `models.json` provider id.
+See [providers.md](providers.md).
 
 `check` flags: `--json`, `--credentials`, `--no-refresh`.
 

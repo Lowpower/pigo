@@ -116,6 +116,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	if err := models.PrepareCatalog(opts.AgentDir, opts.CatalogBaseURL, offline); err != nil {
 		return nil, fmt.Errorf("models.json: %w", err)
 	}
+	auth.RegisterUserJSON()
 	models.SetThinkingBudgets(opts.Config.ThinkingBudgets)
 	ai.SetHTTPIdleTimeout(opts.Config.StreamIdleTimeout())
 

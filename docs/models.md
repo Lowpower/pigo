@@ -38,10 +38,14 @@ Remote overlays: `PIGO_CATALOG_BASE_URL` and `pigo update --models` (cache
     "local": {
       "baseUrl": "http://127.0.0.1:8080/v1",
       "api": "openai-completions",
+      "apiKey": "sk-local",
       "models": [{ "id": "my-model", "contextWindow": 32768 }]
     }
   }
 }
 ```
 
-Unknown provider ids are registered. See [providers.md](providers.md).
+Unknown provider ids are registered, including API-key auth. `apiKey` in
+`models.json`, or the same id in `auth.json`, is enough for `--list-models` and
+requests. Overlaying a custom gateway onto a builtin id such as `openai` still
+merges catalogs; prefer a distinct provider id. See [providers.md](providers.md).
