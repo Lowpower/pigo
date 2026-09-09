@@ -7,21 +7,11 @@
       .logo-mark { fill: #fff; }
     }
   </style>
-  <!-- Block g: 4×5 cells, unit 120, inner counter + right descender. -->
-  <path class="logo-mark" fill-rule="evenodd" d="
-    M160 100
-    H640
-    V700
-    H160
-    V580
-    H520
-    V460
-    H160
-    Z
-    M280 220
-    V340
-    H520
-    V220
-    Z
-  "/>
+  <!-- Block G on a 4×4 cell grid (unit 120, margin 160). Open on the right, one-cell tooth. -->
+  <g class="logo-mark">
+    <rect x="160" y="160" width="120" height="480"/>
+    <rect x="280" y="160" width="360" height="120"/>
+    <rect x="280" y="520" width="360" height="120"/>
+    <rect x="520" y="400" width="120" height="120"/>
+  </g>
 </svg>
