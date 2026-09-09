@@ -1,7 +1,7 @@
 # pigo documentation
 
-User-facing docs for the pigo CLI/TUI coding agent. They describe the
-implementation in this repository.
+The repository README is the Quick Start. This directory is the full manual
+for the pigo CLI/TUI coding agent.
 
 pigo does **not** export a stable Go library. Embeddings go through
 `--mode rpc` / `--mode json` or `pigo server` / `pigo client`. Extensions are
