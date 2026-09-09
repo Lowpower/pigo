@@ -365,7 +365,7 @@ func buildTreeRow(n flatNode, selected, onPath, showLabelTime, foldable, folded 
 	return treeViewRow{
 		gutter:    gutter,
 		body:      lead + entryDisplay(n.node.Entry, tools, link),
-		anchorCol: len([]rune(lead)),
+		anchorCol: visibleWidth(lead),
 		selected:  selected,
 	}
 }
@@ -378,7 +378,7 @@ func clipTreeRows(rows []treeViewRow, width int) []string {
 	maxBody := 0
 	var selected *treeViewRow
 	for i := range rows {
-		w := len([]rune(rows[i].body))
+		w := visibleWidth(rows[i].body)
 		if w > maxBody {
 			maxBody = w
 		}
@@ -399,34 +399,11 @@ func clipTreeRows(rows []treeViewRow, width int) []string {
 	for i, row := range rows {
 		body := row.body
 		if scroll > 0 {
-			body = sliceByColumn(row.body, scroll, viewportWidth)
+			body = sliceByDisplay(row.body, scroll, viewportWidth)
 		}
-		out[i] = truncateRunes(row.gutter+body, width)
+		out[i] = truncateDisplay(row.gutter+body, width, "…")
 	}
 	return out
-}
-
-func sliceByColumn(s string, start, width int) string {
-	r := []rune(s)
-	if start < 0 {
-		start = 0
-	}
-	if start >= len(r) || width <= 0 {
-		return ""
-	}
-	end := min(len(r), start+width)
-	return string(r[start:end])
-}
-
-func truncateRunes(s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	r := []rune(s)
-	if len(r) <= width {
-		return s
-	}
-	return string(r[:width])
 }
 
 func collectToolCalls(nodes []flatNode) map[string]toolCallInfo {
@@ -515,8 +492,8 @@ func formatToolCall(name string, args map[string]any, link pathLink) string {
 	case "bash":
 		raw := argStr("command")
 		cmd := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(raw, "\n", " "), "\t", " "))
-		if len([]rune(cmd)) > 50 {
-			cmd = string([]rune(cmd)[:50]) + "..."
+		if visibleWidth(cmd) > 50 {
+			cmd = truncateDisplay(cmd, 50, "...")
 		}
 		return "[bash: " + cmd + "]"
 	case "grep":
@@ -531,8 +508,8 @@ func formatToolCall(name string, args map[string]any, link pathLink) string {
 	default:
 		raw, _ := json.Marshal(args)
 		s := string(raw)
-		if len(s) > 40 {
-			s = s[:40] + "..."
+		if visibleWidth(s) > 40 {
+			s = truncateDisplay(s, 40, "...")
 		}
 		return "[" + name + ": " + s + "]"
 	}
@@ -563,10 +540,8 @@ func entryDisplay(e session.Entry, tools map[string]toolCallInfo, link pathLink)
 	norm := func(s string) string {
 		s = strings.ReplaceAll(s, "\n", " ")
 		s = strings.ReplaceAll(s, "\t", " ")
-		if len(s) > 200 {
-			s = s[:200] + "…"
-		}
-		return strings.TrimSpace(s)
+		s = strings.TrimSpace(s)
+		return truncateDisplay(s, 200, "…")
 	}
 	switch e.Type {
 	case "branch_summary":
@@ -603,10 +578,7 @@ func entryDisplay(e session.Entry, tools map[string]toolCallInfo, link pathLink)
 			return "assistant: (aborted)"
 		}
 		if p.ErrorMessage != "" {
-			errMsg := norm(p.ErrorMessage)
-			if len(errMsg) > 80 {
-				errMsg = errMsg[:80]
-			}
+			errMsg := truncateDisplay(norm(p.ErrorMessage), 80, "")
 			return "assistant: " + errMsg
 		}
 		return "assistant: (no content)"

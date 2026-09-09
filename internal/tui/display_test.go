@@ -3,8 +3,10 @@ package tui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Lowpower/pigo/internal/config"
 )
@@ -134,6 +136,51 @@ func TestOSC11LeakKeysAreDropped(t *testing.T) {
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]11;rgb:0000/0000/0000\\[1;1R")})
 	if m.editor.Value() != "" {
 		t.Fatalf("OSC 11 reply leaked into editor: %q", m.editor.Value())
+	}
+}
+
+func TestWrapTranscriptThinkingFitsWidth(t *testing.T) {
+	const width = 80
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"ascii", strings.Repeat("thinking ", 40)},
+		{"cjk", strings.Repeat("思考内容", 40)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(testCfg())
+			m.altScreen = true
+			m = send(m, tea.WindowSizeMsg{Width: width, Height: 24})
+			m.streamingThinking = tc.text
+			view := m.View()
+			for _, line := range strings.Split(view, "\n") {
+				if w := lipgloss.Width(line); w > width {
+					t.Fatalf("visible width %d > %d: %q", w, width, line)
+				}
+			}
+			probe := "thinking"
+			if tc.name == "cjk" {
+				probe = "思考"
+			}
+			if !strings.Contains(view, probe) {
+				t.Fatalf("thinking text dropped:\n%s", view)
+			}
+		})
+	}
+}
+
+func TestFirstLineDoesNotSplitUTF8(t *testing.T) {
+	got := firstLine(strings.Repeat("测", 120))
+	if !utf8.ValidString(got) {
+		t.Fatalf("invalid utf8: %q", got)
+	}
+	if strings.ContainsRune(got, utf8.RuneError) {
+		t.Fatalf("replacement rune: %q", got)
+	}
+	if !strings.Contains(got, "测") {
+		t.Fatalf("CJK dropped: %q", got)
 	}
 }
 

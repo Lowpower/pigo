@@ -1269,10 +1269,11 @@ func (m Model) View() string {
 		dock.WriteString(m.complete.view())
 	}
 	dock.WriteString(m.footerStyle.Render(m.footerText()))
+	bodyStr := wrapDisplayBlock(body.String(), m.transcriptWidth())
 	if m.altScreen && m.height > 0 {
-		return m.withTitle(m.layoutFullscreen(body.String(), dock.String()))
+		return m.withTitle(m.layoutFullscreen(bodyStr, dock.String()))
 	}
-	return m.withTitle(m.present(body.String() + dock.String()))
+	return m.withTitle(m.present(bodyStr + dock.String()))
 }
 
 type pendingNav struct {
@@ -1621,9 +1622,7 @@ func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i] + " …"
 	}
-	if len(s) > 200 {
-		s = s[:200] + " …"
-	}
+	s = truncateDisplay(s, 200, " …")
 	if s == "" {
 		return "(no output)"
 	}
