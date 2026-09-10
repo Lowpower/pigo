@@ -9,8 +9,10 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Lowpower/pigo/internal/keys"
+	"github.com/Lowpower/pigo/internal/theme"
 )
 
 const (
@@ -39,14 +41,17 @@ type promptEditor struct {
 
 	readImage func() *clipImage
 	readText  func() string
+	width     int
+	termH     int
 }
 
 func newPromptEditor() promptEditor {
 	ta := textarea.New()
-	ta.Placeholder = "Ask pigo…  (Enter send, Ctrl+G editor, Ctrl+L model, Ctrl+D exit)"
-	ta.Prompt = "│ "
+	ta.Placeholder = "Ask pigo…"
+	ta.Prompt = ""
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
+	ta.SetHeight(1)
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"))
 	ta.KeyMap.Paste.SetEnabled(false)
 	ta.KeyMap.DeleteWordBackward.SetEnabled(false)
@@ -70,9 +75,73 @@ func (e *promptEditor) bashMode() bool {
 func (e *promptEditor) refreshPrompt() {
 	if e.bashMode() {
 		e.ta.Prompt = "$ "
-		return
+	} else {
+		e.ta.Prompt = ""
 	}
-	e.ta.Prompt = "│ "
+	e.syncHeight(0)
+}
+
+func (e *promptEditor) applyTheme(th theme.Theme) {
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(th.Muted))
+	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(th.Tool))
+	e.ta.FocusedStyle.Placeholder = muted
+	e.ta.BlurredStyle.Placeholder = muted
+	e.ta.FocusedStyle.Prompt = prompt
+	e.ta.BlurredStyle.Prompt = prompt
+	e.ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	e.ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
+}
+
+func (e *promptEditor) SetWidth(w int) {
+	if w < 1 {
+		w = 1
+	}
+	e.width = w
+	e.ta.SetWidth(w)
+}
+
+func editorMaxHeight(termH int) int {
+	if termH <= 0 {
+		return 12
+	}
+	return max(5, termH*3/10)
+}
+
+func (e *promptEditor) visibleLineCount() int {
+	inner := e.width
+	if inner < 1 {
+		inner = 40
+	}
+	if p := e.ta.Prompt; p != "" {
+		inner -= lipgloss.Width(p)
+		if inner < 1 {
+			inner = 1
+		}
+	}
+	n := 0
+	for _, line := range strings.Split(e.ta.Value(), "\n") {
+		w := lipgloss.Width(line)
+		if w <= 0 {
+			n++
+			continue
+		}
+		n += (w + inner - 1) / inner
+	}
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+func (e *promptEditor) syncHeight(termH int) {
+	if termH > 0 {
+		e.termH = termH
+	}
+	n := e.visibleLineCount()
+	if maxH := editorMaxHeight(e.termH); n > maxH {
+		n = maxH
+	}
+	e.ta.SetHeight(n)
 }
 
 func (e *promptEditor) applyComplete(prefix string, item completeItem) {
@@ -115,8 +184,6 @@ func (e *promptEditor) undoEdit() {
 func (e *promptEditor) Value() string { return e.ta.Value() }
 
 func (e *promptEditor) View() string { return e.ta.View() }
-
-func (e *promptEditor) SetWidth(w int) { e.ta.SetWidth(w) }
 
 func (e *promptEditor) SetValue(s string) {
 	e.pastes = map[int]string{}
@@ -328,10 +395,12 @@ func (e *promptEditor) navigateHistory(direction int) {
 	if e.promptI == -1 {
 		e.ta.SetValue(e.draft)
 		e.draft = ""
+		e.refreshPrompt()
 		return
 	}
 	text := e.prompts[e.promptI]
 	e.ta.SetValue(text)
+	e.refreshPrompt()
 	if direction == -1 {
 		e.moveTo(0, 0)
 	}

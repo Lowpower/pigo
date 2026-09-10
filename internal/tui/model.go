@@ -183,6 +183,52 @@ func (m *Model) applyTheme(th theme.Theme) {
 	m.errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(th.Error))
 	m.streamStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(th.Assistant))
 	m.footerStyle = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color(th.Muted))
+	m.editor.applyTheme(th)
+}
+
+func (m Model) editorBorderColor() string {
+	th := m.theme
+	color := func(name, fallback string) string {
+		if th.Colors != nil {
+			if c := strings.TrimSpace(th.Colors[name]); c != "" {
+				return c
+			}
+		}
+		return fallback
+	}
+	if m.editor.bashMode() {
+		return color("bashMode", th.Tool)
+	}
+	switch strings.ToLower(strings.TrimSpace(m.cfg.Thinking)) {
+	case "minimal":
+		return color("thinkingMinimal", th.Accent)
+	case "low":
+		return color("thinkingLow", th.Accent)
+	case "medium":
+		return color("thinkingMedium", th.Accent)
+	case "high":
+		return color("thinkingHigh", th.Accent)
+	case "xhigh":
+		return color("thinkingXhigh", th.Accent)
+	case "max":
+		return color("thinkingMax", color("thinkingXhigh", th.Accent))
+	default:
+		return color("thinkingOff", th.Muted)
+	}
+}
+
+func (m Model) framedEditor() string {
+	m.editor.syncHeight(m.height)
+	inner := m.editor.View()
+	if n := m.cfg.EditorPadX(); n > 0 {
+		inner = padLines(inner, n)
+	}
+	w := m.layoutWidth()
+	if w < 1 {
+		w = 40
+	}
+	bar := lipgloss.NewStyle().Foreground(lipgloss.Color(m.editorBorderColor())).Render(strings.Repeat("─", w))
+	return bar + "\n" + inner + "\n" + bar
 }
 
 func (m Model) themeOpts(name string) theme.LoadOptions {
@@ -260,6 +306,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			edW = 20
 		}
 		m.editor.SetWidth(edW)
+		m.editor.syncHeight(msg.Height)
 		wrap := m.layoutWidth() - m.cfg.OutputPadN()
 		m.glam = newRenderer(wrap)
 		return m, tea.Batch(cmds...)
@@ -521,6 +568,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok && m.keys != nil {
 		m.editor.afterTextareaKey(key, m.keys)
 	}
+	m.editor.syncHeight(m.height)
 	m.refreshComplete(false)
 	return m, cmd
 }
@@ -1256,11 +1304,7 @@ func (m Model) View() string {
 
 	var dock strings.Builder
 	dock.WriteString(m.widgets("aboveEditor"))
-	ed := m.editor.View()
-	if n := m.cfg.EditorPadX(); n > 0 {
-		ed = padLines(ed, n)
-	}
-	dock.WriteString(ed)
+	dock.WriteString(m.framedEditor())
 	dock.WriteString("\n")
 	dock.WriteString(m.widgets("belowEditor"))
 	if m.complete.active {
