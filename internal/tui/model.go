@@ -433,11 +433,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.keyIs(msg, "app.tools.expand") {
 			m.toolsExpanded = !m.toolsExpanded
-			state := "collapsed"
-			if m.toolsExpanded {
-				state = "expanded"
-			}
-			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("tool output: " + state)})
 			return m, nil
 		}
 		if m.keyIs(msg, "app.model.select") {
@@ -1175,10 +1170,13 @@ func (m Model) View() string {
 	}
 
 	var body strings.Builder
-	body.WriteString(m.titleStyle.Render("pigo"))
-	body.WriteString("  ")
-	body.WriteString(m.metaStyle.Render(fmt.Sprintf("provider=%s  model=%s  theme=%s", m.providerLabel(), m.cfg.ResolvedModel(), m.cfg.Theme)))
-	body.WriteString("\n\n")
+	if s := m.startupView(); s != "" {
+		body.WriteString(s)
+		if !strings.HasSuffix(s, "\n") {
+			body.WriteByte('\n')
+		}
+		body.WriteByte('\n')
+	}
 
 	for _, e := range m.transcript {
 		switch e.role {
@@ -1325,13 +1323,6 @@ func (m Model) withClip(s string) string {
 		return s
 	}
 	return m.clipOSC + s
-}
-
-func (m Model) providerLabel() string {
-	if m.provider != "" {
-		return m.provider
-	}
-	return "(none yet)"
 }
 
 func (m Model) layoutWidth() int {
