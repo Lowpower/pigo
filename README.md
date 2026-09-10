@@ -1,13 +1,21 @@
-# pigo
+<p align="center">
+  <img alt="pigo" src="docs/images/logo.svg" width="128">
+</p>
+<p align="center">
+  <a href="https://github.com/Lowpower/pigo/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Lowpower/pigo/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/Lowpower/pigo/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Lowpower/pigo?style=flat-square"></a>
+  <a href="https://go.dev/dl/"><img alt="Go" src="https://img.shields.io/github/go-mod/go-version/Lowpower/pigo?style=flat-square"></a>
+</p>
 
-A CLI/TUI coding agent written in Go (agent loop, streaming LLM, built-in tools,
-TUI, session persistence, extensions). Remaining work is tracked as GitHub issues.
+pigo is a terminal coding agent written in Go. Adapt it with [extensions](docs/extensions.md), [skills](docs/skills.md), [prompt templates](docs/prompt-templates.md), and [themes](docs/themes.md) — without forking the host. Put those resources in [packages](docs/packages.md) and share them via npm, git, or a local path.
 
-User docs: [docs/README.md](docs/README.md). Samples: [examples/](examples/).
+It ships with useful defaults and four ways to run: an interactive TUI, print or JSON, RPC for process integration, and `pigo server` / `pigo client`. pigo does **not** export a stable Go library.
 
-## Install
+Full manual: [docs/README.md](docs/README.md). Samples: [examples/](examples/).
 
-Download the archive for your OS from
+## Quick Start
+
+Download a release archive from
 [GitHub Releases](https://github.com/Lowpower/pigo/releases), extract it, and
 put `pigo` on your `PATH`.
 
@@ -20,101 +28,99 @@ put `pigo` on your `PATH`.
 | Windows | amd64 | `pigo_*_windows_amd64.zip` |
 | Windows | arm64 | `pigo_*_windows_arm64.zip` |
 
-Pushing a `vX.Y.Z` tag runs GitHub Actions: pack all six binaries, smoke-test
-each on a matching hosted runner (`--version` / `--help`), then publish the
-Release.
-
-With a Go 1.27+ toolchain you can also install from source:
+With Go 1.27+:
 
 ```bash
 go install github.com/Lowpower/pigo/cmd/pigo@latest
 ```
 
-## Requirements
-
-- Go 1.27+ (only needed to build from source)
-
-## Toolchain
-
-The Cloud Agent environment installs everything via
-[`.cursor/install.sh`](.cursor/install.sh): the Go 1.27 toolchain and
-`golangci-lint`.
-
-To set up locally:
+Authenticate, then start a session in the project you want it to work on:
 
 ```bash
-# Go 1.27 (https://go.dev/dl/) and golangci-lint on your PATH, then:
-go mod download
+pigo auth login anthropic          # or openai, openrouter, …
+cd /path/to/project
+pigo                               # interactive TUI (needs a TTY)
+pigo -p "summarize this repo"      # one prompt, then exit
 ```
 
-## Build, run, test, lint
+By default the model gets `read`, `write`, `edit`, and `bash`. Add more through
+[tools](docs/tools.md), [skills](docs/skills.md), [extensions](docs/extensions.md),
+or [packages](docs/packages.md).
+
+Credentials live in `~/.pigo/agent/auth.json`. Settings live in
+`~/.pigo/agent/settings.json`. Override the config root with
+`PIGO_CODING_AGENT_DIR`.
+
+See [Quickstart](docs/quickstart.md) and [Usage](docs/usage.md) for flags and
+slash commands.
+
+## Providers & Models
+
+Built-in providers include Anthropic, OpenAI, GitHub Copilot, Gemini, Amazon
+Bedrock, OpenRouter, xAI, llama.cpp, and others. Authenticate with
+`pigo auth login <provider>` (API key or OAuth where supported), then pick a
+model with `/model` or `--model provider/id`.
+
+`pigo --list-models` prints the current catalog. Add providers in
+`~/.pigo/agent/models.json`, or via an extension. See
+[providers](docs/providers.md) and [models](docs/models.md).
+
+## Interactive Mode
+
+<p align="center"><img src="docs/images/interactive-mode.png" alt="Interactive Mode" width="600"></p>
+
+From top to bottom:
+
+- **Startup header** — `pigo`, provider, model, and theme
+- **Messages** — your messages, assistant replies, tool calls, and notices
+- **Editor** — where you type; `/` opens commands, Tab completes `@path`
+- **Footer** — working directory, git branch, session name, token/cost usage,
+  current model, and shortcuts (`/help` for the rest)
+
+`--tui-mode` is `regular` (default) or `fullscreen`. See
+[Usage](docs/usage.md) and [keybindings](docs/keybindings.md).
+
+## Sessions
+
+Each run that persists writes a JSONL file under `~/.pigo/agent/sessions/`.
+`--continue` resumes the latest session for this directory; `--resume` and
+`/resume` pick one; `--fork` / `/fork` / `/clone` branch history;
+`/tree` jumps to a previous point.
+
+`--export` and `/export` write a themed HTML transcript. `/share` publishes
+the session (Radius when authenticated, otherwise a private GitHub gist).
+
+See [sessions](docs/sessions.md), [session format](docs/session-format.md), and
+[compaction](docs/compaction.md). Keep the on-disk JSONL schema stable.
+
+## Customization
+
+- [Extensions](docs/extensions.md) — subprocess binaries over framed JSON (`ext.Serve`)
+- [Skills](docs/skills.md) — `SKILL.md` files the model can open
+- [Prompt templates](docs/prompt-templates.md) — markdown that becomes `/name`
+- [Themes](docs/themes.md) — TUI colour sets
+- [Packages](docs/packages.md) — `pigo install` from npm, git, or a local path
+
+Working samples live under [`examples/`](examples/).
+
+## Programmatic usage
+
+pigo does not export a stable Go library. Embed from:
+
+- [`--mode rpc`](docs/rpc.md) — JSONL request/response on stdin/stdout
+- [`--mode json`](docs/json.md) — JSONL agent events
+- [`pigo server` / `pigo client`](docs/server.md) — Unix socket, same RPC
+
+## Development
 
 ```bash
-go build ./...                 # build everything
-go run ./cmd/pigo --version      # print version
-go run ./cmd/pigo --help         # usage
-go run ./cmd/pigo -p "hello"     # single non-interactive prompt (print mode)
-go test ./...                  # run tests
-golangci-lint run              # lint
+go build ./...
+go test ./...
+golangci-lint run ./...
+go run ./cmd/pigo --help
+go run ./cmd/pigo -p "hello"
 ```
 
-### Flags
+The Cloud Agent environment is described in [AGENTS.md](AGENTS.md).
 
-| Flag | Description |
-| --- | --- |
-| `-p`, `--print` | Non-interactive: process prompt and exit |
-| `--mode` | `text` / `json` / `rpc` (default: TTY → interactive, else text) |
-| `--continue`, `-c` / `--resume`, `-r` / `--session` | Session resume |
-| `--fork <path\|id>` | Fork a session into a new file |
-| `--no-session` | Do not persist |
-| `--name`, `-n` | Session display name |
-| `--no-tools`, `-nt` / `--tools`, `-t` / `--exclude-tools`, `-xt` | Tool filters |
-| `--no-skills`, `-ns` / `--skill` | Skills |
-| `--no-context-files`, `-nc` | Skip AGENTS.md / CLAUDE.md |
-| `--model` | `provider/id` and optional `:<thinking>` |
-| `--models` | Comma-separated patterns for Ctrl+P cycling |
-| `--thinking` | `off\|minimal\|low\|medium\|high\|xhigh\|max` |
-| `--export <session.jsonl> [out.html]` | Export session to HTML |
-| `--list-models` | List known models |
-| `auth login\|logout\|print-api-key\|check` | API-key credentials |
-| `server` / `client` | Unix JSONL RPC session server |
-| `/image` | Generate an image (OpenRouter) |
-
-Positional `@file` arguments are inlined as `<file name="...">` blocks (text only).
-
-Configuration is read from `~/.pigo/agent/settings.json` (override with
-`PIGO_CODING_AGENT_DIR`) and can also be overridden with `PIGO_`-prefixed environment
-variables.
-
-## Notes
-
-pigo is a Go CLI/TUI and does not export a stable Go library (`internal/` stays
-private). Embed from `--mode rpc`, `--mode json`, or `pigo server` / `pigo client`.
-Extensions load as subprocess RPC only; host capabilities are in tree.
-Tests are `go test`. `/image` generates images through OpenRouter
-(`OPENROUTER_API_KEY`).
-
-## Layout
-
-```
-cmd/pigo/            # entrypoint (cobra)
-docs/                # user documentation
-examples/            # extensions, skill, prompt, theme samples
-internal/
-├── ai/            # StreamFn + provider adapters
-├── agent/         # agent loop, tool scheduling, cancellation
-├── tools/         # read bash edit write grep find ls
-├── session/       # JSONL + tree + HTML export
-├── compaction/    # history compaction
-├── tui/           # bubbletea TUI
-├── slash/         # built-in slash commands
-├── skills/        # SKILL.md discovery
-├── prompt/        # system prompt + prompt templates
-├── theme/         # TUI themes
-├── models/        # catalog + cycling
-├── auth/          # auth.json
-├── ext/           # extension system (subprocess RPC)
-├── protocol/      # cross-process wire format
-├── runtime/       # shared engine (print/json/rpc/TUI)
-└── config/        # settings.json (~/.pigo/agent)
-```
+Inspired by [earendil-works/pi](https://github.com/earendil-works/pi).

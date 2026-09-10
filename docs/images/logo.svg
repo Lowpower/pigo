@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="pigo">
+  <title>pigo</title>
+  <style>
+    .logo-mark { fill: #000; }
+    @media (prefers-color-scheme: dark) {
+      .logo-mark { fill: #fff; }
+    }
+  </style>
+  <!-- Block G on a 4×4 cell grid (unit 120, margin 160). Open on the right, one-cell tooth. -->
+  <g class="logo-mark">
+    <rect x="160" y="160" width="120" height="480"/>
+    <rect x="280" y="160" width="360" height="120"/>
+    <rect x="280" y="520" width="360" height="120"/>
+    <rect x="520" y="400" width="120" height="120"/>
+  </g>
+</svg>
