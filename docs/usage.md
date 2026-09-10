@@ -17,6 +17,12 @@ to the terminal (drag, then copy with the terminal's shortcut). Fullscreen
 owns the mouse: drag to highlight, and `fullscreenCopyOnSelect` (default true)
 copies the selection; otherwise `Ctrl+X` copies it.
 
+A new interactive session shows a startup header (version, compact key hints)
+and loaded resources (`AGENTS.md` / `CLAUDE.md`, skills, prompt templates,
+extensions, themes). `Ctrl+O` expands the full shortcut list and resource
+paths. `quietStartup` hides this listing; `--verbose` forces it on. Changelog
+notices still appear either way.
+
 ## Root flags
 
 | Flag | Description |

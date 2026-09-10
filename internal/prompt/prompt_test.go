@@ -103,6 +103,53 @@ func TestBuildSkipsUntrustedProjectAgents(t *testing.T) {
 	}
 }
 
+func TestContextFilePathsMatchesLoadedFiles(t *testing.T) {
+	cwd := t.TempDir()
+	agent := t.TempDir()
+	nested := filepath.Join(cwd, "svc")
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(cwd, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(agent, "AGENTS.md")
+	root := filepath.Join(cwd, "AGENTS.md")
+	override := filepath.Join(nested, "AGENTS.override.md")
+	project := filepath.Join(cwd, ".pigo", "AGENTS.md")
+	for _, item := range []struct {
+		path, body string
+	}{
+		{global, "global-agents"},
+		{root, "root-agents"},
+		{override, "nested-override"},
+		{project, "project-secret"},
+	} {
+		if err := os.WriteFile(item.path, []byte(item.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := ContextFilePaths(nested, agent, true)
+	want := []string{global, override, root, project}
+	if len(got) != len(want) {
+		t.Fatalf("paths=%v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("paths[%d]=%s want %s (all=%v)", i, got[i], want[i], got)
+		}
+	}
+	untrusted := ContextFilePaths(nested, agent, false)
+	for _, p := range untrusted {
+		if p == project {
+			t.Fatalf("untrusted listed .pigo/AGENTS.md: %v", untrusted)
+		}
+	}
+}
+
 func TestDiscoverTemplates(t *testing.T) {
 	agent := t.TempDir()
 	cwd := t.TempDir()

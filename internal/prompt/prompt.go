@@ -85,24 +85,38 @@ func skillFileReadTool(tools []ai.Tool) string {
 	return ""
 }
 
-func loadContextFiles(cwd, agentDir string, trusted bool) string {
-	var chunks []string
+// ContextFilePaths returns the AGENTS.md / CLAUDE.md / override files that
+// Build injects, in load order.
+func ContextFilePaths(cwd, agentDir string, trusted bool) []string {
+	var paths []string
 	seen := map[string]bool{}
-	add := func(text string) {
-		if text == "" {
+	add := func(p string) {
+		if p == "" || seen[p] || !fileExists(p) {
 			return
 		}
-		chunks = append(chunks, text)
+		seen[p] = true
+		paths = append(paths, p)
+	}
+	collectDir := func(dir string, includeDotPigo bool) {
+		if p := firstExisting(dir, "AGENTS.override.md"); p != "" {
+			add(p)
+		} else {
+			add(firstExisting(dir, "AGENTS.md", "AGENTS.MD"))
+			add(firstExisting(dir, "CLAUDE.md", "CLAUDE.MD"))
+		}
+		if includeDotPigo {
+			add(filepath.Join(dir, ".pigo", "AGENTS.md"))
+		}
 	}
 	if agentDir != "" {
-		add(loadDirContext(agentDir, false, seen))
+		collectDir(agentDir, false)
 	}
 	if cwd == "" {
-		return strings.Join(chunks, "\n\n")
+		return paths
 	}
 	dir := cwd
 	for i := 0; i < 12; i++ {
-		add(loadDirContext(dir, trusted, seen))
+		collectDir(dir, trusted)
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break
@@ -112,34 +126,19 @@ func loadContextFiles(cwd, agentDir string, trusted bool) string {
 		}
 		dir = parent
 	}
-	return strings.Join(chunks, "\n\n")
+	return paths
 }
 
-func loadDirContext(dir string, includeDotPigo bool, seen map[string]bool) string {
-	var parts []string
-	if p := firstExisting(dir, "AGENTS.override.md"); p != "" {
-		if text := readContextFile(p, seen); text != "" {
-			parts = append(parts, text)
+func loadContextFiles(cwd, agentDir string, trusted bool) string {
+	var chunks []string
+	for _, p := range ContextFilePaths(cwd, agentDir, trusted) {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
 		}
-	} else {
-		if p := firstExisting(dir, "AGENTS.md", "AGENTS.MD"); p != "" {
-			if text := readContextFile(p, seen); text != "" {
-				parts = append(parts, text)
-			}
-		}
-		if p := firstExisting(dir, "CLAUDE.md", "CLAUDE.MD"); p != "" {
-			if text := readContextFile(p, seen); text != "" {
-				parts = append(parts, text)
-			}
-		}
+		chunks = append(chunks, "# "+p+"\n"+string(b))
 	}
-	if includeDotPigo {
-		p := filepath.Join(dir, ".pigo", "AGENTS.md")
-		if text := readContextFile(p, seen); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, "\n\n")
+	return strings.Join(chunks, "\n\n")
 }
 
 func firstExisting(dir string, names ...string) string {
@@ -150,18 +149,6 @@ func firstExisting(dir string, names ...string) string {
 		}
 	}
 	return ""
-}
-
-func readContextFile(path string, seen map[string]bool) string {
-	if seen[path] {
-		return ""
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	seen[path] = true
-	return "# " + path + "\n" + string(b)
 }
 
 func fileExists(path string) bool {
