@@ -9,9 +9,9 @@
   </style>
   <!-- Block G on a 4×4 cell grid (unit 120, margin 160). Open on the right, one-cell tooth. -->
   <g class="logo-mark">
-    <rect x="160" y="160" width="120" height="480"/>
-    <rect x="280" y="160" width="360" height="120"/>
-    <rect x="280" y="520" width="360" height="120"/>
-    <rect x="520" y="400" width="120" height="120"/>
+    <rect x="160" y="160" width="120" height="480" fill="#000"/>
+    <rect x="280" y="160" width="360" height="120" fill="#000"/>
+    <rect x="280" y="520" width="360" height="120" fill="#000"/>
+    <rect x="520" y="400" width="120" height="120" fill="#000"/>
   </g>
 </svg>

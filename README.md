@@ -1,5 +1,8 @@
 <p align="center">
-  <img alt="pigo" src="docs/images/logo.svg" width="128">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+    <img alt="pigo" src="docs/images/logo.png" width="128">
+  </picture>
 </p>
 <p align="center">
   <a href="https://github.com/Lowpower/pigo/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Lowpower/pigo/actions/workflows/ci.yml/badge.svg"></a>
