@@ -249,6 +249,56 @@ func TestEditorUndoRestoresText(t *testing.T) {
 	}
 }
 
+func TestEditorChromeIsCompact(t *testing.T) {
+	m := New(testCfg())
+	view := m.View()
+	if strings.Contains(view, "Enter send") || strings.Contains(view, "Ctrl+G editor") {
+		t.Fatalf("placeholder still dumps keybindings:\n%s", view)
+	}
+	if !strings.Contains(view, "Ask pigo") {
+		t.Fatalf("missing placeholder:\n%s", view)
+	}
+	if strings.Count(view, "│") > 0 && strings.Contains(view, "│ Ask pigo") {
+		t.Fatalf("old left gutter still present:\n%s", view)
+	}
+	if !strings.Contains(view, "─") {
+		t.Fatalf("missing horizontal editor border:\n%s", view)
+	}
+	inner := m.editor.ta.Height()
+	if inner != 1 {
+		t.Fatalf("empty editor height=%d, want 1", inner)
+	}
+}
+
+func TestEditorGrowsWithNewlines(t *testing.T) {
+	m := New(testCfg())
+	m = send(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.editor.SetValue("one\ntwo\nthree")
+	m.editor.syncHeight(24)
+	if m.editor.ta.Height() != 3 {
+		t.Fatalf("height=%d, want 3", m.editor.ta.Height())
+	}
+}
+
+func TestEditorBorderFollowsThinkingAndBash(t *testing.T) {
+	m := New(testCfg())
+	off := m.editorBorderColor()
+	m.cfg.Thinking = "high"
+	if m.editorBorderColor() == off && m.theme.Colors == nil {
+		// builtin theme falls back to accent vs muted, so they should differ
+		if m.editorBorderColor() == m.theme.Muted {
+			t.Fatalf("high thinking should not use muted border")
+		}
+	}
+	if m.editorBorderColor() != m.theme.Accent {
+		t.Fatalf("high thinking border=%s want accent %s", m.editorBorderColor(), m.theme.Accent)
+	}
+	m.editor.SetValue("!ls")
+	if m.editorBorderColor() != m.theme.Tool {
+		t.Fatalf("bash border=%s want tool %s", m.editorBorderColor(), m.theme.Tool)
+	}
+}
+
 func mustDecodePNG() []byte {
 	const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 	b, err := base64.StdEncoding.DecodeString(b64)

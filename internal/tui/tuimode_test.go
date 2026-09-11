@@ -42,7 +42,7 @@ func viewHead(s string, n int) string {
 func assertDockAtBottom(t *testing.T, view string) {
 	t.Helper()
 	bottom := viewTail(view, 12)
-	if !strings.Contains(bottom, "│") {
+	if !strings.Contains(bottom, "Ask pigo") && !strings.Contains(bottom, "─") {
 		t.Fatalf("editor prompt missing from bottom region:\n%s", bottom)
 	}
 	if !strings.Contains(bottom, "/help") {
