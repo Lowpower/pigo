@@ -1283,7 +1283,7 @@ func (m Model) View() string {
 		body.WriteString("\n\n")
 	}
 	if m.streamingActive && m.streaming != "" {
-		body.WriteString(m.streamStyle.Render(transformMermaid(m.streaming, m.mermaidOpts(true))))
+		body.WriteString(m.streamStyle.Render(transformLatexJoins(transformMermaid(m.streaming, m.mermaidOpts(true)))))
 		body.WriteString("\n\n")
 	}
 	if m.running {
@@ -1395,6 +1395,7 @@ func (m Model) mermaidOpts(streaming bool) mermaidOpts {
 func (m Model) renderMarkdown(s string) string {
 	s = indentMarkdownCodeBlocks(s, m.cfg.CodeBlockIndent())
 	s = transformMermaid(s, m.mermaidOpts(false))
+	s = transformLatexJoins(s)
 	if m.glam == nil {
 		return s
 	}
