@@ -248,6 +248,7 @@ func (m Model) applyPickerModel(persist bool) (tea.Model, tea.Cmd) {
 		msg = "Default model: " + m.cfg.DefaultProvider + "/" + m.cfg.DefaultModel
 	}
 	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg)})
+	m.maybeWarnAnthropicExtraUsage()
 	return m, nil
 }
 

@@ -706,3 +706,100 @@ func TestLoadRetryProviderAndDisplaySettings(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadCompactionModelOverridesRetryCapAndWarnings(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RetryMaxAgentDelayMs() != 60000 {
+		t.Fatalf("default cap=%d", cfg.RetryMaxAgentDelayMs())
+	}
+	if cfg.CapRetryDelayMs(90000) != 60000 {
+		t.Fatalf("uncapped 90s should clamp to 60s, got %d", cfg.CapRetryDelayMs(90000))
+	}
+	if !cfg.AnthropicExtraUsageWarning() {
+		t.Fatal("warning default true")
+	}
+	if cfg.CompactionReserveTokens("anthropic", "claude-sonnet-4") != 16384 {
+		t.Fatalf("default reserve=%d", cfg.CompactionReserveTokens("anthropic", "claude-sonnet-4"))
+	}
+
+	dir := t.TempDir()
+	raw := `{
+  "retry": {"maxAgentDelayMs": 5000},
+  "warnings": {"anthropicExtraUsage": false},
+  "compaction": {
+    "reserveTokens": 1000,
+    "keepRecentTokens": 2000,
+    "modelOverrides": {
+      "anthropic/claude-opus-4": {"reserveTokens": 4000, "keepRecentTokens": 150}
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RetryMaxAgentDelayMs() != 5000 || cfg.CapRetryDelayMs(90000) != 5000 {
+		t.Fatalf("cap=%d clamped=%d", cfg.RetryMaxAgentDelayMs(), cfg.CapRetryDelayMs(90000))
+	}
+	if cfg.AnthropicExtraUsageWarning() {
+		t.Fatal("warning should be off")
+	}
+	if cfg.CompactionReserveTokens("openai", "gpt-4o") != 1000 {
+		t.Fatalf("global reserve=%d", cfg.CompactionReserveTokens("openai", "gpt-4o"))
+	}
+	if cfg.CompactionReserveTokens("anthropic", "claude-opus-4") != 4000 {
+		t.Fatalf("override reserve=%d", cfg.CompactionReserveTokens("anthropic", "claude-opus-4"))
+	}
+	if cfg.CompactionKeepRecentTokens("anthropic", "claude-opus-4") != 150 {
+		t.Fatalf("override keep=%d", cfg.CompactionKeepRecentTokens("anthropic", "claude-opus-4"))
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{`"maxAgentDelayMs"`, `"modelOverrides"`, `"anthropicExtraUsage"`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %s in %s", want, s)
+		}
+	}
+}
+
+func TestLoadFullscreenScrollbarModes(t *testing.T) {
+	var unset Config
+	if unset.ScrollbarMode() != "always" || !unset.ScrollbarEnabled() || !unset.ScrollbarVisible(0) {
+		t.Fatal("unset scrollbar should act as always")
+	}
+	off := Config{FullscreenScrollbar: false}
+	if off.ScrollbarMode() != "hidden" || off.ScrollbarEnabled() || off.ScrollbarVisible(3) {
+		t.Fatal("bool false should hide")
+	}
+	auto := Config{FullscreenScrollbar: "auto"}
+	if auto.ScrollbarMode() != "auto" || !auto.ScrollbarEnabled() {
+		t.Fatal("auto should be enabled")
+	}
+	if auto.ScrollbarVisible(0) || !auto.ScrollbarVisible(2) {
+		t.Fatal("auto visible only when scrolled")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"fullscreenScrollbar":"hidden"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ScrollbarMode() != "hidden" {
+		t.Fatalf("loaded mode=%s", cfg.ScrollbarMode())
+	}
+}

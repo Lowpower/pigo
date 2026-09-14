@@ -36,7 +36,7 @@ func (m Model) transcriptWidth() int {
 		w = m.layoutWidth()
 	}
 	w -= m.cfg.OutputPadN()
-	if m.altScreen && m.cfg.ScrollbarEnabled() {
+	if m.altScreen && m.cfg.ScrollbarVisible(m.scrollOff) {
 		w -= 2
 	}
 	if w < 1 {

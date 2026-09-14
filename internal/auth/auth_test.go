@@ -210,6 +210,34 @@ func TestCheckNoRefresh(t *testing.T) {
 	}
 }
 
+func TestIsAnthropicSubscriptionAuth(t *testing.T) {
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	dir := t.TempDir()
+	if IsAnthropicSubscriptionAuth(dir) {
+		t.Fatal("empty store")
+	}
+	s := Open(dir)
+	_, _ = s.Modify("anthropic", func(*Credential) (*Credential, error) {
+		return &Credential{Type: TypeAPIKey, Key: "sk-ant-api03-test"}, nil
+	})
+	if IsAnthropicSubscriptionAuth(dir) {
+		t.Fatal("pay-as-you-go api key")
+	}
+	_, _ = s.Modify("anthropic", func(*Credential) (*Credential, error) {
+		return &Credential{Type: TypeOAuth, Access: "tok"}, nil
+	})
+	if !IsAnthropicSubscriptionAuth(dir) {
+		t.Fatal("oauth should warn")
+	}
+	dir2 := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-oat01-test")
+	if !IsAnthropicSubscriptionAuth(dir2) {
+		t.Fatal("oat env key should warn")
+	}
+}
+
 type staticOAuth struct {
 	refresh func(context.Context, Credential) (Credential, error)
 	toAuth  func(Credential) (ModelAuth, error)

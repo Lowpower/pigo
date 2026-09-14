@@ -19,9 +19,9 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `thinkingBudgets` | Map of thinking level → token budget |
 | `modelThinkingLevels` | Per-model default thinking level |
 | `contextWindow` | Override catalog context window |
-| `compactionEnabled` / `compaction.{enabled,reserveTokens,keepRecentTokens}` | [compaction.md](compaction.md) |
+| `compactionEnabled` / `compaction.{enabled,reserveTokens,keepRecentTokens,modelOverrides}` | [compaction.md](compaction.md) |
 | `steeringMode` / `followUpMode` | Queue behaviour while streaming |
-| `retry.{enabled,maxRetries,baseDelayMs}` and `retry.provider.{timeoutMs,maxRetries,maxRetryDelayMs}` | HTTP retry |
+| `retry.{enabled,maxRetries,baseDelayMs,maxAgentDelayMs}` and `retry.provider.{timeoutMs,maxRetries,maxRetryDelayMs}` | Agent retry (maxAgentDelayMs default 60000) |
 | `defaultTools` | Built-in tool allowlist (default `read,bash,edit,write`) |
 | `enabledModels` | Ctrl+P cycle allowlist (globs) |
 | `defaultProjectTrust` | `ask` \| `always` \| `never` (global only) |
@@ -36,7 +36,9 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `markdown.{mermaid,codeBlockIndent}` | Markdown rendering |
 | `images.{blockImages,autoResize}` | Image attachments (autoResize default true, max edge 2000) |
 | `tuiMode` / `fullscreenExitOutput` | TUI layout (`regular` keeps native terminal selection; `fullscreen` uses the alternate screen) |
+| `fullscreenScrollbar` | `auto` \| `always` \| `hidden` (bool true/false still accepted; unset is `always`) |
 | `fullscreenCopyOnSelect` | Fullscreen only: copy the mouse selection on release (default true). When false, the highlight stays and `Ctrl+X` copies it |
+| `warnings.anthropicExtraUsage` | TUI notice when Anthropic subscription/OAuth auth is active (default true) |
 | `quietStartup` | Skip startup notes |
 | `httpProxy` / `httpIdleTimeoutMs` / `websocketConnectTimeoutMs` | Networking |
 | `hideThinkingBlock` / `showCacheMissNotices` | Display |

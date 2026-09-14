@@ -59,7 +59,7 @@ func (m Model) clipRegion(s string, height int) string {
 	if height <= 0 {
 		return s
 	}
-	if m.cfg.ScrollbarEnabled() {
+	if m.cfg.ScrollbarVisible(m.scrollOff) {
 		s = clipWithScrollbar(s, height, m.scrollOff)
 	} else {
 		s = clipWindow(s, height, m.scrollOff)

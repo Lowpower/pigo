@@ -542,7 +542,7 @@ func (m Model) treeView() string {
 	if width <= 0 {
 		width = 80
 	}
-	if m.altScreen && m.cfg.ScrollbarEnabled() {
+	if m.altScreen && m.cfg.ScrollbarVisible(start) {
 		width -= 2
 		if width < 1 {
 			width = 1

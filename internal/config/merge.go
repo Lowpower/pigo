@@ -49,7 +49,7 @@ type projectOverlay struct {
 	AutocompleteMaxVisible    *int                   `json:"autocompleteMaxVisible"`
 	ShowHardwareCursor        *bool                  `json:"showHardwareCursor"`
 	WebsocketConnectTimeoutMs *int                   `json:"websocketConnectTimeoutMs"`
-	FullscreenScrollbar       *bool                  `json:"fullscreenScrollbar"`
+	FullscreenScrollbar       any                    `json:"fullscreenScrollbar"`
 	FullscreenCopyOnSelect    *bool                  `json:"fullscreenCopyOnSelect"`
 	EnableAnalytics           *bool                  `json:"enableAnalytics"`
 	TrackingID                string                 `json:"trackingId"`
@@ -112,7 +112,18 @@ func applyOverlay(user Config, over projectOverlay) Config {
 		out.KeepRecentTokens = over.KeepRecentTokens
 	}
 	if over.Compaction != nil {
-		out.Compaction = *over.Compaction
+		if over.Compaction.Enabled != nil {
+			out.Compaction.Enabled = over.Compaction.Enabled
+		}
+		if over.Compaction.ReserveTokens > 0 {
+			out.Compaction.ReserveTokens = over.Compaction.ReserveTokens
+		}
+		if over.Compaction.KeepRecentTokens > 0 {
+			out.Compaction.KeepRecentTokens = over.Compaction.KeepRecentTokens
+		}
+		if over.Compaction.ModelOverrides != nil {
+			out.Compaction.ModelOverrides = mergeCompactionOverrides(out.Compaction.ModelOverrides, over.Compaction.ModelOverrides)
+		}
 	}
 	if over.SteeringMode != "" {
 		out.SteeringMode = over.SteeringMode
@@ -129,6 +140,9 @@ func applyOverlay(user Config, over projectOverlay) Config {
 		}
 		if over.Retry.BaseDelayMs != nil {
 			out.Retry.BaseDelayMs = over.Retry.BaseDelayMs
+		}
+		if over.Retry.MaxAgentDelayMs != nil {
+			out.Retry.MaxAgentDelayMs = over.Retry.MaxAgentDelayMs
 		}
 		if over.Retry.Provider != nil {
 			out.Retry.Provider = over.Retry.Provider
@@ -267,7 +281,7 @@ func applyOverlay(user Config, over projectOverlay) Config {
 		out.Transport = over.Transport
 	}
 	if over.Warnings != nil {
-		out.Warnings = over.Warnings
+		out.Warnings = mergeAnyMap(out.Warnings, over.Warnings)
 	}
 	if over.Packages != nil {
 		out.Packages = over.Packages
@@ -297,6 +311,24 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	return out
 }
 
+func mergeCompactionOverrides(base, over map[string]CompactionTokenOverride) map[string]CompactionTokenOverride {
+	out := make(map[string]CompactionTokenOverride, len(base)+len(over))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range over {
+		cur := out[k]
+		if v.ReserveTokens != nil {
+			cur.ReserveTokens = v.ReserveTokens
+		}
+		if v.KeepRecentTokens != nil {
+			cur.KeepRecentTokens = v.KeepRecentTokens
+		}
+		out[k] = cur
+	}
+	return out
+}
+
 // CopyUISettings copies /settings-menu fields from src onto dst (user file).
 func CopyUISettings(dst *Config, src Config) {
 	if dst == nil {
@@ -321,4 +353,17 @@ func CopyUISettings(dst *Config, src Config) {
 	dst.ShowCacheMissNotices = src.ShowCacheMissNotices
 	dst.ShellCommandPrefix = src.ShellCommandPrefix
 	dst.AutocompleteMaxVisible = src.AutocompleteMaxVisible
+	dst.FullscreenScrollbar = src.FullscreenScrollbar
+	dst.Warnings = src.Warnings
+}
+
+func mergeAnyMap(base, over map[string]any) map[string]any {
+	out := make(map[string]any, len(base)+len(over))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range over {
+		out[k] = v
+	}
+	return out
 }

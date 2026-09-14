@@ -163,3 +163,42 @@ func TestSettingsTogglesChangelogAndTelemetry(t *testing.T) {
 		t.Fatal("saved enableInstallTelemetry")
 	}
 }
+
+func TestSettingsCyclesScrollbarAndAnthropicWarning(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
+	m := New(testCfg())
+	m.editor.SetValue("/settings")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("fullscreen scrollbar")})
+	if !strings.Contains(m.View(), "always") {
+		t.Fatalf("expected default always:\n%s", m.View())
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.cfg.ScrollbarMode() != "auto" {
+		t.Fatalf("cycle scrollbar = %s", m.cfg.ScrollbarMode())
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m.editor.SetValue("/settings")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("anthropic extra-usage")})
+	if !strings.Contains(m.View(), "true") {
+		t.Fatalf("expected default true:\n%s", m.View())
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.cfg.AnthropicExtraUsageWarning() {
+		t.Fatal("warning should toggle off")
+	}
+
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ScrollbarMode() != "auto" {
+		t.Fatalf("saved scrollbar = %s", loaded.ScrollbarMode())
+	}
+	if loaded.AnthropicExtraUsageWarning() {
+		t.Fatal("saved warning should be false")
+	}
+}

@@ -451,12 +451,13 @@ func (e *Engine) CompactNowResult(ctx context.Context, msgs []ai.Message, custom
 
 func (e *Engine) compactionSettings() compaction.Settings {
 	s := compaction.DefaultSettings()
-	if e.Opts.Config.ReserveTokens > 0 {
-		s.ReserveTokens = e.Opts.Config.ReserveTokens
+	provider := e.Provider
+	if provider == "" {
+		provider = e.Opts.Config.ResolvedProvider()
 	}
-	if e.Opts.Config.KeepRecentTokens > 0 {
-		s.KeepRecentTokens = e.Opts.Config.KeepRecentTokens
-	}
+	model := e.Opts.Config.ResolvedModel()
+	s.ReserveTokens = e.Opts.Config.CompactionReserveTokens(provider, model)
+	s.KeepRecentTokens = e.Opts.Config.CompactionKeepRecentTokens(provider, model)
 	return s
 }
 

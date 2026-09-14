@@ -61,7 +61,7 @@ type Config struct {
 	AutocompleteMaxVisible    *int                  `mapstructure:"autocompleteMaxVisible"`
 	ShowHardwareCursor        *bool                 `mapstructure:"showHardwareCursor"`
 	WebsocketConnectTimeoutMs *int                  `mapstructure:"websocketConnectTimeoutMs"`
-	FullscreenScrollbar       *bool                 `mapstructure:"fullscreenScrollbar"`
+	FullscreenScrollbar       any                   `mapstructure:"fullscreenScrollbar"`
 	FullscreenCopyOnSelect    *bool                 `mapstructure:"fullscreenCopyOnSelect"`
 	EnableAnalytics           *bool                 `mapstructure:"enableAnalytics"`
 	TrackingID                string                `mapstructure:"trackingId"`
@@ -78,17 +78,25 @@ type Config struct {
 
 // CompactionSettings is settings.compaction.
 type CompactionSettings struct {
-	Enabled          *bool `mapstructure:"enabled" json:"enabled,omitempty"`
-	ReserveTokens    int   `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
-	KeepRecentTokens int   `mapstructure:"keepRecentTokens" json:"keepRecentTokens,omitempty"`
+	Enabled          *bool                              `mapstructure:"enabled" json:"enabled,omitempty"`
+	ReserveTokens    int                                `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
+	KeepRecentTokens int                                `mapstructure:"keepRecentTokens" json:"keepRecentTokens,omitempty"`
+	ModelOverrides   map[string]CompactionTokenOverride `mapstructure:"modelOverrides" json:"modelOverrides,omitempty"`
+}
+
+// CompactionTokenOverride is one compaction.modelOverrides entry.
+type CompactionTokenOverride struct {
+	ReserveTokens    *int `mapstructure:"reserveTokens" json:"reserveTokens,omitempty"`
+	KeepRecentTokens *int `mapstructure:"keepRecentTokens" json:"keepRecentTokens,omitempty"`
 }
 
 // RetrySettings is settings.retry (enabled default true, maxRetries 3, baseDelayMs 2000).
 type RetrySettings struct {
-	Enabled     *bool                  `mapstructure:"enabled" json:"enabled,omitempty"`
-	MaxRetries  *int                   `mapstructure:"maxRetries" json:"maxRetries,omitempty"`
-	BaseDelayMs *int                   `mapstructure:"baseDelayMs" json:"baseDelayMs,omitempty"`
-	Provider    *ProviderRetrySettings `mapstructure:"provider" json:"provider,omitempty"`
+	Enabled         *bool                  `mapstructure:"enabled" json:"enabled,omitempty"`
+	MaxRetries      *int                   `mapstructure:"maxRetries" json:"maxRetries,omitempty"`
+	BaseDelayMs     *int                   `mapstructure:"baseDelayMs" json:"baseDelayMs,omitempty"`
+	MaxAgentDelayMs *int                   `mapstructure:"maxAgentDelayMs" json:"maxAgentDelayMs,omitempty"`
+	Provider        *ProviderRetrySettings `mapstructure:"provider" json:"provider,omitempty"`
 }
 
 // ProviderRetrySettings is settings.retry.provider.
@@ -228,6 +236,90 @@ func (c Config) RetryBaseDelayMs() int {
 		return 2000
 	}
 	return *c.Retry.BaseDelayMs
+}
+
+// RetryMaxAgentDelayMs caps agent-level retry backoff (default 60000).
+func (c Config) RetryMaxAgentDelayMs() int {
+	if c.Retry.MaxAgentDelayMs == nil {
+		return 60000
+	}
+	if *c.Retry.MaxAgentDelayMs < 0 {
+		return 0
+	}
+	return *c.Retry.MaxAgentDelayMs
+}
+
+// CapRetryDelayMs applies retry.maxAgentDelayMs to an exponential backoff delay.
+func (c Config) CapRetryDelayMs(delayMs int) int {
+	limit := c.RetryMaxAgentDelayMs()
+	if limit > 0 && delayMs > limit {
+		return limit
+	}
+	return delayMs
+}
+
+// CompactionReserveTokens is the per-model or ordinary reserve budget (default 16384).
+func (c Config) CompactionReserveTokens(provider, model string) int {
+	if o, ok := c.compactionOverride(provider, model); ok && o.ReserveTokens != nil {
+		return *o.ReserveTokens
+	}
+	if c.ReserveTokens > 0 {
+		return c.ReserveTokens
+	}
+	return 16384
+}
+
+// CompactionKeepRecentTokens is the per-model or ordinary keep-recent budget (default 20000).
+func (c Config) CompactionKeepRecentTokens(provider, model string) int {
+	if o, ok := c.compactionOverride(provider, model); ok && o.KeepRecentTokens != nil {
+		return *o.KeepRecentTokens
+	}
+	if c.KeepRecentTokens > 0 {
+		return c.KeepRecentTokens
+	}
+	return 20000
+}
+
+func (c Config) compactionOverride(provider, model string) (CompactionTokenOverride, bool) {
+	if len(c.Compaction.ModelOverrides) == 0 {
+		return CompactionTokenOverride{}, false
+	}
+	key := strings.TrimSpace(provider) + "/" + strings.TrimSpace(model)
+	o, ok := c.Compaction.ModelOverrides[key]
+	return o, ok
+}
+
+// AnthropicExtraUsageWarning reports whether to warn about Anthropic subscription extra usage (default true).
+func (c Config) AnthropicExtraUsageWarning() bool {
+	if c.Warnings == nil {
+		return true
+	}
+	v, ok := c.Warnings["anthropicExtraUsage"]
+	if !ok || v == nil {
+		return true
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		s := strings.ToLower(strings.TrimSpace(t))
+		return s != "false" && s != "0" && s != "off" && s != "no"
+	default:
+		return true
+	}
+}
+
+// SetAnthropicExtraUsageWarning writes warnings.anthropicExtraUsage.
+func (c *Config) SetAnthropicExtraUsageWarning(on bool) {
+	if c == nil {
+		return
+	}
+	next := make(map[string]any, len(c.Warnings)+1)
+	for k, v := range c.Warnings {
+		next[k] = v
+	}
+	next["anthropicExtraUsage"] = on
+	c.Warnings = next
 }
 
 // HTTPIdleTimeout is the HTTP client timeout (default 5m). 0 disables it.
@@ -481,14 +573,17 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		return
 	}
 	var extra struct {
-		Packages      []PackageEntry  `json:"packages"`
-		Extensions    []string        `json:"extensions"`
-		Skills        []string        `json:"skills"`
-		Prompts       []string        `json:"prompts"`
-		Themes        []string        `json:"themes"`
-		NpmCommand    []string        `json:"npmCommand"`
-		DefaultTools  json.RawMessage `json:"defaultTools"`
-		EnabledModels json.RawMessage `json:"enabledModels"`
+		Packages            []PackageEntry  `json:"packages"`
+		Extensions          []string        `json:"extensions"`
+		Skills              []string        `json:"skills"`
+		Prompts             []string        `json:"prompts"`
+		Themes              []string        `json:"themes"`
+		NpmCommand          []string        `json:"npmCommand"`
+		DefaultTools        json.RawMessage `json:"defaultTools"`
+		EnabledModels       json.RawMessage `json:"enabledModels"`
+		Warnings            map[string]any  `json:"warnings"`
+		FullscreenScrollbar json.RawMessage `json:"fullscreenScrollbar"`
+		Compaction          json.RawMessage `json:"compaction"`
 	}
 	if err := json.Unmarshal(b, &extra); err != nil {
 		return
@@ -511,6 +606,33 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		var ids []string
 		if json.Unmarshal(extra.EnabledModels, &ids) == nil {
 			cfg.EnabledModels = ids
+		}
+	}
+	if extra.Warnings != nil {
+		cfg.Warnings = extra.Warnings
+	}
+	if extra.FullscreenScrollbar != nil {
+		var v any
+		if json.Unmarshal(extra.FullscreenScrollbar, &v) == nil {
+			cfg.FullscreenScrollbar = v
+		}
+	}
+	if extra.Compaction != nil {
+		var nested CompactionSettings
+		if json.Unmarshal(extra.Compaction, &nested) == nil {
+			if nested.Enabled != nil {
+				cfg.Compaction.Enabled = nested.Enabled
+			}
+			if nested.ReserveTokens > 0 {
+				cfg.Compaction.ReserveTokens = nested.ReserveTokens
+			}
+			if nested.KeepRecentTokens > 0 {
+				cfg.Compaction.KeepRecentTokens = nested.KeepRecentTokens
+			}
+			if nested.ModelOverrides != nil {
+				cfg.Compaction.ModelOverrides = nested.ModelOverrides
+			}
+			applyNestedCompaction(cfg)
 		}
 	}
 }
@@ -553,6 +675,11 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 		"reserveTokens":    cfg.ReserveTokens,
 		"keepRecentTokens": cfg.KeepRecentTokens,
 	}
+	if len(cfg.Compaction.ModelOverrides) > 0 {
+		comp, _ := existing["compaction"].(map[string]any)
+		comp["modelOverrides"] = cfg.Compaction.ModelOverrides
+		existing["compaction"] = comp
+	}
 	existing["compactionEnabled"] = cfg.CompactionEnabled()
 	existing["compactionReserveTokens"] = cfg.ReserveTokens
 	existing["compactionKeepRecentTokens"] = cfg.KeepRecentTokens
@@ -572,9 +699,10 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 		existing["enabledModels"] = cfg.EnabledModels
 	}
 	existing["retry"] = map[string]any{
-		"enabled":     cfg.RetryEnabled(),
-		"maxRetries":  cfg.RetryMaxRetries(),
-		"baseDelayMs": cfg.RetryBaseDelayMs(),
+		"enabled":         cfg.RetryEnabled(),
+		"maxRetries":      cfg.RetryMaxRetries(),
+		"baseDelayMs":     cfg.RetryBaseDelayMs(),
+		"maxAgentDelayMs": cfg.RetryMaxAgentDelayMs(),
 	}
 	if cfg.Retry.Provider != nil {
 		retry, _ := existing["retry"].(map[string]any)
@@ -642,7 +770,7 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 		existing["websocketConnectTimeoutMs"] = *cfg.WebsocketConnectTimeoutMs
 	}
 	if cfg.FullscreenScrollbar != nil {
-		existing["fullscreenScrollbar"] = *cfg.FullscreenScrollbar
+		existing["fullscreenScrollbar"] = cfg.FullscreenScrollbar
 	}
 	if cfg.FullscreenCopyOnSelect != nil {
 		existing["fullscreenCopyOnSelect"] = *cfg.FullscreenCopyOnSelect

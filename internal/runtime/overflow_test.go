@@ -160,3 +160,28 @@ func TestPrintJSONOverflowDoesNotLoop(t *testing.T) {
 		t.Fatalf("err=%v out=%s", err, out.String())
 	}
 }
+
+func TestCompactionSettingsUsesModelOverrides(t *testing.T) {
+	reserve, keep := 2000, 150
+	e := &Engine{
+		Provider: "faux",
+		Opts: Options{Config: config.Config{
+			Provider: "faux",
+			Model:    "faux-1",
+			Compaction: config.CompactionSettings{
+				ModelOverrides: map[string]config.CompactionTokenOverride{
+					"faux/faux-1": {ReserveTokens: &reserve, KeepRecentTokens: &keep},
+				},
+			},
+		}},
+	}
+	s := e.compactionSettings()
+	if s.ReserveTokens != 2000 || s.KeepRecentTokens != 150 {
+		t.Fatalf("settings=%+v", s)
+	}
+	e.Opts.Config.Model = "other"
+	s = e.compactionSettings()
+	if s.ReserveTokens != 16384 || s.KeepRecentTokens != 20000 {
+		t.Fatalf("fallback=%+v", s)
+	}
+}
