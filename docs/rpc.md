@@ -39,8 +39,8 @@ Failures set `success` false and `error`. Unknown commands emit
 While a prompt is running, another `prompt` must set `streamingBehavior` or it
 fails. Compaction in progress rejects `prompt`.
 
-Agent JSON events (same shapes as [json.md](json.md)) are mixed onto stdout
-during a run. Extension UI uses `extension_ui_request` /
-`extension_ui_response`.
+Agent JSON events (same shapes as [json.md](json.md), including queue,
+compaction, and retry types) are mixed onto stdout during a run. Extension UI
+uses `extension_ui_request` / `extension_ui_response`.
 
 For a long-lived Unix socket instead of stdin/stdout, see [server.md](server.md).
