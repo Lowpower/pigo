@@ -18,9 +18,9 @@ owns the mouse: drag to highlight, and `fullscreenCopyOnSelect` (default true)
 copies the selection; otherwise `Ctrl+X` copies it.
 
 A new interactive session shows a startup header (version, compact key hints)
-and loaded resources (`AGENTS.md` / `CLAUDE.md`, skills, prompt templates,
-extensions, themes). `Ctrl+O` expands the full shortcut list and resource
-paths. `quietStartup` hides this listing; `--verbose` forces it on. Changelog
+and loaded resources (`SYSTEM.md` / `APPEND_SYSTEM.md`, `AGENTS.md` /
+`CLAUDE.md`, skills, prompt templates, extensions, themes). `Ctrl+O` expands
+the full shortcut list and resource paths. `quietStartup` hides this listing; `--verbose` forces it on. Changelog
 notices still appear either way.
 
 ## Root flags
@@ -93,3 +93,15 @@ Prefix a line with `!` to run bash without going through the model.
 
 Unless `--no-context-files` is set, pigo appends `AGENTS.md` / `CLAUDE.md` from
 the cwd (and `cwd/.pigo/AGENTS.md` when the project is trusted).
+
+### System prompt files
+
+Replace the default system prompt with:
+
+- `.pigo/SYSTEM.md` for a trusted project
+- `~/.pigo/agent/SYSTEM.md` globally
+
+`--system-prompt` still wins over these files. Append without replacing by
+using `APPEND_SYSTEM.md` in either location, or `--append-system-prompt`.
+CLI `--append-system-prompt` skips the discovered append file. Project files
+require trust, the same as other `.pigo/` resources.

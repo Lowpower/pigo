@@ -79,6 +79,12 @@ func TestStartupResourcesCompactAndExpanded(t *testing.T) {
 	if err := os.WriteFile(local, []byte("local"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "SYSTEM.md"), []byte("sys"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	skillPath := filepath.Join(home, "skills", "commit", "SKILL.md")
 	m := New(testCfg())
 	m.engine = &runtime.Engine{
@@ -91,6 +97,12 @@ func TestStartupResourcesCompactAndExpanded(t *testing.T) {
 		Scoped:    []models.Spec{{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4"}, Thinking: "high"}},
 	}
 	view := m.View()
+	if !strings.Contains(view, "[System prompt]") {
+		t.Fatalf("missing system prompt section:\n%s", view)
+	}
+	if !strings.Contains(view, "SYSTEM.md") {
+		t.Fatalf("missing SYSTEM.md:\n%s", view)
+	}
 	if !strings.Contains(view, "[Context]") {
 		t.Fatalf("missing context section:\n%s", view)
 	}
