@@ -30,7 +30,7 @@ Copy the binary into `~/.pigo/agent/extensions/` for auto-discovery.
 err := ext.Serve(ext.Handler{
     Name: "hello",
     Tools: []ext.ToolDef{{
-        Name: "hello", Description: "Greet", Schema: map[string]any{ /* JSON Schema */ },
+        Name: "hello", Description: "Greet", Schema: map[string]any{"type": "object"},
         Fn: func(ctx context.Context, args map[string]any) (string, bool) {
             return "Hello", false // (result, isError)
         },
@@ -49,6 +49,9 @@ err := ext.Serve(ext.Handler{
     },
 })
 ```
+
+`ext.Serve` refuses tools whose `Schema` is missing or not `"type": "object"`.
+The host also ignores such `register_tool` frames and notifies an error.
 
 `ext.Flag(name)` returns CLI values claimed during handshake. Unknown root
 `--flags` are offered to `register_flag`; leftovers error.
