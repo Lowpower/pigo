@@ -1067,6 +1067,39 @@ func TestRPCPromptRejectedDuringCompaction(t *testing.T) {
 	}
 }
 
+func TestRPCSteerRejectedDuringCompaction(t *testing.T) {
+	e := &Engine{Opts: Options{Config: config.Config{SteeringMode: "one-at-a-time"}}}
+	e.setCompacting(true)
+	in := strings.NewReader(`{"type":"steer","message":"nudge"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"success":false`) || !strings.Contains(out.String(), "compaction") {
+		t.Fatalf("expected steer failure: %s", out.String())
+	}
+	if n := e.pendingCount(); n != 0 {
+		t.Fatalf("queued during compact: %d", n)
+	}
+}
+
+func TestRPCFollowUpRejectedDuringCompaction(t *testing.T) {
+	e := &Engine{Opts: Options{Config: config.Config{FollowUpMode: "one-at-a-time"}}}
+	e.setCompacting(true)
+	in := strings.NewReader(`{"type":"follow_up","message":"later"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"success":false`) || !strings.Contains(out.String(), "compaction") {
+		t.Fatalf("expected follow_up failure: %s", out.String())
+	}
+}
+
 func TestSetThinkingLevelRecordsSession(t *testing.T) {
 	sess := session.New(t.TempDir(), t.TempDir())
 	e := &Engine{Opts: Options{Session: sess, Config: config.Config{Thinking: "off"}}}
