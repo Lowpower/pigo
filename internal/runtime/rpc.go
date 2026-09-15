@@ -122,12 +122,18 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			isRunning := running
 			stateMu.Unlock()
 			if isRunning && behavior == "steer" {
-				e.PushSteerImages(msg, imgs)
+				if err := e.queuePrepared(ctx, msg, imgs, e.PushSteerImages); err != nil {
+					reply(id, "prompt", false, nil, err.Error())
+					continue
+				}
 				reply(id, "prompt", true, nil, "")
 				continue
 			}
 			if isRunning && behavior == "followUp" {
-				e.PushFollowImages(msg, imgs)
+				if err := e.queuePrepared(ctx, msg, imgs, e.PushFollowImages); err != nil {
+					reply(id, "prompt", false, nil, err.Error())
+					continue
+				}
 				reply(id, "prompt", true, nil, "")
 				continue
 			}
@@ -176,10 +182,16 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				}
 			}(prep.User, hist, prep.Images, cctx, id)
 		case "steer":
-			e.PushSteerImages(msg, parseRPCImages(raw))
+			if err := e.queuePrepared(ctx, msg, parseRPCImages(raw), e.PushSteerImages); err != nil {
+				reply(id, "steer", false, nil, err.Error())
+				break
+			}
 			reply(id, "steer", true, nil, "")
 		case "follow_up":
-			e.PushFollowImages(msg, parseRPCImages(raw))
+			if err := e.queuePrepared(ctx, msg, parseRPCImages(raw), e.PushFollowImages); err != nil {
+				reply(id, "follow_up", false, nil, err.Error())
+				break
+			}
 			reply(id, "follow_up", true, nil, "")
 		case "new_session":
 			parent, _ := raw["parentSession"].(string)

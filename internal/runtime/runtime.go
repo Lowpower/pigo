@@ -847,6 +847,17 @@ func (e *Engine) preparePrompt(ctx context.Context, user string, images []ai.Ima
 	return promptPrep{User: user, Images: images}, nil
 }
 
+func (e *Engine) queuePrepared(ctx context.Context, user string, images []ai.ImageContent, push func(string, []ai.ImageContent)) error {
+	prep, err := e.preparePrompt(ctx, user, images)
+	if err != nil {
+		return err
+	}
+	if !prep.Handled {
+		push(prep.User, prep.Images)
+	}
+	return nil
+}
+
 // RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
 func (e *Engine) RunPrompt(ctx context.Context, history []ai.Message, user string, images []ai.ImageContent) *agent.Stream {
 	return e.runPrompt(ctx, history, user, images, true)
