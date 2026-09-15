@@ -118,6 +118,15 @@ func (m Model) startupResources() string {
 		trusted = m.engine.Opts.ProjectTrusted
 	}
 	var sections []string
+	if files := prompt.SystemPromptFilePaths(cwd, agentDir, trusted); len(files) > 0 {
+		compact := make([]string, 0, len(files))
+		expanded := make([]string, 0, len(files))
+		for _, p := range files {
+			compact = append(compact, formatCompactContextPath(p, cwd, home))
+			expanded = append(expanded, formatDisplayPath(p, home))
+		}
+		sections = append(sections, m.loadedSection("System prompt", joinCompact(compact, false), joinExpanded(expanded)))
+	}
 	if m.engine == nil || !m.engine.Opts.NoContextFiles {
 		if files := prompt.ContextFilePaths(cwd, agentDir, trusted); len(files) > 0 {
 			compact := make([]string, 0, len(files))

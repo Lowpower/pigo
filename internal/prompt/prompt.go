@@ -25,9 +25,19 @@ type Options struct {
 
 // Build returns the system prompt.
 func Build(opts Options) string {
+	custom := strings.TrimSpace(opts.Custom)
+	if custom == "" {
+		custom = readPromptFile(discoverSystemPromptFile(opts.Cwd, opts.AgentDir, opts.ProjectTrusted))
+	}
+	appendParts := opts.Append
+	if len(appendParts) == 0 {
+		if body := readPromptFile(discoverAppendSystemPromptFile(opts.Cwd, opts.AgentDir, opts.ProjectTrusted)); body != "" {
+			appendParts = []string{body}
+		}
+	}
 	var b strings.Builder
-	if opts.Custom != "" {
-		b.WriteString(opts.Custom)
+	if custom != "" {
+		b.WriteString(custom)
 	} else {
 		b.WriteString("You are an expert coding assistant in pigo.\n")
 		b.WriteString("Be concise. Prefer editing existing files over writing new ones. Use tools to inspect the repo before proposing changes.\n")
@@ -42,7 +52,7 @@ func Build(opts Options) string {
 			}
 		}
 	}
-	for _, a := range opts.Append {
+	for _, a := range appendParts {
 		if strings.TrimSpace(a) == "" {
 			continue
 		}
@@ -127,6 +137,59 @@ func ContextFilePaths(cwd, agentDir string, trusted bool) []string {
 		dir = parent
 	}
 	return paths
+}
+
+// SystemPromptFilePaths returns discovered SYSTEM.md and APPEND_SYSTEM.md
+// files that Build would load (CLI --system-prompt / --append-system-prompt
+// still win when those options are set).
+func SystemPromptFilePaths(cwd, agentDir string, trusted bool) []string {
+	var out []string
+	if p := discoverSystemPromptFile(cwd, agentDir, trusted); p != "" {
+		out = append(out, p)
+	}
+	if p := discoverAppendSystemPromptFile(cwd, agentDir, trusted); p != "" {
+		out = append(out, p)
+	}
+	return out
+}
+
+func discoverSystemPromptFile(cwd, agentDir string, trusted bool) string {
+	if trusted && cwd != "" {
+		if p := filepath.Join(cwd, ".pigo", "SYSTEM.md"); fileExists(p) {
+			return p
+		}
+	}
+	if agentDir != "" {
+		if p := filepath.Join(agentDir, "SYSTEM.md"); fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func discoverAppendSystemPromptFile(cwd, agentDir string, trusted bool) string {
+	if trusted && cwd != "" {
+		if p := filepath.Join(cwd, ".pigo", "APPEND_SYSTEM.md"); fileExists(p) {
+			return p
+		}
+	}
+	if agentDir != "" {
+		if p := filepath.Join(agentDir, "APPEND_SYSTEM.md"); fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func readPromptFile(path string) string {
+	if path == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(b), "\n")
 }
 
 func loadContextFiles(cwd, agentDir string, trusted bool) string {

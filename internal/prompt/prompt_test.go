@@ -187,6 +187,110 @@ func TestDiscoverTemplates(t *testing.T) {
 	}
 }
 
+func TestSystemPromptFileReplacesDefault(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(agent, "SYSTEM.md"), []byte("global-system"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Build(Options{Cwd: cwd, AgentDir: agent})
+	if !strings.Contains(got, "global-system") {
+		t.Fatalf("missing SYSTEM.md:\n%s", got)
+	}
+	if strings.Contains(got, "expert coding assistant") {
+		t.Fatalf("default prompt should be replaced:\n%s", got)
+	}
+}
+
+func TestProjectSystemPromptBeatsGlobalWhenTrusted(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agent, "SYSTEM.md"), []byte("global-system"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "SYSTEM.md"), []byte("project-system"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	untrusted := Build(Options{Cwd: cwd, AgentDir: agent})
+	if !strings.Contains(untrusted, "global-system") || strings.Contains(untrusted, "project-system") {
+		t.Fatalf("untrusted should use global SYSTEM.md:\n%s", untrusted)
+	}
+	trusted := Build(Options{Cwd: cwd, AgentDir: agent, ProjectTrusted: true})
+	if !strings.Contains(trusted, "project-system") || strings.Contains(trusted, "global-system") {
+		t.Fatalf("trusted should use project SYSTEM.md:\n%s", trusted)
+	}
+}
+
+func TestCLICustomBeatsSystemPromptFile(t *testing.T) {
+	agent := t.TempDir()
+	if err := os.WriteFile(filepath.Join(agent, "SYSTEM.md"), []byte("file-system"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Build(Options{AgentDir: agent, Custom: "cli-system"})
+	if !strings.Contains(got, "cli-system") {
+		t.Fatalf("missing CLI prompt:\n%s", got)
+	}
+	if strings.Contains(got, "file-system") {
+		t.Fatalf("CLI custom should win:\n%s", got)
+	}
+}
+
+func TestAppendSystemPromptFile(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(agent, "APPEND_SYSTEM.md"), []byte("global-append"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Build(Options{Cwd: cwd, AgentDir: agent})
+	if !strings.Contains(got, "expert coding assistant") {
+		t.Fatalf("default prompt should remain:\n%s", got)
+	}
+	if !strings.Contains(got, "global-append") {
+		t.Fatalf("missing APPEND_SYSTEM.md:\n%s", got)
+	}
+}
+
+func TestCLIAppendBeatsAppendSystemFile(t *testing.T) {
+	agent := t.TempDir()
+	if err := os.WriteFile(filepath.Join(agent, "APPEND_SYSTEM.md"), []byte("file-append"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Build(Options{AgentDir: agent, Append: []string{"cli-append"}})
+	if !strings.Contains(got, "cli-append") {
+		t.Fatalf("missing CLI append:\n%s", got)
+	}
+	if strings.Contains(got, "file-append") {
+		t.Fatalf("CLI append should skip discovered file:\n%s", got)
+	}
+}
+
+func TestSystemPromptPathsForStartup(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sys := filepath.Join(cwd, ".pigo", "SYSTEM.md")
+	appendPath := filepath.Join(agent, "APPEND_SYSTEM.md")
+	if err := os.WriteFile(sys, []byte("sys"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(appendPath, []byte("append"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := SystemPromptFilePaths(cwd, agent, true)
+	if len(got) != 2 || got[0] != sys || got[1] != appendPath {
+		t.Fatalf("paths=%v want [%s %s]", got, sys, appendPath)
+	}
+	untrusted := SystemPromptFilePaths(cwd, agent, false)
+	if len(untrusted) != 1 || untrusted[0] != appendPath {
+		t.Fatalf("untrusted paths=%v", untrusted)
+	}
+}
+
 func TestBuildInjectsSkillsWithBashOnly(t *testing.T) {
 	got := Build(Options{
 		Skills: []skills.Skill{{Name: "demo", Description: "Do the demo", FilePath: "/tmp/SKILL.md"}},
