@@ -73,6 +73,9 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 
 	byTool := make(map[string]ToolDef, len(h.Tools))
 	for _, t := range h.Tools {
+		if err := checkToolSchema(t.Name, t.Schema); err != nil {
+			return err
+		}
 		byTool[t.Name] = t
 		if err := protocol.WriteMessage(out, protocol.Message{
 			Type: protocol.TypeRegisterTool, Name: t.Name, Description: t.Description, Schema: t.Schema,

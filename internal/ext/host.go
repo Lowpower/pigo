@@ -171,6 +171,12 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 		case protocol.TypeHello:
 			_ = h.send(protocol.Message{Type: protocol.TypeReady})
 		case protocol.TypeRegisterTool:
+			if err := checkToolSchema(m.Name, m.Schema); err != nil {
+				if h.notify != nil {
+					h.notify("error", err.Error())
+				}
+				break
+			}
 			h.mu.Lock()
 			h.tools = append(h.tools, registeredTool{name: m.Name, description: m.Description, schema: m.Schema})
 			h.mu.Unlock()
