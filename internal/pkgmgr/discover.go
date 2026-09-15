@@ -401,6 +401,25 @@ func IsSpawnable(path string) bool {
 	return len(b) >= 2 && b[0] == '#' && b[1] == '!'
 }
 
+// spawnArgvFromPackage returns spawnable argv using the same discovery as
+// pigo install (manifest / index.* / extensions/), filtered by IsSpawnable.
+func spawnArgvFromPackage(packageRoot string) [][]string {
+	files := collectPackageFiles(packageRoot, KindExtensions)
+	var out [][]string
+	seen := map[string]bool{}
+	for _, f := range files {
+		if !IsSpawnable(f) {
+			continue
+		}
+		if seen[f] {
+			continue
+		}
+		seen[f] = true
+		out = append(out, []string{f})
+	}
+	return out
+}
+
 // SpawnArgv returns argv lists for spawnable resources (enabled only).
 func SpawnArgv(rs []Resource) [][]string {
 	var out [][]string

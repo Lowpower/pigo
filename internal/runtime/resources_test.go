@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/skills"
 	"github.com/Lowpower/pigo/internal/theme"
@@ -275,5 +276,102 @@ func TestNoPromptTplsAndNoThemesKeepCLIExtra(t *testing.T) {
 	th := theme.LoadWith(theme.LoadOptions{Name: "clitheme", Extra: opts.ThemePaths, NoDiscovery: true})
 	if th.Name != "clitheme" {
 		t.Fatalf("CLI theme extra = %+v", th)
+	}
+}
+
+func writeCLINpmIndex(t *testing.T, agent, name string, spawnable bool) string {
+	t.Helper()
+	pkg := filepath.Join(agent, "npm", "node_modules", name)
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(pkg, "index.js")
+	body := "export default 1\n"
+	mode := os.FileMode(0o644)
+	if spawnable {
+		body = "#!/usr/bin/env node\n"
+		mode = 0o755
+	}
+	if err := os.WriteFile(p, []byte(body), mode); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestCollectExtensionSpecsLocalPathUnchanged(t *testing.T) {
+	opts := Options{
+		Cwd:           t.TempDir(),
+		AgentDir:      t.TempDir(),
+		CLIExtensions: []string{"/tmp/hello-ext", "https://github.com/org/repo"},
+	}
+	got, err := collectExtensionSpecs(context.Background(), opts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "/tmp/hello-ext,https://github.com/org/repo" {
+		t.Fatalf("specs=%v", got)
+	}
+}
+
+func TestCollectExtensionSpecsResolvesNpm(t *testing.T) {
+	agent := t.TempDir()
+	want := writeCLINpmIndex(t, agent, "demo-ext", true)
+	opts := Options{
+		Cwd:           t.TempDir(),
+		AgentDir:      agent,
+		CLIExtensions: []string{"npm:demo-ext"},
+		NoExtensions:  true,
+	}
+	got, err := collectExtensionSpecs(context.Background(), opts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("specs=%v want %s", got, want)
+	}
+}
+
+func TestCollectExtensionSpecsDedupesDiscovered(t *testing.T) {
+	agent := t.TempDir()
+	want := writeCLINpmIndex(t, agent, "demo-ext", true)
+	opts := Options{
+		Cwd:           t.TempDir(),
+		AgentDir:      agent,
+		CLIExtensions: []string{"npm:demo-ext"},
+	}
+	rs := []pkgmgr.Resource{{Path: want, Enabled: true, Type: pkgmgr.KindExtensions}}
+	got, err := collectExtensionSpecs(context.Background(), opts, rs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("specs=%v want single %s", got, want)
+	}
+}
+
+func TestCollectExtensionSpecsNpmNoSpawnable(t *testing.T) {
+	agent := t.TempDir()
+	writeCLINpmIndex(t, agent, "plain-js", false)
+	opts := Options{
+		Cwd:           t.TempDir(),
+		AgentDir:      agent,
+		CLIExtensions: []string{"npm:plain-js"},
+	}
+	_, err := collectExtensionSpecs(context.Background(), opts, nil)
+	if err == nil || !strings.Contains(err.Error(), "no spawnable entry") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestCollectExtensionSpecsOfflineMissing(t *testing.T) {
+	t.Setenv("PIGO_OFFLINE", "1")
+	opts := Options{
+		Cwd:           t.TempDir(),
+		AgentDir:      t.TempDir(),
+		CLIExtensions: []string{"npm:missing-ext"},
+	}
+	_, err := collectExtensionSpecs(context.Background(), opts, nil)
+	if err == nil || !strings.Contains(err.Error(), "offline") {
+		t.Fatalf("err=%v", err)
 	}
 }

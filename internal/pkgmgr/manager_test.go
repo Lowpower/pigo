@@ -166,3 +166,167 @@ func TestUpdateExtensionsStub(t *testing.T) {
 		t.Fatalf("run=%v", ran)
 	}
 }
+
+func writeSpawnableIndex(t *testing.T, pkgDir string, spawnable bool) string {
+	t.Helper()
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(pkgDir, "index.js")
+	body := "export default 1\n"
+	mode := os.FileMode(0o644)
+	if spawnable {
+		body = "#!/usr/bin/env node\n"
+		mode = 0o755
+	}
+	if err := os.WriteFile(p, []byte(body), mode); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestResolveCLIExtensionNpmInstallsWithoutPersist(t *testing.T) {
+	agent := t.TempDir()
+	m, err := Open(t.TempDir(), agent, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ran int
+	m.Run = func(_ context.Context, _ string, _ []string, _ string) error {
+		ran++
+		pkg := filepath.Join(m.npmRoot(false), "node_modules", "demo-ext")
+		writeSpawnableIndex(t, pkg, true)
+		return nil
+	}
+	argv, err := m.ResolveCLIExtension(context.Background(), "npm:demo-ext")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran != 1 {
+		t.Fatalf("install calls=%d", ran)
+	}
+	if len(argv) != 1 || filepath.Base(argv[0][0]) != "index.js" {
+		t.Fatalf("argv=%v", argv)
+	}
+	cfg, err := config.Load(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Packages) != 0 {
+		t.Fatalf("settings should stay empty, got %+v", cfg.Packages)
+	}
+}
+
+func TestResolveCLIExtensionReusesDisk(t *testing.T) {
+	agent := t.TempDir()
+	m, err := Open(t.TempDir(), agent, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg := filepath.Join(m.npmRoot(false), "node_modules", "demo-ext")
+	want := writeSpawnableIndex(t, pkg, true)
+	m.Run = func(_ context.Context, _ string, _ []string, _ string) error {
+		t.Fatal("should not install when already on disk")
+		return nil
+	}
+	argv, err := m.ResolveCLIExtension(context.Background(), "npm:demo-ext")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(argv) != 1 || argv[0][0] != want {
+		t.Fatalf("argv=%v want %s", argv, want)
+	}
+}
+
+func TestResolveCLIExtensionNoSpawnable(t *testing.T) {
+	agent := t.TempDir()
+	m, err := Open(t.TempDir(), agent, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg := filepath.Join(m.npmRoot(false), "node_modules", "plain-js")
+	writeSpawnableIndex(t, pkg, false)
+	_, err = m.ResolveCLIExtension(context.Background(), "npm:plain-js")
+	if err == nil || !strings.Contains(err.Error(), "no spawnable entry") || !strings.Contains(err.Error(), "*.ts") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestResolveCLIExtensionOfflineMissing(t *testing.T) {
+	t.Setenv("PIGO_OFFLINE", "1")
+	m, err := Open(t.TempDir(), t.TempDir(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Run = func(_ context.Context, _ string, _ []string, _ string) error {
+		t.Fatal("offline must not fetch")
+		return nil
+	}
+	_, err = m.ResolveCLIExtension(context.Background(), "npm:missing-ext")
+	if err == nil || !strings.Contains(err.Error(), "offline") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestResolveCLIExtensionGitStub(t *testing.T) {
+	agent := t.TempDir()
+	m, err := Open(t.TempDir(), agent, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Run = func(_ context.Context, name string, args []string, _ string) error {
+		if name != "git" || len(args) < 3 || args[0] != "clone" {
+			t.Fatalf("unexpected run %s %v", name, args)
+		}
+		writeSpawnableIndex(t, args[2], true)
+		return nil
+	}
+	argv, err := m.ResolveCLIExtension(context.Background(), "git:github.com/org/demo-ext")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(argv) != 1 || filepath.Base(argv[0][0]) != "index.js" {
+		t.Fatalf("argv=%v", argv)
+	}
+	cfg, _ := config.Load(agent)
+	if len(cfg.Packages) != 0 {
+		t.Fatalf("settings should stay empty, got %+v", cfg.Packages)
+	}
+}
+
+func TestResolveCLIExtensionPrefersProjectDisk(t *testing.T) {
+	cwd := t.TempDir()
+	agent := t.TempDir()
+	m, err := Open(cwd, agent, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userPkg := filepath.Join(m.npmRoot(false), "node_modules", "demo-ext")
+	projPkg := filepath.Join(m.npmRoot(true), "node_modules", "demo-ext")
+	writeSpawnableIndex(t, userPkg, true)
+	want := writeSpawnableIndex(t, projPkg, true)
+	m.Run = func(_ context.Context, _ string, _ []string, _ string) error {
+		t.Fatal("should reuse project disk")
+		return nil
+	}
+	argv, err := m.ResolveCLIExtension(context.Background(), "npm:demo-ext")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(argv) != 1 || argv[0][0] != want {
+		t.Fatalf("argv=%v want %s", argv, want)
+	}
+}
+
+func TestResolveCLIExtensionInvalidSource(t *testing.T) {
+	m, err := Open(t.TempDir(), t.TempDir(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ResolveCLIExtension(context.Background(), "git:nopath"); err == nil || !strings.Contains(err.Error(), "not a valid") {
+		t.Fatalf("err=%v", err)
+	}
+	if _, err := m.ResolveCLIExtension(context.Background(), "npm:"); err == nil || !strings.Contains(err.Error(), "missing npm package name") {
+		t.Fatalf("err=%v", err)
+	}
+}

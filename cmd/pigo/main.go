@@ -123,7 +123,7 @@ Environment:
 	cmd.Flags().BoolVar(&f.noTools, "no-tools", false, "disable all tools")
 	cmd.Flags().StringVarP(&f.tools, "tools", "t", "", "comma-separated tool allowlist")
 	cmd.Flags().StringVar(&f.excludeTools, "exclude-tools", "", "comma-separated tool denylist")
-	cmd.Flags().StringArrayVarP(&f.extension, "extension", "e", nil, "extension command to spawn (repeatable)")
+	cmd.Flags().StringArrayVarP(&f.extension, "extension", "e", nil, "extension to spawn (path, npm:<pkg>, or git:<url>; repeatable)")
 	cmd.Flags().BoolVar(&f.noExtensions, "no-extensions", false, "skip extension auto-discovery (explicit -e still loads)")
 	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name for this run (does not write settings)")
 	cmd.Flags().StringArrayVar(&f.themePaths, "theme", nil, "load a theme file or directory (repeatable)")

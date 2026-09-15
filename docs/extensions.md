@@ -9,17 +9,21 @@ There is no in-process plugin loader. Write a small program that calls
 
 ## Load paths
 
-- `-e` / `--extension` (repeatable)
+- `-e` / `--extension` (repeatable): a local command, or `npm:<pkg>` / `git:<url>` which install for this process without writing settings
 - `~/.pigo/agent/extensions/` (executable, `.js`/`.ts`, or `index.js`/`index.ts`)
 - package manifests and `settings.extensions[]`
 
-`--no-extensions` skips discovery. `/reload` restarts extension processes.
+`--no-extensions` skips discovery. Explicit `-e` still loads, including `npm:` / `git:`. `/reload` restarts extension processes.
+
+`npm:` / `git:` reuse an already-installed tree (`~/.pigo/agent/npm|git` or a trusted project copy) when present, then spawn using the same discovery as `pigo install` (manifest / `index.*` / `extensions/`, executable or `#!` shebang). Persist with `pigo install` if the next session should auto-load the package. pigo does not load `*.ts` in-process.
 
 Minimal tool:
 
 ```bash
 go build -o /tmp/hello-ext ./examples/extensions/hello
 pigo -e /tmp/hello-ext -p "say hello to pigo"
+pigo -e npm:some-ext -p "hi"
+pigo -e git:github.com/org/repo -p "hi"
 ```
 
 Copy the binary into `~/.pigo/agent/extensions/` for auto-discovery.

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,15 +25,55 @@ func resolvePackageResources(ctx context.Context, opts Options) []pkgmgr.Resourc
 	return rs
 }
 
-func collectExtensionSpecs(opts Options, rs []pkgmgr.Resource) []string {
+func collectExtensionSpecs(ctx context.Context, opts Options, rs []pkgmgr.Resource) ([]string, error) {
 	var specs []string
+	seen := map[string]bool{}
 	if !opts.NoExtensions {
 		for _, argv := range pkgmgr.SpawnArgv(rs) {
+			if len(argv) == 0 {
+				continue
+			}
+			specs = append(specs, strings.Join(argv, " "))
+			seen[spawnPathKey(argv[0])] = true
+		}
+	}
+	var m *pkgmgr.Manager
+	for _, spec := range opts.CLIExtensions {
+		if !pkgmgr.IsCLIPackageSource(spec) {
+			specs = append(specs, spec)
+			continue
+		}
+		if m == nil {
+			var err error
+			m, err = pkgmgr.Open(opts.Cwd, opts.AgentDir, opts.ProjectTrusted)
+			if err != nil {
+				return nil, fmt.Errorf("extension %q: %w", spec, err)
+			}
+		}
+		argvs, err := m.ResolveCLIExtension(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		for _, argv := range argvs {
+			if len(argv) == 0 {
+				continue
+			}
+			key := spawnPathKey(argv[0])
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			specs = append(specs, strings.Join(argv, " "))
 		}
 	}
-	specs = append(specs, opts.CLIExtensions...)
-	return specs
+	return specs, nil
+}
+
+func spawnPathKey(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 func (e *Engine) applyResolved(rs []pkgmgr.Resource) {

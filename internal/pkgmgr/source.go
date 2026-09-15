@@ -47,6 +47,12 @@ func (s Source) Identity() string {
 
 var npmSpecRe = regexp.MustCompile(`^(@?[^@]+(?:/[^@]+)?)(?:@(.+))?$`)
 
+// IsCLIPackageSource reports whether -e/--extension spec is npm: or git:.
+func IsCLIPackageSource(spec string) bool {
+	s := strings.TrimSpace(spec)
+	return strings.HasPrefix(s, "npm:") || strings.HasPrefix(s, "git:")
+}
+
 // ParseSource classifies an install/remove source string.
 func ParseSource(source string) (Source, error) {
 	source = strings.TrimSpace(source)
