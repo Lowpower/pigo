@@ -127,6 +127,7 @@ type Model struct {
 	lastEscape    time.Time
 	summaryCancel context.CancelFunc
 	pendingNav    *pendingNav
+	anthropicWarn bool
 	clipOSC       string
 	imgProto      string
 	altScreen     bool
@@ -1435,6 +1436,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		}
 	}
 	m.applyStartupChangelog()
+	m.maybeWarnAnthropicExtraUsage()
 	if openResume {
 		next, _ := m.openSessionPicker()
 		m = next.(Model)

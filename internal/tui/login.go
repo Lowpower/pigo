@@ -307,6 +307,9 @@ func (m Model) handleLoginMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.login = loginState{}
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(text)})
+		if v.err == nil {
+			m.maybeWarnAnthropicExtraUsage()
+		}
 		return m, nil
 	}
 	return m, nil

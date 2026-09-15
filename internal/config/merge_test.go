@@ -86,6 +86,72 @@ func TestCopyUISettingsLeavesDefaultTools(t *testing.T) {
 	}
 }
 
+func TestApplyProjectMergesCompactionOverridesAndWarnings(t *testing.T) {
+	userReserve, userKeep := 111, 222
+	overReserve := 4000
+	user := Config{
+		Compaction: CompactionSettings{
+			ModelOverrides: map[string]CompactionTokenOverride{
+				"anthropic/claude-sonnet-4": {ReserveTokens: &userReserve, KeepRecentTokens: &userKeep},
+				"openai/gpt-4o":             {ReserveTokens: &userReserve},
+			},
+		},
+		Warnings: map[string]any{"anthropicExtraUsage": true, "keepMe": true},
+		Retry:    RetrySettings{MaxAgentDelayMs: intPtr(90000)},
+	}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{
+  "retry": {"maxAgentDelayMs": 5000},
+  "fullscreenScrollbar": "auto",
+  "warnings": {"anthropicExtraUsage": false},
+  "compaction": {
+    "modelOverrides": {
+      "anthropic/claude-sonnet-4": {"reserveTokens": 4000}
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ApplyProject(user, cwd, true)
+	if got.RetryMaxAgentDelayMs() != 5000 {
+		t.Fatalf("retry cap=%d", got.RetryMaxAgentDelayMs())
+	}
+	if got.ScrollbarMode() != "auto" {
+		t.Fatalf("scrollbar=%s", got.ScrollbarMode())
+	}
+	if got.AnthropicExtraUsageWarning() {
+		t.Fatal("project should disable extra-usage warning")
+	}
+	if keep, ok := got.Warnings["keepMe"].(bool); !ok || !keep {
+		t.Fatalf("other warning keys should remain: %+v", got.Warnings)
+	}
+	if got.CompactionReserveTokens("anthropic", "claude-sonnet-4") != overReserve {
+		t.Fatalf("merged reserve=%d", got.CompactionReserveTokens("anthropic", "claude-sonnet-4"))
+	}
+	if got.CompactionKeepRecentTokens("anthropic", "claude-sonnet-4") != userKeep {
+		t.Fatalf("keep should stay from user overlay, got %d", got.CompactionKeepRecentTokens("anthropic", "claude-sonnet-4"))
+	}
+	if got.CompactionReserveTokens("openai", "gpt-4o") != userReserve {
+		t.Fatalf("unrelated override dropped: %d", got.CompactionReserveTokens("openai", "gpt-4o"))
+	}
+}
+
+func TestCopyUISettingsCopiesScrollbarAndWarnings(t *testing.T) {
+	dst := Config{}
+	src := Config{FullscreenScrollbar: "hidden", Warnings: map[string]any{"anthropicExtraUsage": false}}
+	CopyUISettings(&dst, src)
+	if dst.ScrollbarMode() != "hidden" {
+		t.Fatalf("scrollbar=%s", dst.ScrollbarMode())
+	}
+	if dst.AnthropicExtraUsageWarning() {
+		t.Fatal("warning should copy")
+	}
+}
+
 func TestApplyProjectEmptyThinkingDefaultsMedium(t *testing.T) {
 	user, err := Load(t.TempDir())
 	if err != nil {

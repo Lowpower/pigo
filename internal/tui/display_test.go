@@ -96,6 +96,26 @@ func TestClipWindowPadsShortContent(t *testing.T) {
 	}
 }
 
+func TestClipRegionAutoScrollbar(t *testing.T) {
+	m := New(testCfg())
+	m.cfg.FullscreenScrollbar = "auto"
+	body := strings.Repeat("x\n", 10)
+	hidden := m.clipRegion(body, 3)
+	if strings.Contains(hidden, "▐") {
+		t.Fatalf("auto at bottom should hide thumb: %q", hidden)
+	}
+	m.scrollOff = 4
+	shown := m.clipRegion(body, 3)
+	if !strings.Contains(shown, "▐") {
+		t.Fatalf("auto when scrolled should show thumb: %q", shown)
+	}
+	m.cfg.FullscreenScrollbar = "hidden"
+	off := m.clipRegion(body, 3)
+	if strings.Contains(off, "▐") {
+		t.Fatalf("hidden should omit thumb: %q", off)
+	}
+}
+
 func TestOutputPadAppliesToView(t *testing.T) {
 	n := 2
 	m := New(config.Config{Theme: "default", OutputPad: &n})

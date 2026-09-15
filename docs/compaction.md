@@ -11,6 +11,7 @@ recent tail.
 | `compactionEnabled` / `compaction.enabled` | `true` |
 | `compactionReserveTokens` / `compaction.reserveTokens` | `16384` |
 | `compactionKeepRecentTokens` / `compaction.keepRecentTokens` | `20000` |
+| `compaction.modelOverrides["provider/modelId"]` | Per-model `reserveTokens` / `keepRecentTokens` |
 | `branchSummary.skipPrompt` / `branchSummary.reserveTokens` | branch summaries on fork/tree |
 
 ## Manual

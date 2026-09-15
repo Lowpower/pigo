@@ -58,6 +58,7 @@ func (e *Engine) prepareRetry(ctx context.Context, last []agent.Msg) bool {
 	if e.retryAttempt > 1 {
 		delayMs *= 1 << (e.retryAttempt - 1)
 	}
+	delayMs = e.Opts.Config.CapRetryDelayMs(delayMs)
 	errMsg := msg.ErrorMessage
 	if errMsg == "" {
 		errMsg = "Unknown error"
@@ -154,7 +155,7 @@ func (e *Engine) withSummarizationRetry(ctx context.Context, source map[string]a
 		}
 		attempt++
 		lastRetry = true
-		delayMs := e.Opts.Config.RetryBaseDelayMs() * (1 << (attempt - 1))
+		delayMs := e.Opts.Config.CapRetryDelayMs(e.Opts.Config.RetryBaseDelayMs() * (1 << (attempt - 1)))
 		e.emitSession(map[string]any{
 			"type":         "summarization_retry_scheduled",
 			"attempt":      attempt,

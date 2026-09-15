@@ -65,6 +65,8 @@ func (m *Model) refreshSettingsItems() {
 		{"tui-mode", "TUI mode", "Interface layout; fullscreen uses the alternate screen", m.cfg.TuiMode()},
 		{"fullscreen-exit-output", "Fullscreen exit output", "Print the transcript or a resume hint when leaving fullscreen", m.cfg.FullscreenExit()},
 		{"fullscreen-copy-on-select", "Copy on select", "Automatically copy selected text in fullscreen mode", boolText(m.cfg.CopyOnSelect())},
+		{"fullscreen-scrollbar", "Fullscreen scrollbar", "Show a scrollbar in fullscreen mode", m.cfg.ScrollbarMode()},
+		{"anthropic-extra-usage", "Anthropic extra-usage warning", "Warn when Anthropic subscription auth bills extra usage", boolText(m.cfg.AnthropicExtraUsageWarning())},
 	}
 	items := make([]pickerItem, 0, len(rows))
 	for _, r := range rows {
@@ -117,8 +119,10 @@ func nextChoice(cur string, values []string) string {
 
 func (m Model) settingChoices(id string) []string {
 	switch id {
-	case "autocompact", "show-images", "block-images", "collapse-changelog", "install-telemetry", "auto-resize-images", "hide-thinking", "cache-miss-notices", "fullscreen-copy-on-select":
+	case "autocompact", "show-images", "block-images", "collapse-changelog", "install-telemetry", "auto-resize-images", "hide-thinking", "cache-miss-notices", "fullscreen-copy-on-select", "anthropic-extra-usage":
 		return []string{"true", "false"}
+	case "fullscreen-scrollbar":
+		return []string{"always", "auto", "hidden"}
 	case "steering-mode", "follow-up-mode":
 		return []string{"one-at-a-time", "all"}
 	case "mermaid-rendering":
@@ -189,6 +193,10 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.FullscreenExit()
 	case "fullscreen-copy-on-select":
 		return boolText(m.cfg.CopyOnSelect())
+	case "fullscreen-scrollbar":
+		return m.cfg.ScrollbarMode()
+	case "anthropic-extra-usage":
+		return boolText(m.cfg.AnthropicExtraUsageWarning())
 	default:
 		return ""
 	}
@@ -257,6 +265,11 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 	case "fullscreen-copy-on-select":
 		on := value == "true"
 		patch(func(c *config.Config) { c.FullscreenCopyOnSelect = &on })
+	case "fullscreen-scrollbar":
+		patch(func(c *config.Config) { c.FullscreenScrollbar = value })
+	case "anthropic-extra-usage":
+		on := value == "true"
+		patch(func(c *config.Config) { c.SetAnthropicExtraUsageWarning(on) })
 	}
 	m.persistSettings()
 	return cmd

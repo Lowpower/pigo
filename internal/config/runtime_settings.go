@@ -243,12 +243,42 @@ func (c Config) CopyOnSelect() bool {
 	return *c.FullscreenCopyOnSelect
 }
 
-// ScrollbarEnabled reports whether a fullscreen scrollbar should be drawn (default true).
-func (c Config) ScrollbarEnabled() bool {
+// ScrollbarMode is auto, always, or hidden. Unset and bool true match the old default (always).
+func (c Config) ScrollbarMode() string {
 	if c.FullscreenScrollbar == nil {
+		return "always"
+	}
+	switch v := c.FullscreenScrollbar.(type) {
+	case bool:
+		if v {
+			return "always"
+		}
+		return "hidden"
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "auto", "always", "hidden":
+			return strings.ToLower(strings.TrimSpace(v))
+		}
+	}
+	return "always"
+}
+
+// ScrollbarEnabled reports whether a fullscreen scrollbar may be drawn (not hidden).
+func (c Config) ScrollbarEnabled() bool {
+	return c.ScrollbarMode() != "hidden"
+}
+
+// ScrollbarVisible reports whether the bar should occupy a column for this scroll offset.
+// auto shows the bar only after the user scrolls away from the bottom.
+func (c Config) ScrollbarVisible(scrollOff int) bool {
+	switch c.ScrollbarMode() {
+	case "hidden":
+		return false
+	case "auto":
+		return scrollOff > 0
+	default:
 		return true
 	}
-	return *c.FullscreenScrollbar
 }
 
 // CacheRetention is PIGO_CACHE_RETENTION / PI_CACHE_RETENTION (none|short|long).
