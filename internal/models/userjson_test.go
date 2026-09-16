@@ -68,6 +68,44 @@ func TestLoadUserJSONRegistersUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONReadsSessionAffinityFormat(t *testing.T) {
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("affinity-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "affinity-json": {
+      "api": "openai-completions",
+      "baseUrl": "https://example.invalid/v1",
+      "models": [
+        {"id": "m1", "compat": {"sessionAffinityFormat": "openrouter"}},
+        {"id": "m2"}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m1, ok := Lookup("affinity-json", "m1")
+	if !ok || m1.Compat == nil || m1.Compat.SessionAffinityFormat != "openrouter" {
+		t.Fatalf("m1 = %+v ok=%v", m1, ok)
+	}
+	m2, ok := Lookup("affinity-json", "m2")
+	if !ok {
+		t.Fatal("m2 missing")
+	}
+	if m2.Compat != nil && m2.Compat.SessionAffinityFormat != "" {
+		t.Fatalf("m2 compat = %+v, want empty sessionAffinityFormat", m2.Compat)
+	}
+}
+
 func TestLoadUserJSONExposesAPIKey(t *testing.T) {
 	t.Cleanup(func() {
 		ClearOverlays()

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 const responsesFixture = `event: response.output_text.delta
@@ -148,5 +150,83 @@ func TestBuildResponsesInputToolPair(t *testing.T) {
 	}})
 	if len(items) < 3 {
 		t.Fatalf("items = %d", len(items))
+	}
+}
+
+func TestOpenAIResponsesSessionAffinityHeaders(t *testing.T) {
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "aff-resp", DefaultAPI: "openai-responses", DefaultID: "none",
+		Models: []models.Model{
+			{Provider: "aff-resp", ID: "openai", Compat: &models.Compat{SessionAffinityFormat: "openai"}},
+			{Provider: "aff-resp", ID: "nosession", Compat: &models.Compat{SessionAffinityFormat: "openai-nosession"}},
+			{Provider: "aff-resp", ID: "openrouter", Compat: &models.Compat{SessionAffinityFormat: "openrouter"}},
+			{Provider: "aff-resp", ID: "none"},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("aff-resp") })
+
+	cases := []struct {
+		model string
+		want  map[string]string
+		dont  []string
+	}{
+		{
+			model: "openai",
+			want: map[string]string{
+				"session_id":          "sess-1",
+				"x-client-request-id": "sess-1",
+			},
+			dont: []string{"x-session-id", "x-session-affinity"},
+		},
+		{
+			model: "nosession",
+			want:  map[string]string{"x-client-request-id": "sess-1"},
+			dont:  []string{"session_id", "x-session-id", "x-session-affinity"},
+		},
+		{
+			model: "openrouter",
+			want:  map[string]string{"x-session-id": "sess-1"},
+			dont:  []string{"session_id", "x-client-request-id", "x-session-affinity"},
+		},
+		{
+			model: "none",
+			dont:  []string{"session_id", "x-session-id", "x-session-affinity", "x-client-request-id"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			var got http.Header
+			var payload map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Clone()
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &payload)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(responsesFixture))
+			}))
+			defer srv.Close()
+
+			client := &OpenAIResponsesClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+			stream, err := client.StreamFn()(context.Background(), Context{
+				Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			}, Options{Provider: "aff-resp", Model: tc.model, SessionID: "sess-1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream.Collect()
+			for k, v := range tc.want {
+				if got.Get(k) != v {
+					t.Errorf("%s = %q, want %q", k, got.Get(k), v)
+				}
+			}
+			for _, k := range tc.dont {
+				if got.Get(k) != "" {
+					t.Errorf("unexpected %s = %q", k, got.Get(k))
+				}
+			}
+			if payload["prompt_cache_key"] != "sess-1" {
+				t.Errorf("prompt_cache_key = %#v", payload["prompt_cache_key"])
+			}
+		})
 	}
 }

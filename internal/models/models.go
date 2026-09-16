@@ -59,6 +59,7 @@ type Compat struct {
 	ChatTemplateKwargs              any    `json:"chatTemplateKwargs,omitempty"`
 	ChatTemplateArgs                any    `json:"chatTemplateArgs,omitempty"`
 	SupportsLongCacheRetention      *bool  `json:"supportsLongCacheRetention,omitempty"`
+	SessionAffinityFormat           string `json:"sessionAffinityFormat,omitempty"`
 }
 
 // Cost is catalog pricing in dollars per million tokens.
