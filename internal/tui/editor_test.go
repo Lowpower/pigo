@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Lowpower/pigo/internal/keys"
+	"github.com/Lowpower/pigo/internal/runtime"
 )
 
 func pasteImageKey() tea.KeyMsg {
@@ -297,6 +298,116 @@ func TestEditorBorderFollowsThinkingAndBash(t *testing.T) {
 	if m.editorBorderColor() != m.theme.Tool {
 		t.Fatalf("bash border=%s want tool %s", m.editorBorderColor(), m.theme.Tool)
 	}
+}
+
+func TestIdleEditorBorderHasNoStatusLabel(t *testing.T) {
+	m := New(testCfg())
+	m.cfg.Thinking = "high"
+	m.width = 80
+	got := m.framedEditor()
+	for _, leak := range []string{"Compacting", "Retrying", "Summarizing branch"} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("idle border contains %q:\n%s", leak, got)
+		}
+	}
+	if !strings.Contains(got, "─") {
+		t.Fatalf("idle missing dashes:\n%s", got)
+	}
+	if hasBrailleSpinner(got) {
+		t.Fatalf("idle should not spin:\n%s", got)
+	}
+}
+
+func TestEditorBorderShowsCompactionRetryAndBranch(t *testing.T) {
+	m := New(testCfg())
+	m.cfg.Thinking = "high"
+	m.width = 80
+
+	m = send(m, sessionEventMsg{"type": "compaction_start", "reason": "manual"})
+	got := m.framedEditor()
+	if !strings.Contains(got, "Compacting context") {
+		t.Fatalf("missing compact label:\n%s", got)
+	}
+	if !hasBrailleSpinner(got) {
+		t.Fatalf("missing compact spinner:\n%s", got)
+	}
+	if !strings.Contains(got, "─") {
+		t.Fatalf("compact border dropped dashes:\n%s", got)
+	}
+
+	m = send(m, sessionEventMsg{"type": "compaction_end"})
+	if strings.Contains(m.framedEditor(), "Compacting") {
+		t.Fatalf("compact status stuck:\n%s", m.framedEditor())
+	}
+
+	m = send(m, sessionEventMsg{"type": "compaction_start", "reason": "overflow"})
+	if !strings.Contains(m.framedEditor(), "Context overflow detected") {
+		t.Fatalf("missing overflow label:\n%s", m.framedEditor())
+	}
+	m = send(m, sessionEventMsg{"type": "compaction_end"})
+	m = send(m, sessionEventMsg{"type": "compaction_start", "reason": "threshold"})
+	if !strings.Contains(m.framedEditor(), "Auto-compacting") {
+		t.Fatalf("missing auto compact label:\n%s", m.framedEditor())
+	}
+	m = send(m, sessionEventMsg{"type": "compaction_end"})
+
+	m = send(m, sessionEventMsg{
+		"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 8000,
+	})
+	got = m.framedEditor()
+	if !strings.Contains(got, "Retrying (1/3)") {
+		t.Fatalf("missing retry label:\n%s", got)
+	}
+	if !hasBrailleSpinner(got) {
+		t.Fatalf("missing retry spinner:\n%s", got)
+	}
+
+	m = send(m, sessionEventMsg{"type": "auto_retry_end"})
+	m.border = borderStatus{kind: statusBranch, gen: 1}
+	got = m.framedEditor()
+	if !strings.Contains(got, "Summarizing branch") {
+		t.Fatalf("missing branch label:\n%s", got)
+	}
+	if !hasBrailleSpinner(got) {
+		t.Fatalf("missing branch spinner:\n%s", got)
+	}
+}
+
+func TestEditorBorderSpinnerOnlyWhenNarrow(t *testing.T) {
+	m := New(testCfg())
+	m.width = 8
+	m = send(m, sessionEventMsg{"type": "compaction_start", "reason": "overflow"})
+	got := m.framedEditor()
+	if strings.Contains(got, "Compacting") || strings.Contains(got, "Auto-compacting") {
+		t.Fatalf("narrow border should drop label:\n%s", got)
+	}
+	if !hasBrailleSpinner(got) {
+		t.Fatalf("narrow border should keep spinner:\n%s", got)
+	}
+	if visibleWidth(got[:strings.IndexByte(got, '\n')]) > 8 {
+		t.Fatalf("top bar wider than layout:\n%s", got)
+	}
+}
+
+func TestInterruptDuringRetryDoesNotOpenTree(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{}
+	m = send(m, sessionEventMsg{
+		"type": "auto_retry_start", "attempt": 1, "maxAttempts": 2, "delayMs": 5000,
+	})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.overlay != overlayNone {
+		t.Fatalf("esc during retry opened overlay %d", m.overlay)
+	}
+}
+
+func hasBrailleSpinner(s string) bool {
+	for _, f := range spinnerFrames {
+		if strings.Contains(s, f) {
+			return true
+		}
+	}
+	return false
 }
 
 func mustDecodePNG() []byte {
