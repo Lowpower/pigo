@@ -151,6 +151,35 @@ func TestAgentEndStopsRunning(t *testing.T) {
 	}
 }
 
+func TestAgentEndWithEngineRunsAfterAgentEndAsync(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg}}
+	m.running = true
+	next, cmd := m.Update(agentEventMsg{agent.Event{Type: agent.EventAgentEnd}})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("expected AfterAgentEnd cmd")
+	}
+	if !m.running {
+		t.Fatal("should stay running while AfterAgentEnd runs")
+	}
+	m = send(m, cmd())
+	if m.running {
+		t.Fatal("running should clear after AfterAgentEnd")
+	}
+}
+
+func TestSlashCompactRunsAsync(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg}}
+	m.editor.SetValue("/compact")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_ = next
+	if cmd == nil {
+		t.Fatal("compact should not block Update")
+	}
+}
+
 func TestCycleThinkingKey(t *testing.T) {
 	m := New(testCfg())
 	m.cfg.Thinking = "off"
@@ -441,6 +470,29 @@ func TestTreeConfirmAbortsThenNavigates(t *testing.T) {
 	}
 	if strings.TrimSpace(m.editor.Value()) == "" {
 		t.Fatal("restored queue should not be overwritten")
+	}
+}
+
+func TestTreeSummarizeStartsAsync(t *testing.T) {
+	m := treeModel(t)
+	m.width = 80
+	entries := m.engine.Opts.Session.Entries()
+	if len(entries) < 2 {
+		t.Fatal("need a non-leaf target")
+	}
+	next, cmd := m.applyTreeNav(entries[0].ID, true, "", false)
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("summarize navigation should not block Update")
+	}
+	if m.overlay != overlayNone {
+		t.Fatalf("overlay = %d", m.overlay)
+	}
+	if m.border.kind != statusBranch {
+		t.Fatalf("border kind = %d", m.border.kind)
+	}
+	if !strings.Contains(m.framedEditor(), "Summarizing branch") {
+		t.Fatalf("missing branch spinner:\n%s", m.framedEditor())
 	}
 }
 

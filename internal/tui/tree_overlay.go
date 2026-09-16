@@ -429,15 +429,36 @@ func (m Model) applyTreeNav(target string, summarize bool, custom string, replac
 		m.overlay = overlayNone
 		return m, nil
 	}
+	if summarize {
+		m.overlay = overlayNone
+		m.setBorder(statusBranch, "")
+		ctx, cancel := context.WithCancel(context.Background())
+		m.summaryCancel = cancel
+		eng := m.engine
+		return m, tea.Batch(m.borderTickCmd(), func() tea.Msg {
+			res, err := eng.NavigateTree(ctx, target, session.NavigateOpts{
+				Summarize:           true,
+				CustomInstructions:  custom,
+				ReplaceInstructions: replace,
+			})
+			return treeNavDoneMsg{target: target, res: res, err: err}
+		})
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.summaryCancel = cancel
 	res, err := m.engine.NavigateTree(ctx, target, session.NavigateOpts{
-		Summarize:           summarize,
+		Summarize:           false,
 		CustomInstructions:  custom,
 		ReplaceInstructions: replace,
 	})
 	cancel()
 	m.summaryCancel = nil
+	return m.applyTreeNavResult(target, res, err)
+}
+
+func (m Model) applyTreeNavResult(target string, res session.NavigateResult, err error) (tea.Model, tea.Cmd) {
+	m.summaryCancel = nil
+	m.clearBorder(statusBranch)
 	if err != nil {
 		m.overlay = overlayNone
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(err.Error())})

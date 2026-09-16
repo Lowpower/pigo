@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/changelog"
+	"github.com/Lowpower/pigo/internal/compaction"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/keys"
 	"github.com/Lowpower/pigo/internal/llama"
@@ -54,6 +56,23 @@ type llamaDoneMsg struct{ text string }
 type imageGenMsg struct {
 	prompt string
 	images []ai.ImageContent
+	err    error
+}
+type compactDoneMsg struct {
+	history []ai.Message
+	summary string
+	err     error
+}
+type afterAgentEndMsg struct {
+	hist  []ai.Message
+	again bool
+}
+type promptReadyMsg struct {
+	stream *agent.Stream
+}
+type treeNavDoneMsg struct {
+	target string
+	res    session.NavigateResult
 	err    error
 }
 
@@ -127,6 +146,7 @@ type Model struct {
 	lastEscape    time.Time
 	summaryCancel context.CancelFunc
 	pendingNav    *pendingNav
+	border        borderStatus
 	anthropicWarn bool
 	clipOSC       string
 	imgProto      string
@@ -229,7 +249,7 @@ func (m Model) framedEditor() string {
 		w = 40
 	}
 	bar := lipgloss.NewStyle().Foreground(lipgloss.Color(m.editorBorderColor())).Render(strings.Repeat("─", w))
-	return bar + "\n" + inner + "\n" + bar
+	return m.renderEditorTopBorder(w) + "\n" + inner + "\n" + bar
 }
 
 func (m Model) themeOpts(name string) theme.LoadOptions {
@@ -414,6 +434,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if m.keyIs(msg, "app.interrupt") {
+			if m.abortBorderStatus() {
+				return m, nil
+			}
 			if m.running && m.cancel != nil {
 				m.cancel()
 				return m, nil
@@ -514,7 +537,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleLoginMsg(msg)
 
 	case agentEventMsg:
-		m.applyAgentEvent(msg.ev)
+		cmd := m.applyAgentEvent(msg.ev)
+		if cmd != nil {
+			return m, cmd
+		}
 		return m, waitForAgentEvent(m.agentEvents)
 
 	case agentClosedMsg:
@@ -534,6 +560,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startTurn(next.text, next.images)
 		}
 		return m, nil
+
+	case sessionEventMsg:
+		m.applySessionEvent(msg)
+		return m, m.borderTickCmd()
+
+	case borderTickMsg:
+		if msg.gen != m.border.gen || m.border.kind == statusIdle {
+			return m, nil
+		}
+		m.border.frame++
+		return m, m.borderTickCmd()
+
+	case compactDoneMsg:
+		return m.handleCompactDone(msg)
+
+	case afterAgentEndMsg:
+		return m.handleAfterAgentEnd(msg)
+
+	case promptReadyMsg:
+		if msg.stream == nil {
+			m.running = false
+			m.cancel = nil
+			return m, nil
+		}
+		m.agentEvents = msg.stream.Events()
+		return m, waitForAgentEvent(m.agentEvents)
+
+	case treeNavDoneMsg:
+		return m.applyTreeNavResult(msg.target, msg.res, msg.err)
 
 	case shareDoneMsg:
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg.text)})
@@ -758,15 +813,13 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if m.engine == nil {
 			return note("compaction requires a runtime engine")
 		}
-		out, summary, err := m.engine.MaybeCompact(context.Background(), m.history)
-		if err != nil {
-			return note("compact error: " + err.Error())
+		eng := m.engine
+		hist := m.history
+		custom := cmd.Rest
+		return m, func() tea.Msg {
+			out, summary, err := eng.CompactNow(context.Background(), hist, custom)
+			return compactDoneMsg{history: out, summary: summary, err: err}
 		}
-		if summary == "" {
-			return note("compaction not needed")
-		}
-		m.history = out
-		return note("compacted history")
 	case "settings":
 		return m.openSettings()
 	case "scoped-models":
@@ -1015,7 +1068,11 @@ func (m Model) handleImageGen(msg imageGenMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.Cmd) {
-	if m.engine != nil && m.engine.Compacting() {
+	if m.border.kind == statusBranch {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while a branch summary is in progress.")})
+		return m, nil
+	}
+	if m.border.kind == statusCompact || (m.engine != nil && m.engine.Compacting()) {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while compaction is in progress.")})
 		return m, nil
 	}
@@ -1024,29 +1081,30 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
 	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 
-	var stream *agent.Stream
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	if m.engine != nil {
-		m.provider = m.engine.Provider
-		// history already contains the user turn; RunPrompt appends user again, so pass without last
-		hist := m.history[:len(m.history)-1]
-		stream = m.engine.RunPrompt(ctx, hist, text, images)
-	} else {
-		sf, provider := ai.DefaultStreamFn()
-		m.provider = provider
-		reg := tools.Default()
-		exec := agent.ToolFunc(func(ctx context.Context, c agent.ToolCall) (string, bool) {
-			return reg.Execute(ctx, c.Name, c.Args)
-		})
-		reqCtx := ai.Context{Messages: append([]ai.Message(nil), m.history...), Tools: reg.AITools()}
-		stream = agent.Run(ctx, sf, reqCtx, exec, agent.Config{Model: m.cfg.ResolvedModel()})
-	}
-	m.agentEvents = stream.Events()
 	m.running = true
 	m.streaming = ""
 	m.streamingThinking = ""
 	m.streamingActive = false
+	if m.engine != nil {
+		m.provider = m.engine.Provider
+		// history already contains the user turn; RunPrompt appends user again, so pass without last
+		hist := m.history[:len(m.history)-1]
+		eng := m.engine
+		return m, func() tea.Msg {
+			return promptReadyMsg{stream: eng.RunPrompt(ctx, hist, text, images)}
+		}
+	}
+	sf, provider := ai.DefaultStreamFn()
+	m.provider = provider
+	reg := tools.Default()
+	exec := agent.ToolFunc(func(ctx context.Context, c agent.ToolCall) (string, bool) {
+		return reg.Execute(ctx, c.Name, c.Args)
+	})
+	reqCtx := ai.Context{Messages: append([]ai.Message(nil), m.history...), Tools: reg.AITools()}
+	stream := agent.Run(ctx, sf, reqCtx, exec, agent.Config{Model: m.cfg.ResolvedModel()})
+	m.agentEvents = stream.Events()
 	return m, waitForAgentEvent(m.agentEvents)
 }
 
@@ -1063,7 +1121,7 @@ func waitForAgentEvent(ch <-chan agent.Event) tea.Cmd {
 	}
 }
 
-func (m *Model) applyAgentEvent(ev agent.Event) {
+func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 	switch ev.Type {
 	case agent.EventMessageStart:
 		m.streaming = ""
@@ -1149,18 +1207,12 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 			m.history = agent.MessagesFromTranscript(ev.Messages)
 		}
 		if m.engine != nil {
-			ctx := context.Background()
-			if hist, again := m.engine.AfterAgentEnd(ctx, ev.Messages); again {
-				m.history = hist
-				m.retryPrefix = len(hist)
-				stream := m.engine.Continue(ctx, hist)
-				m.agentEvents = stream.Events()
-				m.running = true
-				m.streamingActive = true
-				if m.cfg.CacheMissNotices() {
-					m.appendCacheMissNotice()
-				}
-				return
+			eng := m.engine
+			last := ev.Messages
+			m.streamingActive = false
+			return func() tea.Msg {
+				hist, again := eng.AfterAgentEnd(context.Background(), last)
+				return afterAgentEndMsg{hist: hist, again: again}
 			}
 		}
 		m.running = false
@@ -1169,6 +1221,62 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 			m.appendCacheMissNotice()
 		}
 	}
+	return nil
+}
+
+func (m Model) handleAfterAgentEnd(msg afterAgentEndMsg) (tea.Model, tea.Cmd) {
+	m.clearBorder(statusRetry)
+	m.clearBorder(statusCompact)
+	if msg.again && m.engine != nil {
+		m.history = msg.hist
+		m.retryPrefix = len(msg.hist)
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancel = cancel
+		stream := m.engine.Continue(ctx, msg.hist)
+		m.agentEvents = stream.Events()
+		m.running = true
+		m.streamingActive = true
+		if m.cfg.CacheMissNotices() {
+			m.appendCacheMissNotice()
+		}
+		return m, waitForAgentEvent(m.agentEvents)
+	}
+	m.running = false
+	m.streamingActive = false
+	m.cancel = nil
+	if m.cfg.CacheMissNotices() {
+		m.appendCacheMissNotice()
+	}
+	if m.pendingNav != nil {
+		nav := *m.pendingNav
+		m.pendingNav = nil
+		return m.applyTreeNav(nav.target, nav.summarize, nav.custom, nav.replace)
+	}
+	if len(m.queued) > 0 {
+		next := m.queued[0]
+		m.queued = m.queued[1:]
+		return m.startTurn(next.text, next.images)
+	}
+	return m, nil
+}
+
+func (m Model) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
+	m.clearBorder(statusCompact)
+	note := func(s string) (tea.Model, tea.Cmd) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		return m, nil
+	}
+	if msg.err != nil {
+		if errors.Is(msg.err, context.Canceled) || errors.Is(msg.err, compaction.ErrSummarizeAborted) {
+			return note("Compaction cancelled")
+		}
+		return note("compact error: " + msg.err.Error())
+	}
+	if msg.summary == "" {
+		return note("compaction not needed")
+	}
+	m.history = msg.history
+	return note("compacted history")
 }
 
 func (m *Model) appendCacheMissNotice() {
@@ -1454,6 +1562,19 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 	p := tea.NewProgram(m, opts...)
 	if m.extHub != nil {
 		m.extHub.send = func(msg tea.Msg) { p.Send(msg) }
+	}
+	if eng != nil {
+		eng.SetOnSessionEvent(func(v any) {
+			ev, ok := v.(map[string]any)
+			if !ok || ev == nil {
+				return
+			}
+			cp := make(map[string]any, len(ev))
+			for k, val := range ev {
+				cp[k] = val
+			}
+			p.Send(sessionEventMsg(cp))
+		})
 	}
 	final, err := p.Run()
 	if err != nil {

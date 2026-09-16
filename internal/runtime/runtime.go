@@ -357,6 +357,11 @@ func (e *Engine) emitSession(v any) {
 	}
 }
 
+// SetOnSessionEvent registers a listener for session JSON events (TUI status).
+func (e *Engine) SetOnSessionEvent(fn func(any)) {
+	e.onSessionEvent = fn
+}
+
 func (e *Engine) recordEntry(entry *session.Entry, err error) {
 	if err == nil && entry != nil {
 		e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
