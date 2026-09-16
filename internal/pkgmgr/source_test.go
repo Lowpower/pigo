@@ -68,3 +68,12 @@ func TestPackageIdentity(t *testing.T) {
 		t.Fatalf("git identity: %q vs %q", g1.Identity(), g2.Identity())
 	}
 }
+
+func TestIsCLIPackageSource(t *testing.T) {
+	if !IsCLIPackageSource("npm:left-pad") || !IsCLIPackageSource(" git:github.com/user/repo") {
+		t.Fatal("expected npm:/git: prefixes")
+	}
+	if IsCLIPackageSource("/tmp/ext") || IsCLIPackageSource("https://github.com/user/repo") {
+		t.Fatal("local path and https URLs are not CLI package sources")
+	}
+}

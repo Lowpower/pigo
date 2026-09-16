@@ -98,6 +98,49 @@ func managedJoin(root string, parts ...string) string {
 	return resolved
 }
 
+// ResolveCLIExtension installs an npm:/git: source to disk if needed (no
+// settings persist) and returns spawnable argv using the same discovery as
+// pigo install. Local paths are rejected; callers should pass those through.
+func (m *Manager) ResolveCLIExtension(ctx context.Context, spec string) ([][]string, error) {
+	src, err := ParseSource(spec)
+	if err != nil {
+		return nil, fmt.Errorf("extension %q: %w", spec, err)
+	}
+	if src.Kind != KindNPM && src.Kind != KindGit {
+		return nil, fmt.Errorf("extension %q: not a valid npm: or git: source", spec)
+	}
+	if src.Kind == KindNPM && src.Name == "" {
+		return nil, fmt.Errorf("extension %q: missing npm package name", spec)
+	}
+	root := m.cliInstalled(spec)
+	if root == "" {
+		if offline() {
+			return nil, fmt.Errorf("extension %q: not installed (offline; pigo does not fetch npm:/git: when PIGO_OFFLINE is set)", spec)
+		}
+		if err := m.install(ctx, spec, false); err != nil {
+			return nil, fmt.Errorf("extension %q: install failed: %w", spec, err)
+		}
+		root = m.InstalledPath(spec, false)
+		if root == "" {
+			return nil, fmt.Errorf("extension %q: install succeeded but package is missing on disk", spec)
+		}
+	}
+	argv := spawnArgvFromPackage(root)
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("extension %q: no spawnable entry (need an executable or #! shebang; pigo does not load *.ts in-process)", spec)
+	}
+	return argv, nil
+}
+
+func (m *Manager) cliInstalled(source string) string {
+	if m.Trusted {
+		if p := m.InstalledPath(source, true); p != "" {
+			return p
+		}
+	}
+	return m.InstalledPath(source, false)
+}
+
 // InstalledPath returns the on-disk path for an installed source, or "".
 func (m *Manager) InstalledPath(source string, local bool) string {
 	src, err := ParseSource(source)

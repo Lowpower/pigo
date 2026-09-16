@@ -192,7 +192,10 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		opts.CLIExtensions = opts.Extensions
 	}
 	rs := resolvePackageResources(ctx, opts)
-	extSpecs := collectExtensionSpecs(opts, rs)
+	extSpecs, err := collectExtensionSpecs(ctx, opts, rs)
+	if err != nil {
+		return nil, err
+	}
 	opts.Extensions = extSpecs
 	e.Opts = opts
 
@@ -1138,12 +1141,14 @@ func (e *Engine) Reload() {
 		reg = filterTools(reg, builtinAllow(e.Opts), e.Opts.ToolDeny)
 	}
 	if !e.Opts.NoTools {
-		specs := collectExtensionSpecs(e.Opts, rs)
-		e.Opts.Extensions = specs
-		hosts, r, err := spawnExtensions(ctx, specs, reg, e.Opts.UnknownFlags)
+		specs, err := collectExtensionSpecs(ctx, e.Opts, rs)
 		if err == nil {
-			e.Hosts = hosts
-			reg = r
+			e.Opts.Extensions = specs
+			hosts, r, err := spawnExtensions(ctx, specs, reg, e.Opts.UnknownFlags)
+			if err == nil {
+				e.Hosts = hosts
+				reg = r
+			}
 		}
 	}
 	e.Tools = reg

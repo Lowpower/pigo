@@ -46,7 +46,7 @@ notices still appear either way.
 | `--no-skills`, `-ns` / `--skill` | Disable skills or add extra skill paths |
 | `--no-tools`, `-nt` / `--tools`, `-t` / `--exclude-tools`, `-xt` | Tool filters |
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools (extensions still register) |
-| `--extension`, `-e` / `--no-extensions`, `-ne` | Load extra extension binaries / skip discovery |
+| `--extension`, `-e` / `--no-extensions`, `-ne` | Extra extension (path, `npm:<pkg>`, or `git:<url>`) / skip discovery |
 | `--use-theme` / `--theme` / `--no-themes` | Theme name or extra theme files |
 | `--prompt-template` / `--no-prompt-templates`, `-np` | Extra prompt templates |
 | `--list-models` / `--list-models-query` | Print known models |

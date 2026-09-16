@@ -11,6 +11,10 @@ pigo update --extensions
 pigo remove some-package
 ```
 
+Root `-e npm:<pkg>` / `-e git:<url>` install for the current process only and do
+not write settings. Use `pigo install` when the next session should auto-load
+the package.
+
 `pigo config` toggles discovered resources. `--local` writes
 `cwd/.pigo/settings.json`. `--approve` / `--no-approve` override project trust
 for that command.
