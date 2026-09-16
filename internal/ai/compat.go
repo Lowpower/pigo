@@ -9,6 +9,9 @@ import (
 const (
 	midConvoOutputConfigBeta    = "mid-conversation-output-config-2026-07-01"
 	thinkingBindingControlsBeta = "thinking-binding-controls-2026-08-01"
+
+	affinityCompletions = "completions"
+	affinityResponses   = "responses"
 )
 
 func lookupCompat(opts Options) *models.Compat {
@@ -20,6 +23,39 @@ func lookupCompat(opts Options) *models.Compat {
 		return nil
 	}
 	return m.Compat
+}
+
+func sessionAffinityHeaders(opts Options, kind string) map[string]string {
+	if opts.SessionID == "" {
+		return nil
+	}
+	c := lookupCompat(opts)
+	if c == nil {
+		return nil
+	}
+	format := strings.ToLower(strings.TrimSpace(c.SessionAffinityFormat))
+	sid := opts.SessionID
+	switch format {
+	case "openrouter":
+		return map[string]string{"x-session-id": sid}
+	case "openai":
+		h := map[string]string{
+			"session_id":          sid,
+			"x-client-request-id": sid,
+		}
+		if kind == affinityCompletions {
+			h["x-session-affinity"] = sid
+		}
+		return h
+	case "openai-nosession":
+		h := map[string]string{"x-client-request-id": sid}
+		if kind == affinityCompletions {
+			h["x-session-affinity"] = sid
+		}
+		return h
+	default:
+		return nil
+	}
 }
 
 func toolStrict(t Tool) bool {

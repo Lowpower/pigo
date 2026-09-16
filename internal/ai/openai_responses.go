@@ -43,6 +43,9 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 		for k, v := range c.Headers {
 			optsList = append(optsList, option.WithHeader(k, v))
 		}
+		for k, v := range sessionAffinityHeaders(opts, affinityResponses) {
+			optsList = append(optsList, option.WithHeader(k, v))
+		}
 		client := openai.NewClient(optsList...)
 
 		params := responses.ResponseNewParams{
