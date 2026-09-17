@@ -59,6 +59,7 @@ type Compat struct {
 	ChatTemplateKwargs              any    `json:"chatTemplateKwargs,omitempty"`
 	ChatTemplateArgs                any    `json:"chatTemplateArgs,omitempty"`
 	SupportsLongCacheRetention      *bool  `json:"supportsLongCacheRetention,omitempty"`
+	SupportsMaxOutputTokens         *bool  `json:"supportsMaxOutputTokens,omitempty"`
 	SessionAffinityFormat           string `json:"sessionAffinityFormat,omitempty"`
 	// SupportsToolReferences enables Anthropic-style deferred tools
 	// (defer_loading / tool_reference). Fireworks Messages also enable this

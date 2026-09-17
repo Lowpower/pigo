@@ -58,7 +58,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 		if reqCtx.System != "" {
 			params.Instructions = param.NewOpt(reqCtx.System)
 		}
-		if opts.MaxTokens > 0 {
+		if opts.MaxTokens > 0 && supportsMaxOutputTokens(opts) {
 			n := int64(opts.MaxTokens)
 			if n < 16 {
 				n = 16

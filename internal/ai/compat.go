@@ -77,6 +77,14 @@ func longCacheOK(c *models.Compat) bool {
 	return *c.SupportsLongCacheRetention
 }
 
+func supportsMaxOutputTokens(opts Options) bool {
+	c := lookupCompat(opts)
+	if c == nil || c.SupportsMaxOutputTokens == nil {
+		return true
+	}
+	return *c.SupportsMaxOutputTokens
+}
+
 func midConvoEffort(opts Options) bool {
 	c := lookupCompat(opts)
 	return c != nil && c.SupportsMidConvoEffort
