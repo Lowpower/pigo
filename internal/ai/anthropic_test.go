@@ -2,11 +2,14 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // anthropicFixture is a recorded-style Anthropic Messages SSE stream: a text
@@ -201,5 +204,105 @@ func TestAnthropicClientHTTPError(t *testing.T) {
 	}
 	if final == nil || final.StopReason != StopError {
 		t.Fatalf("final = %v, want stopReason=error", final)
+	}
+}
+
+func TestAnthropicMaxTokensCompat(t *testing.T) {
+	omit, send := false, true
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "maxout-ant", DefaultAPI: "anthropic-messages", DefaultID: "unset",
+		Models: []models.Model{
+			{Provider: "maxout-ant", ID: "omit", Compat: &models.Compat{SupportsMaxOutputTokens: &omit}},
+			{Provider: "maxout-ant", ID: "send", Compat: &models.Compat{SupportsMaxOutputTokens: &send}},
+			{Provider: "maxout-ant", ID: "unset"},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("maxout-ant") })
+
+	cases := []struct {
+		name, model string
+		maxTokens   int
+		thinking    string
+		wantPresent bool
+		want        int
+	}{
+		{name: "false omits", model: "omit", maxTokens: 100},
+		{name: "false omits default", model: "omit"},
+		{name: "false omits thinking bump", model: "omit", thinking: "high"},
+		{name: "true sends", model: "send", maxTokens: 100, wantPresent: true, want: 100},
+		{name: "unset sends default", model: "unset", wantPresent: true, want: defaultMaxTokens},
+		{name: "unset thinking bump", model: "unset", thinking: "high", wantPresent: true, want: models.BudgetTokens("high") + 4096},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := buildAnthropicRequest(Context{
+				Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			}, Options{Provider: "maxout-ant", Model: tc.model, MaxTokens: tc.maxTokens, Thinking: tc.thinking})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := payload["max_tokens"]
+			if !tc.wantPresent {
+				if ok {
+					t.Fatalf("unexpected max_tokens = %#v", got)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("missing max_tokens in %#v", payload)
+			}
+			n, _ := got.(float64)
+			if int(n) != tc.want {
+				t.Fatalf("max_tokens = %#v, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnthropicSessionAffinityHeaders(t *testing.T) {
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "aff-ant", DefaultAPI: "anthropic-messages", DefaultID: "none",
+		Models: []models.Model{
+			{Provider: "aff-ant", ID: "on", Compat: &models.Compat{SendSessionAffinityHeaders: true}},
+			{Provider: "aff-ant", ID: "off"},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("aff-ant") })
+
+	cases := []struct {
+		name, provider, model, session, retention, want string
+	}{
+		{name: "compat true", provider: "aff-ant", model: "on", session: "sess-1", want: "sess-1"},
+		{name: "compat unset", provider: "aff-ant", model: "off", session: "sess-1"},
+		{name: "fireworks default", provider: "fireworks", model: "m", session: "sess-1", want: "sess-1"},
+		{name: "fireworks cache none", provider: "fireworks", model: "m", session: "sess-1", retention: "none"},
+		{name: "no session id", provider: "aff-ant", model: "on"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got http.Header
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Clone()
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(anthropicFixture))
+			}))
+			defer srv.Close()
+
+			client := &AnthropicClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+			stream, err := client.StreamFn()(context.Background(), Context{
+				Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			}, Options{Provider: tc.provider, Model: tc.model, SessionID: tc.session, CacheRetention: tc.retention})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream.Collect()
+			if got.Get("x-session-affinity") != tc.want {
+				t.Fatalf("x-session-affinity = %q, want %q", got.Get("x-session-affinity"), tc.want)
+			}
+		})
 	}
 }
