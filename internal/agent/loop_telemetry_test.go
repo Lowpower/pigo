@@ -47,7 +47,7 @@ func TestLoopEmitsNestedSpans(t *testing.T) {
 		toolCallMessage("tc1", "read", map[string]any{"path": "README.md"}),
 		textMessage("Done."),
 	)
-	exec := ToolFunc(func(_ context.Context, c ToolCall) (string, bool) {
+	exec := ToolFunc(func(_ context.Context, _ ToolCall) (string, bool) {
 		return "ok", false
 	})
 	reqCtx := ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: "read"}}}

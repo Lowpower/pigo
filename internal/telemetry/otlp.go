@@ -211,7 +211,7 @@ func PostOTLP(ctx context.Context, records []SpanRecord) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("otlp http %s", resp.Status)
