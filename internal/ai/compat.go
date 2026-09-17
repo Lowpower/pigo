@@ -85,6 +85,17 @@ func supportsMaxOutputTokens(opts Options) bool {
 	return *c.SupportsMaxOutputTokens
 }
 
+func sendAnthropicSessionAffinity(opts Options) bool {
+	if strings.EqualFold(strings.TrimSpace(opts.CacheRetention), "none") {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(opts.Provider), "fireworks") {
+		return true
+	}
+	c := lookupCompat(opts)
+	return c != nil && c.SendSessionAffinityHeaders
+}
+
 func midConvoEffort(opts Options) bool {
 	c := lookupCompat(opts)
 	return c != nil && c.SupportsMidConvoEffort

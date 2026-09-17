@@ -71,6 +71,9 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 			httpReq.Header.Set(k, v)
 		}
 		applyAnthropicAuth(httpReq, c.APIKey, midConvoBetas(opts)...)
+		if opts.SessionID != "" && sendAnthropicSessionAffinity(opts) {
+			httpReq.Header.Set("x-session-affinity", opts.SessionID)
+		}
 
 		client := c.HTTPClient
 		if client == nil {
@@ -193,10 +196,12 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 	applyAnthropicCacheControl(msgs, opts)
 
 	req := map[string]any{
-		"model":      opts.Model,
-		"max_tokens": maxTokens,
-		"messages":   msgs,
-		"stream":     true,
+		"model":    opts.Model,
+		"messages": msgs,
+		"stream":   true,
+	}
+	if supportsMaxOutputTokens(opts) {
+		req["max_tokens"] = maxTokens
 	}
 	if reqCtx.System != "" {
 		sys := map[string]any{
@@ -231,7 +236,7 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		}
 		if budget > 0 {
 			req["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
-			if maxTokens <= budget {
+			if supportsMaxOutputTokens(opts) && maxTokens <= budget {
 				req["max_tokens"] = budget + 4096
 			}
 		} else if reasoningEffort(opts) != "" {

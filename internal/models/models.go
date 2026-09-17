@@ -61,6 +61,7 @@ type Compat struct {
 	SupportsLongCacheRetention      *bool  `json:"supportsLongCacheRetention,omitempty"`
 	SupportsMaxOutputTokens         *bool  `json:"supportsMaxOutputTokens,omitempty"`
 	SessionAffinityFormat           string `json:"sessionAffinityFormat,omitempty"`
+	SendSessionAffinityHeaders      bool   `json:"sendSessionAffinityHeaders,omitempty"`
 	// SupportsToolReferences enables Anthropic-style deferred tools
 	// (defer_loading / tool_reference). Fireworks Messages also enable this
 	// when Options.Provider is "fireworks", even if this flag is unset.

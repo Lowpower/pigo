@@ -149,6 +149,44 @@ func TestLoadUserJSONReadsSupportsMaxOutputTokens(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONReadsSendSessionAffinityHeaders(t *testing.T) {
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("aff-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "aff-json": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://example.invalid/v1",
+      "models": [
+        {"id": "m1", "compat": {"sendSessionAffinityHeaders": true}},
+        {"id": "m2"}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m1, ok := Lookup("aff-json", "m1")
+	if !ok || m1.Compat == nil || !m1.Compat.SendSessionAffinityHeaders {
+		t.Fatalf("m1 = %+v ok=%v, want sendSessionAffinityHeaders=true", m1, ok)
+	}
+	m2, ok := Lookup("aff-json", "m2")
+	if !ok {
+		t.Fatal("m2 missing")
+	}
+	if m2.Compat != nil && m2.Compat.SendSessionAffinityHeaders {
+		t.Fatalf("m2 compat = %+v, want sendSessionAffinityHeaders unset", m2.Compat)
+	}
+}
+
 func TestLoadUserJSONExposesAPIKey(t *testing.T) {
 	t.Cleanup(func() {
 		ClearOverlays()
