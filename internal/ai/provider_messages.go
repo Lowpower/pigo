@@ -6,8 +6,14 @@ import "encoding/json"
 // shape. Assistant tool calls become tool_use blocks; toolResult becomes a user
 // message with tool_result.
 func AnthropicWireMessages(msgs []Message) []map[string]any {
+	return anthropicWireMessages(msgs, false, nil)
+}
+
+func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]struct{}) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
-	for _, m := range msgs {
+	loaded := map[string]struct{}{}
+	for i := 0; i < len(msgs); i++ {
+		m := msgs[i]
 		if m.Assistant != nil {
 			out = append(out, map[string]any{
 				"role":    "assistant",
@@ -15,43 +21,32 @@ func AnthropicWireMessages(msgs []Message) []map[string]any {
 			})
 			continue
 		}
-		if m.Role == RoleToolResult || m.ToolCallID != "" {
-			text, imgs := ParseToolContent(m.Content)
-			if len(imgs) == 0 {
-				imgs = m.Images
-				text = m.Content
+		if isAnthropicToolResult(m) {
+			if !emitRefs {
+				tr, _ := convertAnthropicToolResult(m, nil, loaded)
+				out = append(out, map[string]any{
+					"role":    "user",
+					"content": []map[string]any{tr},
+				})
+				continue
 			}
-			var inner any
-			if len(imgs) == 0 {
-				inner = text
-			} else {
-				blocks := make([]map[string]any, 0, 1+len(imgs))
-				if text != "" {
-					blocks = append(blocks, map[string]any{"type": "text", "text": text})
+			var blocks []map[string]any
+			var siblings []map[string]any
+			j := i
+			for j < len(msgs) {
+				n := msgs[j]
+				if n.Assistant != nil || !isAnthropicToolResult(n) {
+					break
 				}
-				for _, img := range imgs {
-					blocks = append(blocks, map[string]any{
-						"type": "image",
-						"source": map[string]any{
-							"type":       "base64",
-							"media_type": img.MimeType,
-							"data":       img.Data,
-						},
-					})
-				}
-				inner = blocks
+				tr, sib := convertAnthropicToolResult(n, deferred, loaded)
+				blocks = append(blocks, tr)
+				siblings = append(siblings, sib...)
+				j++
 			}
-			block := map[string]any{
-				"type":        "tool_result",
-				"tool_use_id": m.ToolCallID,
-				"content":     inner,
-			}
-			if m.IsError {
-				block["is_error"] = true
-			}
+			i = j - 1
 			out = append(out, map[string]any{
 				"role":    "user",
-				"content": []map[string]any{block},
+				"content": append(blocks, siblings...),
 			})
 			continue
 		}
@@ -62,6 +57,71 @@ func AnthropicWireMessages(msgs []Message) []map[string]any {
 		out = append(out, map[string]any{"role": role, "content": anthropicUserContent(m)})
 	}
 	return out
+}
+
+func isAnthropicToolResult(m Message) bool {
+	return m.Role == RoleToolResult || m.ToolCallID != ""
+}
+
+func convertAnthropicToolResult(m Message, deferred map[string]struct{}, loaded map[string]struct{}) (block map[string]any, siblings []map[string]any) {
+	inner, siblingBlocks := anthropicToolResultBody(m)
+	var refs []map[string]any
+	for _, name := range m.AddedToolNames {
+		if name == "" {
+			continue
+		}
+		if _, ok := deferred[name]; !ok {
+			continue
+		}
+		if _, ok := loaded[name]; ok {
+			continue
+		}
+		loaded[name] = struct{}{}
+		refs = append(refs, map[string]any{"type": "tool_reference", "tool_name": name})
+	}
+	block = map[string]any{
+		"type":        "tool_result",
+		"tool_use_id": m.ToolCallID,
+		"content":     inner,
+	}
+	if m.IsError {
+		block["is_error"] = true
+	}
+	if len(refs) == 0 {
+		return block, nil
+	}
+	block["content"] = refs
+	return block, siblingBlocks
+}
+
+func anthropicToolResultBody(m Message) (inner any, siblings []map[string]any) {
+	text, imgs := ParseToolContent(m.Content)
+	if len(imgs) == 0 {
+		imgs = m.Images
+		text = m.Content
+	}
+	if len(imgs) == 0 {
+		sib := []map[string]any{}
+		if text != "" {
+			sib = append(sib, map[string]any{"type": "text", "text": text})
+		}
+		return text, sib
+	}
+	blocks := make([]map[string]any, 0, 1+len(imgs))
+	if text != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": text})
+	}
+	for _, img := range imgs {
+		blocks = append(blocks, map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": img.MimeType,
+				"data":       img.Data,
+			},
+		})
+	}
+	return blocks, blocks
 }
 
 func anthropicUserContent(m Message) any {

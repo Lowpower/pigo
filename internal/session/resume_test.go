@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,6 +76,36 @@ func TestRestoreAIMessagesRoundTrip(t *testing.T) {
 	}
 	if opened.ID() != m.ID() {
 		t.Fatalf("FindByID id=%s want %s", opened.ID(), m.ID())
+	}
+}
+
+func TestRestoreAIMessagesAddedToolNames(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok", "stopReason": "toolUse"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("toolResult", map[string]any{
+		"role": "toolResult", "toolCallId": "s1", "toolName": "tool_search",
+		"content": "Found lookup.", "isError": false, "addedToolNames": []string{"lookup"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendActiveToolsChange([]string{"tool_search", "lookup"}); err != nil {
+		t.Fatal(err)
+	}
+	msgs := RestoreAIMessages(m.Entries())
+	if len(msgs) != 3 {
+		t.Fatalf("len=%d", len(msgs))
+	}
+	if fmt.Sprint(msgs[2].AddedToolNames) != "[lookup]" {
+		t.Fatalf("added = %#v", msgs[2].AddedToolNames)
+	}
+	names, ok := LastActiveToolNames(m.Entries())
+	if !ok || fmt.Sprint(names) != "[tool_search lookup]" {
+		t.Fatalf("active = %v ok=%v", names, ok)
 	}
 }
 

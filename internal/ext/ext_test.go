@@ -2,6 +2,7 @@ package ext
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -130,6 +131,61 @@ func scriptedReverseThenText() ai.StreamFn {
 		i++
 		return ai.EmitMessage(ctx, m), nil
 	}
+}
+
+func TestHostSetActiveToolsHook(t *testing.T) {
+	h := spawnSearchExt(t)
+	defer func() { _ = h.Close() }()
+
+	var got []string
+	h.SetActiveToolsHook(func(names []string) { got = append([]string(nil), names...) })
+	out, isErr := h.CallTool(context.Background(), "tool_search", map[string]any{"query": "lookup"})
+	if isErr || out != "Found lookup." {
+		t.Fatalf("tool_search = %q err=%v", out, isErr)
+	}
+	if fmt.Sprint(got) != "[tool_search lookup]" {
+		t.Fatalf("hook names = %v", got)
+	}
+}
+
+func TestSearchExtHelperProcess(_ *testing.T) {
+	if os.Getenv("PIGO_EXT_SEARCH") != "1" {
+		return
+	}
+	_ = Serve(Handler{
+		Name: "search-ext",
+		Tools: []ToolDef{
+			{
+				Name:        "tool_search",
+				Description: "Find tools",
+				Schema:      map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}},
+				Fn: func(_ context.Context, _ map[string]any) (string, bool) {
+					_ = SetActiveTools([]string{"tool_search", "lookup"})
+					return "Found lookup.", false
+				},
+			},
+			{
+				Name:        "lookup",
+				Description: "Look up a key",
+				Schema:      map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}}},
+				Fn: func(_ context.Context, args map[string]any) (string, bool) {
+					return fmt.Sprintf("value for %v", args["key"]), false
+				},
+			},
+		},
+	})
+	os.Exit(0)
+}
+
+func spawnSearchExt(t *testing.T) *Host {
+	t.Helper()
+	h, err := Spawn(context.Background(), "search-ext",
+		[]string{os.Args[0], "-test.run=^TestSearchExtHelperProcess$"},
+		Options{Env: []string{"PIGO_EXT_SEARCH=1"}})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	return h
 }
 
 func reverseString(s string) string {

@@ -81,6 +81,43 @@ func (r *Registry) AITools() []ai.Tool {
 	return out
 }
 
+// Has reports whether a tool with this name is registered.
+func (r *Registry) Has(name string) bool {
+	if r == nil {
+		return false
+	}
+	_, ok := r.byName[name]
+	return ok
+}
+
+// AIToolsNamed returns registered tools whose names are in names, in registry
+// order. A nil names slice means all tools.
+func (r *Registry) AIToolsNamed(names []string) []ai.Tool {
+	if r == nil {
+		return nil
+	}
+	if names == nil {
+		return r.AITools()
+	}
+	allow := make(map[string]bool, len(names))
+	for _, n := range names {
+		allow[n] = true
+	}
+	out := make([]ai.Tool, 0, len(names))
+	for _, t := range r.order {
+		if !allow[t.Name()] {
+			continue
+		}
+		out = append(out, ai.Tool{
+			Name:                t.Name(),
+			Description:         t.Description(),
+			Parameters:          t.Schema(),
+			ConstrainedSampling: preferConstrainedSampling(t.Name()),
+		})
+	}
+	return out
+}
+
 // List returns tools in registration order.
 func (r *Registry) List() []Tool {
 	out := make([]Tool, len(r.order))

@@ -182,7 +182,14 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		maxTokens = defaultMaxTokens
 	}
 
-	msgs := AnthropicWireMessages(reqCtx.Messages)
+	enabled := supportsToolReferences(opts)
+	immediate, deferred := splitDeferredTools(reqCtx.Messages, reqCtx.Tools, enabled)
+	var msgs []map[string]any
+	if enabled {
+		msgs = anthropicWireMessages(reqCtx.Messages, true, deferredNameSet(deferred))
+	} else {
+		msgs = AnthropicWireMessages(reqCtx.Messages)
+	}
 	applyAnthropicCacheControl(msgs, opts)
 
 	req := map[string]any{
@@ -199,18 +206,11 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		}
 		req["system"] = []map[string]any{sys}
 	}
-	if len(reqCtx.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(reqCtx.Tools))
-		for i, t := range reqCtx.Tools {
-			tool := map[string]any{
-				"name":         t.Name,
-				"description":  t.Description,
-				"input_schema": t.Parameters,
-			}
-			if i == len(reqCtx.Tools)-1 {
-				tool["cache_control"] = anthropicCacheControl(opts)
-			}
-			tools = append(tools, tool)
+	if len(immediate) > 0 || len(deferred) > 0 {
+		tools := anthropicToolDefs(immediate, false)
+		tools = append(tools, anthropicToolDefs(deferred, true)...)
+		if len(tools) > 0 {
+			tools[len(tools)-1]["cache_control"] = anthropicCacheControl(opts)
 		}
 		req["tools"] = tools
 		req["tool_choice"] = map[string]any{"type": "auto"}
@@ -239,6 +239,25 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		}
 	}
 	return json.Marshal(req)
+}
+
+func anthropicToolDefs(tools []Tool, deferLoading bool) []map[string]any {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		tool := map[string]any{
+			"name":         t.Name,
+			"description":  t.Description,
+			"input_schema": t.Parameters,
+		}
+		if deferLoading {
+			tool["defer_loading"] = true
+		}
+		out = append(out, tool)
+	}
+	return out
 }
 
 func anthropicCacheControl(opts Options) map[string]any {
@@ -410,6 +429,10 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 				args = map[string]any{}
 			}
 			block = &Content{Type: KindToolCall, ToolID: cb.ID, ToolName: cb.Name, Arguments: args}
+		case "tool_reference":
+			// Request-side load marker; Fireworks may echo it. Skip so later
+			// tool_use blocks keep their stream indexes.
+			return true
 		default:
 			return true
 		}

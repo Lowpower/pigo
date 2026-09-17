@@ -14,6 +14,30 @@ import (
 )
 
 var flagStore sync.Map
+var (
+	serveMu  sync.Mutex
+	serveOut io.Writer
+)
+
+// SetActiveTools asks the host to replace the active tool set. Unknown names
+// are ignored. Call from a tool or a session_start handler.
+func SetActiveTools(names []string) error {
+	if names == nil {
+		names = []string{}
+	}
+	serveMu.Lock()
+	out := serveOut
+	serveMu.Unlock()
+	if out == nil {
+		return errors.New("ext: SetActiveTools called outside Serve")
+	}
+	serveMu.Lock()
+	defer serveMu.Unlock()
+	return protocol.WriteMessage(out, protocol.Message{
+		Type:    protocol.TypeSetActiveTools,
+		Payload: map[string]any{"names": names},
+	})
+}
 
 // Flag returns a CLI flag value this process claimed during Serve handshake.
 func Flag(name string) (any, bool) {
@@ -56,6 +80,16 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 		flagStore.Delete(k)
 		return true
 	})
+	serveMu.Lock()
+	serveOut = out
+	serveMu.Unlock()
+	defer func() {
+		serveMu.Lock()
+		if serveOut == out {
+			serveOut = nil
+		}
+		serveMu.Unlock()
+	}()
 	r := bufio.NewReader(in)
 
 	if err := protocol.WriteMessage(out, protocol.Message{Type: protocol.TypeHello, ExtName: h.Name, APIVersion: APIVersion}); err != nil {

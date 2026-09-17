@@ -26,6 +26,10 @@ type Message struct {
 	ToolCallID string            `json:"toolCallId,omitempty"`
 	ToolName   string            `json:"toolName,omitempty"`
 	IsError    bool              `json:"isError,omitempty"`
+	// AddedToolNames are Context.tools that became available after this
+	// toolResult. Providers with native deferred loading use them as the
+	// load point; others ignore the field.
+	AddedToolNames []string `json:"addedToolNames,omitempty"`
 	// Images are extra user-message blocks. Empty for text-only.
 	Images []ImageContent `json:"images,omitempty"`
 }

@@ -82,6 +82,9 @@ type Engine struct {
 	steer      []ai.Message
 	follow     []ai.Message
 	compacting bool
+	// activeToolNames is the provider-facing subset of Tools. nil means all.
+	activeToolNames []string
+	addedByCall     map[string][]string
 
 	onSessionEvent func(any)
 	uiHandler      uiHandlerFunc
@@ -235,6 +238,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.applyProviders()
 	e.rebuildCommands()
 	e.applyProjectTrust(ctx)
+	e.bindExtensionHooks()
 	if fn := e.bindStream(provider); fn != nil {
 		e.Stream = fn
 	} else if e.Stream != nil {
@@ -772,7 +776,11 @@ func (e *Engine) Executor() agent.ToolExecutor {
 		e.DispatchEvent(ctx, "tool_execution_start", map[string]any{
 			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
 		})
+		before := e.activeSnapshot()
 		result, isErr := e.Tools.Execute(ctx, c.Name, c.Args)
+		if added := addedNames(before, e.activeSnapshot()); len(added) > 0 {
+			e.noteAddedTools(c.ID, added)
+		}
 		e.DispatchEvent(ctx, "tool_execution_end", map[string]any{
 			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
 			"content": result, "isError": isErr,
@@ -909,7 +917,7 @@ func (e *Engine) runLoop(ctx context.Context, history, newUsers []ai.Message) *a
 func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.Message, system string) *agent.Stream {
 	req := ai.Context{System: system, Messages: history}
 	if e.Tools != nil {
-		req.Tools = e.Tools.AITools()
+		req.Tools = e.providerTools()
 	}
 	sf := e.Stream
 	if sf == nil {
@@ -937,6 +945,8 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 			}
 			return out
 		},
+		ToolAddedNames: e.toolAddedNames,
+		NextTools:      e.providerTools,
 	})
 }
 
@@ -955,6 +965,7 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 		return
 	}
 	e.persisted = len(session.RestoreAIMessages(session.ContextEntries(s)))
+	e.restoreActiveTools(s)
 }
 
 // NewSession starts a fresh session, emitting shutdown/start extension events.
@@ -1159,6 +1170,7 @@ func (e *Engine) Reload() {
 	e.Tools = reg
 	e.applyProviders()
 	e.rebuildCommands()
+	e.bindExtensionHooks()
 	if fn := e.bindStream(e.Provider); fn != nil {
 		e.Stream = fn
 	}
@@ -1189,10 +1201,14 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 		case agent.RoleAssistant:
 			entry, err = e.Opts.Session.AppendMessage("assistant", msg.Assistant)
 		case agent.RoleToolResult:
-			entry, err = e.Opts.Session.AppendMessage("toolResult", map[string]any{
+			payload := map[string]any{
 				"role": "toolResult", "toolName": msg.ToolName, "toolCallId": msg.ToolCallID,
 				"content": msg.Text, "isError": msg.IsError,
-			})
+			}
+			if len(msg.AddedToolNames) > 0 {
+				payload["addedToolNames"] = msg.AddedToolNames
+			}
+			entry, err = e.Opts.Session.AppendMessage("toolResult", payload)
 		default:
 			payload := map[string]any{"role": "user", "content": msg.Text}
 			if len(msg.Images) > 0 {

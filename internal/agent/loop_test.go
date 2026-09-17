@@ -410,3 +410,70 @@ func TestPrepareNextTurnRewritesTranscript(t *testing.T) {
 		t.Fatalf("transcript = %+v", last.Messages)
 	}
 }
+
+func TestLoopStampsAddedToolNamesAndRefreshesTools(t *testing.T) {
+	var mu sync.Mutex
+	var toolSets [][]string
+	provider := func(ctx context.Context, req ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		mu.Lock()
+		var names []string
+		for _, t := range req.Tools {
+			names = append(names, t.Name)
+		}
+		toolSets = append(toolSets, names)
+		n := len(toolSets)
+		mu.Unlock()
+		if n == 1 {
+			return ai.EmitMessage(ctx, toolCallMessage("s1", "search", nil)), nil
+		}
+		return ai.EmitMessage(ctx, textMessage("done")), nil
+	}
+	active := []ai.Tool{{Name: "search", Parameters: map[string]any{"type": "object"}}}
+	exec := ToolFunc(func(_ context.Context, _ ToolCall) (string, bool) {
+		return "found lookup", false
+	})
+	events := Run(context.Background(), provider, ai.Context{
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "go"}},
+		Tools:    active,
+	}, exec, Config{
+		Model:          "test",
+		ToolAddedNames: func(ToolCall) []string { return []string{"lookup"} },
+		NextTools: func() []ai.Tool {
+			return []ai.Tool{
+				{Name: "search", Parameters: map[string]any{"type": "object"}},
+				{Name: "lookup", Parameters: map[string]any{"type": "object"}},
+			}
+		},
+	}).Collect()
+	last := events[len(events)-1]
+	if last.Type != EventAgentEnd {
+		t.Fatalf("last = %s", last.Type)
+	}
+	var stamped []string
+	for _, m := range last.Messages {
+		if m.Role == RoleToolResult {
+			stamped = m.AddedToolNames
+		}
+	}
+	if fmt.Sprint(stamped) != "[lookup]" {
+		t.Fatalf("addedToolNames = %v", stamped)
+	}
+	wire := MessagesFromTranscript(last.Messages)
+	var wireAdded []string
+	for _, m := range wire {
+		if m.Role == ai.RoleToolResult {
+			wireAdded = m.AddedToolNames
+		}
+	}
+	if fmt.Sprint(wireAdded) != "[lookup]" {
+		t.Fatalf("ai message added = %v", wireAdded)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(toolSets) < 2 {
+		t.Fatalf("provider calls = %d", len(toolSets))
+	}
+	if len(toolSets[1]) != 2 || toolSets[1][0] != "search" || toolSets[1][1] != "lookup" {
+		t.Fatalf("second tools = %v", toolSets[1])
+	}
+}

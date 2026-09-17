@@ -167,7 +167,7 @@ func (e *Engine) extendResourcesFromExtensions(ctx context.Context, reason strin
 func (e *Engine) rebuildSystemPrompt() {
 	var toolDefs []ai.Tool
 	if e.Tools != nil {
-		toolDefs = e.Tools.AITools()
+		toolDefs = e.providerTools()
 	}
 	e.System = prompt.Build(prompt.Options{
 		Cwd:              e.Opts.Cwd,
