@@ -230,3 +230,66 @@ func TestOpenAIResponsesSessionAffinityHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIResponsesMaxOutputTokensCompat(t *testing.T) {
+	omit, send := false, true
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "maxout-resp", DefaultAPI: "openai-responses", DefaultID: "unset",
+		Models: []models.Model{
+			{Provider: "maxout-resp", ID: "omit", Compat: &models.Compat{SupportsMaxOutputTokens: &omit}},
+			{Provider: "maxout-resp", ID: "send", Compat: &models.Compat{SupportsMaxOutputTokens: &send}},
+			{Provider: "maxout-resp", ID: "unset"},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("maxout-resp") })
+
+	cases := []struct {
+		name, model string
+		maxTokens   int
+		wantPresent bool
+		want        int
+	}{
+		{name: "false omits", model: "omit", maxTokens: 100},
+		{name: "true sends", model: "send", maxTokens: 100, wantPresent: true, want: 100},
+		{name: "true clamps below 16", model: "send", maxTokens: 10, wantPresent: true, want: 16},
+		{name: "unset sends", model: "unset", maxTokens: 100, wantPresent: true, want: 100},
+		{name: "false without MaxTokens omits", model: "omit"},
+		{name: "unset without MaxTokens omits", model: "unset"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var payload map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &payload)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(responsesFixture))
+			}))
+			defer srv.Close()
+
+			client := &OpenAIResponsesClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+			stream, err := client.StreamFn()(context.Background(), Context{
+				Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			}, Options{Provider: "maxout-resp", Model: tc.model, MaxTokens: tc.maxTokens})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream.Collect()
+
+			got, ok := payload["max_output_tokens"]
+			if !tc.wantPresent {
+				if ok {
+					t.Fatalf("unexpected max_output_tokens = %#v", got)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("missing max_output_tokens in %#v", payload)
+			}
+			n, _ := got.(float64)
+			if int(n) != tc.want {
+				t.Fatalf("max_output_tokens = %#v, want %d", got, tc.want)
+			}
+		})
+	}
+}

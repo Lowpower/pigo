@@ -106,6 +106,49 @@ func TestLoadUserJSONReadsSessionAffinityFormat(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONReadsSupportsMaxOutputTokens(t *testing.T) {
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("maxout-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "maxout-json": {
+      "api": "openai-responses",
+      "baseUrl": "https://example.invalid/v1",
+      "models": [
+        {"id": "m1", "compat": {"supportsMaxOutputTokens": false}},
+        {"id": "m2", "compat": {"supportsMaxOutputTokens": true}},
+        {"id": "m3"}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m1, ok := Lookup("maxout-json", "m1")
+	if !ok || m1.Compat == nil || m1.Compat.SupportsMaxOutputTokens == nil || *m1.Compat.SupportsMaxOutputTokens {
+		t.Fatalf("m1 = %+v ok=%v, want supportsMaxOutputTokens=false", m1, ok)
+	}
+	m2, ok := Lookup("maxout-json", "m2")
+	if !ok || m2.Compat == nil || m2.Compat.SupportsMaxOutputTokens == nil || !*m2.Compat.SupportsMaxOutputTokens {
+		t.Fatalf("m2 = %+v ok=%v, want supportsMaxOutputTokens=true", m2, ok)
+	}
+	m3, ok := Lookup("maxout-json", "m3")
+	if !ok {
+		t.Fatal("m3 missing")
+	}
+	if m3.Compat != nil && m3.Compat.SupportsMaxOutputTokens != nil {
+		t.Fatalf("m3 compat = %+v, want unset supportsMaxOutputTokens", m3.Compat)
+	}
+}
+
 func TestLoadUserJSONExposesAPIKey(t *testing.T) {
 	t.Cleanup(func() {
 		ClearOverlays()
