@@ -98,7 +98,13 @@ protocol does not apply there.
 `tool_result`, `input`, `before_agent_start`, `context`, `resources_discover`,
 `project_trust`, `user_bash`, `before_provider_headers`,
 `before_provider_request`, `after_provider_response`, `model_select`,
-`thinking_level_select`, `ui_prompt_start`, `ui_prompt_end`.
+`thinking_level_select`, `ui_prompt_start`, `ui_prompt_end`,
+`telemetry_span`.
+
+`telemetry_span` is fire-and-forget (`EmitEvent`, no `event_result`). The
+payload is a `SpanRecord`: `name`, `trace_id`, `span_id`, `parent_span_id`,
+unix-nano timestamps, `status`, `attrs`. Prompt text and tool arguments are
+not included. Official sample: [`examples/extensions/telemetry`](../examples/extensions/telemetry).
 
 Useful return payloads:
 

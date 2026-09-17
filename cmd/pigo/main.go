@@ -90,7 +90,9 @@ func newRootCmd() *cobra.Command {
 Environment:
   PIGO_CODING_AGENT_DIR           Agent config directory
   PIGO_CODING_AGENT_SESSION_DIR   Session storage directory (overridden by --session-dir)
-  PIGO_TELEMETRY                  Override install telemetry (1/true/yes or 0/false/no)
+  PIGO_TELEMETRY                  Override install ping and span export (1/true/yes or 0/false/no)
+  PIGO_TELEMETRY_JSONL            Write finished spans as JSONL to stderr (1/true/yes)
+  OTEL_EXPORTER_OTLP_ENDPOINT     Built-in OTLP/HTTP JSON traces (appends /v1/traces)
   PIGO_OFFLINE                    Skip network at startup (also set by --offline)
   PIGO_SHARE_VIEWER_URL           Base URL for /share viewer
   PIGO_OAUTH_CALLBACK_HOST        OAuth callback bind host (default 127.0.0.1)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/telemetry"
 	"github.com/Lowpower/pigo/internal/version"
 )
 
@@ -82,20 +83,8 @@ func userAgent(ver string) string {
 	return "pigo/" + ver + " (" + runtime.GOOS + "; " + runtime.Version() + "; " + runtime.GOARCH + ")"
 }
 
-func isTruthyEnvFlag(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true", "yes":
-		return true
-	default:
-		return false
-	}
-}
-
 // TelemetryAllowed reports whether install telemetry should run.
 // PIGO_TELEMETRY overrides settings when set (1/true/yes vs 0/false/no).
 func TelemetryAllowed(cfg config.Config) bool {
-	if v, ok := os.LookupEnv("PIGO_TELEMETRY"); ok {
-		return isTruthyEnvFlag(v)
-	}
-	return cfg.InstallTelemetryEnabled()
+	return telemetry.Allowed(cfg)
 }

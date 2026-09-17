@@ -9,6 +9,7 @@ import (
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/compaction"
+	"github.com/Lowpower/pigo/internal/telemetry"
 )
 
 // SetAutoRetryEnabled toggles settings.retry.enabled (in-memory; disk overlay is #14).
@@ -59,6 +60,10 @@ func (e *Engine) prepareRetry(ctx context.Context, last []agent.Msg) bool {
 		delayMs *= 1 << (e.retryAttempt - 1)
 	}
 	delayMs = e.Opts.Config.CapRetryDelayMs(delayMs)
+	_, span := telemetry.Start(ctx, "pigo.retry")
+	span.SetAttribute("pigo.retry.attempt", e.retryAttempt)
+	span.SetAttribute("pigo.retry.delay_ms", delayMs)
+	defer span.End()
 	errMsg := msg.ErrorMessage
 	if errMsg == "" {
 		errMsg = "Unknown error"
@@ -71,6 +76,7 @@ func (e *Engine) prepareRetry(ctx context.Context, last []agent.Msg) bool {
 		"errorMessage": errMsg,
 	})
 	if err := e.sleepRetry(ctx, time.Duration(delayMs)*time.Millisecond); err != nil {
+		span.RecordError(err)
 		attempt := e.retryAttempt
 		e.retryAttempt = 0
 		e.emitSession(map[string]any{

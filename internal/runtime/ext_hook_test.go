@@ -8,11 +8,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
+	"github.com/Lowpower/pigo/internal/telemetry"
 	"github.com/Lowpower/pigo/internal/tools"
 )
 
@@ -115,6 +117,22 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				}
 				msg["errorMessage"] = "from-ext"
 				return map[string]any{"message": msg}
+			},
+		})
+	case "span":
+		_ = ext.Serve(ext.Handler{
+			Name:   "span-ext",
+			Events: []string{"telemetry_span"},
+			OnEvent: func(event string, payload map[string]any) map[string]any {
+				if p := os.Getenv("PIGO_EXT_LOG"); p != "" {
+					f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+					if err == nil {
+						name, _ := payload["name"].(string)
+						_, _ = fmt.Fprintln(f, event, name)
+						_ = f.Close()
+					}
+				}
+				return nil
 			},
 		})
 	}
@@ -323,5 +341,57 @@ func TestMessageAndToolUpdateEvents(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("log missing %s:\n%s", want, got)
 		}
+	}
+}
+
+func TestSpanEventOnlyToSubscribedHosts(t *testing.T) {
+	telemetry.Reset()
+	t.Cleanup(telemetry.Reset)
+	logPath := filepath.Join(t.TempDir(), "span.log")
+	sub := spawnRuntimeExt(t, "span", nil, "PIGO_EXT_LOG="+logPath)
+	other := spawnRuntimeExt(t, "flag", nil)
+	if !sub.Subscribed(telemetry.EventSpan) {
+		t.Fatal("span-ext should subscribe")
+	}
+	if other.Subscribed(telemetry.EventSpan) {
+		t.Fatal("flag-ext should not subscribe")
+	}
+	e := &Engine{
+		Hosts: []*ext.Host{sub, other},
+		Opts:  Options{Config: config.Config{Model: "x"}},
+	}
+	e.wireTelemetry()
+	_, span := telemetry.Start(context.Background(), "pigo.turn")
+	span.End()
+	_ = telemetry.Shutdown(context.Background())
+
+	deadline := time.Now().Add(2 * time.Second)
+	var got string
+	for time.Now().Before(deadline) {
+		b, _ := os.ReadFile(logPath)
+		got = string(b)
+		if strings.Contains(got, "telemetry_span") && strings.Contains(got, "pigo.turn") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("subscribed host log = %q", got)
+}
+
+func TestSpanEventDeniedSkipsExtension(t *testing.T) {
+	telemetry.Reset()
+	t.Cleanup(telemetry.Reset)
+	t.Setenv("PIGO_TELEMETRY", "0")
+	logPath := filepath.Join(t.TempDir(), "span.log")
+	h := spawnRuntimeExt(t, "span", nil, "PIGO_EXT_LOG="+logPath)
+	e := &Engine{Hosts: []*ext.Host{h}, Opts: Options{Config: config.Config{Model: "x"}}}
+	e.wireTelemetry()
+	_, span := telemetry.Start(context.Background(), "pigo.turn")
+	span.End()
+	_ = telemetry.Shutdown(context.Background())
+	time.Sleep(50 * time.Millisecond)
+	b, err := os.ReadFile(logPath)
+	if err == nil && strings.Contains(string(b), "telemetry_span") {
+		t.Fatalf("denied export still sent: %s", b)
 	}
 }

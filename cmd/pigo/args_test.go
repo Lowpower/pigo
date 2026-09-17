@@ -247,7 +247,7 @@ func TestSessionDirAndVerboseFlagsParse(t *testing.T) {
 	cmd.SetErr(&out)
 	_ = cmd.Execute()
 	s := out.String()
-	for _, want := range []string{"--session-dir", "--verbose", "PIGO_TELEMETRY", "PIGO_CODING_AGENT_SESSION_DIR"} {
+	for _, want := range []string{"--session-dir", "--verbose", "PIGO_TELEMETRY", "PIGO_TELEMETRY_JSONL", "OTEL_EXPORTER_OTLP_ENDPOINT", "PIGO_CODING_AGENT_SESSION_DIR"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("help missing %s:\n%s", want, s)
 		}

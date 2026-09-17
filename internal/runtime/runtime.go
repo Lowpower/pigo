@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
@@ -21,6 +22,7 @@ import (
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/skills"
 	"github.com/Lowpower/pigo/internal/slash"
+	"github.com/Lowpower/pigo/internal/telemetry"
 	"github.com/Lowpower/pigo/internal/tools"
 	"github.com/Lowpower/pigo/internal/trust"
 )
@@ -239,6 +241,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.rebuildCommands()
 	e.applyProjectTrust(ctx)
 	e.bindExtensionHooks()
+	e.wireTelemetry()
 	if fn := e.bindStream(provider); fn != nil {
 		e.Stream = fn
 	} else if e.Stream != nil {
@@ -474,6 +477,10 @@ func (e *Engine) compactionSettings() compaction.Settings {
 }
 
 func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Message, s compaction.Settings, willRetry bool) (CompactResult, error) {
+	ctx, span := telemetry.Start(ctx, "pigo.compaction")
+	defer span.End()
+	span.SetAttribute("pigo.compaction.reason", reason)
+
 	cctx, cancel := context.WithCancel(ctx)
 	e.mu.Lock()
 	e.compactCancel = cancel
@@ -489,6 +496,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	defer e.setCompacting(false)
 	cut := compaction.FindCutIndex(msgs, s.KeepRecentTokens)
 	tokensBefore := compaction.EstimateContextTokens(msgs)
+	span.SetAttribute("pigo.compaction.tokens_before", tokensBefore)
 	keep := ""
 	if e.Opts.Session != nil {
 		keep = session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, cut)
@@ -535,6 +543,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 		return cerr
 	})
 	if err != nil {
+		span.RecordError(err)
 		aborted := errors.Is(err, compaction.ErrSummarizeAborted) || errors.Is(err, context.Canceled)
 		e.emitSession(map[string]any{
 			"type": "compaction_end", "reason": reason,
@@ -550,6 +559,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 		compacted = msgs
 	}
 	out := resultOf(compacted, summary)
+	span.SetAttribute("pigo.compaction.tokens_after", out.EstimatedTokensAfter)
 	if summary != "" && e.Opts.Session != nil {
 		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokensBefore); err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
@@ -741,10 +751,32 @@ func builtinAllow(opts Options) []string {
 	return opts.Config.InitialBuiltinTools()
 }
 
-// Close stops extension subprocesses.
+// Close flushes telemetry then stops extension subprocesses.
 func (e *Engine) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = telemetry.Shutdown(ctx)
 	for _, h := range e.Hosts {
 		_ = h.Close()
+	}
+}
+
+func (e *Engine) wireTelemetry() {
+	telemetry.Init(e.Opts.Config)
+	if !telemetry.Allowed(e.Opts.Config) {
+		return
+	}
+	telemetry.AddExporter(telemetry.NewEventExporter(e.emitSpanEvent))
+}
+
+func (e *Engine) emitSpanEvent(event string, payload map[string]any) {
+	if e == nil {
+		return
+	}
+	for _, h := range e.Hosts {
+		if h != nil && h.Subscribed(event) {
+			h.EmitEvent(event, payload)
+		}
 	}
 }
 
@@ -1171,6 +1203,7 @@ func (e *Engine) Reload() {
 	e.applyProviders()
 	e.rebuildCommands()
 	e.bindExtensionHooks()
+	e.wireTelemetry()
 	if fn := e.bindStream(e.Provider); fn != nil {
 		e.Stream = fn
 	}
