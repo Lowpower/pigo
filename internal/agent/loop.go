@@ -2,12 +2,24 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/telemetry"
 	"github.com/Lowpower/pigo/internal/tools"
 )
+
+type turnOutcome int
+
+const (
+	turnContinue turnOutcome = iota
+	turnComplete
+	turnAbort
+)
+
+var errToolFailed = errors.New("tool error")
 
 // Tool execution modes.
 const (
@@ -91,6 +103,9 @@ func Run(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolExecut
 }
 
 func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolExecutor, cfg Config, s *Stream) {
+	ctx, runSpan := telemetry.Start(ctx, "pigo.run")
+	defer runSpan.End()
+
 	emit := func(ev Event) bool {
 		ok := s.push(ctx, ev)
 		if ok && cfg.OnLifecycle != nil {
@@ -118,89 +133,112 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 
 	firstTurn := true
 	for turn := 0; turn < cfg.MaxTurns; turn++ {
-		if !emit(Event{Type: EventTurnStart}) {
-			return
-		}
-		if firstTurn {
-			for _, m := range cfg.NewUserMessages {
-				msg := msgFromAI(m)
-				if !emit(Event{Type: EventMessageStart, Msg: &msg}) {
-					return
-				}
-				if !emit(Event{Type: EventMessageEnd, Msg: &msg}) {
-					return
-				}
-			}
-			firstTurn = false
-		}
-		if len(pending) > 0 {
-			for _, m := range pending {
-				msg := msgFromAI(m)
-				if !emit(Event{Type: EventMessageStart, Msg: &msg}) {
-					return
-				}
-				if !emit(Event{Type: EventMessageEnd, Msg: &msg}) {
-					return
-				}
-				transcript = append(transcript, msg)
-			}
-		}
-
-		aiCtx := ai.Context{System: reqCtx.System, Messages: toAIMessages(transcript), Tools: reqCtx.Tools}
-		if cfg.NextTools != nil {
-			aiCtx.Tools = cfg.NextTools()
-		}
-		message, ok := streamAssistant(ctx, sf, aiCtx, cfg, emit)
-		if !ok {
-			return
-		}
-		transcript = append(transcript, Msg{Role: RoleAssistant, Assistant: message})
-
-		if message.StopReason == ai.StopError || message.StopReason == ai.StopAborted {
-			emit(Event{Type: EventTurnEnd, Assistant: message})
-			emit(Event{Type: EventAgentEnd, Messages: transcript})
-			return
-		}
-
-		toolCalls := toToolCalls(message)
-		var toolResults []Msg
-		// A length stop still materialises tool results as errors so the
-		// next turn can continue; truncated calls are not executed.
-		if len(toolCalls) > 0 {
-			if message.StopReason == ai.StopLength {
-				toolResults, ok = failToolCalls(toolCalls, emit)
-			} else {
-				toolResults, ok = executeToolCalls(ctx, toolCalls, exec, cfg, emit)
-			}
-			if !ok {
+		turnCtx, turnSpan := telemetry.Start(ctx, "pigo.turn")
+		turnSpan.SetAttribute("pigo.turn.index", turn)
+		outcome := turnContinue
+		func() {
+			defer turnSpan.End()
+			if !emit(Event{Type: EventTurnStart}) {
+				outcome = turnAbort
 				return
 			}
-			transcript = append(transcript, toolResults...)
-			for i := range toolResults {
-				m := toolResults[i]
-				if !emit(Event{Type: EventMessageStart, Msg: &m}) {
-					return
+			if firstTurn {
+				for _, m := range cfg.NewUserMessages {
+					msg := msgFromAI(m)
+					if !emit(Event{Type: EventMessageStart, Msg: &msg}) {
+						outcome = turnAbort
+						return
+					}
+					if !emit(Event{Type: EventMessageEnd, Msg: &msg}) {
+						outcome = turnAbort
+						return
+					}
 				}
-				if !emit(Event{Type: EventMessageEnd, Msg: &m}) {
-					return
+				firstTurn = false
+			}
+			if len(pending) > 0 {
+				for _, m := range pending {
+					msg := msgFromAI(m)
+					if !emit(Event{Type: EventMessageStart, Msg: &msg}) {
+						outcome = turnAbort
+						return
+					}
+					if !emit(Event{Type: EventMessageEnd, Msg: &msg}) {
+						outcome = turnAbort
+						return
+					}
+					transcript = append(transcript, msg)
 				}
 			}
-			if cfg.PrepareNextTurn != nil {
-				next := cfg.PrepareNextTurn(ctx, toAIMessages(transcript))
-				transcript = transcriptFromAI(next)
-			}
-		}
 
-		if !emit(Event{Type: EventTurnEnd, Assistant: message, ToolResults: toolResults}) {
+			aiCtx := ai.Context{System: reqCtx.System, Messages: toAIMessages(transcript), Tools: reqCtx.Tools}
+			if cfg.NextTools != nil {
+				aiCtx.Tools = cfg.NextTools()
+			}
+			message, ok := streamAssistant(turnCtx, sf, aiCtx, cfg, emit)
+			if !ok {
+				outcome = turnAbort
+				return
+			}
+			transcript = append(transcript, Msg{Role: RoleAssistant, Assistant: message})
+
+			if message.StopReason == ai.StopError || message.StopReason == ai.StopAborted {
+				emit(Event{Type: EventTurnEnd, Assistant: message})
+				emit(Event{Type: EventAgentEnd, Messages: transcript})
+				outcome = turnAbort
+				return
+			}
+
+			toolCalls := toToolCalls(message)
+			var toolResults []Msg
+			// A length stop still materialises tool results as errors so the
+			// next turn can continue; truncated calls are not executed.
+			if len(toolCalls) > 0 {
+				if message.StopReason == ai.StopLength {
+					toolResults, ok = failToolCalls(toolCalls, emit)
+				} else {
+					toolResults, ok = executeToolCalls(turnCtx, toolCalls, exec, cfg, emit)
+				}
+				if !ok {
+					outcome = turnAbort
+					return
+				}
+				transcript = append(transcript, toolResults...)
+				for i := range toolResults {
+					m := toolResults[i]
+					if !emit(Event{Type: EventMessageStart, Msg: &m}) {
+						outcome = turnAbort
+						return
+					}
+					if !emit(Event{Type: EventMessageEnd, Msg: &m}) {
+						outcome = turnAbort
+						return
+					}
+				}
+				if cfg.PrepareNextTurn != nil {
+					next := cfg.PrepareNextTurn(turnCtx, toAIMessages(transcript))
+					transcript = transcriptFromAI(next)
+				}
+			}
+
+			if !emit(Event{Type: EventTurnEnd, Assistant: message, ToolResults: toolResults}) {
+				outcome = turnAbort
+				return
+			}
+
+			pending = drainQueue(cfg.Steering)
+			if len(toolResults) == 0 && len(pending) == 0 {
+				pending = drainQueue(cfg.FollowUp)
+				if len(pending) == 0 {
+					outcome = turnComplete
+				}
+			}
+		}()
+		if outcome == turnAbort {
 			return
 		}
-
-		pending = drainQueue(cfg.Steering)
-		if len(toolResults) == 0 && len(pending) == 0 {
-			pending = drainQueue(cfg.FollowUp)
-			if len(pending) == 0 {
-				break
-			}
+		if outcome == turnComplete {
+			break
 		}
 	}
 
@@ -211,6 +249,11 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 // events and returning the final assistant message. ok is false if the context
 // was cancelled while emitting.
 func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg Config, emit func(Event) bool) (*ai.AssistantMessage, bool) {
+	ctx, span := telemetry.Start(ctx, "pigo.llm_request")
+	defer span.End()
+	if cfg.Model != "" {
+		span.SetAttribute("gen_ai.request.model", cfg.Model)
+	}
 	stream, err := sf(ctx, aiCtx, ai.Options{
 		Model:          cfg.Model,
 		Thinking:       cfg.Thinking,
@@ -219,6 +262,7 @@ func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg 
 		CacheRetention: cfg.CacheRetention,
 	})
 	if err != nil {
+		span.RecordError(err)
 		msg := &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopError, ErrorMessage: err.Error()}
 		return emitAssistantEnd(cfg, emit, msg)
 	}
@@ -246,6 +290,9 @@ func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg 
 	}
 	if final == nil {
 		final = &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopError, ErrorMessage: "provider stream ended without a terminal event"}
+	}
+	if final.StopReason == ai.StopError {
+		span.RecordError(errors.New("provider error"))
 	}
 	return emitAssistantEnd(cfg, emit, final)
 }
@@ -277,8 +324,11 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 			out     string
 			isError bool
 		)
+		toolCtx, span := telemetry.Start(ctx, "pigo.tool")
+		span.SetAttribute("gen_ai.tool.name", c.Name)
+		defer span.End()
 		if exec != nil {
-			toolCtx := tools.WithOutputUpdate(ctx, func(partial string) {
+			execCtx := tools.WithOutputUpdate(toolCtx, func(partial string) {
 				_ = emit(Event{
 					Type:       EventToolUpdate,
 					ToolCallID: c.ID,
@@ -287,9 +337,12 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 					Result:     partial,
 				})
 			})
-			out, isError = exec.Execute(toolCtx, c)
+			out, isError = exec.Execute(execCtx, c)
 		} else {
 			out, isError = fmt.Sprintf("no executor for tool %q", c.Name), true
+		}
+		if isError {
+			span.RecordError(errToolFailed)
 		}
 		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: isError, AddedToolNames: toolAddedNames(cfg, c)}
 		return emit(Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: isError})

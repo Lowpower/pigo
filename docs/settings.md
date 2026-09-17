@@ -43,7 +43,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `httpProxy` / `httpIdleTimeoutMs` / `websocketConnectTimeoutMs` | Networking |
 | `hideThinkingBlock` / `showCacheMissNotices` | Display |
 | `lastChangelogVersion` / `collapseChangelog` | `/changelog` |
-| `enableInstallTelemetry` / `enableAnalytics` / `trackingId` | Telemetry |
+| `enableInstallTelemetry` / `enableAnalytics` / `trackingId` | Telemetry. `enableInstallTelemetry` (default true) also gates span export unless `PIGO_TELEMETRY` overrides |
 | `packages` / `extensions` / `skills` / `prompts` / `themes` / `npmCommand` | Resource lists |
 
 Related files in the agent dir:

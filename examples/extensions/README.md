@@ -42,4 +42,16 @@ go build -o /tmp/searchtools-ext ./examples/extensions/searchtools
 go run ./cmd/pigo -e /tmp/searchtools-ext -p "look up alpha"
 ```
 
+## telemetry
+
+Subscribes to `telemetry_span` and POSTs OTLP/HTTP JSON to
+`OTEL_EXPORTER_OTLP_ENDPOINT` (stderr JSONL if unset). Built-in export already
+uses the same env without a plugin; this binary is a copyable sink. If both
+are on, spans are sent twice.
+
+```bash
+go build -o /tmp/pigo-telemetry ./examples/extensions/telemetry
+pigo -e /tmp/pigo-telemetry -p "hi"
+```
+
 See [docs/extensions.md](../../docs/extensions.md).
