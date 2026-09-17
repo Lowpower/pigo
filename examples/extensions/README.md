@@ -32,4 +32,14 @@ go build -o /tmp/guard-ext ./examples/extensions/guard
 go run ./cmd/pigo -e /tmp/guard-ext --plan -p "summarize this"
 ```
 
+## searchtools
+
+Registers `tool_search` plus a deferred `lookup` tool. `session_start` keeps
+only the loader active; searching then calls `ext.SetActiveTools`.
+
+```bash
+go build -o /tmp/searchtools-ext ./examples/extensions/searchtools
+go run ./cmd/pigo -e /tmp/searchtools-ext -p "look up alpha"
+```
+
 See [docs/extensions.md](../../docs/extensions.md).

@@ -190,6 +190,17 @@ func (m *Manager) AppendThinkingLevelChange(level string) (*Entry, error) {
 	return m.appendEntry(e)
 }
 
+// AppendActiveToolsChange records the current active tool set on the branch.
+func (m *Manager) AppendActiveToolsChange(names []string) (*Entry, error) {
+	e := &Entry{
+		Type:            "active_tools_change",
+		ID:              newUUID(),
+		Timestamp:       isoNow(),
+		ActiveToolNames: append([]string(nil), names...),
+	}
+	return m.appendEntry(e)
+}
+
 // AppendCustomEntry records an extension custom entry (not sent to the LLM).
 func (m *Manager) AppendCustomEntry(customType string, data any) (*Entry, error) {
 	var raw json.RawMessage

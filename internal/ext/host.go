@@ -71,7 +71,8 @@ type Host struct {
 	waitErr        error
 	waitDone       chan struct{}
 
-	providerHook func(id string, args map[string]any, drop bool)
+	providerHook    func(id string, args map[string]any, drop bool)
+	activeToolsHook func([]string)
 }
 
 // Spawn starts an extension process (argv) and completes the handshake: it waits
@@ -263,6 +264,14 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 				result := ui(m.Name, m.Args, timeout)
 				_ = h.send(protocol.Message{Type: protocol.TypeUIResult, ID: m.ID, Args: result})
 			}(m)
+		case protocol.TypeSetActiveTools:
+			names := payloadStringSlice(m.Payload, "names")
+			h.mu.Lock()
+			hook := h.activeToolsHook
+			h.mu.Unlock()
+			if hook != nil {
+				hook(names)
+			}
 		}
 	}
 }
@@ -342,6 +351,13 @@ func (h *Host) SetStatus(fn func(key, text string)) {
 func (h *Host) SetProviderHook(fn func(id string, args map[string]any, drop bool)) {
 	h.mu.Lock()
 	h.providerHook = fn
+	h.mu.Unlock()
+}
+
+// SetActiveToolsHook is called when the extension sends set_active_tools.
+func (h *Host) SetActiveToolsHook(fn func([]string)) {
+	h.mu.Lock()
+	h.activeToolsHook = fn
 	h.mu.Unlock()
 }
 
@@ -430,4 +446,25 @@ func newID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return fmt.Sprintf("%x", b)
+}
+
+func payloadStringSlice(payload map[string]any, key string) []string {
+	if payload == nil {
+		return nil
+	}
+	switch t := payload[key].(type) {
+	case []string:
+		return append([]string(nil), t...)
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, x := range t {
+			s, ok := x.(string)
+			if ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }

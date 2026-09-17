@@ -165,13 +165,17 @@ func msgJSON(m Msg) any {
 		}
 		return map[string]any{"role": "assistant", "content": m.Text}
 	case RoleToolResult:
-		return map[string]any{
+		out := map[string]any{
 			"role":       "toolResult",
 			"toolCallId": m.ToolCallID,
 			"toolName":   m.ToolName,
 			"content":    []map[string]any{{"type": "text", "text": m.Text}},
 			"isError":    m.IsError,
 		}
+		if len(m.AddedToolNames) > 0 {
+			out["addedToolNames"] = m.AddedToolNames
+		}
+		return out
 	default:
 		if len(m.Images) == 0 {
 			return map[string]any{"role": "user", "content": m.Text}

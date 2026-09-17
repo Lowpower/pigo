@@ -24,9 +24,10 @@ type Msg struct {
 	Assistant *ai.AssistantMessage `json:"assistant,omitempty"`
 
 	// RoleToolResult metadata.
-	ToolCallID string `json:"toolCallId,omitempty"`
-	ToolName   string `json:"toolName,omitempty"`
-	IsError    bool   `json:"isError,omitempty"`
+	ToolCallID     string   `json:"toolCallId,omitempty"`
+	ToolName       string   `json:"toolName,omitempty"`
+	IsError        bool     `json:"isError,omitempty"`
+	AddedToolNames []string `json:"addedToolNames,omitempty"`
 
 	// Images are user-message attachments.
 	Images []ai.ImageContent `json:"images,omitempty"`

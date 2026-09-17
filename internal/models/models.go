@@ -60,6 +60,10 @@ type Compat struct {
 	ChatTemplateArgs                any    `json:"chatTemplateArgs,omitempty"`
 	SupportsLongCacheRetention      *bool  `json:"supportsLongCacheRetention,omitempty"`
 	SessionAffinityFormat           string `json:"sessionAffinityFormat,omitempty"`
+	// SupportsToolReferences enables Anthropic-style deferred tools
+	// (defer_loading / tool_reference). Fireworks Messages also enable this
+	// when Options.Provider is "fireworks", even if this flag is unset.
+	SupportsToolReferences bool `json:"supportsToolReferences,omitempty"`
 }
 
 // Cost is catalog pricing in dollars per million tokens.

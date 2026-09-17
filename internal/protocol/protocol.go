@@ -44,6 +44,7 @@ const (
 	TypeStatusItem          = "status_line_item"      // ext -> host: { Name, Text }
 	TypeUIRequest           = "ui_request"            // ext -> host: { ID, Name=method, Args }
 	TypeUIResult            = "ui_result"             // host -> ext: { ID, Args }
+	TypeSetActiveTools      = "set_active_tools"      // ext -> host: { Payload.names }
 	TypePing                = "ping"                  // host -> ext
 	TypePong                = "pong"                  // ext -> host
 	TypeShutdown            = "shutdown"              // host -> ext: terminate gracefully

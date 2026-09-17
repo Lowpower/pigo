@@ -63,6 +63,12 @@ type Config struct {
 	// OnMessageEnd may replace a finalized assistant message before it is
 	// pushed as message_end and appended to the transcript.
 	OnMessageEnd func(*ai.AssistantMessage) *ai.AssistantMessage
+	// ToolAddedNames, if set, is consulted after each tool execution so
+	// deferred-loading providers can stamp addedToolNames on the result.
+	ToolAddedNames func(call ToolCall) []string
+	// NextTools, if set, replaces Context.Tools before each provider call so
+	// newly activated tools are visible on the following turn.
+	NextTools func() []ai.Tool
 }
 
 // Run drives the agent loop and returns a stream of AgentEvents. The loop runs
@@ -141,6 +147,9 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 		}
 
 		aiCtx := ai.Context{System: reqCtx.System, Messages: toAIMessages(transcript), Tools: reqCtx.Tools}
+		if cfg.NextTools != nil {
+			aiCtx.Tools = cfg.NextTools()
+		}
 		message, ok := streamAssistant(ctx, sf, aiCtx, cfg, emit)
 		if !ok {
 			return
@@ -282,7 +291,7 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 		} else {
 			out, isError = fmt.Sprintf("no executor for tool %q", c.Name), true
 		}
-		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: isError}
+		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: isError, AddedToolNames: toolAddedNames(cfg, c)}
 		return emit(Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: isError})
 	}
 
@@ -328,6 +337,13 @@ func failToolCalls(calls []ToolCall, emit func(Event) bool) ([]Msg, bool) {
 	return results, true
 }
 
+func toolAddedNames(cfg Config, call ToolCall) []string {
+	if cfg.ToolAddedNames == nil {
+		return nil
+	}
+	return cfg.ToolAddedNames(call)
+}
+
 func drainQueue(fn func() []ai.Message) []ai.Message {
 	if fn == nil {
 		return nil
@@ -346,7 +362,7 @@ func msgFromAI(m ai.Message) Msg {
 		}
 		return Msg{Role: RoleAssistant, Text: text, Assistant: m.Assistant}
 	case m.Role == RoleToolResult || m.Role == ai.RoleToolResult || m.ToolCallID != "":
-		return Msg{Role: RoleToolResult, Text: m.Content, ToolCallID: m.ToolCallID, ToolName: m.ToolName, IsError: m.IsError}
+		return Msg{Role: RoleToolResult, Text: m.Content, ToolCallID: m.ToolCallID, ToolName: m.ToolName, IsError: m.IsError, AddedToolNames: append([]string(nil), m.AddedToolNames...)}
 	default:
 		return Msg{Role: RoleUser, Text: m.Content, Images: m.Images}
 	}
@@ -362,9 +378,6 @@ func toToolCalls(m *ai.AssistantMessage) []ToolCall {
 func toAIMessages(transcript []Msg) []ai.Message {
 	return MessagesFromTranscript(transcript)
 }
-
-// MessagesFromTranscript is the exported form of toAIMessages, used by the TUI
-// to keep on-screen history aligned with the loop transcript.
 
 // MessagesFromTranscript converts the agent transcript into provider-facing
 // ai.Messages, preserving assistant tool-call blocks and toolResult pairing.
@@ -384,11 +397,12 @@ func MessagesFromTranscript(transcript []Msg) []ai.Message {
 			})
 		case RoleToolResult:
 			out = append(out, ai.Message{
-				Role:       ai.RoleToolResult,
-				Content:    m.Text,
-				ToolCallID: m.ToolCallID,
-				ToolName:   m.ToolName,
-				IsError:    m.IsError,
+				Role:           ai.RoleToolResult,
+				Content:        m.Text,
+				ToolCallID:     m.ToolCallID,
+				ToolName:       m.ToolName,
+				IsError:        m.IsError,
+				AddedToolNames: append([]string(nil), m.AddedToolNames...),
 			})
 		default:
 			out = append(out, ai.Message{Role: ai.RoleUser, Content: m.Text, Images: m.Images})

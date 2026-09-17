@@ -90,13 +90,44 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 			}
 			name, _ := payload["toolName"].(string)
 			errFlag, _ := payload["isError"].(bool)
-			out = append(out, ai.Message{Role: ai.RoleToolResult, Content: content, ToolCallID: id, ToolName: name, IsError: errFlag})
+			out = append(out, ai.Message{
+				Role:           ai.RoleToolResult,
+				Content:        content,
+				ToolCallID:     id,
+				ToolName:       name,
+				IsError:        errFlag,
+				AddedToolNames: stringSlice(payload["addedToolNames"]),
+			})
 		default:
 			content, images := parseUserContent(payload["content"])
 			out = append(out, ai.Message{Role: ai.RoleUser, Content: content, Images: images})
 		}
 	}
 	return out
+}
+
+func stringSlice(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		if len(t) == 0 {
+			return nil
+		}
+		return append([]string(nil), t...)
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, x := range t {
+			s, ok := x.(string)
+			if ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func parseUserContent(v any) (string, []ai.ImageContent) {
@@ -149,6 +180,20 @@ func customMessageText(e Entry) string {
 // FindByID opens the session whose id equals or is prefixed by id for cwd.
 func FindByID(cwd, agentDir, id string) (*Manager, error) {
 	return FindByIDAt(cwd, agentDir, id, "")
+}
+
+// LastActiveToolNames returns the latest active_tools_change names on the path.
+func LastActiveToolNames(entries []Entry) ([]string, bool) {
+	var names []string
+	found := false
+	for _, e := range entries {
+		if e.Type != "active_tools_change" {
+			continue
+		}
+		names = append([]string(nil), e.ActiveToolNames...)
+		found = true
+	}
+	return names, found
 }
 
 // FindByIDAt is FindByID using an optional session directory override.

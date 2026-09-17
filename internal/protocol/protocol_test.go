@@ -30,6 +30,7 @@ func TestFrameRoundTrip(t *testing.T) {
 		{Type: TypeStreamStart, ID: "s1", Payload: map[string]any{"model": "x"}},
 		{Type: TypeStreamEvent, ID: "s1", Event: "text_delta", Payload: map[string]any{"delta": "hi"}},
 		{Type: TypeStreamAbort, ID: "s1"},
+		{Type: TypeSetActiveTools, Payload: map[string]any{"names": []any{"tool_search", "lookup"}}},
 	}
 
 	var buf bytes.Buffer
