@@ -68,6 +68,7 @@ Unknown `--flags` on the root command are held for extensions that
 - `install` / `remove` (`uninstall`) / `list` / `update` — [packages.md](packages.md)
 - `server` / `client` — [server.md](server.md)
 - cobra `help` / `completion`
+- `eval` — run JSON scenarios in isolated temp directories ([`evals/`](../evals/README.md))
 
 ## Slash commands (TUI)
 

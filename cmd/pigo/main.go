@@ -150,7 +150,7 @@ Environment:
 	cmd.Flags().BoolVar(&f.verbose, "verbose", false, "force verbose startup (overrides quietStartup)")
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
-	cmd.AddCommand(newAuthCmd(), newConfigCmd(), newServerCmd(), newClientCmd())
+	cmd.AddCommand(newAuthCmd(), newConfigCmd(), newServerCmd(), newClientCmd(), newEvalCmd())
 	addPackageCommands(cmd)
 	return cmd
 }

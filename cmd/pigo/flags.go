@@ -11,7 +11,7 @@ var extraFlags []ext.UnknownFlag
 var rootSubcommands = map[string]bool{
 	"auth": true, "config": true, "install": true, "remove": true,
 	"list": true, "update": true, "help": true, "completion": true,
-	"server": true, "client": true,
+	"server": true, "client": true, "eval": true,
 }
 
 var knownBoolFlags = map[string]bool{
