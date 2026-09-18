@@ -9,3 +9,6 @@
 
 # Local env
 .env
+
+# Eval reports
+/.eval

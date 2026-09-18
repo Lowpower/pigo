@@ -34,4 +34,5 @@ subprocess binaries that speak the framed JSON protocol (`internal/ext`).
 - [JSON event stream](json.md)
 - [Unix session server](server.md)
 
-Working samples live under [`examples/`](../examples/).
+Working samples live under [`examples/`](../examples/). Scenario evals live
+under [`evals/`](../evals/README.md).

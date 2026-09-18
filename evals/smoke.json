@@ -1,0 +1,6 @@
+{
+  "name": "smoke",
+  "prompt": "What is the capital of France? Reply with only the city name.",
+  "noTools": true,
+  "expect": { "contains": ["Paris"] }
+}
