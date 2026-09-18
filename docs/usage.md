@@ -54,7 +54,7 @@ notices still appear either way.
 | `--export <session.jsonl> [out.html]` | Export a session to HTML |
 | `--api-key` | In-process API key (not written to disk) |
 | `--tui-mode` | `regular` \| `fullscreen` |
-| `--no-sandbox` | Do not wrap bash in the sandbox |
+| `--no-sandbox` | Do not wrap bash in the OS sandbox, and do not route tools into Docker |
 | `--approve`, `-a` / `--no-approve`, `-na` | Trust / skip project-local resources this run |
 | `--verbose` / `--version`, `-v` | |
 

@@ -3,11 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-
-	"github.com/Lowpower/pigo/internal/sandbox"
-	"github.com/Lowpower/pigo/internal/shell"
 )
 
 // bashTool executes a shell command via shell.GetConfig (Git Bash / PATH / WSL).
@@ -16,6 +11,7 @@ type bashTool struct {
 	cwd    string
 	env    map[string]string
 	envFn  func() map[string]string
+	fs     Runner
 }
 
 type bashParams struct {
@@ -57,33 +53,9 @@ func (t bashTool) Execute(ctx context.Context, args map[string]any) (string, boo
 	if t.envFn != nil {
 		extra = t.envFn()
 	}
-	cmd, err := bashCmd(runCtx, command, t.cwd, extra)
+	cmd, err := useRunner(t.fs).Bash(runCtx, command, t.cwd, extra)
 	if err != nil {
 		return err.Error(), true
 	}
 	return runStreamed(runCtx, cmd, p.Timeout, "pigo-bash")
-}
-
-func bashCmd(ctx context.Context, command, dir string, extra map[string]string) (*exec.Cmd, error) {
-	cfg, err := shell.GetConfig()
-	if err != nil {
-		return nil, err
-	}
-	cwd := dir
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	name, argv := sandbox.Command(command, cwd, "")
-	var cmd *exec.Cmd
-	if name == "bwrap" {
-		cmd = exec.CommandContext(ctx, name, argv...)
-		shell.PrepareContext(cmd)
-	} else {
-		cmd = shell.CommandContext(ctx, cfg, command)
-	}
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	applyExtraEnv(cmd, extra)
-	return cmd, nil
 }

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -35,7 +34,7 @@ type rgMatch struct {
 	text string
 }
 
-func grepRipgrep(ctx context.Context, rg, root string, isDir bool, p grepParams, limit int) (string, bool, bool) {
+func grepRipgrep(ctx context.Context, r Runner, rg, root string, isDir bool, p grepParams, limit int) (string, bool, bool) {
 	args := []string{"--json", "--line-number", "--color=never", "--hidden"}
 	if p.IgnoreCase {
 		args = append(args, "--ignore-case")
@@ -48,7 +47,10 @@ func grepRipgrep(ctx context.Context, rg, root string, isDir bool, p grepParams,
 	}
 	args = append(args, "--", p.Pattern, root)
 
-	cmd := exec.CommandContext(ctx, rg, args...)
+	cmd, err := r.Command(ctx, rg, args, "")
+	if err != nil || cmd == nil {
+		return "", false, false
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", false, false
@@ -112,7 +114,7 @@ func grepRipgrep(ctx context.Context, rg, root string, isDir bool, p grepParams,
 	for _, m := range matches {
 		rel := grepDisplayPath(root, isDir, m.path)
 		if p.Context > 0 {
-			writeGrepContext(&b, m.path, rel, m.line, p.Context)
+			writeGrepContext(r, &b, m.path, rel, m.line, p.Context)
 			continue
 		}
 		fmt.Fprintf(&b, "%s:%d:%s\n", rel, m.line, TruncateLine(m.text, GrepMaxLineLength))
@@ -131,8 +133,8 @@ func grepDisplayPath(root string, isDir bool, filePath string) string {
 	return filepath.ToSlash(rel)
 }
 
-func writeGrepContext(b *strings.Builder, path, rel string, lineNum, context int) {
-	data, err := os.ReadFile(path)
+func writeGrepContext(r Runner, b *strings.Builder, path, rel string, lineNum, context int) {
+	data, err := r.ReadFile(path)
 	if err != nil || bytes.IndexByte(data, 0) >= 0 {
 		fmt.Fprintf(b, "%s:%d: (unable to read file)\n", rel, lineNum)
 		return

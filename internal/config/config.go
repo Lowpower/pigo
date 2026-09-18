@@ -74,6 +74,21 @@ type Config struct {
 	Prompts    []string       `mapstructure:"-" json:"prompts,omitempty"`
 	Themes     []string       `mapstructure:"-" json:"themes,omitempty"`
 	NpmCommand []string       `mapstructure:"-" json:"npmCommand,omitempty"`
+
+	Container ContainerSettings `mapstructure:"container"`
+}
+
+// ContainerSettings is settings.container (opt-in Docker tool isolation).
+type ContainerSettings struct {
+	Image  string           `mapstructure:"image" json:"image,omitempty"`
+	Mounts []ContainerMount `mapstructure:"mounts" json:"mounts,omitempty"`
+	Env    []string         `mapstructure:"env" json:"env,omitempty"`
+}
+
+// ContainerMount is one extra host→container bind.
+type ContainerMount struct {
+	Host      string `mapstructure:"host" json:"host"`
+	Container string `mapstructure:"container" json:"container"`
 }
 
 // CompactionSettings is settings.compaction.
@@ -343,6 +358,11 @@ func (c Config) DoubleEscape() string {
 	}
 }
 
+// ContainerImage is settings.container.image (empty means host tools).
+func (c Config) ContainerImage() string {
+	return strings.TrimSpace(c.Container.Image)
+}
+
 // DefaultBuiltinTools is the initial built-in selection when defaultTools is unset.
 func DefaultBuiltinTools() []string {
 	return []string{"read", "bash", "edit", "write"}
@@ -584,6 +604,7 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		Warnings            map[string]any  `json:"warnings"`
 		FullscreenScrollbar json.RawMessage `json:"fullscreenScrollbar"`
 		Compaction          json.RawMessage `json:"compaction"`
+		Container           json.RawMessage `json:"container"`
 	}
 	if err := json.Unmarshal(b, &extra); err != nil {
 		return
@@ -633,6 +654,12 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 				cfg.Compaction.ModelOverrides = nested.ModelOverrides
 			}
 			applyNestedCompaction(cfg)
+		}
+	}
+	if extra.Container != nil {
+		var nested ContainerSettings
+		if json.Unmarshal(extra.Container, &nested) == nil {
+			cfg.Container = nested
 		}
 	}
 }

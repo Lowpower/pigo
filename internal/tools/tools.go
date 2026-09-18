@@ -45,6 +45,7 @@ type Options struct {
 	Env          map[string]string
 	EnvFn        func() map[string]string
 	ImageCapable func() bool
+	Runner       Runner
 }
 
 // Default returns a registry with the built-in tools. powershell is Windows-only.
@@ -54,14 +55,15 @@ func Default() *Registry {
 
 // NewBuiltins builds the built-in tool set with runtime options.
 func NewBuiltins(opt Options) *Registry {
+	r := useRunner(opt.Runner)
 	ts := []Tool{
-		readTool{autoResize: opt.AutoResize, cwd: opt.Cwd, imageCapable: opt.ImageCapable},
-		writeTool{cwd: opt.Cwd},
-		editTool{cwd: opt.Cwd},
-		bashTool{prefix: opt.ShellPrefix, cwd: opt.Cwd, env: opt.Env, envFn: opt.EnvFn},
-		grepTool{cwd: opt.Cwd},
-		findTool{cwd: opt.Cwd},
-		listTool{cwd: opt.Cwd},
+		readTool{autoResize: opt.AutoResize, cwd: opt.Cwd, imageCapable: opt.ImageCapable, fs: r},
+		writeTool{cwd: opt.Cwd, fs: r},
+		editTool{cwd: opt.Cwd, fs: r},
+		bashTool{prefix: opt.ShellPrefix, cwd: opt.Cwd, env: opt.Env, envFn: opt.EnvFn, fs: r},
+		grepTool{cwd: opt.Cwd, fs: r},
+		findTool{cwd: opt.Cwd, fs: r},
+		listTool{cwd: opt.Cwd, fs: r},
 	}
 	ts = append(ts, extraPlatformTools(opt)...)
 	return NewRegistry(ts...)

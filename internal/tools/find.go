@@ -13,6 +13,7 @@ const findDefaultLimit = 1000
 // repository it still applies .gitignore files (fd --no-require-git).
 type findTool struct {
 	cwd string
+	fs  Runner
 }
 
 type findParams struct {
@@ -49,7 +50,7 @@ func (t findTool) Execute(_ context.Context, args map[string]any) (string, bool)
 
 	var matches []string
 	truncated := false
-	walkErr := walkUnignored(root, ignoreNoRequireGit, func(_, rel string) error {
+	walkErr := walkUnignored(t.fs, root, ignoreNoRequireGit, func(_, rel string) error {
 		if g.Match(rel) {
 			matches = append(matches, rel)
 			if len(matches) >= limit {

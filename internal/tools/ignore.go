@@ -3,8 +3,8 @@ package tools
 import (
 	"bufio"
 	"io/fs"
-	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -18,6 +18,7 @@ const (
 )
 
 type ignorer struct {
+	fs         Runner
 	searchRoot string
 	mode       ignoreMode
 	cache      map[string][]giPattern
@@ -29,16 +30,16 @@ type giPattern struct {
 	g       *globMatcher
 }
 
-func newIgnorer(searchRoot string, mode ignoreMode) *ignorer {
+func newIgnorer(r Runner, searchRoot string, mode ignoreMode) *ignorer {
 	abs, err := filepath.Abs(searchRoot)
 	if err != nil {
 		abs = searchRoot
 	}
-	return &ignorer{searchRoot: abs, mode: mode, cache: map[string][]giPattern{}}
+	return &ignorer{fs: useRunner(r), searchRoot: abs, mode: mode, cache: map[string][]giPattern{}}
 }
 
-func (ig *ignorer) skipDir(path string, d fs.DirEntry) bool {
-	if d.Name() == ".git" && path != ig.searchRoot {
+func (ig *ignorer) skipDir(path, name string) bool {
+	if name == ".git" && path != ig.searchRoot {
 		return true
 	}
 	return ig.ignored(path, true)
@@ -80,7 +81,7 @@ func (ig *ignorer) ignored(path string, isDir bool) bool {
 
 func (ig *ignorer) ruleRootFor(abs string) string {
 	// Nested repo directories are ignored (or not) by the parent tree's rules.
-	if git := nearestGitRoot(filepath.Dir(abs)); git != "" {
+	if git := nearestGitRoot(ig.fs, filepath.Dir(abs)); git != "" {
 		return git
 	}
 	if ig.mode == ignoreNoRequireGit {
@@ -94,11 +95,11 @@ func (ig *ignorer) loadDir(dir string, includeExclude bool) []giPattern {
 		return cached
 	}
 	var pats []giPattern
-	if b, err := os.ReadFile(filepath.Join(dir, ".gitignore")); err == nil {
+	if b, err := ig.fs.ReadFile(filepath.Join(dir, ".gitignore")); err == nil {
 		pats = append(pats, parseGitignore(string(b))...)
 	}
 	if includeExclude {
-		if b, err := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude")); err == nil {
+		if b, err := ig.fs.ReadFile(filepath.Join(dir, ".git", "info", "exclude")); err == nil {
 			pats = append(pats, parseGitignore(string(b))...)
 		}
 	}
@@ -127,14 +128,13 @@ func dirsFromRoot(root, end string) []string {
 	return out
 }
 
-func nearestGitRoot(path string) string {
+func nearestGitRoot(r Runner, path string) string {
 	cur, err := filepath.Abs(path)
 	if err != nil {
 		cur = path
 	}
 	for {
-		info, err := os.Stat(filepath.Join(cur, ".git"))
-		if err == nil && info != nil {
+		if _, err := r.Stat(filepath.Join(cur, ".git")); err == nil {
 			return cur
 		}
 		parent := filepath.Dir(cur)
@@ -183,14 +183,22 @@ func parseGitignore(content string) []giPattern {
 	return out
 }
 
-func walkUnignored(root string, mode ignoreMode, fn func(path, rel string) error) error {
-	ig := newIgnorer(root, mode)
+func walkUnignored(r Runner, root string, mode ignoreMode, fn func(path, rel string) error) error {
+	r = useRunner(r)
+	if isHostRunner(r) {
+		return walkUnignoredOS(r, root, mode, fn)
+	}
+	return walkUnignoredRunner(r, root, mode, fn)
+}
+
+func walkUnignoredOS(r Runner, root string, mode ignoreMode, fn func(path, rel string) error) error {
+	ig := newIgnorer(r, root, mode)
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
-			if ig.skipDir(path, d) {
+			if ig.skipDir(path, d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -204,4 +212,44 @@ func walkUnignored(root string, mode ignoreMode, fn func(path, rel string) error
 		}
 		return fn(path, filepath.ToSlash(rel))
 	})
+}
+
+func walkUnignoredRunner(r Runner, root string, mode ignoreMode, fn func(path, rel string) error) error {
+	ig := newIgnorer(r, root, mode)
+	var walk func(dir string) error
+	walk = func(dir string) error {
+		entries, err := r.ReadDir(dir)
+		if err != nil {
+			return nil
+		}
+		sortDirEntries(entries)
+		for _, e := range entries {
+			p := filepath.Join(dir, e.Name)
+			if e.IsDir {
+				if ig.skipDir(p, e.Name) {
+					continue
+				}
+				if err := walk(p); err != nil {
+					return err
+				}
+				continue
+			}
+			if ig.ignored(p, false) {
+				continue
+			}
+			rel, relErr := filepath.Rel(root, p)
+			if relErr != nil {
+				continue
+			}
+			if err := fn(p, filepath.ToSlash(rel)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(root)
+}
+
+func sortDirEntries(entries []DirEntry) {
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 }

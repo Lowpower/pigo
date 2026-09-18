@@ -45,6 +45,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `lastChangelogVersion` / `collapseChangelog` | `/changelog` |
 | `enableInstallTelemetry` / `enableAnalytics` / `trackingId` | Telemetry. `enableInstallTelemetry` (default true) also gates span export unless `PIGO_TELEMETRY` overrides |
 | `packages` / `extensions` / `skills` / `prompts` / `themes` / `npmCommand` | Resource lists |
+| `container.{image,mounts,env}` | Opt-in Docker isolation for built-in tools and `!` (see [tools.md](tools.md)) |
 
 Related files in the agent dir:
 

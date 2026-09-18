@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -16,6 +15,7 @@ import (
 // applied against the original (not incrementally).
 type editTool struct {
 	cwd string
+	fs  Runner
 }
 
 type editReplace struct {
@@ -59,7 +59,8 @@ func (t editTool) Execute(_ context.Context, args map[string]any) (string, bool)
 }
 
 func (t editTool) applyEdits(path string, edits []editReplace) (string, bool) {
-	raw, err := os.ReadFile(path)
+	r := useRunner(t.fs)
+	raw, err := r.ReadFile(path)
 	if err != nil {
 		return err.Error(), true
 	}
@@ -98,7 +99,7 @@ func (t editTool) applyEdits(path string, edits []editReplace) (string, bool) {
 	b.WriteString(original[prev:])
 	updated := b.String()
 
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+	if err := r.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return err.Error(), true
 	}
 

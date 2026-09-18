@@ -35,7 +35,8 @@ Local `.pigo/` resources, ancestor `.agents/skills`, and project
 
 ## Sandbox
 
-Off by default. Linux/darwin only. `--no-sandbox` disables wrapping.
+Off by default. Linux/darwin only. `--no-sandbox` disables wrapping
+and Docker tool isolation.
 
 Files (project overrides global):
 
@@ -56,3 +57,28 @@ Files (project overrides global):
   }
 }
 ```
+
+This OS wrapper applies to **bash** on the host. It is skipped when Docker
+isolation is on.
+
+## Docker (tools in container)
+
+Opt-in via `settings.container.image`. pigo and `auth.json` stay on the host.
+`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, and `!` / `!!` run
+against a session-long container: cwd is mounted at `/workspace`. Extra binds
+and an env allowlist are optional. API keys and OAuth tokens are never passed
+into the container, even if listed in `container.env`.
+
+```json
+{
+  "container": {
+    "image": "debian:bookworm-slim",
+    "mounts": [{ "host": "/opt/cache", "container": "/cache" }],
+    "env": ["GOPATH"]
+  }
+}
+```
+
+If `image` is set but Docker is missing or the daemon fails, the tool/`!`
+call errors instead of falling back to the host. `--no-sandbox` turns this
+off. Extension tools and Windows `powershell` stay on the host.

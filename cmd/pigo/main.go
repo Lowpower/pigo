@@ -143,7 +143,7 @@ Environment:
 	cmd.Flags().StringArrayVar(&f.promptTemplates, "prompt-template", nil, "load a prompt template file or directory")
 	cmd.Flags().BoolVar(&f.noPromptTpls, "no-prompt-templates", false, "disable prompt template discovery")
 	cmd.Flags().StringVar(&f.tuiMode, "tui-mode", "", "TUI layout: regular|fullscreen")
-	cmd.Flags().BoolVar(&f.noSandbox, "no-sandbox", false, "disable OS-level sandbox wrapping for bash")
+	cmd.Flags().BoolVar(&f.noSandbox, "no-sandbox", false, "disable OS sandbox wrapping and Docker tool isolation")
 	cmd.Flags().BoolVarP(&f.approve, "approve", "a", false, "trust project-local files for this run")
 	cmd.Flags().BoolVar(&f.noApprove, "no-approve", false, "ignore project-local files for this run")
 	cmd.Flags().StringVar(&f.sessionDir, "session-dir", "", "directory for session storage and lookup")
