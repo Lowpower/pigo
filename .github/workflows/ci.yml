@@ -43,3 +43,12 @@ jobs:
           version: v2.13.1
           # Repo still has pre-existing revive/staticcheck findings; fail only on new ones.
           only-new-issues: true
+
+  python-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Test Cursor PR footer stripper
+        working-directory: .github/scripts
+        run: python3 strip_cursor_pr_footer_test.py
