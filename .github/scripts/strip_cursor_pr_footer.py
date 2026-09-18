@@ -22,12 +22,28 @@ FOOTER_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
+INLINE_ARTIFACTS_SUB_RE = re.compile(
+    r"(?:\r?\n)*"
+    r"<sub>To show artifacts inline,\s*"
+    r'<a href="https://cursor\.com/dashboard/cloud-agents#my-pull-requests">'
+    r"enable</a> in settings\.</sub>"
+    r"\s*",
+    re.IGNORECASE,
+)
+
+AGENT_MARKDOWN_LINK_RE = re.compile(
+    r"\[([^\]]+)\]\(https://cursor\.com/(?:agents|background-agent)[^)]*\)",
+    re.IGNORECASE,
+)
+
 
 def strip_cursor_pr_footer(body: str | None) -> str:
     if not body:
         return ""
-    new, n = FOOTER_RE.subn("", body)
-    if n == 0:
+    new = FOOTER_RE.sub("", body)
+    new = INLINE_ARTIFACTS_SUB_RE.sub("", new)
+    new = AGENT_MARKDOWN_LINK_RE.sub(r"\1", new)
+    if new == body:
         return body
     return new.rstrip() + "\n"
 

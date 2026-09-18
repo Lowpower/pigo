@@ -65,6 +65,20 @@ class StripCursorPRFooterTest(unittest.TestCase):
         prose = "See https://cursor.com/agents/ for the product page.\n"
         self.assertEqual(strip_cursor_pr_footer(prose), prose)
 
+    def test_strips_inline_artifacts_sub_and_keeps_link_text(self):
+        body = (
+            "## Demos\n\n"
+            "[demo.mp4](https://cursor.com/agents/bc-9fb6361d-1261-4377-8d35-948d572cdba7"
+            "/artifacts?path=%2Fopt%2Fcursor%2Fartifacts%2Fdemo.mp4)\n\n"
+            "<sub>To show artifacts inline, "
+            '<a href="https://cursor.com/dashboard/cloud-agents#my-pull-requests">'
+            "enable</a> in settings.</sub>\n"
+        )
+        got = strip_cursor_pr_footer(body)
+        self.assertEqual(got, "## Demos\n\ndemo.mp4\n")
+        self.assertNotIn("cursor.com/agents/", got)
+        self.assertNotIn("dashboard/cloud-agents", got)
+
 
 if __name__ == "__main__":
     unittest.main()
