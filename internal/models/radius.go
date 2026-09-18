@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,10 @@ import (
 	"strings"
 	"time"
 )
+
+const radiusCatalogWait = 10 * time.Second
+
+var radiusCatalogRetry = 500 * time.Millisecond
 
 // RadiusGateway is RADIUS_GATEWAY or PIGO_RADIUS_GATEWAY (no built-in host).
 func RadiusGateway() string {
@@ -27,18 +32,24 @@ type radiusGatewayConfig struct {
 }
 
 func refreshRadius(store CatalogStore) error {
+	return refreshRadiusCatalog(context.Background(), store, os.Getenv("RADIUS_API_KEY"))
+}
+
+func refreshRadiusCatalog(ctx context.Context, store CatalogStore, token string) error {
 	gateway := RadiusGateway()
-	key := os.Getenv("RADIUS_API_KEY")
 	if gateway == "" {
 		return nil
 	}
-	req, err := http.NewRequest(http.MethodGet, gateway+"/v1/config", nil)
+	if token == "" {
+		token = os.Getenv("RADIUS_API_KEY")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, gateway+"/v1/config", nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("accept", "application/json")
-	if key != "" {
-		req.Header.Set("authorization", "Bearer "+key)
+	if token != "" {
+		req.Header.Set("authorization", "Bearer "+token)
 	}
 	client := &http.Client{Timeout: remoteAttemptTimeout}
 	resp, err := client.Do(req)
@@ -74,4 +85,39 @@ func refreshRadius(store CatalogStore) error {
 		_ = store.Write("radius", StoreEntry{Models: out, CheckedAt: time.Now().UnixMilli()})
 	}
 	return nil
+}
+
+// WaitForRadiusCatalog polls the Radius gateway until the overlay is non-empty
+// or ctx ends. Timeout is not an error: the caller should keep the credential.
+func WaitForRadiusCatalog(ctx context.Context, store CatalogStore, token string, notify func(string)) bool {
+	if RadiusGateway() == "" {
+		notifyRadiusCatalog(notify, "Radius model catalog timed out; models may be unavailable until refresh.")
+		return false
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, radiusCatalogWait)
+		defer cancel()
+	}
+	notifyRadiusCatalog(notify, "Waiting for Radius model catalog…")
+	for {
+		err := refreshRadiusCatalog(ctx, store, token)
+		if err == nil && len(remoteOverlay("radius")) > 0 {
+			return true
+		}
+		timer := time.NewTimer(radiusCatalogRetry)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			notifyRadiusCatalog(notify, "Radius model catalog timed out; models may be unavailable until refresh.")
+			return false
+		case <-timer.C:
+		}
+	}
+}
+
+func notifyRadiusCatalog(notify func(string), msg string) {
+	if notify != nil {
+		notify(msg)
+	}
 }

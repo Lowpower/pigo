@@ -1,10 +1,13 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestRefreshRadiusLoadsConfig(t *testing.T) {
@@ -43,5 +46,101 @@ func TestRefreshRadiusSkipsWithoutAuthOrGateway(t *testing.T) {
 	t.Setenv("RADIUS_API_KEY", "")
 	if err := refreshRadius(&MemoryStore{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWaitForRadiusCatalogLoadsImmediately(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	var gotAuth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth.Store(r.Header.Get("authorization"))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"baseUrl": "https://messages.example",
+			"models":  []map[string]any{{"id": "balanced"}},
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("RADIUS_GATEWAY", srv.URL)
+	t.Setenv("RADIUS_API_KEY", "")
+	store := &MemoryStore{}
+	ok := WaitForRadiusCatalog(t.Context(), store, "oauth-tok", nil)
+	if !ok {
+		t.Fatal("expected catalog ready")
+	}
+	if gotAuth.Load() != "Bearer oauth-tok" {
+		t.Fatalf("authorization = %v", gotAuth.Load())
+	}
+	if _, found := Lookup("radius", "balanced"); !found {
+		t.Fatal("balanced missing from catalog")
+	}
+	if _, found, _ := store.Read("radius"); !found {
+		t.Fatal("expected models-store write")
+	}
+}
+
+func TestWaitForRadiusCatalogRetriesUntilReady(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	origRetry := radiusCatalogRetry
+	radiusCatalogRetry = 10 * time.Millisecond
+	t.Cleanup(func() { radiusCatalogRetry = origRetry })
+
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if n.Add(1) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"baseUrl": "https://messages.example",
+			"models":  []map[string]any{{"id": "balanced"}},
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("RADIUS_GATEWAY", srv.URL)
+	ok := WaitForRadiusCatalog(t.Context(), &MemoryStore{}, "tok", nil)
+	if !ok {
+		t.Fatal("expected catalog after retries")
+	}
+	if n.Load() < 3 {
+		t.Fatalf("hits = %d", n.Load())
+	}
+	if _, found := Lookup("radius", "balanced"); !found {
+		t.Fatal("balanced missing after retry")
+	}
+}
+
+func TestWaitForRadiusCatalogTimeout(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	origRetry := radiusCatalogRetry
+	radiusCatalogRetry = 10 * time.Millisecond
+	t.Cleanup(func() { radiusCatalogRetry = origRetry })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"baseUrl": "https://messages.example",
+			"models":  []map[string]any{},
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("RADIUS_GATEWAY", srv.URL)
+	var notes []string
+	ctx, cancel := context.WithTimeout(t.Context(), 80*time.Millisecond)
+	defer cancel()
+	ok := WaitForRadiusCatalog(ctx, &MemoryStore{}, "tok", func(msg string) { notes = append(notes, msg) })
+	if ok {
+		t.Fatal("empty catalog should time out")
+	}
+	if _, found := Lookup("radius", "balanced"); found {
+		t.Fatal("should not treat missing default as loaded")
+	}
+	foundTimeout := false
+	for _, n := range notes {
+		if n != "" {
+			foundTimeout = true
+			break
+		}
+	}
+	if !foundTimeout {
+		t.Fatalf("expected timeout notify, got %v", notes)
 	}
 }
