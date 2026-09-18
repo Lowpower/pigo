@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 )
@@ -13,6 +12,7 @@ const lsDefaultLimit = 500
 // listTool lists directory contents. The tool name is "ls".
 type listTool struct {
 	cwd string
+	fs  Runner
 }
 
 type lsParams struct {
@@ -34,15 +34,15 @@ func (t listTool) Execute(_ context.Context, args map[string]any) (string, bool)
 		return "invalid arguments: " + err.Error(), true
 	}
 	dir := resolvePath(t.cwd, p.Path)
-	entries, err := os.ReadDir(dir)
+	entries, err := useRunner(t.fs).ReadDir(dir)
 	if err != nil {
 		return err.Error(), true
 	}
 
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() {
+		name := e.Name
+		if e.IsDir {
 			name += "/"
 		}
 		names = append(names, name)

@@ -61,6 +61,7 @@ type projectOverlay struct {
 	Prompts                   []string               `json:"prompts"`
 	Themes                    []string               `json:"themes"`
 	NpmCommand                []string               `json:"npmCommand"`
+	Container                 *ContainerSettings     `json:"container"`
 }
 
 // ApplyProject overlays cwd/.pigo/settings.json onto user when trusted.
@@ -300,6 +301,17 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	}
 	if over.NpmCommand != nil {
 		out.NpmCommand = over.NpmCommand
+	}
+	if over.Container != nil {
+		if over.Container.Image != "" {
+			out.Container.Image = over.Container.Image
+		}
+		if over.Container.Mounts != nil {
+			out.Container.Mounts = append([]ContainerMount(nil), over.Container.Mounts...)
+		}
+		if over.Container.Env != nil {
+			out.Container.Env = append([]string(nil), over.Container.Env...)
+		}
 	}
 	applyNestedCompaction(&out)
 	if out.Thinking == "" && out.DefaultThinkingLevel != "" {

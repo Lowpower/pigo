@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/shell"
 	"github.com/Lowpower/pigo/internal/tools"
 )
@@ -62,27 +61,27 @@ func (e *Engine) RunUserBash(ctx context.Context, command string, exclude bool, 
 			return BashResult{Output: out, ExitCode: &code}
 		}
 		cwd := e.Opts.Cwd
-		return RunBash(ctx, cwd, command, onChunk)
+		extra := e.sessionToolEnv()
+		return runBash(ctx, e.toolRunner, cwd, command, extra, onChunk)
 	}
-	return RunBash(ctx, "", command, onChunk)
+	return runBash(ctx, tools.NewHostRunner(), "", command, nil, onChunk)
 }
 
 // RunBash executes command with the resolved shell in cwd.
 func RunBash(ctx context.Context, cwd, command string, onChunk func(string)) BashResult {
-	cfg, err := shell.GetConfig()
+	return runBash(ctx, tools.NewHostRunner(), cwd, command, nil, onChunk)
+}
+
+func runBash(ctx context.Context, r tools.Runner, cwd, command string, extra map[string]string, onChunk func(string)) BashResult {
+	if r == nil {
+		r = tools.NewHostRunner()
+	}
+	cmd, err := r.Bash(ctx, command, cwd, extra)
 	if err != nil {
 		code := 1
 		return BashResult{Output: err.Error(), ExitCode: &code}
 	}
-	name, args := sandbox.Command(command, cwd, "")
-	var cmd *exec.Cmd
-	if name == "bwrap" {
-		cmd = exec.CommandContext(ctx, name, args...)
-		shell.PrepareContext(cmd)
-	} else {
-		cmd = shell.CommandContext(ctx, cfg, command)
-	}
-	if cwd != "" {
+	if cwd != "" && cmd.Dir == "" {
 		cmd.Dir = cwd
 	}
 	output, waitErr := shell.WaitStream(cmd, onChunk)

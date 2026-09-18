@@ -76,6 +76,27 @@ func TestLoadSettingsKeyNames(t *testing.T) {
 	}
 }
 
+func TestLoadContainerSettings(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"container":{"image":"alpine:3","mounts":[{"host":"/tmp/data","container":"/data"}],"env":["TERM"]}}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ContainerImage() != "alpine:3" {
+		t.Fatalf("image=%q", cfg.ContainerImage())
+	}
+	if len(cfg.Container.Mounts) != 1 || cfg.Container.Mounts[0].Host != "/tmp/data" {
+		t.Fatalf("mounts=%+v", cfg.Container.Mounts)
+	}
+	if len(cfg.Container.Env) != 1 || cfg.Container.Env[0] != "TERM" {
+		t.Fatalf("env=%v", cfg.Container.Env)
+	}
+}
+
 func TestLoadRetryDefaultsAndOverride(t *testing.T) {
 	cfg, err := Load(t.TempDir())
 	if err != nil {

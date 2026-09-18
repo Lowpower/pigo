@@ -19,6 +19,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/prompt"
+	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/skills"
 	"github.com/Lowpower/pigo/internal/slash"
@@ -90,6 +91,8 @@ type Engine struct {
 
 	onSessionEvent func(any)
 	uiHandler      uiHandlerFunc
+
+	toolRunner tools.Runner
 
 	// BeforeTree / AfterTree are optional NavigateTree hooks (#15 will wire extensions).
 	BeforeTree func(session.TreePrep) session.TreeHookResult
@@ -184,6 +187,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		Provider: provider,
 		Scoped:   scoped,
 	}
+	e.syncToolRunner()
 	reg := e.builtinRegistry()
 	if opts.NoTools {
 		reg = tools.NewRegistry()
@@ -295,6 +299,37 @@ func (e *Engine) builtinRegistry() *tools.Registry {
 		Cwd:          e.Opts.Cwd,
 		EnvFn:        e.sessionToolEnv,
 		ImageCapable: func() bool { return e.currentModel().SupportsImage() },
+		Runner:       e.toolRunner,
+	})
+}
+
+func (e *Engine) syncToolRunner() {
+	if e == nil {
+		return
+	}
+	wantDocker := !sandbox.NoSandbox() && e.Opts.Config.ContainerImage() != ""
+	if !wantDocker {
+		if e.toolRunner != nil {
+			_ = e.toolRunner.Close()
+		}
+		e.toolRunner = tools.NewHostRunner()
+		return
+	}
+	if tools.SameDockerContainer(e.toolRunner, e.Opts.Config.ContainerImage(), e.Opts.Cwd) {
+		return
+	}
+	if e.toolRunner != nil {
+		_ = e.toolRunner.Close()
+	}
+	mounts := make([]tools.Mount, 0, len(e.Opts.Config.Container.Mounts))
+	for _, m := range e.Opts.Config.Container.Mounts {
+		mounts = append(mounts, tools.Mount{Host: m.Host, Container: m.Container})
+	}
+	e.toolRunner = tools.NewDockerRunner(tools.DockerOptions{
+		Image:      e.Opts.Config.ContainerImage(),
+		Cwd:        e.Opts.Cwd,
+		Mounts:     mounts,
+		ExtraAllow: e.Opts.Config.Container.Env,
 	})
 }
 
@@ -756,6 +791,10 @@ func (e *Engine) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = telemetry.Shutdown(ctx)
+	if e.toolRunner != nil {
+		_ = e.toolRunner.Close()
+		e.toolRunner = nil
+	}
 	for _, h := range e.Hosts {
 		_ = h.Close()
 	}
@@ -1180,6 +1219,7 @@ func (e *Engine) Reload() {
 	e.Hosts = nil
 	e.extCommands = nil
 	e.extStreams = nil
+	e.syncToolRunner()
 	reg := e.builtinRegistry()
 	if e.Opts.NoTools {
 		reg = tools.NewRegistry()

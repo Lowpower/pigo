@@ -3,13 +3,13 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 )
 
 // writeTool creates or overwrites a file.
 type writeTool struct {
 	cwd string
+	fs  Runner
 }
 
 type writeParams struct {
@@ -34,13 +34,14 @@ func (t writeTool) Execute(_ context.Context, args map[string]any) (string, bool
 		return "path is required", true
 	}
 	path := resolvePath(t.cwd, p.Path)
+	r := useRunner(t.fs)
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := r.MkdirAll(dir, 0o755); err != nil {
 			return err.Error(), true
 		}
 	}
 	return withFileMutation(path, func() (string, bool) {
-		if err := os.WriteFile(path, []byte(p.Content), 0o644); err != nil {
+		if err := r.WriteFile(path, []byte(p.Content), 0o644); err != nil {
 			return err.Error(), true
 		}
 		return fmt.Sprintf("Wrote %d bytes to %s.", len(p.Content), path), false

@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -12,6 +11,7 @@ type readTool struct {
 	autoResize   bool
 	cwd          string
 	imageCapable func() bool
+	fs           Runner
 }
 
 type readParams struct {
@@ -37,7 +37,7 @@ func (t readTool) Execute(_ context.Context, args map[string]any) (string, bool)
 		return "path is required", true
 	}
 	path := resolvePath(t.cwd, p.Path)
-	data, err := os.ReadFile(path)
+	data, err := useRunner(t.fs).ReadFile(path)
 	if err != nil {
 		return err.Error(), true
 	}

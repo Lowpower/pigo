@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,6 +16,7 @@ const grepDefaultLimit = 100
 // .gitignore when inside a git repository (ripgrep default).
 type grepTool struct {
 	cwd string
+	fs  Runner
 }
 
 type grepParams struct {
@@ -47,7 +47,8 @@ func (t grepTool) Execute(ctx context.Context, args map[string]any) (string, boo
 	}
 
 	root := resolvePath(t.cwd, p.Path)
-	info, statErr := os.Stat(root)
+	r := useRunner(t.fs)
+	info, statErr := r.Stat(root)
 	if statErr != nil {
 		return statErr.Error(), true
 	}
@@ -63,8 +64,9 @@ func (t grepTool) Execute(ctx context.Context, args map[string]any) (string, boo
 		limit = p.Limit
 	}
 
-	if rg, lookErr := lookRipgrep(); lookErr == nil && rg != "" {
-		if out, isErr, ok := grepRipgrep(ctx, rg, root, info.IsDir(), p, limit); ok {
+	if rg, lookErr := r.LookPath("rg"); lookErr == nil && rg != "" {
+		searchRoot := runnerSearchPath(r, root)
+		if out, isErr, ok := grepRipgrep(ctx, r, rg, searchRoot, info.IsDir, p, limit); ok {
 			return out, isErr
 		}
 	}
@@ -86,7 +88,7 @@ func (t grepTool) Execute(ctx context.Context, args map[string]any) (string, boo
 	truncated := false
 
 	searchFile := func(path, rel string) bool {
-		data, readErr := os.ReadFile(path)
+		data, readErr := r.ReadFile(path)
 		if readErr != nil || bytes.IndexByte(data, 0) >= 0 { // skip unreadable/binary
 			return true
 		}
@@ -118,10 +120,10 @@ func (t grepTool) Execute(ctx context.Context, args map[string]any) (string, boo
 		return true
 	}
 
-	if !info.IsDir() {
+	if !info.IsDir {
 		searchFile(root, filepath.ToSlash(root))
 	} else {
-		_ = walkUnignored(root, ignoreGitRequired, func(path, rel string) error {
+		_ = walkUnignored(r, root, ignoreGitRequired, func(path, rel string) error {
 			if g != nil && !g.Match(rel) {
 				return nil
 			}

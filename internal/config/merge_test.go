@@ -162,3 +162,33 @@ func TestApplyProjectEmptyThinkingDefaultsMedium(t *testing.T) {
 		t.Fatalf("thinking=%q, want medium", got.Thinking)
 	}
 }
+
+func TestApplyProjectOverlaysContainer(t *testing.T) {
+	user, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"container":{"image":"debian:bookworm-slim","mounts":[{"host":"/opt/cache","container":"/cache"}],"env":["GOPATH"]}}`
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ApplyProject(user, cwd, true)
+	if got.ContainerImage() != "debian:bookworm-slim" {
+		t.Fatalf("image=%q", got.ContainerImage())
+	}
+	if len(got.Container.Mounts) != 1 || got.Container.Mounts[0].Container != "/cache" {
+		t.Fatalf("mounts=%+v", got.Container.Mounts)
+	}
+	if len(got.Container.Env) != 1 || got.Container.Env[0] != "GOPATH" {
+		t.Fatalf("env=%v", got.Container.Env)
+	}
+	untrusted := ApplyProject(user, cwd, false)
+	if untrusted.ContainerImage() != "" {
+		t.Fatalf("untrusted image=%q", untrusted.ContainerImage())
+	}
+}
+
