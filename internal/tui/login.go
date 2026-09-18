@@ -9,6 +9,7 @@ import (
 
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 type loginPhase int
@@ -301,6 +302,7 @@ func (m Model) handleLoginMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case loginDoneMsg:
+		provider := m.login.provider
 		text := "login complete"
 		if v.err != nil {
 			text = "login error: " + v.err.Error()
@@ -309,10 +311,28 @@ func (m Model) handleLoginMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(text)})
 		if v.err == nil {
 			m.maybeWarnAnthropicExtraUsage()
+			m.maybeWarnRadiusCatalog(provider)
 		}
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *Model) maybeWarnRadiusCatalog(provider string) {
+	if provider != "radius" {
+		return
+	}
+	id := models.DefaultID("radius")
+	if id == "" {
+		id = "balanced"
+	}
+	if _, ok := models.Lookup("radius", id); ok {
+		return
+	}
+	m.transcript = append(m.transcript, entry{
+		role:     "meta",
+		rendered: m.metaStyle.Render("Radius model catalog timed out; models may be unavailable until refresh."),
+	})
 }
 
 func formatLoginEvent(ev auth.Event) string {

@@ -495,7 +495,27 @@ func Login(ctx context.Context, s *Store, providerID, authType string, ix Intera
 	_, err = s.Modify(providerID, func(*Credential) (*Credential, error) {
 		return &cred, nil
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if providerID == "radius" && authType == TypeOAuth {
+		waitRadiusCatalogAfterLogin(ix, s.dir, cred.Access)
+	}
+	return nil
+}
+
+func waitRadiusCatalogAfterLogin(ix Interaction, agentDir, token string) {
+	notify := func(msg string) {
+		if ix.Notify == nil {
+			return
+		}
+		typ := EventProgress
+		if strings.Contains(msg, "timed out") {
+			typ = EventInfo
+		}
+		ix.Notify(Event{Type: typ, Message: msg})
+	}
+	_ = models.WaitForRadiusCatalog(ix.ctx(), models.OpenFileStore(filepath.Join(agentDir, "models-store.json")), token, notify)
 }
 
 // CheckAuth is side-effect-free (no refresh).
