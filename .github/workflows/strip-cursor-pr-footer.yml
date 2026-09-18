@@ -1,17 +1,13 @@
 # Cursor Cloud Agents inject Open in Web / Open in Cursor buttons into PR
 # bodies (server-side; cannot be disabled). Strip that HTML so public PRs
-# do not advertise agent run URLs.
+# do not advertise agent run URLs. --all is idempotent and also backfills
+# already merged PRs when this workflow runs.
 name: Strip Cursor PR footer
 
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
   workflow_dispatch:
-    inputs:
-      all:
-        description: Clean every pull request, including merged/closed
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -38,16 +34,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Strip Cursor agent footer
+      - name: Strip Cursor agent footer from all PRs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          STRIP_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.all }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         working-directory: .github/scripts
-        run: |
-          set -euo pipefail
-          if [[ "${STRIP_ALL}" == "true" ]]; then
-            python3 strip_cursor_pr_footer.py --repo "${GITHUB_REPOSITORY}" --all
-          else
-            python3 strip_cursor_pr_footer.py --repo "${GITHUB_REPOSITORY}" --pr "${PR_NUMBER}"
-          fi
+        run: python3 strip_cursor_pr_footer.py --repo "${GITHUB_REPOSITORY}" --all

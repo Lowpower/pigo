@@ -86,19 +86,18 @@ def _set_body(repo: str, number: int, body: str) -> None:
         env=env,
     )
     if proc.returncode != 0:
-        sys.stderr.write(proc.stderr)
-        raise SystemExit(proc.returncode or 1)
+        err = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(err or f"gh api PATCH failed ({proc.returncode})")
 
 
 def _clean_one(repo: str, pr: dict[str, Any], dry_run: bool) -> str:
-    number = int(pr["number"])
     original = pr.get("body") or ""
     cleaned = strip_cursor_pr_footer(original)
     if cleaned == original:
         return "skip"
     if dry_run:
         return "dry-run"
-    _set_body(repo, number, cleaned)
+    _set_body(repo, int(pr["number"]), cleaned)
     return "updated"
 
 
@@ -117,14 +116,23 @@ def main() -> None:
     else:
         pulls = _list_pulls(args.repo)
 
-    counts = {"updated": 0, "skip": 0, "dry-run": 0}
+    counts = {"updated": 0, "skip": 0, "dry-run": 0, "error": 0}
     for pr in pulls:
-        action = _clean_one(args.repo, pr, args.dry_run)
+        try:
+            action = _clean_one(args.repo, pr, args.dry_run)
+        except RuntimeError as exc:
+            action = "error"
+            print(f"#{pr['number']}\t{action}\t{exc}", file=sys.stderr)
+        else:
+            print(f"#{pr['number']}\t{action}")
         counts[action] += 1
-        print(f"#{pr['number']}\t{action}")
     print(
-        f"done updated={counts['updated']} dry-run={counts['dry-run']} skip={counts['skip']}"
+        "done updated={updated} dry-run={dry-run} skip={skip} error={error}".format(
+            **counts
+        )
     )
+    if counts["error"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
