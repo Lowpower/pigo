@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/slash"
 )
 
@@ -120,6 +121,84 @@ func slashSuggestions(before string, cmds []slash.Command) (items []completeItem
 		return nil, "", false
 	}
 	return items, before, true
+}
+
+func commandArgSuggestions(before string, eng *runtime.Engine) (items []completeItem, prefix string, ok bool) {
+	if eng == nil || !strings.HasPrefix(before, "/") || strings.HasPrefix(before, "//") {
+		return nil, "", false
+	}
+	rest := before[1:]
+	sp := strings.IndexAny(rest, " \t")
+	if sp < 0 {
+		return nil, "", false
+	}
+	name := rest[:sp]
+	arg := strings.TrimLeft(rest[sp+1:], " \t")
+	raw := eng.CommandArgCompletions(name, arg)
+	if len(raw) == 0 {
+		return nil, "", false
+	}
+	for _, it := range raw {
+		val, _ := it["value"].(string)
+		if val == "" {
+			val, _ = it["label"].(string)
+		}
+		if val == "" {
+			continue
+		}
+		label, _ := it["label"].(string)
+		if label == "" {
+			label = val
+		}
+		desc, _ := it["description"].(string)
+		if desc == "" {
+			desc, _ = it["desc"].(string)
+		}
+		items = append(items, completeItem{Value: val, Label: label, Desc: desc})
+		if len(items) >= completeMaxItems {
+			break
+		}
+	}
+	if len(items) == 0 {
+		return nil, "", false
+	}
+	return items, arg, true
+}
+
+func extensionAutocomplete(before string, eng *runtime.Engine) (items []completeItem, prefix string, ok bool) {
+	if eng == nil || strings.TrimSpace(before) == "" {
+		return nil, "", false
+	}
+	raw := eng.AutocompleteQuery(before)
+	if len(raw) == 0 {
+		return nil, "", false
+	}
+	for _, it := range raw {
+		val, _ := it["value"].(string)
+		if val == "" {
+			val, _ = it["insertText"].(string)
+		}
+		if val == "" {
+			continue
+		}
+		label, _ := it["label"].(string)
+		if label == "" {
+			label = val
+		}
+		desc, _ := it["description"].(string)
+		items = append(items, completeItem{Value: val, Label: label, Desc: desc})
+		if len(items) >= completeMaxItems {
+			break
+		}
+	}
+	if len(items) == 0 {
+		return nil, "", false
+	}
+	token := lastPathToken(before)
+	if token == "" {
+		token = before
+	}
+	return items, token, true
 }
 
 func fileSuggestions(before, cwd string, force bool) (items []completeItem, prefix string, ok bool) {

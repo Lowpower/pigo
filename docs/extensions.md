@@ -63,6 +63,10 @@ The host also ignores such `register_tool` frames and notifies an error.
 `ext.SetActiveTools(names)` sends `set_active_tools` to the host. Unknown names
 are ignored. Call it from a tool or a `session_start` handler.
 
+`ext.Notify`, `ext.Status`, `ext.UI`, and `ext.HostCall` send frames to the
+host. `UI` and `HostCall` wait for a result. Call them from a tool, command,
+shortcut, or event handler (not during handshake).
+
 ## Dynamic tool loading
 
 Register every tool, keep a small loader active, and activate more tools during
@@ -99,12 +103,15 @@ protocol does not apply there.
 `project_trust`, `user_bash`, `before_provider_headers`,
 `before_provider_request`, `after_provider_response`, `model_select`,
 `thinking_level_select`, `ui_prompt_start`, `ui_prompt_end`,
-`telemetry_span`.
+`telemetry_span`, `agent_settled`, `cache_warming_decision`.
 
 `telemetry_span` is fire-and-forget (`EmitEvent`, no `event_result`). The
 payload is a `SpanRecord`: `name`, `trace_id`, `span_id`, `parent_span_id`,
 unix-nano timestamps, `status`, `attrs`. Prompt text and tool arguments are
 not included. Official sample: [`examples/extensions/telemetry`](../examples/extensions/telemetry).
+
+`cache_warming_decision` is emitted at `session_start`. pigo does not warm
+caches; the payload is `{ "warm": false }`.
 
 Useful return payloads:
 
@@ -113,12 +120,72 @@ Useful return payloads:
 - `before_agent_start`: `{ "systemPrompt": "…" }`
 - `project_trust` / `user_bash`: `{ "block": true }`
 
+## Host calls (`ext.HostCall` / `host_request`)
+
+From a tool, command, shortcut, or event handler:
+
+```go
+info, err := ext.HostCall("session.info", nil)
+_ = ext.Notify("cwd="+fmt.Sprint(info["cwd"]), "info")
+_ = ext.Status("demo", "ok")
+res, err := ext.UI("confirm", map[string]any{"title": "Continue?"})
+_ = ext.RequestShutdown() // host exits when idle (not os.Exit)
+```
+
+Session / runtime: `mode`, `getContextUsage`, `isIdle`, `hasPendingMessages`,
+`abort`, `shutdown`, `waitForIdle`, `getSystemPrompt`,
+`getSystemPromptOptions`, `compact`, `reload`, `getActiveTools`, `getAllTools`,
+`setActiveTools`, `getCommands`, `setModel`, `getThinkingLevel`,
+`setThinkingLevel`, `session.info`, `session.entries`, `session.branch`,
+`session.leaf`, `appendEntry`, `setLabel`, `setSessionName`, `getSessionName`,
+`sendMessage`, `sendUserMessage`, `newSession`, `fork`, `navigateTree`,
+`switchSession`, `exec`, `events.on`, `events.emit`.
+
+`sendMessage` `deliverAs`: `steer` / `followUp` / `nextTurn`. `triggerTurn:false`
+must not insert between a tool call and its result (steering is drained after
+tools). Idle `steer` with `triggerTurn:true` starts a turn.
+
+Model registry: `model.list` / `model.getAll`, `model.getAvailable`,
+`model.find`, `model.hasConfiguredAuth`, `model.stream` / `model.streamSimple`
+(events via `host_event` `model.stream`), `model.complete`, `model.refresh`,
+`model.getApiKeyAndHeaders`, `model.getProviderAuth`,
+`model.getApiKeyForProvider`, `model.isUsingOAuth`, `model.getProvider`,
+`model.getProviderDisplayName`, `model.getProviderAuthStatus`.
+
+Render / complete: `registerMessageRenderer`, `registerEntryRenderer`,
+`registerMarkdownTransformer`, `registerToolRenderer`,
+`addAutocompleteProvider`. The host asks back with `host_event`
+(`render.message` / `render.entry` / `render.tool` / `markdown.transform` /
+`autocomplete.query` / `command.complete`). Return `{text}` / `{markdown}` /
+`{items}`.
+
+`ext.EventsOn` / `ext.EventsEmit` is a host-forwarded bus (extensions do not
+talk to each other).
+
 ## UI (TUI / RPC)
 
-Extensions may send `notify`, `status_line_item`, and `ui_request` methods:
-`select`, `confirm`, `input`, `setWidget`, `setTitle`, `set_editor_text`.
-RPC clients answer via `extension_ui_response`. Full custom TUI widgets are not
-embedded as host components.
+`notify`, `status_line_item`, and `ui_request` / `host_request` UI methods:
+
+- dialogs: `select`, `confirm`, `input`, `editor` (title + prefill)
+- `setWidget`, `setTitle`, `set_editor_text`, `getEditorText`, `pasteToEditor`
+- `setFooter` / `setHeader`: whole-page `[]string`; empty restores the default.
+  `status_line_item` only applies to the default footer. `getFooterData` is a
+  snapshot (`gitBranch`, `statuses`, `tokens`, `cost`, `modelId`, `cwd`)
+- working: `setWorkingMessage`, `setWorkingVisible`, `setWorkingIndicator`
+  (`{frames, intervalMs}`; `[]` hides; omit frames to restore)
+- `setHiddenThinkingLabel`, `setToolsExpanded` / `getToolsExpanded`
+- themes: `getAllThemes`, `getTheme`, `getCurrentTheme`, `setTheme`
+- `custom.open` / `update` / `close` / `focus` / `unfocus` / `hide` /
+  `setHidden`: declarative widgets (`text`, `markdown`, `select`, `input`,
+  `list`, `buttons`). Overlay is `{overlay: true}` plus static
+  `overlayOptions` (`anchor`, `width`, `margin`). Interaction is `host_event`
+  `custom.change` / `custom.submit` / `custom.cancel`. Unknown widget `kind`
+  is skipped
+- `terminal_input.subscribe`: host pushes `host_event` `terminal.input`;
+  return `{consume, data?}`
+
+The editor component itself is not swappable. Unknown UI methods still return
+`{cancelled: true}`. RPC clients answer dialogs via `extension_ui_response`.
 
 ## Wire types
 
@@ -127,8 +194,9 @@ embedded as host components.
 `shortcut`, `event` / `event_result`, `get_flag` / `flag_value`,
 `oauth_login|refresh|get_api_key` / `oauth_result`, `refresh_models` /
 `refresh_models_result`, `stream_start|event|abort`, `notify`,
-`status_line_item`, `ui_request` / `ui_result`, `set_active_tools`, `ping` /
-`pong`, `shutdown`.
+`status_line_item`, `ui_request` / `ui_result`, `set_active_tools`,
+`host_request` / `host_result`, `host_event` / `host_event_result`, `ping` /
+`pong`, `shutdown` (host→ext), `shutdown_request` (ext→host).
 
 Provider stream events: `start`, `text_*`, `thinking_*`, `toolcall_*`, `done`,
 `error`.

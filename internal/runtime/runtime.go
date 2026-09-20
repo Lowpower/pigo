@@ -109,6 +109,22 @@ type Engine struct {
 	extStreams        map[string]ai.StreamFn
 	stopAfterTools    bool
 	overflowAttempted bool
+
+	busy         bool
+	runAbort     context.CancelFunc
+	kickFn       func(user string, images []ai.ImageContent)
+	wantShutdown bool
+	nextTurn     []ai.Message
+	msgRenderers map[string]*ext.Host
+	entryRender  map[string]*ext.Host
+	toolRender   map[string]*ext.Host
+	mdTransforms []*ext.Host
+	autoComplete []autoCompleteReg
+}
+
+type autoCompleteReg struct {
+	host     *ext.Host
+	triggers []string
 }
 
 // New applies auth, discovers skills, loads tools/extensions, and builds the prompt.
@@ -263,6 +279,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		"cwd":       e.Opts.Cwd,
 		"reason":    "startup",
 	})
+	e.DispatchEvent(ctx, "cache_warming_decision", map[string]any{"warm": false})
 	e.extendResourcesFromExtensions(ctx, "startup")
 	e.rebuildSystemPrompt()
 	return e, nil
@@ -972,13 +989,16 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 	}
 
 	e.overflowAttempted = false
+	queued := e.TakeNextTurn()
 	userMsg := ai.Message{Role: ai.RoleUser, Content: user, Images: images}
-	history = append(append([]ai.Message(nil), history...), userMsg)
+	history = append(append([]ai.Message(nil), history...), queued...)
+	history = append(history, userMsg)
+	newUsers := append(append([]ai.Message(nil), queued...), userMsg)
 	compacted, _, err := e.MaybeCompact(ctx, history)
 	if err == nil {
 		history = compacted
 	}
-	return e.runLoopWithSystem(ctx, history, []ai.Message{userMsg}, sys)
+	return e.runLoopWithSystem(ctx, history, newUsers, sys)
 }
 
 func (e *Engine) runLoop(ctx context.Context, history, newUsers []ai.Message) *agent.Stream {

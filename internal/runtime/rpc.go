@@ -54,6 +54,34 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			emit(map[string]any{"type": "extension_ui_request", "method": "setStatus", "key": key, "text": text})
 		})
 	}
+	e.SetKick(func(user string, images []ai.ImageContent) {
+		stateMu.Lock()
+		if running {
+			stateMu.Unlock()
+			e.PushSteerImages(user, images)
+			return
+		}
+		if cancel != nil {
+			cancel()
+		}
+		cctx, c := context.WithCancel(ctx)
+		cancel = c
+		running = true
+		hist := history
+		stateMu.Unlock()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				stateMu.Lock()
+				running = false
+				cancel = nil
+				history = e.History()
+				stateMu.Unlock()
+			}()
+			_ = e.printJSON(cctx, out, hist, user, images, false)
+		}()
+	})
 	defer func() {
 		e.setUIHandler(nil)
 		closeUI()
@@ -92,6 +120,10 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 		if typ == "extension_ui_response" {
 			onUIResponse(raw)
 			continue
+		}
+		if e.WantShutdown() && e.IsIdle() {
+			wg.Wait()
+			return nil
 		}
 
 		switch typ {

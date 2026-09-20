@@ -22,6 +22,7 @@ import (
 	"github.com/Lowpower/pigo/internal/changelog"
 	"github.com/Lowpower/pigo/internal/compaction"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/keys"
 	"github.com/Lowpower/pigo/internal/llama"
 	"github.com/Lowpower/pigo/internal/models"
@@ -161,11 +162,21 @@ type Model struct {
 	thinkingPick  listPicker
 	sel           textSel
 
-	extHub     *extUIHub
-	extStatus  map[string]string
-	extWidgets []extWidget
-	extTitle   string
-	extUI      extUIState
+	extHub          *extUIHub
+	extStatus       map[string]string
+	extWidgets      []extWidget
+	extTitle        string
+	extUI           extUIState
+	extFooterSet    bool
+	extFooter       []string
+	extHeader       []string
+	workingMessage  string
+	workingVisible  *bool
+	workingFrames   []string
+	workingInterval int
+	thinkingLabel   string
+	extCustom       *extCustomState
+	termHosts       []*ext.Host
 }
 
 // New builds the interactive model from the resolved config.
@@ -315,6 +326,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, nil
 	}
 	switch msg := msg.(type) {
+	case extKickMsg:
+		if m.running {
+			if m.engine != nil {
+				m.engine.PushSteerImages(msg.user, msg.images)
+			}
+			return m, nil
+		}
+		return m.startTurn(msg.user, msg.images)
+	case extShutdownMsg:
+		m.quitting = true
+		return m, tea.Quit
 	case tea.WindowSizeMsg:
 		cmds := []tea.Cmd{}
 		if m.cfg.ClearOnShrink() && m.lastWidth > 0 && (msg.Width < m.lastWidth || msg.Height < m.lastHeight) {
@@ -352,6 +374,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if isTermQueryLeak(msg) {
 			return m, nil
 		}
+		if consumed, next := m.handleTerminalInput(msg); consumed {
+			return next, nil
+		}
 		if m.sessionPickerActive() {
 			return m.handleSessionPickerKey(msg)
 		}
@@ -380,6 +405,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.loginActive() {
 			return m.handleLoginKey(msg)
+		}
+		if m.extCustom != nil && !m.extCustom.hidden {
+			return m.handleExtCustomKey(msg)
 		}
 		if m.extUI.active {
 			return m.handleExtUIKey(msg)
@@ -558,6 +586,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next := m.queued[0]
 			m.queued = m.queued[1:]
 			return m.startTurn(next.text, next.images)
+		}
+		if m.engine != nil && m.engine.WantShutdown() {
+			m.quitting = true
+			return m, tea.Quit
 		}
 		return m, nil
 
@@ -1088,6 +1120,7 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	m.streamingThinking = ""
 	m.streamingActive = false
 	if m.engine != nil {
+		m.engine.SetRunAbort(cancel)
 		m.provider = m.engine.Provider
 		// history already contains the user turn; RunPrompt appends user again, so pass without last
 		hist := m.history[:len(m.history)-1]
@@ -1162,10 +1195,16 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		if p, ok := ev.Args["path"].(string); ok && p != "" {
 			label = strings.Replace(label, p, m.linkPath(p, p), 1)
 		}
+		rendered := m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, label))
+		if m.engine != nil {
+			if custom := m.engine.RenderTool("call", ev.ToolName, ev.Args, ""); custom != "" {
+				rendered = m.toolStyle.Render(custom)
+			}
+		}
 		m.transcript = append(m.transcript, entry{
 			role:       "tool",
 			toolCallID: ev.ToolCallID,
-			rendered:   m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, label)),
+			rendered:   rendered,
 		})
 
 	case agent.EventToolUpdate:
@@ -1319,6 +1358,9 @@ func (m Model) View() string {
 	if m.extUI.active {
 		return m.extUIView()
 	}
+	if m.extCustom != nil && m.extCustom.overlay && !m.extCustom.hidden {
+		return m.present(m.extCustomView())
+	}
 	if m.overlay == overlayTree || m.overlay == overlayTreeLabel || m.overlay == overlayTreeSummary || m.overlay == overlayTreeCustom {
 		return m.present(m.treeView())
 	}
@@ -1327,6 +1369,10 @@ func (m Model) View() string {
 	}
 
 	var body strings.Builder
+	if len(m.extHeader) > 0 {
+		body.WriteString(strings.Join(m.extHeader, "\n"))
+		body.WriteString("\n\n")
+	}
 	if s := m.startupView(); s != "" {
 		body.WriteString(s)
 		if !strings.HasSuffix(s, "\n") {
@@ -1339,7 +1385,7 @@ func (m Model) View() string {
 		switch e.role {
 		case "thinking":
 			if m.hideThinking {
-				body.WriteString(m.metaStyle.Render("Thinking…"))
+				body.WriteString(m.metaStyle.Render(m.hiddenThinkingText()))
 			} else if e.rendered != "" {
 				body.WriteString(e.rendered)
 			} else {
@@ -1385,7 +1431,7 @@ func (m Model) View() string {
 
 	if m.streamingThinking != "" {
 		if m.hideThinking {
-			body.WriteString(m.metaStyle.Render("Thinking…"))
+			body.WriteString(m.metaStyle.Render(m.hiddenThinkingText()))
 		} else {
 			body.WriteString(m.metaStyle.Render(m.streamingThinking))
 		}
@@ -1395,8 +1441,8 @@ func (m Model) View() string {
 		body.WriteString(m.streamStyle.Render(transformLatexJoins(transformMermaid(m.streaming, m.mermaidOpts(true)))))
 		body.WriteString("\n\n")
 	}
-	if m.running {
-		body.WriteString(m.metaStyle.Render("…working (Ctrl+C to interrupt)"))
+	if line := m.workingLine(); line != "" {
+		body.WriteString(m.metaStyle.Render(line))
 		body.WriteString("\n\n")
 	}
 	if m.bashRunning {
@@ -1413,8 +1459,13 @@ func (m Model) View() string {
 
 	var dock strings.Builder
 	dock.WriteString(m.widgets("aboveEditor"))
-	dock.WriteString(m.framedEditor())
-	dock.WriteString("\n")
+	if m.extCustom != nil && !m.extCustom.overlay && !m.extCustom.hidden {
+		dock.WriteString(m.extCustomView())
+		dock.WriteString("\n")
+	} else {
+		dock.WriteString(m.framedEditor())
+		dock.WriteString("\n")
+	}
 	dock.WriteString(m.widgets("belowEditor"))
 	if m.complete.active {
 		dock.WriteString(m.complete.view())
@@ -1497,11 +1548,73 @@ func (m Model) mermaidWidth() int {
 	return wrap
 }
 
+func (m Model) hiddenThinkingText() string {
+	if m.thinkingLabel != "" {
+		return m.thinkingLabel
+	}
+	return "Thinking…"
+}
+
+func (m Model) workingLine() string {
+	if m.workingVisible != nil && !*m.workingVisible {
+		return ""
+	}
+	if m.workingFrames != nil && len(m.workingFrames) == 0 {
+		return ""
+	}
+	if !m.running && (m.workingVisible == nil || !*m.workingVisible) {
+		return ""
+	}
+	if len(m.workingFrames) > 0 {
+		iv := m.workingInterval
+		if iv <= 0 {
+			iv = 120
+		}
+		idx := int(time.Now().UnixMilli()/int64(iv)) % len(m.workingFrames)
+		return m.workingFrames[idx]
+	}
+	if m.workingMessage != "" {
+		return m.workingMessage
+	}
+	if m.running {
+		return "…working (Ctrl+C to interrupt)"
+	}
+	return ""
+}
+
+func (m Model) handleTerminalInput(msg tea.KeyMsg) (bool, Model) {
+	if len(m.termHosts) == 0 {
+		return false, m
+	}
+	payload := map[string]any{"key": msg.String(), "paste": msg.Paste}
+	if msg.Type == tea.KeyRunes {
+		payload["data"] = string(msg.Runes)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	for _, h := range m.termHosts {
+		if h == nil {
+			continue
+		}
+		res := h.SendHostEvent(ctx, "terminal.input", payload, true)
+		if consume, _ := res["consume"].(bool); consume {
+			if s, _ := res["data"].(string); s != "" {
+				m.editor.insertPaste(s)
+			}
+			return true, m
+		}
+	}
+	return false, m
+}
+
 func (m Model) mermaidOpts(streaming bool) mermaidOpts {
 	return mermaidOpts{mode: m.cfg.MermaidMode(), width: m.mermaidWidth(), streaming: streaming}
 }
 
 func (m Model) renderMarkdown(s string) string {
+	if m.engine != nil && !strings.Contains(s, "\x1b") {
+		s = m.engine.TransformMarkdown(s, "assistant", false)
+	}
 	s = indentMarkdownCodeBlocks(s, m.cfg.CodeBlockIndent())
 	s = transformMermaid(s, m.mermaidOpts(false))
 	s = transformLatexJoins(s)
@@ -1564,6 +1677,9 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		m.extHub.send = func(msg tea.Msg) { p.Send(msg) }
 	}
 	if eng != nil {
+		eng.SetKick(func(user string, images []ai.ImageContent) {
+			p.Send(extKickMsg{user: user, images: images})
+		})
 		eng.SetOnSessionEvent(func(v any) {
 			ev, ok := v.(map[string]any)
 			if !ok || ev == nil {

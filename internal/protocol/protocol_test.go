@@ -31,6 +31,11 @@ func TestFrameRoundTrip(t *testing.T) {
 		{Type: TypeStreamEvent, ID: "s1", Event: "text_delta", Payload: map[string]any{"delta": "hi"}},
 		{Type: TypeStreamAbort, ID: "s1"},
 		{Type: TypeSetActiveTools, Payload: map[string]any{"names": []any{"tool_search", "lookup"}}},
+		{Type: TypeHostRequest, ID: "h1", Name: "isIdle", Args: map[string]any{}},
+		{Type: TypeHostResult, ID: "h1", Args: map[string]any{"idle": true}},
+		{Type: TypeHostEvent, ID: "e2", Name: "custom.submit", Args: map[string]any{"id": "w1"}},
+		{Type: TypeHostEventResult, ID: "e2", Args: map[string]any{}},
+		{Type: TypeShutdownRequest},
 	}
 
 	var buf bytes.Buffer

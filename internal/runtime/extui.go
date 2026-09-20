@@ -13,7 +13,9 @@ type uiHandlerFunc func(req map[string]any, timeout time.Duration) map[string]an
 
 func isDialogUIMethod(method string) bool {
 	switch method {
-	case "select", "confirm", "input", "editor":
+	case "select", "confirm", "input", "editor",
+		"getEditorText", "getToolsExpanded", "getFooterData",
+		"getAllThemes", "getTheme", "getCurrentTheme", "setTheme":
 		return true
 	default:
 		return false

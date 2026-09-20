@@ -53,6 +53,8 @@ type Host struct {
 	notify      func(level, text string)
 	status      func(key, text string)
 	ui          func(method string, args map[string]any, timeout time.Duration) map[string]any
+	hostCall    func(name string, args map[string]any) map[string]any
+	shutdownReq func()
 
 	writeMu sync.Mutex
 
@@ -73,6 +75,7 @@ type Host struct {
 
 	providerHook    func(id string, args map[string]any, drop bool)
 	activeToolsHook func([]string)
+	busSubs         map[string]bool
 }
 
 // Spawn starts an extension process (argv) and completes the handshake: it waits
@@ -118,6 +121,7 @@ func Spawn(ctx context.Context, name string, argv []string, opts Options) (*Host
 		pending:        make(map[string]chan protocol.Message),
 		streamCh:       map[string]chan protocol.Message{},
 		waitDone:       make(chan struct{}),
+		busSubs:        map[string]bool{},
 	}
 
 	ready := make(chan error, 1)
@@ -232,7 +236,7 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 			h.replyFlag(m.ID, m.Name)
 		case protocol.TypeInitialized:
 			signalReady(nil)
-		case protocol.TypeToolResult, protocol.TypeEventResult, protocol.TypeOAuthResult, protocol.TypeRefreshModelsResult:
+		case protocol.TypeToolResult, protocol.TypeEventResult, protocol.TypeOAuthResult, protocol.TypeRefreshModelsResult, protocol.TypeHostEventResult:
 			h.deliverPending(m)
 		case protocol.TypeStreamEvent:
 			h.deliverStream(m)
@@ -271,6 +275,37 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 			h.mu.Unlock()
 			if hook != nil {
 				hook(names)
+			}
+		case protocol.TypeHostRequest:
+			h.mu.Lock()
+			call := h.hostCall
+			ui := h.ui
+			h.mu.Unlock()
+			go func(m protocol.Message) {
+				var result map[string]any
+				isErr := false
+				if isUIHostMethod(m.Name) && ui != nil {
+					result = ui(m.Name, m.Args, hostCallTimeout(m.Args))
+				} else if call != nil {
+					result = call(m.Name, m.Args)
+				} else {
+					result = map[string]any{"error": "no host call handler"}
+					isErr = true
+				}
+				if result == nil {
+					result = map[string]any{}
+				}
+				if _, ok := result["error"]; ok {
+					isErr = true
+				}
+				_ = h.send(protocol.Message{Type: protocol.TypeHostResult, ID: m.ID, Args: result, IsError: isErr})
+			}(m)
+		case protocol.TypeShutdownRequest:
+			h.mu.Lock()
+			fn := h.shutdownReq
+			h.mu.Unlock()
+			if fn != nil {
+				fn()
 			}
 		}
 	}
@@ -359,6 +394,112 @@ func (h *Host) SetActiveToolsHook(fn func([]string)) {
 	h.mu.Lock()
 	h.activeToolsHook = fn
 	h.mu.Unlock()
+}
+
+// SetHostCall handles session/runtime host_request methods.
+func (h *Host) SetHostCall(fn func(name string, args map[string]any) map[string]any) {
+	h.mu.Lock()
+	h.hostCall = fn
+	h.mu.Unlock()
+}
+
+// SetShutdownRequest is called when the extension asks the host to exit.
+func (h *Host) SetShutdownRequest(fn func()) {
+	h.mu.Lock()
+	h.shutdownReq = fn
+	h.mu.Unlock()
+}
+
+// SubscribeBus records interest in an extension-bus event name.
+func (h *Host) SubscribeBus(event string) {
+	h.mu.Lock()
+	if h.busSubs == nil {
+		h.busSubs = map[string]bool{}
+	}
+	h.busSubs[event] = true
+	h.mu.Unlock()
+}
+
+// WantsBus reports whether this extension subscribed to an event-bus name.
+func (h *Host) WantsBus(event string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.busSubs[event]
+}
+
+// SendHostEvent pushes a host_event. If wait is true, it waits for host_event_result.
+func (h *Host) SendHostEvent(ctx context.Context, name string, args map[string]any, wait bool) map[string]any {
+	id := ""
+	var ch chan protocol.Message
+	if wait {
+		id = newID()
+		ch = make(chan protocol.Message, 1)
+		h.mu.Lock()
+		if h.closed {
+			h.mu.Unlock()
+			return map[string]any{"cancelled": true}
+		}
+		h.pending[id] = ch
+		h.mu.Unlock()
+	}
+	if err := h.send(protocol.Message{Type: protocol.TypeHostEvent, ID: id, Name: name, Args: args}); err != nil {
+		if wait {
+			h.mu.Lock()
+			delete(h.pending, id)
+			h.mu.Unlock()
+		}
+		return map[string]any{"error": err.Error()}
+	}
+	if !wait {
+		return map[string]any{}
+	}
+	select {
+	case m, ok := <-ch:
+		if !ok {
+			return map[string]any{"cancelled": true}
+		}
+		if m.Args == nil {
+			return map[string]any{}
+		}
+		return m.Args
+	case <-ctx.Done():
+		h.mu.Lock()
+		delete(h.pending, id)
+		h.mu.Unlock()
+		return map[string]any{"cancelled": true}
+	}
+}
+
+func isUIHostMethod(name string) bool {
+	switch name {
+	case "select", "confirm", "input", "editor",
+		"setWidget", "setTitle", "set_editor_text",
+		"getEditorText", "pasteToEditor",
+		"setFooter", "setHeader", "getFooterData",
+		"setWorkingMessage", "setWorkingVisible", "setWorkingIndicator",
+		"setHiddenThinkingLabel",
+		"setToolsExpanded", "getToolsExpanded",
+		"getAllThemes", "getTheme", "setTheme", "getCurrentTheme",
+		"custom.open", "custom.update", "custom.close",
+		"custom.focus", "custom.unfocus", "custom.hide", "custom.setHidden",
+		"terminal_input.subscribe":
+		return true
+	default:
+		return false
+	}
+}
+
+func hostCallTimeout(args map[string]any) time.Duration {
+	if args == nil {
+		return 0
+	}
+	switch v := args["timeout"].(type) {
+	case float64:
+		return time.Duration(v) * time.Millisecond
+	case int:
+		return time.Duration(v) * time.Millisecond
+	}
+	return 0
 }
 
 // HasTool reports whether the extension registered a tool with this name.

@@ -14,6 +14,13 @@ func (e *Engine) bindExtensionHooks() {
 		h.SetActiveToolsHook(func(names []string) {
 			e.SetActiveTools(names)
 		})
+		host := h
+		h.SetHostCall(func(name string, args map[string]any) map[string]any {
+			return e.HandleHostCall(host, name, args)
+		})
+		h.SetShutdownRequest(func() {
+			e.requestShutdown()
+		})
 	}
 }
 
