@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -20,6 +22,7 @@ type Scenario struct {
 	Files        map[string]string `json:"files"`
 	Expect       Expect            `json:"expect"`
 	Path         string            `json:"-"`
+	DocsLift     bool              `json:"-"`
 }
 
 // Expect is a deterministic string grader. All set fields must pass.
@@ -40,13 +43,16 @@ func LoadDir(dir string) ([]Scenario, error) {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
-		s, err := LoadFile(path)
+		filePath := filepath.Join(dir, e.Name())
+		s, err := LoadFile(filePath)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, s)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return filepath.Base(out[i].Path) < filepath.Base(out[j].Path)
+	})
 	return out, nil
 }
 
@@ -60,11 +66,48 @@ func LoadFile(path string) (Scenario, error) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return Scenario{}, fmt.Errorf("%s: %w", path, err)
 	}
+	s.DocsLift = isDocsLiftPath(path)
 	if strings.TrimSpace(s.Name) == "" {
-		s.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		s.Name = defaultScenarioName(path)
 	}
 	s.Path = path
 	return s, nil
+}
+
+func isDocsLiftPath(p string) bool {
+	return strings.HasSuffix(strings.ToLower(filepath.Base(p)), ".docs.json")
+}
+
+func defaultScenarioName(p string) string {
+	base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+	if isDocsLiftPath(p) && strings.HasSuffix(strings.ToLower(base), ".docs") {
+		base = base[:len(base)-len(".docs")]
+	}
+	return base
+}
+
+func isContextDocFile(rel string) bool {
+	slash := filepath.ToSlash(rel)
+	base := strings.ToLower(filepath.Base(slash))
+	switch base {
+	case "agents.md", "claude.md", "agents.override.md":
+		return true
+	}
+	dir, file := path.Split(slash)
+	return strings.EqualFold(strings.TrimSuffix(dir, "/"), ".pigo") && strings.EqualFold(file, "AGENTS.md")
+}
+
+func stripContextDocs(files map[string]string) map[string]string {
+	if len(files) == 0 {
+		return files
+	}
+	out := make(map[string]string, len(files))
+	for k, v := range files {
+		if !isContextDocFile(k) {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func grade(output string, exp Expect) error {

@@ -1,0 +1,10 @@
+{
+  "name": "indent",
+  "prompt": "What indent style should we use? Reply with only tabs or spaces.",
+  "noTools": true,
+  "files": {
+    "AGENTS.md": "Always use tabs for indentation. Never use spaces.",
+    "readme.txt": "a fixture that is not a doc file"
+  },
+  "expect": { "contains": ["tabs"] }
+}
