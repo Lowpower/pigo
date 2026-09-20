@@ -66,6 +66,7 @@ type Handler struct {
 	OnOAuth         func(kind string, cred map[string]any) map[string]any
 	OnRefreshModels func() []map[string]any
 	OnStream        func(req map[string]any, emit func(event string, payload map[string]any), abort <-chan struct{})
+	OnHostEvent     func(name string, args map[string]any) map[string]any
 }
 
 // Serve runs an extension over stdin/stdout. It is the entrypoint an extension
@@ -80,6 +81,7 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 		flagStore.Delete(k)
 		return true
 	})
+	resetRuntime()
 	serveMu.Lock()
 	serveOut = out
 	serveMu.Unlock()
@@ -183,6 +185,9 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 	}
 
 	aborts := map[string]chan struct{}{}
+	runtime.mu.Lock()
+	runtime.onHost = h.OnHostEvent
+	runtime.mu.Unlock()
 
 	for {
 		m, err := protocol.ReadMessage(r)
@@ -191,35 +196,70 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 		}
 		switch m.Type {
 		case protocol.TypeToolCall:
-			result, isErr := "unknown tool: "+m.Name, true
-			if t, ok := byTool[m.Name]; ok {
-				result, isErr = t.Fn(context.Background(), m.Args)
-			}
-			if err := protocol.WriteMessage(out, protocol.Message{
-				Type: protocol.TypeToolResult, ID: m.ID, Result: result, IsError: isErr,
-			}); err != nil {
-				return err
-			}
+			id := m.ID
+			name := m.Name
+			args := m.Args
+			t, ok := byTool[name]
+			go func() {
+				result, isErr := "unknown tool: "+name, true
+				if ok {
+					result, isErr = t.Fn(context.Background(), args)
+				}
+				_ = writeOut(protocol.Message{Type: protocol.TypeToolResult, ID: id, Result: result, IsError: isErr})
+			}()
 		case protocol.TypeCommand:
 			if c, ok := byCmd[m.Name]; ok && c.Fn != nil {
-				c.Fn(m.Text)
+				text := m.Text
+				fn := c.Fn
+				go fn(text)
 			}
 		case protocol.TypeShortcut:
 			if s, ok := byShort[m.Name]; ok && s.Fn != nil {
-				s.Fn()
+				fn := s.Fn
+				go fn()
 			}
 		case protocol.TypeEvent:
-			var payload map[string]any
-			if h.OnEvent != nil {
-				payload = h.OnEvent(m.Event, m.Payload)
-			}
-			if m.ID != "" {
-				if err := protocol.WriteMessage(out, protocol.Message{
-					Type: protocol.TypeEventResult, ID: m.ID, Payload: payload,
-				}); err != nil {
-					return err
+			id := m.ID
+			ev := m.Event
+			payload := m.Payload
+			go func() {
+				var outPayload map[string]any
+				if h.OnEvent != nil {
+					outPayload = h.OnEvent(ev, payload)
 				}
-			}
+				if id != "" {
+					_ = writeOut(protocol.Message{Type: protocol.TypeEventResult, ID: id, Payload: outPayload})
+				}
+			}()
+		case protocol.TypeUIResult, protocol.TypeHostResult:
+			deliverReply(m)
+		case protocol.TypeHostEvent:
+			id := m.ID
+			name := m.Name
+			args := m.Args
+			go func() {
+				if name == "bus" {
+					ev, _ := args["event"].(string)
+					data, _ := args["data"].(map[string]any)
+					dispatchBus(ev, data)
+					if id != "" {
+						_ = writeOut(protocol.Message{Type: protocol.TypeHostEventResult, ID: id, Args: map[string]any{}})
+					}
+					return
+				}
+				var result map[string]any
+				runtime.mu.Lock()
+				fn := runtime.onHost
+				runtime.mu.Unlock()
+				if fn != nil {
+					result = fn(name, args)
+				} else if h.OnHostEvent != nil {
+					result = h.OnHostEvent(name, args)
+				}
+				if id != "" {
+					_ = writeOut(protocol.Message{Type: protocol.TypeHostEventResult, ID: id, Args: result})
+				}
+			}()
 		case protocol.TypeOAuthLogin, protocol.TypeOAuthRefresh, protocol.TypeOAuthGetAPIKey:
 			kind := "login"
 			if m.Type == protocol.TypeOAuthRefresh {
@@ -228,35 +268,31 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 			if m.Type == protocol.TypeOAuthGetAPIKey {
 				kind = "get_api_key"
 			}
-			var result map[string]any
-			if h.OnOAuth != nil {
-				result = h.OnOAuth(kind, m.Payload)
-			}
-			if err := protocol.WriteMessage(out, protocol.Message{
-				Type: protocol.TypeOAuthResult, ID: m.ID, Payload: result,
-			}); err != nil {
-				return err
-			}
+			id := m.ID
+			cred := m.Payload
+			go func() {
+				var result map[string]any
+				if h.OnOAuth != nil {
+					result = h.OnOAuth(kind, cred)
+				}
+				_ = writeOut(protocol.Message{Type: protocol.TypeOAuthResult, ID: id, Payload: result})
+			}()
 		case protocol.TypeRefreshModels:
-			var models []map[string]any
-			if h.OnRefreshModels != nil {
-				models = h.OnRefreshModels()
-			}
-			payload := map[string]any{"models": models}
-			if err := protocol.WriteMessage(out, protocol.Message{
-				Type: protocol.TypeRefreshModelsResult, ID: m.ID, Payload: payload,
-			}); err != nil {
-				return err
-			}
+			id := m.ID
+			go func() {
+				var models []map[string]any
+				if h.OnRefreshModels != nil {
+					models = h.OnRefreshModels()
+				}
+				_ = writeOut(protocol.Message{Type: protocol.TypeRefreshModelsResult, ID: id, Payload: map[string]any{"models": models}})
+			}()
 		case protocol.TypeStreamStart:
 			stop := make(chan struct{})
 			aborts[m.ID] = stop
 			id := m.ID
 			req := m.Payload
 			emit := func(event string, payload map[string]any) {
-				_ = protocol.WriteMessage(out, protocol.Message{
-					Type: protocol.TypeStreamEvent, ID: id, Event: event, Payload: payload,
-				})
+				_ = writeOut(protocol.Message{Type: protocol.TypeStreamEvent, ID: id, Event: event, Payload: payload})
 			}
 			if h.OnStream != nil {
 				go h.OnStream(req, emit, stop)
@@ -272,7 +308,7 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 				delete(aborts, m.ID)
 			}
 		case protocol.TypePing:
-			if err := protocol.WriteMessage(out, protocol.Message{Type: protocol.TypePong}); err != nil {
+			if err := writeOut(protocol.Message{Type: protocol.TypePong}); err != nil {
 				return err
 			}
 		case protocol.TypeShutdown:

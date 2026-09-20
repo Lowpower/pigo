@@ -74,7 +74,15 @@ func (m *Model) refreshComplete(force bool) {
 		m.complete.set(items, prefix)
 		return
 	}
+	if items, prefix, ok := commandArgSuggestions(before, m.engine); ok {
+		m.complete.set(items, prefix)
+		return
+	}
 	if items, prefix, ok := fileSuggestions(before, m.cwd(), force); ok {
+		m.complete.set(items, prefix)
+		return
+	}
+	if items, prefix, ok := extensionAutocomplete(before, m.engine); ok {
 		m.complete.set(items, prefix)
 		return
 	}

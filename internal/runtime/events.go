@@ -180,9 +180,12 @@ func (e *Engine) hasEvent(name string) bool {
 func (e *Engine) onAgentLifecycle(ctx context.Context, ev agent.Event) {
 	switch ev.Type {
 	case agent.EventAgentStart:
+		e.setBusy(true)
 		e.DispatchEvent(ctx, "agent_start", map[string]any{})
 	case agent.EventAgentEnd:
+		e.setBusy(false)
 		e.DispatchEvent(ctx, "agent_end", map[string]any{})
+		e.DispatchEvent(ctx, "agent_settled", map[string]any{})
 	case agent.EventTurnStart:
 		e.DispatchEvent(ctx, "turn_start", map[string]any{})
 	case agent.EventTurnEnd:

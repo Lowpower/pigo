@@ -42,6 +42,16 @@ go build -o /tmp/searchtools-ext ./examples/extensions/searchtools
 go run ./cmd/pigo -e /tmp/searchtools-ext -p "look up alpha"
 ```
 
+## hostproto
+
+Calls `ext.HostCall("session.info")` on `session_start`, sets a status item,
+and exposes `host_echo` (host `exec`).
+
+```bash
+go build -o /tmp/hostproto-ext ./examples/extensions/hostproto
+go run ./cmd/pigo -e /tmp/hostproto-ext -p "use host_echo"
+```
+
 ## telemetry
 
 Subscribes to `telemetry_span` and POSTs OTLP/HTTP JSON to

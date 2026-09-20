@@ -106,6 +106,9 @@ func (m *Model) refreshGit() {
 }
 
 func (m Model) footerText() string {
+	if m.extFooterSet {
+		return strings.Join(m.extFooter, "\n")
+	}
 	home, _ := os.UserHomeDir()
 	cwd := m.gitCwd
 	if cwd == "" && m.engine != nil {

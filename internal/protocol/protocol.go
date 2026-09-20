@@ -45,9 +45,14 @@ const (
 	TypeUIRequest           = "ui_request"            // ext -> host: { ID, Name=method, Args }
 	TypeUIResult            = "ui_result"             // host -> ext: { ID, Args }
 	TypeSetActiveTools      = "set_active_tools"      // ext -> host: { Payload.names }
+	TypeHostRequest         = "host_request"          // ext -> host: { ID, Name=method, Args }
+	TypeHostResult          = "host_result"           // host -> ext: { ID, Args, IsError }
+	TypeHostEvent           = "host_event"            // host -> ext: { ID, Name, Args }
+	TypeHostEventResult     = "host_event_result"     // ext -> host: { ID, Args }
 	TypePing                = "ping"                  // host -> ext
 	TypePong                = "pong"                  // ext -> host
 	TypeShutdown            = "shutdown"              // host -> ext: terminate gracefully
+	TypeShutdownRequest     = "shutdown_request"      // ext -> host: request process exit
 )
 
 // Message is the RPC envelope. Type selects which fields are meaningful.
