@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,12 +20,14 @@ import (
 
 // Options configure a suite or single-case run.
 type Options struct {
-	Dir      string
-	OutDir   string
-	Provider string
-	Model    string
-	APIKey   string
-	Stream   ai.StreamFn // when set, skip credential checks (offline tests)
+	Dir            string
+	OutDir         string
+	Provider       string
+	Model          string
+	APIKey         string
+	RunsPerVariant int
+	ContainerImage string
+	Stream         ai.StreamFn // when set, skip credential checks (offline tests)
 }
 
 func seedFiles(cwd string, files map[string]string) error {
@@ -60,6 +63,26 @@ func resolveModel(opts Options) string {
 	return strings.TrimSpace(os.Getenv("PIGO_MODEL"))
 }
 
+func resolveRuns(opts Options) int {
+	if opts.RunsPerVariant > 0 {
+		return opts.RunsPerVariant
+	}
+	if v := strings.TrimSpace(os.Getenv("PIGO_EVAL_RUNS_PER_VARIANT")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
+}
+
+func resolveContainerImage(opts Options) string {
+	if s := strings.TrimSpace(opts.ContainerImage); s != "" {
+		return s
+	}
+	return strings.TrimSpace(os.Getenv("PIGO_CONTAINER_IMAGE"))
+}
+
 // RunDir loads scenarios from opts.Dir, runs them, and writes report.json.
 func RunDir(ctx context.Context, opts Options) (Report, error) {
 	scenarios, err := LoadDir(opts.Dir)
@@ -68,6 +91,7 @@ func RunDir(ctx context.Context, opts Options) (Report, error) {
 	}
 	provider := resolveProvider(opts)
 	skipAll := opts.Stream == nil
+	skipReason := "no API key"
 	if skipAll {
 		probe, err := os.MkdirTemp("", "pigo-eval-auth-")
 		if err != nil {
@@ -81,6 +105,12 @@ func RunDir(ctx context.Context, opts Options) (Report, error) {
 		}
 		skipAll = !HasCredential(probe, provider)
 	}
+	if resolveContainerImage(opts) != "" {
+		if _, err := lookDocker("docker"); err != nil {
+			skipAll = true
+			skipReason = "docker not found in PATH"
+		}
+	}
 
 	var results []Result
 	for _, sc := range scenarios {
@@ -88,11 +118,11 @@ func RunDir(ctx context.Context, opts Options) (Report, error) {
 			results = append(results, Result{
 				Name:   sc.Name,
 				Status: StatusSkip,
-				Error:  "no API key",
+				Error:  skipReason,
 			})
 			continue
 		}
-		results = append(results, runOne(ctx, sc, opts, provider))
+		results = append(results, runScenario(ctx, sc, opts, provider)...)
 	}
 	rep := summarize(results)
 	if err := writeReport(opts.OutDir, rep); err != nil {
@@ -101,11 +131,31 @@ func RunDir(ctx context.Context, opts Options) (Report, error) {
 	return rep, nil
 }
 
-func runOne(ctx context.Context, sc Scenario, opts Options, provider string) Result {
-	res := Result{Name: sc.Name}
+func runScenario(ctx context.Context, sc Scenario, opts Options, provider string) []Result {
+	if !sc.DocsLift {
+		return []Result{runOne(ctx, sc, opts, provider, "", 0, 1)}
+	}
+	runs := resolveRuns(opts)
+	out := make([]Result, 0, 2*runs)
+	for i := 1; i <= runs; i++ {
+		out = append(out, runOne(ctx, sc, opts, provider, VariantWithoutDocs, i, runs))
+		out = append(out, runOne(ctx, sc, opts, provider, VariantWithDocs, i, runs))
+	}
+	return out
+}
+
+func runOne(ctx context.Context, sc Scenario, opts Options, provider, variant string, repeat, runs int) Result {
+	res := Result{Name: sc.Name, Variant: variant, Repeat: repeat}
+	files := sc.Files
+	noContext := sc.Files["AGENTS.md"] == "" && sc.Files["CLAUDE.md"] == ""
+	if variant == VariantWithoutDocs {
+		files = stripContextDocs(sc.Files)
+		noContext = true
+	}
+
 	root, err := os.MkdirTemp("", "pigo-eval-")
 	if err != nil {
-		res.Status = StatusFail
+		res.Status = StatusError
 		res.Error = err.Error()
 		return res
 	}
@@ -116,19 +166,19 @@ func runOne(ctx context.Context, sc Scenario, opts Options, provider string) Res
 	home := filepath.Join(root, "home")
 	for _, d := range []string{cwd, agentDir, home} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			res.Status = StatusFail
+			res.Status = StatusError
 			res.Error = err.Error()
 			return res
 		}
 	}
-	if err := seedFiles(cwd, sc.Files); err != nil {
-		res.Status = StatusFail
+	if err := seedFiles(cwd, files); err != nil {
+		res.Status = StatusError
 		res.Error = err.Error()
 		return res
 	}
 	if opts.APIKey != "" {
 		if err := auth.SetAPIKey(agentDir, provider, opts.APIKey); err != nil {
-			res.Status = StatusFail
+			res.Status = StatusError
 			res.Error = err.Error()
 			return res
 		}
@@ -151,6 +201,7 @@ func runOne(ctx context.Context, sc Scenario, opts Options, provider string) Res
 		Model:           resolveModel(opts),
 		DefaultModel:    resolveModel(opts),
 		Thinking:        "off",
+		Container:       config.ContainerSettings{Image: resolveContainerImage(opts)},
 	}
 	eng, err := runtime.New(ctx, runtime.Options{
 		Config:         cfg,
@@ -165,7 +216,7 @@ func runOne(ctx context.Context, sc Scenario, opts Options, provider string) Res
 		NoSkills:       true,
 		NoPromptTpls:   true,
 		NoThemes:       true,
-		NoContextFiles: sc.Files["AGENTS.md"] == "" && sc.Files["CLAUDE.md"] == "",
+		NoContextFiles: noContext,
 		ProjectTrusted: true,
 		CLIProvider:    provider,
 		CLIModel:       resolveModel(opts),
@@ -174,7 +225,7 @@ func runOne(ctx context.Context, sc Scenario, opts Options, provider string) Res
 		InputSource:    "cli",
 	})
 	if err != nil {
-		res.Status = StatusFail
+		res.Status = StatusError
 		res.Error = err.Error()
 		return res
 	}
@@ -195,16 +246,17 @@ func runOne(ctx context.Context, sc Scenario, opts Options, provider string) Res
 	res.LatencyMs = res.Latency.Milliseconds()
 	eng.PersistTranscript(last)
 	if err := stopErr(last); err != nil {
-		res.Status = StatusFail
+		res.Status = StatusError
 		res.Error = err.Error()
 		res.Output = lastAssistantText(last)
-		copySession(opts.OutDir, sc.Name, sess, &res)
+		copySession(opts.OutDir, sc.Name, variant, repeat, runs, sess, &res)
 		return res
 	}
 	res.Output = lastAssistantText(last)
 	stats := session.CollectStats(sess, nil, 0)
 	res.Tokens = stats.Tokens.Total
-	copySession(opts.OutDir, sc.Name, sess, &res)
+	res.Cost = stats.Cost
+	copySession(opts.OutDir, sc.Name, variant, repeat, runs, sess, &res)
 	if err := grade(res.Output, sc.Expect); err != nil {
 		res.Status = StatusFail
 		res.Error = err.Error()
@@ -241,7 +293,19 @@ func stopErr(last []agent.Msg) error {
 	return nil
 }
 
-func copySession(outDir, name string, sess *session.Manager, res *Result) {
+func sessionArtifactName(name, variant string, repeat, runs int) string {
+	base := name
+	if variant != "" && runs > 1 && repeat > 0 {
+		base = fmt.Sprintf("%s-%d", name, repeat)
+	}
+	file := base + ".jsonl"
+	if variant == "" {
+		return file
+	}
+	return filepath.Join(variant, file)
+}
+
+func copySession(outDir, name, variant string, repeat, runs int, sess *session.Manager, res *Result) {
 	if outDir == "" || sess == nil {
 		return
 	}
@@ -249,11 +313,11 @@ func copySession(outDir, name string, sess *session.Manager, res *Result) {
 	if src == "" {
 		return
 	}
-	dir := filepath.Join(outDir, "sessions")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	rel := sessionArtifactName(name, variant, repeat, runs)
+	dst := filepath.Join(outDir, "sessions", rel)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return
 	}
-	dst := filepath.Join(dir, name+".jsonl")
 	in, err := os.Open(src)
 	if err != nil {
 		return

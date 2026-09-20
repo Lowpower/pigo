@@ -18,7 +18,8 @@ func TestEvalHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := out.String()
-	if !strings.Contains(s, "eval") || !strings.Contains(s, "--out") {
+	if !strings.Contains(s, "eval") || !strings.Contains(s, "--out") ||
+		!strings.Contains(s, "--runs-per-variant") || !strings.Contains(s, "--container-image") {
 		t.Fatalf("eval help:\n%s", s)
 	}
 }

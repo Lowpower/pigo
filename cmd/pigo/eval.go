@@ -10,10 +10,12 @@ import (
 
 func newEvalCmd() *cobra.Command {
 	var (
-		outDir   string
-		provider string
-		model    string
-		apiKey   string
+		outDir         string
+		provider       string
+		model          string
+		apiKey         string
+		runsPerVariant int
+		containerImage string
 	)
 	cmd := &cobra.Command{
 		Use:   "eval [dir]",
@@ -28,11 +30,13 @@ func newEvalCmd() *cobra.Command {
 				outDir = ".eval"
 			}
 			rep, err := eval.RunDir(cmd.Context(), eval.Options{
-				Dir:      dir,
-				OutDir:   outDir,
-				Provider: provider,
-				Model:    model,
-				APIKey:   apiKey,
+				Dir:            dir,
+				OutDir:         outDir,
+				Provider:       provider,
+				Model:          model,
+				APIKey:         apiKey,
+				RunsPerVariant: runsPerVariant,
+				ContainerImage: containerImage,
 			})
 			if err != nil {
 				return err
@@ -48,5 +52,7 @@ func newEvalCmd() *cobra.Command {
 	cmd.Flags().StringVar(&provider, "provider", "", "provider id (env PIGO_PROVIDER)")
 	cmd.Flags().StringVar(&model, "model", "", "model id (env PIGO_MODEL)")
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key for this process (does not persist)")
+	cmd.Flags().IntVar(&runsPerVariant, "runs-per-variant", 0, "docs-lift repetitions (env PIGO_EVAL_RUNS_PER_VARIANT, default 1)")
+	cmd.Flags().StringVar(&containerImage, "container-image", "", "settings.container.image for tool isolation (env PIGO_CONTAINER_IMAGE)")
 	return cmd
 }
