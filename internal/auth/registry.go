@@ -84,6 +84,10 @@ func registerBuiltins() {
 		OAuth: xaiOAuth{},
 	})
 	registerProvider(Provider{
+		ID:    "meta",
+		OAuth: metaOAuth{},
+	})
+	registerProvider(Provider{
 		ID: "google",
 		APIKey: &APIKeyHandler{
 			Name:  "Gemini API key",

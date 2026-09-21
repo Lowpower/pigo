@@ -5,7 +5,8 @@ A provider is an id with a wire API, base URL, and credentials.
 ## Built-in
 
 Core ids: `anthropic`, `openai`, `openai-codex`, `opencode`, `google`,
-`amazon-bedrock`, `llama.cpp`, `radius`, `github-copilot`, `openrouter`, `xai`.
+`amazon-bedrock`, `llama.cpp`, `radius`, `github-copilot`, `openrouter`,
+`xai`, `meta`.
 
 Additional catalog ids are registered from `internal/models` (OpenRouter-style
 gateways, Cloudflare, Azure, Vertex, MiniMax, Moonshot, Z.AI, …). Run
@@ -20,7 +21,7 @@ Wire APIs include `anthropic-messages`, `openai-completions`,
 
 `pigo auth login <provider>` stores keys in `~/.pigo/agent/auth.json`.
 OAuth is available for several providers (Anthropic, OpenAI Codex, GitHub
-Copilot, OpenRouter, Kimi, xAI, Radius). See [auth.md](auth.md).
+Copilot, OpenRouter, Kimi, xAI, Meta Muse, Radius). See [auth.md](auth.md).
 
 `--api-key` injects a key for this process only.
 

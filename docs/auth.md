@@ -21,8 +21,14 @@ See [providers.md](providers.md).
 API key (env in parentheses): `anthropic` (`ANTHROPIC_API_KEY` and related),
 `openai` / `openai-codex` (`OPENAI_API_KEY`), `opencode`, `openrouter`, `xai`,
 `google` (`GEMINI_API_KEY`), `amazon-bedrock`, `llama.cpp`, plus catalog
-providers (`OPENROUTER_API_KEY`, `GROQ_API_KEY`, …).
+providers (`OPENROUTER_API_KEY`, `GROQ_API_KEY`, `META_API_KEY`, …).
 
 OAuth (device or loopback): `anthropic`, `openai-codex`, `github-copilot`,
-`openrouter`, `kimi-coding`, `xai`, `radius`. Callback bind host:
+`openrouter`, `kimi-coding`, `xai`, `meta`, `radius`. Callback bind host:
 `PIGO_OAUTH_CALLBACK_HOST` (default `127.0.0.1`).
+
+`/login meta` (or `pigo auth login meta`) uses a device code at auth.meta.com,
+then mints a Model API key at api.meta.ai. Minted keys last about a day; pigo
+stores the identity token as `refresh` and remints automatically. A 401/403
+from mint means the session is gone — sign in again. A key can also be set
+with `META_API_KEY`.

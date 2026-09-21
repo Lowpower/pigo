@@ -83,6 +83,7 @@ func TestNvidiaDefaultHeaders(t *testing.T) {
 func TestMixedProvidersAreRegistered(t *testing.T) {
 	want := map[string]string{
 		"xai":                   "openai-responses",
+		"meta":                  "openai-responses",
 		"fireworks":             "anthropic-messages",
 		"github-copilot":        "openai-completions",
 		"opencode-go":           "openai-completions",
@@ -108,6 +109,16 @@ func TestMixedProvidersAreRegistered(t *testing.T) {
 	}
 	if copilot.FilterModels == nil {
 		t.Fatal("github-copilot missing FilterModels")
+	}
+	meta, ok := LookupProvider("meta")
+	if !ok {
+		t.Fatal("missing meta")
+	}
+	if meta.DefaultID != "muse-spark-1.3" || meta.BaseURL != "https://api.meta.ai/v1" {
+		t.Fatalf("meta spec = %+v", meta)
+	}
+	if len(meta.Env) == 0 || meta.Env[0] != "META_API_KEY" {
+		t.Fatalf("meta env = %v", meta.Env)
 	}
 }
 
