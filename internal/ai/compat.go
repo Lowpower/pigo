@@ -70,6 +70,46 @@ func toolStrict(t Tool) bool {
 	}
 }
 
+// wireToolStrict is whether the adapter should send strict JSON-schema sampling.
+func wireToolStrict(opts Options, t Tool) bool {
+	return toolStrict(t) && supportsStrictMode(opts)
+}
+
+func supportsStrictMode(opts Options) bool {
+	if isCerebrasProvider(opts) {
+		return false
+	}
+	c := lookupCompat(opts)
+	if c != nil && c.SupportsStrictMode != nil {
+		return *c.SupportsStrictMode
+	}
+	switch strings.ToLower(strings.TrimSpace(opts.Provider)) {
+	case "openai", "openai-codex", "azure-openai-responses":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCerebrasProvider(opts Options) bool {
+	if strings.EqualFold(strings.TrimSpace(opts.Provider), "cerebras") {
+		return true
+	}
+	spec, ok := models.LookupProvider(opts.Provider)
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(spec.BaseURL), "cerebras.ai")
+}
+
+func allowedFallbackModels(opts Options) []models.AllowedFallbackModel {
+	c := lookupCompat(opts)
+	if c == nil || c.AllowedFallbackModels == nil {
+		return nil
+	}
+	return *c.AllowedFallbackModels
+}
+
 func longCacheOK(c *models.Compat) bool {
 	if c == nil || c.SupportsLongCacheRetention == nil {
 		return true

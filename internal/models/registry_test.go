@@ -105,3 +105,36 @@ func TestOverlayMergesCostAndMaxTokens(t *testing.T) {
 		t.Fatalf("maxTokens=%d", m.MaxTokens)
 	}
 }
+
+func TestOverlayMergesCompat(t *testing.T) {
+	ClearOverlays()
+	t.Cleanup(ClearOverlays)
+	on := true
+	fallbacks := []AllowedFallbackModel{{Model: "claude-haiku-4"}}
+	SetUserOverlay("anthropic", []Model{{
+		ID: "claude-sonnet-4",
+		Compat: &Compat{
+			SupportsStrictMode:    &on,
+			AllowedFallbackModels: &fallbacks,
+		},
+	}})
+	m, ok := Lookup("anthropic", "claude-sonnet-4")
+	if !ok || m.Compat == nil {
+		t.Fatal("missing compat")
+	}
+	if m.Compat.SupportsStrictMode == nil || !*m.Compat.SupportsStrictMode {
+		t.Fatalf("strict = %+v", m.Compat.SupportsStrictMode)
+	}
+	if m.Compat.AllowedFallbackModels == nil || len(*m.Compat.AllowedFallbackModels) != 1 {
+		t.Fatalf("fallbacks = %+v", m.Compat.AllowedFallbackModels)
+	}
+	empty := []AllowedFallbackModel{}
+	SetUserOverlay("anthropic", []Model{{
+		ID:     "claude-sonnet-4",
+		Compat: &Compat{AllowedFallbackModels: &empty},
+	}})
+	m, _ = Lookup("anthropic", "claude-sonnet-4")
+	if m.Compat == nil || m.Compat.AllowedFallbackModels == nil || len(*m.Compat.AllowedFallbackModels) != 0 {
+		t.Fatalf("empty fallbacks = %+v", m.Compat)
+	}
+}

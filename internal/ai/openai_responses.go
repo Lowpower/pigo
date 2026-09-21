@@ -91,7 +91,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 				ft := responses.FunctionToolParam{
 					Name:       t.Name,
 					Parameters: t.Parameters,
-					Strict:     param.NewOpt(toolStrict(t)),
+					Strict:     param.NewOpt(wireToolStrict(opts, t)),
 				}
 				if t.Description != "" {
 					ft.Description = param.NewOpt(t.Description)

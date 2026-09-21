@@ -266,9 +266,70 @@ func TestBuildOpenAIRequestThinkingFormats(t *testing.T) {
 	}
 	tools, _ := req["tools"].([]any)
 	fn, _ := tools[0].(map[string]any)["function"].(map[string]any)
-	if fn["strict"] != true {
-		t.Fatalf("strict = %#v", fn)
+	if _, ok := fn["strict"]; ok {
+		t.Fatalf("unknown provider should omit strict: %#v", fn)
 	}
+}
+
+func TestBuildOpenAIRequestStrictMode(t *testing.T) {
+	on, off := true, false
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "strict-test", DefaultAPI: "openai-completions", DefaultID: "on",
+		Models: []models.Model{
+			{Provider: "strict-test", ID: "on", Compat: &models.Compat{SupportsStrictMode: &on}},
+			{Provider: "strict-test", ID: "off", Compat: &models.Compat{SupportsStrictMode: &off}},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("strict-test") })
+
+	prefer := &ConstrainedSampling{Type: "json_schema", Strict: "prefer"}
+	ctx := Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		Tools:    []Tool{{Name: "read", Parameters: map[string]any{"type": "object"}, ConstrainedSampling: prefer}},
+	}
+
+	body, err := buildOpenAIRequest(ctx, Options{Provider: "openai", Model: "gpt-4o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := openAIToolFn(t, body)
+	if fn["strict"] != true {
+		t.Fatalf("openai default strict = %#v", fn)
+	}
+
+	body, _ = buildOpenAIRequest(ctx, Options{Provider: "cerebras", Model: "gemma-4-31b"})
+	fn = openAIToolFn(t, body)
+	if _, ok := fn["strict"]; ok {
+		t.Fatalf("cerebras must omit strict: %#v", fn)
+	}
+
+	body, _ = buildOpenAIRequest(ctx, Options{Provider: "strict-test", Model: "on"})
+	fn = openAIToolFn(t, body)
+	if fn["strict"] != true {
+		t.Fatalf("compat true = %#v", fn)
+	}
+	body, _ = buildOpenAIRequest(ctx, Options{Provider: "strict-test", Model: "off"})
+	fn = openAIToolFn(t, body)
+	if _, ok := fn["strict"]; ok {
+		t.Fatalf("compat false = %#v", fn)
+	}
+}
+
+func openAIToolFn(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	tools, _ := req["tools"].([]any)
+	if len(tools) == 0 {
+		t.Fatal("no tools")
+	}
+	fn, _ := tools[0].(map[string]any)["function"].(map[string]any)
+	if fn == nil {
+		t.Fatalf("function = %#v", tools[0])
+	}
+	return fn
 }
 
 func TestBuildAnthropicMidConvoEffort(t *testing.T) {
@@ -295,6 +356,49 @@ func TestBuildAnthropicMidConvoEffort(t *testing.T) {
 	oc, _ := req["output_config"].(map[string]any)
 	if oc["effort"] != "high" {
 		t.Fatalf("output_config = %#v", oc)
+	}
+}
+
+func TestBuildAnthropicFallbacks(t *testing.T) {
+	fallbacks := []models.AllowedFallbackModel{{Model: "claude-haiku-4"}}
+	empty := []models.AllowedFallbackModel{}
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "fb-ant", DefaultAPI: "anthropic-messages", DefaultID: "sonnet",
+		Models: []models.Model{
+			{Provider: "fb-ant", ID: "sonnet", Compat: &models.Compat{AllowedFallbackModels: &fallbacks}},
+			{Provider: "fb-ant", ID: "none", Compat: &models.Compat{AllowedFallbackModels: &empty}},
+			{Provider: "fb-ant", ID: "unset"},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("fb-ant") })
+
+	ctx := Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}
+	body, err := buildAnthropicRequest(ctx, Options{Provider: "fb-ant", Model: "sonnet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	_ = json.Unmarshal(body, &req)
+	list, _ := req["fallbacks"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("fallbacks = %#v", req["fallbacks"])
+	}
+	item, _ := list[0].(map[string]any)
+	if item["model"] != "claude-haiku-4" {
+		t.Fatalf("fallback item = %#v", item)
+	}
+
+	body, _ = buildAnthropicRequest(ctx, Options{Provider: "fb-ant", Model: "none"})
+	req = map[string]any{}
+	_ = json.Unmarshal(body, &req)
+	if _, ok := req["fallbacks"]; ok {
+		t.Fatalf("empty list should omit fallbacks: %#v", req["fallbacks"])
+	}
+	body, _ = buildAnthropicRequest(ctx, Options{Provider: "fb-ant", Model: "unset"})
+	req = map[string]any{}
+	_ = json.Unmarshal(body, &req)
+	if _, ok := req["fallbacks"]; ok {
+		t.Fatalf("unset should omit fallbacks: %#v", req["fallbacks"])
 	}
 }
 

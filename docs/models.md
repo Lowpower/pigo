@@ -49,3 +49,10 @@ Unknown provider ids are registered, including API-key auth. `apiKey` in
 `models.json`, or the same id in `auth.json`, is enough for `--list-models` and
 requests. Overlaying a custom gateway onto a builtin id such as `openai` still
 merges catalogs; prefer a distinct provider id. See [providers.md](providers.md).
+
+Per-model `compat` fields overlay onto the catalog:
+
+| Field | Notes |
+| --- | --- |
+| `supportsStrictMode` | Send OpenAI-compatible `strict` tool schemas. Default false for unknown providers; true for `openai` / `openai-codex` / `azure-openai-responses`. Cerebras is always off. |
+| `allowedFallbackModels` | Anthropic `fallbacks` targets (`[{"model":"claude-haiku-4"}]`). Empty array omits the field. |

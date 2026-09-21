@@ -126,7 +126,7 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 		tools := make([]map[string]any, 0, len(reqCtx.Tools))
 		for _, t := range reqCtx.Tools {
 			fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters}
-			if toolStrict(t) {
+			if wireToolStrict(opts, t) {
 				fn["strict"] = true
 			}
 			tools = append(tools, map[string]any{

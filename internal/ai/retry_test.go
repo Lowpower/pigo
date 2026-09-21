@@ -64,6 +64,19 @@ func TestIsContextOverflow(t *testing.T) {
 	if IsContextOverflow(errorAssistant("overloaded_error"), 0) {
 		t.Fatal("overloaded should not be overflow")
 	}
+	if !IsContextOverflow(errorAssistant(`{"code":"1261","message":"Prompt too long"}`), 0) {
+		t.Fatal("z.ai Prompt too long should match")
+	}
+	cerebras := errorAssistant("400 status code (no body)")
+	cerebras.Provider = "cerebras"
+	if !IsContextOverflow(cerebras, 0) {
+		t.Fatal("cerebras bodyless 400 should be overflow")
+	}
+	other := errorAssistant("400 status code (no body)")
+	other.Provider = "openai"
+	if IsContextOverflow(other, 0) {
+		t.Fatal("non-cerebras bodyless 400 should not be overflow")
+	}
 }
 
 func TestIsRecoverableLength(t *testing.T) {

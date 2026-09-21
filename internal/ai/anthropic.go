@@ -211,7 +211,7 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		}
 		req["system"] = []map[string]any{sys}
 	}
-	if len(immediate) > 0 || len(deferred) > 0 {
+		if len(immediate) > 0 || len(deferred) > 0 {
 		tools := anthropicToolDefs(immediate, false)
 		tools = append(tools, anthropicToolDefs(deferred, true)...)
 		if len(tools) > 0 {
@@ -219,6 +219,9 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		}
 		req["tools"] = tools
 		req["tool_choice"] = map[string]any{"type": "auto"}
+	}
+	if fallbacks := anthropicFallbackParams(opts); len(fallbacks) > 0 {
+		req["fallbacks"] = fallbacks
 	}
 	if midConvoEffort(opts) {
 		req["thinking"] = map[string]any{
@@ -244,6 +247,24 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		}
 	}
 	return json.Marshal(req)
+}
+
+func anthropicFallbackParams(opts Options) []map[string]any {
+	list := allowedFallbackModels(opts)
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, fb := range list {
+		if fb.Model == "" {
+			continue
+		}
+		out = append(out, map[string]any{"model": fb.Model})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func anthropicToolDefs(tools []Tool, deferLoading bool) []map[string]any {

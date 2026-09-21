@@ -273,10 +273,66 @@ func mergeOverlay(base, extra []Model) []Model {
 			if m.MaxTokens > 0 {
 				out[i].MaxTokens = m.MaxTokens
 			}
+			if m.Compat != nil {
+				out[i].Compat = mergeCompat(out[i].Compat, m.Compat)
+			}
 			continue
 		}
 		idx[m.ID] = len(out)
 		out = append(out, m)
 	}
 	return out
+}
+
+func mergeCompat(base, extra *Compat) *Compat {
+	if extra == nil {
+		return base
+	}
+	out := Compat{}
+	if base != nil {
+		out = *base
+	}
+	if extra.ThinkingFormat != "" {
+		out.ThinkingFormat = extra.ThinkingFormat
+	}
+	if extra.SupportsMidConvoEffort {
+		out.SupportsMidConvoEffort = true
+	}
+	if extra.SupportsReasoningEffort {
+		out.SupportsReasoningEffort = true
+	}
+	if extra.SupportsExplicitPromptCacheMode {
+		out.SupportsExplicitPromptCacheMode = true
+	}
+	if extra.VLLMPriority != nil {
+		out.VLLMPriority = extra.VLLMPriority
+	}
+	if extra.ChatTemplateKwargs != nil {
+		out.ChatTemplateKwargs = extra.ChatTemplateKwargs
+	}
+	if extra.ChatTemplateArgs != nil {
+		out.ChatTemplateArgs = extra.ChatTemplateArgs
+	}
+	if extra.SupportsLongCacheRetention != nil {
+		out.SupportsLongCacheRetention = extra.SupportsLongCacheRetention
+	}
+	if extra.SupportsMaxOutputTokens != nil {
+		out.SupportsMaxOutputTokens = extra.SupportsMaxOutputTokens
+	}
+	if extra.SessionAffinityFormat != "" {
+		out.SessionAffinityFormat = extra.SessionAffinityFormat
+	}
+	if extra.SendSessionAffinityHeaders {
+		out.SendSessionAffinityHeaders = true
+	}
+	if extra.SupportsToolReferences {
+		out.SupportsToolReferences = true
+	}
+	if extra.SupportsStrictMode != nil {
+		out.SupportsStrictMode = extra.SupportsStrictMode
+	}
+	if extra.AllowedFallbackModels != nil {
+		out.AllowedFallbackModels = extra.AllowedFallbackModels
+	}
+	return &out
 }

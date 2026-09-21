@@ -66,6 +66,19 @@ type Compat struct {
 	// (defer_loading / tool_reference). Fireworks Messages also enable this
 	// when Options.Provider is "fireworks", even if this flag is unset.
 	SupportsToolReferences bool `json:"supportsToolReferences,omitempty"`
+	// SupportsStrictMode controls JSON-schema strict tool sampling on the wire.
+	// Nil means: false for unknown OpenAI-compatible providers, true for
+	// openai / openai-codex / azure-openai-responses. Cerebras is always false.
+	SupportsStrictMode *bool `json:"supportsStrictMode,omitempty"`
+	// AllowedFallbackModels is Anthropic server-side fallbacks. Nil leaves the
+	// request unchanged; a non-nil empty slice omits the fallbacks field.
+	AllowedFallbackModels *[]AllowedFallbackModel `json:"allowedFallbackModels,omitempty"`
+}
+
+// AllowedFallbackModel is one Anthropic `fallbacks` target.
+type AllowedFallbackModel struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model"`
 }
 
 // Cost is catalog pricing in dollars per million tokens.
