@@ -120,3 +120,8 @@ func notifyRadiusCatalog(notify func(string), msg string) {
 		notify(msg)
 	}
 }
+
+// RadiusOverlayReady reports whether the gateway catalog overlay is present.
+func RadiusOverlayReady() bool {
+	return len(remoteOverlay("radius")) > 0
+}

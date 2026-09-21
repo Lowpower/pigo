@@ -322,11 +322,7 @@ func (m *Model) maybeWarnRadiusCatalog(provider string) {
 	if provider != "radius" {
 		return
 	}
-	id := models.DefaultID("radius")
-	if id == "" {
-		id = "balanced"
-	}
-	if _, ok := models.Lookup("radius", id); ok {
+	if models.RadiusOverlayReady() {
 		return
 	}
 	m.transcript = append(m.transcript, entry{
