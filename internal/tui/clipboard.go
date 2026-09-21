@@ -267,19 +267,91 @@ func randHex(n int) string {
 }
 
 func runClip(name string, timeout time.Duration, args ...string) ([]byte, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.Output()
-	if err != nil || len(out) == 0 {
+	out, ok := runClipCmd(timeout, "", name, args...)
+	if !ok || len(out) == 0 {
 		return nil, false
 	}
 	return out, true
 }
 
 func runClipOK(name string, timeout time.Duration, args ...string) bool {
+	_, ok := runClipCmd(timeout, "", name, args...)
+	return ok
+}
+
+type clipRunner func(timeout time.Duration, stdin string, name string, args ...string) ([]byte, bool)
+
+func defaultClipRunner(timeout time.Duration, stdin string, name string, args ...string) ([]byte, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
-	return cmd.Run() == nil
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+var runClipCmd clipRunner = defaultClipRunner
+
+func copyToClipboard(text string) string {
+	writeClipboardText(text)
+	return osc52(text)
+}
+
+func writeClipboardText(text string) bool {
+	return writeClipboardTextEnv(os.Getenv, runClipCmd, text)
+}
+
+func writeClipboardTextEnv(getenv func(string) string, run clipRunner, text string) bool {
+	if run == nil {
+		run = defaultClipRunner
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return copyViaWindowsClipboard(text, run)
+	case "linux":
+		if isWSL(getenv) {
+			return copyViaWindowsClipboard(text, run)
+		}
+	}
+	return false
+}
+
+func copyViaWindowsClipboard(text string, run clipRunner) bool {
+	tmp, err := os.CreateTemp("", "pigo-wsl-clip-*.txt")
+	if err != nil {
+		return false
+	}
+	path := tmp.Name()
+	defer func() { _ = os.Remove(path) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return false
+	}
+	if _, err := tmp.WriteString(text); err != nil {
+		_ = tmp.Close()
+		return false
+	}
+	if err := tmp.Close(); err != nil {
+		return false
+	}
+	winPath := path
+	if runtime.GOOS != "windows" {
+		out, ok := run(time.Second, "", "wslpath", "-w", path)
+		if !ok {
+			return false
+		}
+		winPath = strings.TrimSpace(string(out))
+		if winPath == "" {
+			return false
+		}
+	}
+	escaped := strings.ReplaceAll(winPath, "'", "''")
+	script := "Set-Clipboard -Value ([System.IO.File]::ReadAllText('" + escaped + "', [System.Text.Encoding]::UTF8))"
+	_, ok := run(5*time.Second, "", "powershell.exe", "-NoProfile", "-Command", script)
+	return ok
 }

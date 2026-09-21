@@ -27,6 +27,9 @@ Mouse copy: `--tui-mode regular` (default) leaves selection to the terminal;
 `fullscreen` uses the alternate screen (`fullscreenCopyOnSelect`,
 `Ctrl+X`).
 
+Copy also writes the Windows clipboard from WSL (`WSL_DISTRO_NAME` /
+`WSLENV`) via PowerShell UTF-8, in addition to OSC 52.
+
 ## Termux
 
 There is no Termux-specific code path. Use the Linux arm64 (or amd64)
