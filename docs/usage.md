@@ -67,7 +67,7 @@ Unknown `--flags` on the root command are held for extensions that
 - `config` — TTY settings picker (`--print` dumps JSON; `--local` writes `.pigo/settings.json`)
 - `install` / `remove` (`uninstall`) / `list` / `update` — [packages.md](packages.md)
 - `server` / `client` — [server.md](server.md)
-- cobra `help` / `completion`
+- cobra `help` / `completion` — [platforms.md](platforms.md#shell-aliases)
 - `eval` — run JSON scenarios in isolated temp directories; `*.docs.json` is a paired docs-lift comparison ([`evals/`](../evals/README.md))
 
 ## Slash commands (TUI)

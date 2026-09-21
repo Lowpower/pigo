@@ -25,8 +25,13 @@ subprocess binaries that speak the framed JSON protocol (`internal/ext`).
 - [Models](models.md)
 - [Providers](providers.md)
 - [Keybindings](keybindings.md)
-- [Tools](tools.md)
+- [Tools](tools.md) — sandbox and [Docker isolation](tools.md#docker-tools-in-container)
 - [Auth](auth.md)
+
+## Platforms and ops
+
+- [Security](security.md) — project trust, extensions, credentials
+- [Platforms](platforms.md) — Windows, Termux, tmux, terminal setup, shell aliases
 
 ## Programmatic usage
 
