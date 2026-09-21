@@ -1,7 +1,7 @@
 # Auth
 
 Storage: `~/.pigo/agent/auth.json` (mode 0600). Credential `type` is `api_key`
-or `oauth`.
+or `oauth`. Trust, extensions, and isolation: [security.md](security.md).
 
 ```bash
 pigo auth login anthropic

@@ -31,7 +31,8 @@ display.
 
 Local `.pigo/` resources, ancestor `.agents/skills`, and project
 `sandbox.json` require trust (`ask` / `always` / `never`, `--approve`,
-`/trust`). User `~/.agents/skills` always loads.
+`/trust`). User `~/.agents/skills` always loads. Credentials, extension
+loading, and isolation: [security.md](security.md).
 
 ## Sandbox
 
