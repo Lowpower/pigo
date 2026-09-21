@@ -91,11 +91,17 @@ func registerBuiltins() {
 	})
 	registerExtraProviders()
 	RegisterProvider(ProviderSpec{
-		ID:            "radius",
-		Name:          "Radius API key",
-		Env:           []string{"RADIUS_API_KEY"},
-		DefaultAPI:    "pigo-messages",
-		DefaultID:     "balanced",
+		ID:         "radius",
+		Name:       "Radius API key",
+		Env:        []string{"RADIUS_API_KEY"},
+		DefaultAPI: "pigo-messages",
+		DefaultID:  "balanced",
+		Models: []Model{{
+			Provider: "radius",
+			ID:       "balanced",
+			Name:     "Balanced",
+			API:      "pigo-messages",
+		}},
 		RefreshModels: refreshRadius,
 	})
 }

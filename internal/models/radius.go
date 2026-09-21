@@ -11,15 +11,21 @@ import (
 	"time"
 )
 
-const radiusCatalogWait = 10 * time.Second
+const (
+	radiusCatalogWait    = 10 * time.Second
+	defaultRadiusGateway = "https://radius.pi.dev"
+)
 
 var radiusCatalogRetry = 500 * time.Millisecond
 
-// RadiusGateway is RADIUS_GATEWAY or PIGO_RADIUS_GATEWAY (no built-in host).
+// RadiusGateway is RADIUS_GATEWAY or PIGO_RADIUS_GATEWAY, else the public host.
 func RadiusGateway() string {
 	g := strings.TrimRight(strings.TrimSpace(os.Getenv("RADIUS_GATEWAY")), "/")
 	if g == "" {
 		g = strings.TrimRight(strings.TrimSpace(os.Getenv("PIGO_RADIUS_GATEWAY")), "/")
+	}
+	if g == "" {
+		g = defaultRadiusGateway
 	}
 	return g
 }
@@ -37,9 +43,6 @@ func refreshRadius(store CatalogStore) error {
 
 func refreshRadiusCatalog(ctx context.Context, store CatalogStore, token string) error {
 	gateway := RadiusGateway()
-	if gateway == "" {
-		return nil
-	}
 	if token == "" {
 		token = os.Getenv("RADIUS_API_KEY")
 	}
@@ -90,10 +93,6 @@ func refreshRadiusCatalog(ctx context.Context, store CatalogStore, token string)
 // WaitForRadiusCatalog polls the Radius gateway until the overlay is non-empty
 // or ctx ends. Timeout is not an error: the caller should keep the credential.
 func WaitForRadiusCatalog(ctx context.Context, store CatalogStore, token string, notify func(string)) bool {
-	if RadiusGateway() == "" {
-		notifyRadiusCatalog(notify, "Radius model catalog timed out; models may be unavailable until refresh.")
-		return false
-	}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, radiusCatalogWait)

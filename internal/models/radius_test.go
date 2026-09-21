@@ -41,11 +41,11 @@ func TestRefreshRadiusLoadsConfig(t *testing.T) {
 	}
 }
 
-func TestRefreshRadiusSkipsWithoutAuthOrGateway(t *testing.T) {
+func TestRadiusGatewayDefaultsToPublicHost(t *testing.T) {
 	t.Setenv("RADIUS_GATEWAY", "")
-	t.Setenv("RADIUS_API_KEY", "")
-	if err := refreshRadius(&MemoryStore{}); err != nil {
-		t.Fatal(err)
+	t.Setenv("PIGO_RADIUS_GATEWAY", "")
+	if RadiusGateway() != defaultRadiusGateway {
+		t.Fatalf("gateway = %q", RadiusGateway())
 	}
 }
 
@@ -130,8 +130,11 @@ func TestWaitForRadiusCatalogTimeout(t *testing.T) {
 	if ok {
 		t.Fatal("empty catalog should time out")
 	}
-	if _, found := Lookup("radius", "balanced"); found {
-		t.Fatal("should not treat missing default as loaded")
+	if _, found := Lookup("radius", "balanced"); !found {
+		t.Fatal("offline fallback balanced should remain listed")
+	}
+	if len(remoteOverlay("radius")) != 0 {
+		t.Fatal("empty gateway config should not overlay models")
 	}
 	foundTimeout := false
 	for _, n := range notes {

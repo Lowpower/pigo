@@ -7,6 +7,9 @@ A provider is an id with a wire API, base URL, and credentials.
 Core ids: `anthropic`, `openai`, `openai-codex`, `opencode`, `google`,
 `amazon-bedrock`, `llama.cpp`, `radius`, `github-copilot`, `openrouter`, `xai`.
 
+`radius` keeps an offline `balanced` model and refreshes the rest from
+`https://radius.pi.dev` (`RADIUS_GATEWAY` / `PIGO_RADIUS_GATEWAY`).
+
 Additional catalog ids are registered from `internal/models` (OpenRouter-style
 gateways, Cloudflare, Azure, Vertex, MiniMax, Moonshot, Z.AI, …). Run
 `pigo --list-models` for the current set.

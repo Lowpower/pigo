@@ -180,4 +180,7 @@ func TestRemainingNewAPIProvidersRegistered(t *testing.T) {
 	if spec, _ := LookupProvider("radius"); spec.RefreshModels == nil {
 		t.Error("radius missing RefreshModels")
 	}
+	if _, ok := Lookup("radius", "balanced"); !ok {
+		t.Error("radius missing offline balanced model")
+	}
 }

@@ -20,7 +20,7 @@ Most names use the `PIGO_` prefix. Span export also reads standard
 | `PIGO_OAUTH_CALLBACK_HOST` | OAuth bind host (default `127.0.0.1`) |
 | `PIGO_SERVER_LISTEN` / `PIGO_SERVER_CONNECT` | Default Unix socket for `server` / `client` |
 | `PIGO_CATALOG_BASE_URL` | Remote model catalog |
-| `PIGO_RADIUS_GATEWAY` / `PIGO_RADIUS_CLIENT_ID` | Radius (`RADIUS_GATEWAY` / `RADIUS_CLIENT_ID` also accepted) |
+| `PIGO_RADIUS_GATEWAY` / `PIGO_RADIUS_CLIENT_ID` | Radius (`RADIUS_GATEWAY` / `RADIUS_CLIENT_ID` also accepted). Gateway defaults to `https://radius.pi.dev` |
 | `PIGO_CHANGELOG_PATH` | Changelog file override |
 | `PIGO_HYPERLINKS` / `PIGO_TRUE_COLOR` / `PIGO_IMAGE_PROTOCOL` / `PIGO_CACHE_RETENTION` | Terminal / cache (`on`/`off`/`auto`; cache is `none\|short\|long`) |
 
