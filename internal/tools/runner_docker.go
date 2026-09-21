@@ -26,6 +26,7 @@ type DockerOptions struct {
 	Cwd        string
 	Mounts     []Mount
 	ExtraAllow []string
+	Network    bool
 }
 
 type dockerRunner struct {
@@ -33,6 +34,7 @@ type dockerRunner struct {
 	Cwd        string
 	Mounts     []Mount
 	ExtraAllow []string
+	Network    bool
 
 	mu     sync.Mutex
 	docker string
@@ -48,6 +50,7 @@ func NewDockerRunner(opt DockerOptions) Runner {
 		Cwd:        opt.Cwd,
 		Mounts:     append([]Mount{}, opt.Mounts...),
 		ExtraAllow: append([]string{}, opt.ExtraAllow...),
+		Network:    opt.Network,
 	}
 }
 
@@ -122,6 +125,9 @@ func (d *dockerRunner) runArgs() ([]string, error) {
 		"--label", "pigo.tools=1",
 		"-w", ContainerWorkDir,
 		"-v", dockerBind(cwd, ContainerWorkDir),
+	}
+	if !d.Network {
+		args = append(args, "--network", "none")
 	}
 	if uid := os.Getuid(); uid >= 0 {
 		args = append(args, "-u", fmt.Sprintf("%d:%d", uid, os.Getgid()))

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/protocol"
+	"github.com/Lowpower/pigo/internal/secretname"
 	"github.com/Lowpower/pigo/internal/shell"
 )
 
@@ -86,7 +87,7 @@ func Spawn(ctx context.Context, name string, argv []string, opts Options) (*Host
 		return nil, errors.New("ext: empty argv")
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = append(os.Environ(), opts.Env...)
+	cmd.Env = append(secretname.FilterEnviron(os.Environ()), secretname.FilterEnviron(opts.Env)...)
 	cmd.Stderr = os.Stderr
 	shell.Prepare(cmd)
 

@@ -78,7 +78,7 @@ func TestLoadSettingsKeyNames(t *testing.T) {
 
 func TestLoadContainerSettings(t *testing.T) {
 	dir := t.TempDir()
-	body := `{"container":{"image":"alpine:3","mounts":[{"host":"/tmp/data","container":"/data"}],"env":["TERM"]}}`
+	body := `{"container":{"image":"alpine:3","mounts":[{"host":"/tmp/data","container":"/data"}],"env":["TERM"],"network":true}}`
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +94,9 @@ func TestLoadContainerSettings(t *testing.T) {
 	}
 	if len(cfg.Container.Env) != 1 || cfg.Container.Env[0] != "TERM" {
 		t.Fatalf("env=%v", cfg.Container.Env)
+	}
+	if !cfg.ContainerNetwork() {
+		t.Fatal("expected container.network true")
 	}
 }
 

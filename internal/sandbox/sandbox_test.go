@@ -158,3 +158,17 @@ func TestSeatbeltProfileDeniesWriteAndNetwork(t *testing.T) {
 		t.Fatal("no proxy ports should mean no network")
 	}
 }
+
+func TestDefaultsDenyPigoHome(t *testing.T) {
+	cfg := Load(t.TempDir(), t.TempDir())
+	found := false
+	for _, p := range cfg.Filesystem.DenyRead {
+		if p == "~/.pigo" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("denyRead=%v", cfg.Filesystem.DenyRead)
+	}
+}

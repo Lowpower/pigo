@@ -17,7 +17,7 @@ Most names use the `PIGO_` prefix. Span export also reads standard
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Full traces URL (wins over `ENDPOINT`) |
 | `OTEL_EXPORTER_OTLP_HEADERS` / `OTEL_EXPORTER_OTLP_TRACES_HEADERS` | Comma-separated `k=v` request headers |
 | `PIGO_SHARE_VIEWER_URL` | Base URL printed by `/share` (otherwise the gist URL) |
-| `PIGO_OAUTH_CALLBACK_HOST` | OAuth bind host (default `127.0.0.1`) |
+| `PIGO_OAUTH_CALLBACK_HOST` | OAuth bind host; non-loopback values are ignored (default `127.0.0.1`) |
 | `PIGO_SERVER_LISTEN` / `PIGO_SERVER_CONNECT` | Default Unix socket for `server` / `client` |
 | `PIGO_CATALOG_BASE_URL` | Remote model catalog |
 | `PIGO_RADIUS_GATEWAY` / `PIGO_RADIUS_CLIENT_ID` | Radius (`RADIUS_GATEWAY` / `RADIUS_CLIENT_ID` also accepted) |

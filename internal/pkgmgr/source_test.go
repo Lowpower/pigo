@@ -77,3 +77,12 @@ func TestIsCLIPackageSource(t *testing.T) {
 		t.Fatal("local path and https URLs are not CLI package sources")
 	}
 }
+
+func TestParseSourceRejectsInsecureGit(t *testing.T) {
+	for _, in := range []string{"git://github.com/user/repo", "git:git://github.com/user/repo"} {
+		_, err := ParseSource(in)
+		if err == nil {
+			t.Fatalf("ParseSource(%q) should reject git://", in)
+		}
+	}
+}

@@ -275,10 +275,17 @@ func TestResolveCLIExtensionGitStub(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Run = func(_ context.Context, name string, args []string, _ string) error {
-		if name != "git" || len(args) < 3 || args[0] != "clone" {
+		if name != "git" {
 			t.Fatalf("unexpected run %s %v", name, args)
 		}
-		writeSpawnableIndex(t, args[2], true)
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "core.hooksPath=/dev/null") {
+			t.Fatalf("git clone must disable hooks: %v", args)
+		}
+		if !strings.Contains(joined, "clone") {
+			t.Fatalf("expected clone: %v", args)
+		}
+		writeSpawnableIndex(t, args[len(args)-1], true)
 		return nil
 	}
 	argv, err := m.ResolveCLIExtension(context.Background(), "git:github.com/org/demo-ext")

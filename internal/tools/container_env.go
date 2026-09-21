@@ -3,6 +3,8 @@ package tools
 import (
 	"os"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/secretname"
 )
 
 var defaultContainerEnv = map[string]bool{
@@ -23,7 +25,7 @@ var defaultContainerEnv = map[string]bool{
 }
 
 func allowedContainerEnvName(name string, extra []string) bool {
-	if isSecretEnvName(name) {
+	if secretname.ShouldDrop(name) {
 		return false
 	}
 	if defaultContainerEnv[name] {
@@ -33,37 +35,11 @@ func allowedContainerEnvName(name string, extra []string) bool {
 		return true
 	}
 	for _, n := range extra {
-		if n == name && !isSecretEnvName(n) {
+		if n == name && !secretname.ShouldDrop(n) {
 			return true
 		}
 	}
 	return false
-}
-
-func isSecretEnvName(name string) bool {
-	u := strings.ToUpper(strings.TrimSpace(name))
-	if u == "" {
-		return false
-	}
-	if u == "AUTHORIZATION" {
-		return true
-	}
-	if strings.HasSuffix(u, "_API_KEY") || strings.HasSuffix(u, "_TOKEN") ||
-		strings.HasSuffix(u, "_SECRET") || strings.HasSuffix(u, "_PASSWORD") {
-		return true
-	}
-	if strings.Contains(u, "OAUTH") {
-		return true
-	}
-	if strings.Contains(u, "REFRESH") && strings.Contains(u, "TOKEN") {
-		return true
-	}
-	return false
-}
-
-func skipSessionFileEnv(name string) bool {
-	u := strings.ToUpper(name)
-	return strings.HasSuffix(u, "_SESSION_FILE")
 }
 
 // filterContainerEnv builds KEY=val pairs for a tool container.
@@ -72,7 +48,7 @@ func filterContainerEnv(host []string, extraAllow []string, extra map[string]str
 	out := map[string]string{}
 	order := make([]string, 0)
 	add := func(k, v string) {
-		if k == "" || skipSessionFileEnv(k) || !allowedContainerEnvName(k, extraAllow) {
+		if k == "" || secretname.ShouldDrop(k) || !allowedContainerEnvName(k, extraAllow) {
 			return
 		}
 		if _, ok := out[k]; !ok {

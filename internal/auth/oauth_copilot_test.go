@@ -197,6 +197,17 @@ func TestApplyEnvAppliesCopilotAvailableModelIDs(t *testing.T) {
 	}
 }
 
+func TestCallbackHostRejectsNonLoopback(t *testing.T) {
+	t.Setenv("PIGO_OAUTH_CALLBACK_HOST", "0.0.0.0")
+	if got := callbackHost(); got != "127.0.0.1" {
+		t.Fatalf("callbackHost=%q", got)
+	}
+	t.Setenv("PIGO_OAUTH_CALLBACK_HOST", "127.0.0.1")
+	if got := callbackHost(); got != "127.0.0.1" {
+		t.Fatalf("loopback=%q", got)
+	}
+}
+
 func extraStringSliceForTest(t *testing.T, raw string) {
 	t.Helper()
 	var c Credential

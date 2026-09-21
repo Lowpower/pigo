@@ -345,18 +345,18 @@ func (m *Manager) installGit(ctx context.Context, src Source, local bool) error 
 	writeGitIgnore(root)
 	if st, err := os.Stat(target); err == nil && st.IsDir() {
 		if src.Ref != "" {
-			_ = m.Run(ctx, "git", []string{"fetch", "origin", src.Ref}, target)
-			return m.Run(ctx, "git", []string{"checkout", src.Ref}, target)
+			_ = m.Run(ctx, "git", gitSafeArgs("fetch", "origin", src.Ref), target)
+			return m.Run(ctx, "git", gitSafeArgs("checkout", src.Ref), target)
 		}
-		_ = m.Run(ctx, "git", []string{"fetch", "--all"}, target)
-		return m.Run(ctx, "git", []string{"pull", "--ff-only"}, target)
+		_ = m.Run(ctx, "git", gitSafeArgs("fetch", "--all"), target)
+		return m.Run(ctx, "git", gitSafeArgs("pull", "--ff-only"), target)
 	}
-	if err := m.Run(ctx, "git", []string{"clone", src.Repo, target}, ""); err != nil {
+	if err := m.Run(ctx, "git", gitSafeArgs("clone", "--", src.Repo, target), ""); err != nil {
 		_ = os.RemoveAll(target)
 		return err
 	}
 	if src.Ref != "" {
-		if err := m.Run(ctx, "git", []string{"checkout", src.Ref}, target); err != nil {
+		if err := m.Run(ctx, "git", gitSafeArgs("checkout", src.Ref), target); err != nil {
 			_ = os.RemoveAll(target)
 			return err
 		}
@@ -365,6 +365,15 @@ func (m *Manager) installGit(ctx context.Context, src Source, local bool) error 
 		_ = m.runNpm(ctx, []string{"install", "--omit=dev"}, target)
 	}
 	return nil
+}
+
+func gitSafeArgs(args ...string) []string {
+	out := []string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.file.allow=never",
+		"-c", "protocol.git.allow=never",
+	}
+	return append(out, args...)
 }
 
 // RemoveAndPersist uninstalls a source and drops it from settings.

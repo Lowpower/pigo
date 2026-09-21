@@ -332,7 +332,7 @@ func (e *Engine) syncToolRunner() {
 		e.toolRunner = tools.NewHostRunner()
 		return
 	}
-	if tools.SameDockerContainer(e.toolRunner, e.Opts.Config.ContainerImage(), e.Opts.Cwd) {
+	if tools.SameDockerContainer(e.toolRunner, e.Opts.Config.ContainerImage(), e.Opts.Cwd, e.Opts.Config.ContainerNetwork()) {
 		return
 	}
 	if e.toolRunner != nil {
@@ -347,6 +347,7 @@ func (e *Engine) syncToolRunner() {
 		Cwd:        e.Opts.Cwd,
 		Mounts:     mounts,
 		ExtraAllow: e.Opts.Config.Container.Env,
+		Network:    e.Opts.Config.ContainerNetwork(),
 	})
 }
 

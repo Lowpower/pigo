@@ -75,7 +75,7 @@ func defaults() Config {
 			},
 		},
 		Filesystem: Filesystem{
-			DenyRead:   []string{"~/.ssh", "~/.aws", "~/.gnupg"},
+			DenyRead:   []string{"~/.ssh", "~/.aws", "~/.gnupg", "~/.pigo"},
 			AllowWrite: []string{".", "/tmp"},
 			DenyWrite:  []string{".env", ".env.*", "*.pem", "*.key"},
 		},

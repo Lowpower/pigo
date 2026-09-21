@@ -312,6 +312,10 @@ func applyOverlay(user Config, over projectOverlay) Config {
 		if over.Container.Env != nil {
 			out.Container.Env = append([]string(nil), over.Container.Env...)
 		}
+		if over.Container.Network != nil {
+			on := *over.Container.Network
+			out.Container.Network = &on
+		}
 	}
 	applyNestedCompaction(&out)
 	if out.Thinking == "" && out.DefaultThinkingLevel != "" {

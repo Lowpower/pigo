@@ -49,6 +49,29 @@ func spawnReverseExt(t *testing.T) *Host {
 	return h
 }
 
+func TestEnvCheckHelperProcess(_ *testing.T) {
+	if os.Getenv("PIGO_EXT_HELPER") != "envcheck" {
+		return
+	}
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		fmt.Fprintln(os.Stderr, "secret leaked")
+		os.Exit(2)
+	}
+	_ = Serve(Handler{Name: "envcheck"})
+	os.Exit(0)
+}
+
+func TestSpawnDropsSecretEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-should-not-reach-ext")
+	h, err := Spawn(context.Background(), "envcheck",
+		[]string{os.Args[0], "-test.run=^TestEnvCheckHelperProcess$"},
+		Options{Env: []string{"PIGO_EXT_HELPER=envcheck", "ANTHROPIC_API_KEY=from-opts"}})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	_ = h.Close()
+}
+
 func TestHostSpawnRegisterAndCall(t *testing.T) {
 	h := spawnReverseExt(t)
 	defer func() { _ = h.Close() }()

@@ -311,10 +311,8 @@ func (e *Engine) HandleHostCall(h *ext.Host, name string, args map[string]any) m
 	case "registerToolRenderer":
 		e.setRenderer(&e.toolRender, argString(args, "name"), h)
 		return map[string]any{"ok": true}
-	case "model.getApiKeyAndHeaders", "model.getProviderAuth":
-		return e.modelAuthPayload(argString(args, "provider"))
-	case "model.getApiKeyForProvider":
-		return map[string]any{"key": auth.APIKey(e.Opts.AgentDir, argString(args, "provider"))}
+	case "model.getApiKeyAndHeaders", "model.getProviderAuth", "model.getApiKeyForProvider":
+		return map[string]any{"error": "credentials are not exposed to extensions"}
 	case "model.isUsingOAuth":
 		c, ok := auth.Get(e.Opts.AgentDir, argString(args, "provider"))
 		return map[string]any{"ok": ok && c.Type == auth.TypeOAuth}
@@ -804,33 +802,6 @@ func anyMaps(v any) []map[string]any {
 		return out
 	}
 	return nil
-}
-
-func (e *Engine) modelAuthPayload(provider string) map[string]any {
-	if provider == "" {
-		provider = e.Provider
-	}
-	p, ok := auth.Lookup(provider)
-	if !ok {
-		return map[string]any{"error": "unknown provider: " + provider}
-	}
-	res, err := auth.Resolve(context.Background(), auth.Open(e.Opts.AgentDir), p, auth.ResolveOpts{})
-	if err != nil {
-		return map[string]any{"error": err.Error()}
-	}
-	if res == nil {
-		return map[string]any{}
-	}
-	headers := res.Auth.Headers
-	if headers == nil {
-		headers = map[string]string{}
-	}
-	return map[string]any{
-		"apiKey":  res.Auth.APIKey,
-		"headers": headers,
-		"baseURL": res.Auth.BaseURL,
-		"source":  res.Source,
-	}
 }
 
 func (e *Engine) providerSnapshot(id string) map[string]any {

@@ -34,8 +34,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Strip Cursor agent footer from all PRs
+      - name: Strip Cursor agent footer from this PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: .github/scripts
-        run: python3 strip_cursor_pr_footer.py --repo "${GITHUB_REPOSITORY}" --all
+        run: |
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            python3 strip_cursor_pr_footer.py --repo "${GITHUB_REPOSITORY}" --pr "${{ github.event.pull_request.number }}"
+          else
+            python3 strip_cursor_pr_footer.py --repo "${GITHUB_REPOSITORY}" --all
+          fi

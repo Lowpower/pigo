@@ -124,6 +124,26 @@ func TestFakeRunnerBashDropsAPIKeys(t *testing.T) {
 	}
 }
 
+func TestDockerRunArgsDisablesNetworkByDefault(t *testing.T) {
+	d := &dockerRunner{Image: "alpine:3", Cwd: t.TempDir()}
+	args, err := d.runArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--network none") {
+		t.Fatalf("expected --network none: %v", args)
+	}
+	d.Network = true
+	args, err = d.runArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(args, " "), "--network none") {
+		t.Fatalf("network=true should not isolate: %v", args)
+	}
+}
+
 func TestDockerRunnerMissingBinary(t *testing.T) {
 	orig := lookDocker
 	lookDocker = func(string) (string, error) { return "", errors.New("missing") }

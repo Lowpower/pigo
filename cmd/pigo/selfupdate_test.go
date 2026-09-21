@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,16 +35,22 @@ func TestRunSelfUpdateInstallsRelease(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		name := "pigo_9.9.9_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tag_name": "v9.9.9",
-			"assets": []map[string]string{{
-				"name":                 "pigo_9.9.9_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz",
-				"browser_download_url": "http://" + r.Host + "/asset",
-			}},
+			"assets": []map[string]string{
+				{"name": name, "browser_download_url": "http://" + r.Host + "/asset"},
+				{"name": "checksums.txt", "browser_download_url": "http://" + r.Host + "/checksums"},
+			},
 		})
 	})
 	mux.HandleFunc("/asset", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(archive)
+	})
+	mux.HandleFunc("/checksums", func(w http.ResponseWriter, _ *http.Request) {
+		sum := sha256.Sum256(archive)
+		name := "pigo_9.9.9_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+		fmt.Fprintf(w, "%x  %s\n", sum, name)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -84,6 +92,39 @@ func TestRunSelfUpdateMissingRelease(t *testing.T) {
 	})
 	err := runSelfUpdate(context.Background(), filepath.Join(t.TempDir(), "pigo"), true)
 	if err == nil || !strings.Contains(err.Error(), "self-update") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRunSelfUpdateRejectsChecksumMismatch(t *testing.T) {
+	archive := []byte("not-a-real-archive")
+	mux := http.NewServeMux()
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		name := "pigo_9.9.9_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v9.9.9",
+			"assets": []map[string]string{
+				{"name": name, "browser_download_url": "http://" + r.Host + "/asset"},
+				{"name": "checksums.txt", "browser_download_url": "http://" + r.Host + "/checksums"},
+			},
+		})
+	})
+	mux.HandleFunc("/asset", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive)
+	})
+	mux.HandleFunc("/checksums", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, "%x  %s\n", sha256.Sum256([]byte("other")), "pigo_9.9.9_"+runtime.GOOS+"_"+runtime.GOARCH+".tar.gz")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	oldAPI, oldHTTP := selfUpdateAPI, selfUpdateHTTP
+	selfUpdateAPI = srv.URL + "/releases/latest"
+	selfUpdateHTTP = srv.Client()
+	t.Cleanup(func() {
+		selfUpdateAPI, selfUpdateHTTP = oldAPI, oldHTTP
+	})
+	err := runSelfUpdate(context.Background(), filepath.Join(t.TempDir(), "pigo"), true)
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("err=%v", err)
 	}
 }

@@ -147,8 +147,8 @@ func runnerSearchPath(r Runner, hostPath string) string {
 	return hostPath
 }
 
-// SameDockerContainer reports whether r is a Docker runner for this image and cwd.
-func SameDockerContainer(r Runner, image, cwd string) bool {
+// SameDockerContainer reports whether r is a Docker runner for this image, cwd, and network flag.
+func SameDockerContainer(r Runner, image, cwd string, network bool) bool {
 	d, ok := r.(*dockerRunner)
-	return ok && d.Image == image && d.Cwd == cwd
+	return ok && d.Image == image && d.Cwd == cwd && d.Network == network
 }
