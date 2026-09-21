@@ -311,8 +311,9 @@ func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, u
 
 func (e *Engine) builtinRegistry() *tools.Registry {
 	return tools.NewBuiltins(tools.Options{
-		AutoResize:   e.Opts.Config.AutoResize(),
-		ShellPrefix:  e.Opts.Config.ShellPrefix(),
+		AutoResize:  e.Opts.Config.AutoResize(),
+		ImageResize: func() *tools.ResizeOptions { return resizeFromModel(e.currentModel()) },
+		ShellPrefix: e.Opts.Config.ShellPrefix(),
 		Cwd:          e.Opts.Cwd,
 		EnvFn:        e.sessionToolEnv,
 		ImageCapable: func() bool { return e.currentModel().SupportsImage() },
@@ -434,6 +435,19 @@ func (e *Engine) currentModel() models.Model {
 		return m
 	}
 	return models.Model{Provider: provider, ID: id}
+}
+
+func resizeFromModel(m models.Model) *tools.ResizeOptions {
+	r := m.ImageResizeProfile()
+	if r == nil {
+		return nil
+	}
+	return &tools.ResizeOptions{
+		MaxWidth:    r.MaxWidth,
+		MaxHeight:   r.MaxHeight,
+		MaxBytes:    r.MaxBytes,
+		JPEGQuality: r.JPEGQuality,
+	}
 }
 
 func (e *Engine) sessionHook(event string) bool {
@@ -948,7 +962,28 @@ func (e *Engine) preparePrompt(ctx context.Context, user string, images []ai.Ima
 			}
 		}
 	}
+	images = e.resizePromptImages(images)
 	return promptPrep{User: user, Images: images}, nil
+}
+
+func (e *Engine) resizePromptImages(images []ai.ImageContent) []ai.ImageContent {
+	if len(images) == 0 {
+		return images
+	}
+	resize := resizeFromModel(e.currentModel())
+	auto := e.Opts.Config.AutoResize()
+	out := make([]ai.ImageContent, 0, len(images))
+	for _, img := range images {
+		data, mime, ok := tools.ResizeImageB64(img.Data, img.MimeType, auto, resize)
+		if !ok {
+			out = append(out, img)
+			continue
+		}
+		img.Data = data
+		img.MimeType = mime
+		out = append(out, img)
+	}
+	return out
 }
 
 func (e *Engine) queuePrepared(ctx context.Context, user string, images []ai.ImageContent, push func(string, []ai.ImageContent)) error {

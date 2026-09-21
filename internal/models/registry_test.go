@@ -105,3 +105,20 @@ func TestOverlayMergesCostAndMaxTokens(t *testing.T) {
 		t.Fatalf("maxTokens=%d", m.MaxTokens)
 	}
 }
+
+func TestOverlayMergesInputLimitsResize(t *testing.T) {
+	ClearOverlays()
+	t.Cleanup(ClearOverlays)
+	SetUserOverlay("anthropic", []Model{{
+		ID: "claude-sonnet-4",
+		InputLimits: &InputLimits{Images: &ImageInputLimits{Resize: &ImageResize{MaxWidth: 800, MaxHeight: 600}}},
+	}})
+	m, ok := Lookup("anthropic", "claude-sonnet-4")
+	if !ok {
+		t.Fatal("missing")
+	}
+	r := m.ImageResizeProfile()
+	if r == nil || r.MaxWidth != 800 || r.MaxHeight != 600 {
+		t.Fatalf("resize=%+v", r)
+	}
+}

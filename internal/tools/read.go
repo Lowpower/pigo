@@ -9,6 +9,7 @@ import (
 // readTool returns the contents of a text file, or image content for supported images.
 type readTool struct {
 	autoResize   bool
+	resize       func() *ResizeOptions
 	cwd          string
 	imageCapable func() bool
 	fs           Runner
@@ -42,7 +43,7 @@ func (t readTool) Execute(_ context.Context, args map[string]any) (string, bool)
 		return err.Error(), true
 	}
 	if mime := sniffImageMIME(data); mime != "" {
-		processed, ok := processImage(data, mime, t.autoResize)
+		processed, ok := processImage(data, mime, t.autoResize, t.resizeOpts())
 		note := ""
 		if t.imageCapable != nil && !t.imageCapable() {
 			note = "\n[Current model does not support images. The image will be omitted from this request.]"
@@ -97,4 +98,11 @@ func (t readTool) Execute(_ context.Context, args map[string]any) (string, bool)
 		out += fmt.Sprintf("\n\n[%d more lines in file. Use offset=%d to continue.]", remaining, next)
 	}
 	return out, false
+}
+
+func (t readTool) resizeOpts() *ResizeOptions {
+	if t.resize == nil {
+		return nil
+	}
+	return t.resize()
 }

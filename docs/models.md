@@ -49,3 +49,9 @@ Unknown provider ids are registered, including API-key auth. `apiKey` in
 `models.json`, or the same id in `auth.json`, is enough for `--list-models` and
 requests. Overlaying a custom gateway onto a builtin id such as `openai` still
 merges catalogs; prefer a distinct provider id. See [providers.md](providers.md).
+
+Catalog and `models.json` entries may include `inputLimits.images.resize`
+(`maxWidth`, `maxHeight`, `maxBytes`, `jpegQuality`). When set, `read`
+resizes to that profile even if `images.autoResize` is false. Without it,
+`images.autoResize` (default true) still caps the long edge at 2000px.
+

@@ -47,6 +47,28 @@ type Model struct {
 	Input            []string           `json:"input,omitempty"`
 	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap,omitempty"`
 	Compat           *Compat            `json:"compat,omitempty"`
+	InputLimits      *InputLimits       `json:"inputLimits,omitempty"`
+}
+
+// InputLimits is optional per-model request/image preprocessing from the catalog.
+type InputLimits struct {
+	MaxRequestBytes int               `json:"maxRequestBytes,omitempty"`
+	Images          *ImageInputLimits `json:"images,omitempty"`
+}
+
+// ImageInputLimits is image count and resize metadata for one model.
+type ImageInputLimits struct {
+	Resize        *ImageResize `json:"resize,omitempty"`
+	MaxPerMessage int          `json:"maxPerMessage,omitempty"`
+	MaxPerRequest int          `json:"maxPerRequest,omitempty"`
+}
+
+// ImageResize is a cache-safe resize profile applied before an image is stored.
+type ImageResize struct {
+	MaxWidth    int `json:"maxWidth,omitempty"`
+	MaxHeight   int `json:"maxHeight,omitempty"`
+	MaxBytes    int `json:"maxBytes,omitempty"`
+	JPEGQuality int `json:"jpegQuality,omitempty"`
 }
 
 // Compat is optional per-model wire-protocol knobs from the catalog overlay.

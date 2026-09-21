@@ -273,10 +273,76 @@ func mergeOverlay(base, extra []Model) []Model {
 			if m.MaxTokens > 0 {
 				out[i].MaxTokens = m.MaxTokens
 			}
+			if m.InputLimits != nil {
+				out[i].InputLimits = mergeInputLimits(out[i].InputLimits, m.InputLimits)
+			}
 			continue
 		}
 		idx[m.ID] = len(out)
 		out = append(out, m)
 	}
 	return out
+}
+
+func mergeInputLimits(base, over *InputLimits) *InputLimits {
+	if over == nil {
+		return base
+	}
+	if base == nil {
+		cp := *over
+		if over.Images != nil {
+			img := *over.Images
+			if over.Images.Resize != nil {
+				r := *over.Images.Resize
+				img.Resize = &r
+			}
+			cp.Images = &img
+		}
+		return &cp
+	}
+	out := *base
+	if over.MaxRequestBytes > 0 {
+		out.MaxRequestBytes = over.MaxRequestBytes
+	}
+	if over.Images != nil {
+		img := ImageInputLimits{}
+		if base.Images != nil {
+			img = *base.Images
+		}
+		if over.Images.MaxPerMessage > 0 {
+			img.MaxPerMessage = over.Images.MaxPerMessage
+		}
+		if over.Images.MaxPerRequest > 0 {
+			img.MaxPerRequest = over.Images.MaxPerRequest
+		}
+		if over.Images.Resize != nil {
+			r := ImageResize{}
+			if img.Resize != nil {
+				r = *img.Resize
+			}
+			if over.Images.Resize.MaxWidth > 0 {
+				r.MaxWidth = over.Images.Resize.MaxWidth
+			}
+			if over.Images.Resize.MaxHeight > 0 {
+				r.MaxHeight = over.Images.Resize.MaxHeight
+			}
+			if over.Images.Resize.MaxBytes > 0 {
+				r.MaxBytes = over.Images.Resize.MaxBytes
+			}
+			if over.Images.Resize.JPEGQuality > 0 {
+				r.JPEGQuality = over.Images.Resize.JPEGQuality
+			}
+			img.Resize = &r
+		}
+		out.Images = &img
+	}
+	return &out
+}
+
+// ImageResizeProfile returns the model's image resize profile, if any.
+func (m Model) ImageResizeProfile() *ImageResize {
+	if m.InputLimits == nil || m.InputLimits.Images == nil {
+		return nil
+	}
+	return m.InputLimits.Images.Resize
 }

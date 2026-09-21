@@ -40,12 +40,21 @@ func NewRegistry(ts ...Tool) *Registry {
 // Options configures built-in tool runtime behaviour.
 type Options struct {
 	AutoResize   bool
+	ImageResize  func() *ResizeOptions
 	ShellPrefix  string
 	Cwd          string
 	Env          map[string]string
 	EnvFn        func() map[string]string
 	ImageCapable func() bool
 	Runner       Runner
+}
+
+// ResizeOptions is a per-model image resize profile.
+type ResizeOptions struct {
+	MaxWidth    int
+	MaxHeight   int
+	MaxBytes    int
+	JPEGQuality int
 }
 
 // Default returns a registry with the built-in tools. powershell is Windows-only.
@@ -57,7 +66,7 @@ func Default() *Registry {
 func NewBuiltins(opt Options) *Registry {
 	r := useRunner(opt.Runner)
 	ts := []Tool{
-		readTool{autoResize: opt.AutoResize, cwd: opt.Cwd, imageCapable: opt.ImageCapable, fs: r},
+		readTool{autoResize: opt.AutoResize, resize: opt.ImageResize, cwd: opt.Cwd, imageCapable: opt.ImageCapable, fs: r},
 		writeTool{cwd: opt.Cwd, fs: r},
 		editTool{cwd: opt.Cwd, fs: r},
 		bashTool{prefix: opt.ShellPrefix, cwd: opt.Cwd, env: opt.Env, envFn: opt.EnvFn, fs: r},

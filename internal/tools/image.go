@@ -61,7 +61,7 @@ type processedImage struct {
 	hints    []string
 }
 
-func processImage(data []byte, mime string, autoResize bool) (processedImage, bool) {
+func processImage(data []byte, mime string, autoResize bool, resize *ResizeOptions) (processedImage, bool) {
 	img, err := decodeImage(data, mime)
 	if err != nil {
 		return processedImage{}, false
@@ -73,12 +73,23 @@ func processImage(data []byte, mime string, autoResize bool) (processedImage, bo
 		hints = append(hints, "[Image converted from image/bmp to image/png.]")
 	}
 
+	maxW, maxH := 0, 0
+	if resize != nil {
+		maxW, maxH = resize.MaxWidth, resize.MaxHeight
+	} else if autoResize {
+		maxW, maxH = imageMaxEdge, imageMaxEdge
+	}
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	if autoResize && (w > imageMaxEdge || h > imageMaxEdge) {
-		scale := float64(imageMaxEdge) / float64(w)
-		if s := float64(imageMaxEdge) / float64(h); s < scale {
-			scale = s
+	if (maxW > 0 && w > maxW) || (maxH > 0 && h > maxH) {
+		scale := 1.0
+		if maxW > 0 && w > maxW {
+			scale = float64(maxW) / float64(w)
+		}
+		if maxH > 0 && h > maxH {
+			if s := float64(maxH) / float64(h); s < scale {
+				scale = s
+			}
 		}
 		nw := max(1, int(float64(w)*scale))
 		nh := max(1, int(float64(h)*scale))
@@ -91,10 +102,15 @@ func processImage(data []byte, mime string, autoResize bool) (processedImage, bo
 		}
 	}
 
+	quality := 80
+	if resize != nil && resize.JPEGQuality > 0 {
+		quality = resize.JPEGQuality
+	}
+
 	var buf bytes.Buffer
 	switch outMIME {
 	case "image/jpeg":
-		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 80}); err != nil {
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
 			return processedImage{}, false
 		}
 	case "image/gif":
@@ -107,11 +123,31 @@ func processImage(data []byte, mime string, autoResize bool) (processedImage, bo
 			return processedImage{}, false
 		}
 	}
+	if resize != nil && resize.MaxBytes > 0 && buf.Len() > resize.MaxBytes && outMIME != "image/jpeg" {
+		buf.Reset()
+		outMIME = "image/jpeg"
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
+			return processedImage{}, false
+		}
+	}
 	return processedImage{
 		data:     base64.StdEncoding.EncodeToString(buf.Bytes()),
 		mimeType: outMIME,
 		hints:    hints,
 	}, true
+}
+
+// ResizeImageB64 resizes a base64 image using the model profile or autoResize.
+func ResizeImageB64(data, mime string, autoResize bool, resize *ResizeOptions) (string, string, bool) {
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return "", "", false
+	}
+	p, ok := processImage(raw, mime, autoResize, resize)
+	if !ok {
+		return "", "", false
+	}
+	return p.data, p.mimeType, true
 }
 
 func formatResizeHint(ow, oh, nw, nh int) string {
