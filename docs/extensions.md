@@ -118,7 +118,11 @@ Useful return payloads:
 - `tool_call`: `{ "block": true, "reason": "…", "terminate": true? }` or `{ "input": { … } }` to rewrite args
 - `input`: `{ "action": "handled" }` or `{ "action": "transform", "text": "…" }`
 - `before_agent_start`: `{ "systemPrompt": "…" }`
-- `project_trust` / `user_bash`: `{ "block": true }`
+- `project_trust`: `{ "block": true }`
+- `user_bash`: omit the payload (or return `null`) to run the local shell.
+  Replace execution with `{ "result": { "output": "…", "cancelled": false, "truncated": false, "exitCode": 0 } }`.
+  `{ "block": true }` and any other payload (including `{}`) fail closed: the
+  command is not run. A handler error or timeout also fails closed.
 
 ## Host calls (`ext.HostCall` / `host_request`)
 

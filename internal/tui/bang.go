@@ -168,6 +168,9 @@ func (m Model) handleBashDone(msg bashDoneMsg) (tea.Model, tea.Cmd) {
 		rendered += "\n" + m.errStyle.Render(fmt.Sprintf("exit %d", *msg.result.ExitCode))
 	}
 	m.transcript = append(m.transcript, entry{role: "tool", rendered: rendered})
+	if msg.result.Error != "" {
+		return m, nil
+	}
 	if m.engine != nil {
 		m.engine.PersistBash(msg.command, msg.result, msg.exclude)
 	}

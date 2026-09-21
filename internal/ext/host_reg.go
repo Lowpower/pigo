@@ -181,6 +181,21 @@ func (h *Host) QueryEvent(ctx context.Context, event string, payload map[string]
 	return m.Payload, nil
 }
 
+// QueryEventOrErr returns the handler payload without treating failures as
+// empty continue. A nil map means the handler returned no override.
+func (h *Host) QueryEventOrErr(ctx context.Context, event string, payload map[string]any) (map[string]any, error) {
+	if !h.Subscribed(event) {
+		return nil, nil
+	}
+	m, err := h.roundTrip(ctx, protocol.Message{
+		Type: protocol.TypeEvent, Event: event, Payload: payload,
+	}, protocol.TypeEventResult)
+	if err != nil {
+		return nil, err
+	}
+	return m.Payload, nil
+}
+
 func (h *Host) roundTrip(ctx context.Context, m protocol.Message, wantType string) (protocol.Message, error) {
 	id := newID()
 	m.ID = id

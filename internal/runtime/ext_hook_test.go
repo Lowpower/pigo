@@ -135,6 +135,32 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				return nil
 			},
 		})
+	case "userbash":
+		_ = ext.Serve(ext.Handler{
+			Name:   "userbash-ext",
+			Events: []string{"user_bash"},
+			OnEvent: func(string, map[string]any) map[string]any {
+				switch os.Getenv("PIGO_USER_BASH") {
+				case "empty":
+					return map[string]any{}
+				case "block":
+					return map[string]any{"block": true, "reason": "blocked-by-ext"}
+				case "result":
+					return map[string]any{"result": map[string]any{
+						"output": "from-ext", "cancelled": false, "truncated": false, "exitCode": 0.0,
+					}}
+				case "old":
+					return map[string]any{"result": map[string]any{
+						"stdout": "old-out", "stderr": "", "exitCode": 0.0,
+					}}
+				case "hang":
+					time.Sleep(2 * time.Second)
+					return nil
+				default:
+					return nil
+				}
+			},
+		})
 	}
 	os.Exit(0)
 }

@@ -4,6 +4,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"time"
 
@@ -18,6 +19,8 @@ type BashResult struct {
 	Cancelled      bool
 	Truncated      bool
 	FullOutputPath string
+	// Error is set when a user_bash handler failed closed (no local exec).
+	Error string
 }
 
 func (r BashResult) asData() map[string]any {
@@ -36,35 +39,130 @@ func (r BashResult) asData() map[string]any {
 }
 
 // RunUserBash runs bang/RPC bash, allowing extensions to replace the result.
+// A throwing or invalid user_bash handler fails closed: local bash is not run.
 func (e *Engine) RunUserBash(ctx context.Context, command string, exclude bool, onChunk func(string)) BashResult {
 	if e != nil {
-		res := e.DispatchEvent(ctx, "user_bash", map[string]any{
+		payload := map[string]any{
 			"command":            command,
 			"excludeFromContext": exclude,
 			"cwd":                e.Opts.Cwd,
-		})
-		if r := asMap(res["result"]); r != nil {
-			out := asString(r["stdout"])
-			if errText := asString(r["stderr"]); errText != "" {
-				if out != "" {
-					out += "\n"
-				}
-				out += errText
+		}
+		for _, h := range e.Hosts {
+			if h == nil || !h.Subscribed("user_bash") {
+				continue
 			}
-			code := 0
-			switch v := r["exitCode"].(type) {
-			case float64:
-				code = int(v)
-			case int:
-				code = v
+			res, err := h.QueryEventOrErr(ctx, "user_bash", payload)
+			if err != nil {
+				return userBashFail(fmt.Sprintf("user_bash: %v", err))
 			}
-			return BashResult{Output: out, ExitCode: &code}
+			if res == nil {
+				continue
+			}
+			got, err := parseUserBashOverride(res)
+			if err != nil {
+				return userBashFail(err.Error())
+			}
+			if got != nil {
+				return *got
+			}
 		}
 		cwd := e.Opts.Cwd
 		extra := e.sessionToolEnv()
 		return runBash(ctx, e.toolRunner, cwd, command, extra, onChunk)
 	}
 	return runBash(ctx, tools.NewHostRunner(), "", command, nil, onChunk)
+}
+
+func userBashFail(msg string) BashResult {
+	code := 1
+	return BashResult{Output: msg, ExitCode: &code, Error: msg}
+}
+
+const userBashInvalid = "invalid user_bash handler result: return undefined for local execution or exactly one valid { operations } or { result } object"
+
+func parseUserBashOverride(res map[string]any) (*BashResult, error) {
+	if asBool(res["block"]) {
+		reason := asString(res["reason"])
+		if reason == "" {
+			reason = "user_bash blocked"
+		}
+		return nil, errors.New(reason)
+	}
+	_, hasOps := res["operations"]
+	_, hasResult := res["result"]
+	if hasOps && hasResult {
+		return nil, errors.New(userBashInvalid)
+	}
+	if hasOps {
+		return nil, errors.New(userBashInvalid)
+	}
+	if !hasResult {
+		return nil, errors.New(userBashInvalid)
+	}
+	r := asMap(res["result"])
+	if r == nil {
+		return nil, errors.New(userBashInvalid)
+	}
+	if _, ok := r["output"]; ok {
+		out, ok := r["output"].(string)
+		if !ok {
+			return nil, errors.New(userBashInvalid)
+		}
+		cancelled, ok := r["cancelled"].(bool)
+		if !ok {
+			return nil, errors.New(userBashInvalid)
+		}
+		truncated, ok := r["truncated"].(bool)
+		if !ok {
+			return nil, errors.New(userBashInvalid)
+		}
+		br := BashResult{Output: out, Cancelled: cancelled, Truncated: truncated}
+		if v, exists := r["exitCode"]; exists && v != nil {
+			code, ok := intFromJSON(v)
+			if !ok {
+				return nil, errors.New(userBashInvalid)
+			}
+			br.ExitCode = &code
+		}
+		if v, exists := r["fullOutputPath"]; exists && v != nil {
+			path, ok := v.(string)
+			if !ok {
+				return nil, errors.New(userBashInvalid)
+			}
+			br.FullOutputPath = path
+		}
+		return &br, nil
+	}
+	if _, hasStdout := r["stdout"]; hasStdout || r["stderr"] != nil || r["exitCode"] != nil {
+		out := asString(r["stdout"])
+		if errText := asString(r["stderr"]); errText != "" {
+			if out != "" {
+				out += "\n"
+			}
+			out += errText
+		}
+		code := 0
+		if v, exists := r["exitCode"]; exists && v != nil {
+			if n, ok := intFromJSON(v); ok {
+				code = n
+			}
+		}
+		return &BashResult{Output: out, ExitCode: &code}, nil
+	}
+	return nil, errors.New(userBashInvalid)
+}
+
+func intFromJSON(v any) (int, bool) {
+	switch t := v.(type) {
+	case int:
+		return t, true
+	case int64:
+		return int(t), true
+	case float64:
+		return int(t), true
+	default:
+		return 0, false
+	}
 }
 
 // RunBash executes command with the resolved shell in cwd.
@@ -107,7 +205,7 @@ func runBash(ctx context.Context, r tools.Runner, cwd, command string, extra map
 
 // PersistBash writes a bashExecution session entry. excludeFromContext skips LLM history.
 func (e *Engine) PersistBash(command string, result BashResult, exclude bool) {
-	if e == nil || e.Opts.Session == nil {
+	if e == nil || e.Opts.Session == nil || result.Error != "" {
 		return
 	}
 	payload := map[string]any{

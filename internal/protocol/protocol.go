@@ -85,6 +85,15 @@ func WriteMessage(w io.Writer, m Message) error {
 	if err != nil {
 		return err
 	}
+	if m.Type == TypeEventResult && m.Payload != nil && len(m.Payload) == 0 {
+		var raw map[string]any
+		if err := json.Unmarshal(b, &raw); err == nil {
+			raw["payload"] = map[string]any{}
+			if nb, err := json.Marshal(raw); err == nil {
+				b = nb
+			}
+		}
+	}
 	if len(b) > MaxFrameLen {
 		return errors.New("protocol: frame exceeds max length")
 	}

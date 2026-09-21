@@ -59,6 +59,23 @@ func TestFrameRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEventResultKeepsEmptyPayload(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteMessage(&buf, Message{Type: TypeEventResult, ID: "e1", Payload: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadMessage(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Payload == nil {
+		t.Fatal("empty event_result payload was dropped")
+	}
+	if len(got.Payload) != 0 {
+		t.Fatalf("payload = %#v", got.Payload)
+	}
+}
+
 func TestReadMessageRejectsHugeFrame(t *testing.T) {
 	// length prefix claims > MaxFrameLen
 	var buf bytes.Buffer
