@@ -149,7 +149,8 @@ Model registry: `model.list` / `model.getAll`, `model.getAvailable`,
 `model.find`, `model.hasConfiguredAuth`, `model.stream` / `model.streamSimple`
 (events via `host_event` `model.stream`), `model.complete`, `model.refresh`,
 `model.getApiKeyAndHeaders`, `model.getProviderAuth`,
-`model.getApiKeyForProvider`, `model.isUsingOAuth`, `model.getProvider`,
+`model.getApiKeyForProvider` (these three return an error; credentials stay
+on the host), `model.isUsingOAuth`, `model.getProvider`,
 `model.getProviderDisplayName`, `model.getProviderAuthStatus`.
 
 Render / complete: `registerMessageRenderer`, `registerEntryRenderer`,

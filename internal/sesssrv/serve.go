@@ -18,11 +18,21 @@ type Session interface {
 type NewSession func() (Session, error)
 
 // ListenUnix binds a Unix domain socket, replacing a stale socket file.
+// The socket is chmod 0600 so only the current user can connect.
 func ListenUnix(path string) (net.Listener, error) {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	return net.Listen("unix", path)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = ln.Close()
+		_ = os.Remove(path)
+		return nil, err
+	}
+	return ln, nil
 }
 
 // DialUnix connects to a Unix domain socket.

@@ -9,14 +9,16 @@ project-local resources and credentials as the two trust boundaries.
 | --- | --- |
 | `~/.pigo/agent/auth.json` | API keys and OAuth tokens (mode `0600`) |
 | Provider env vars | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, … |
-| `--api-key` | In-process only; not written to disk |
+| `--api-key` | In-process only; not written to disk or copied into the environment |
+| Session JSONL | Transcripts (mode `0600`, directory `0700`) |
+| `models.json` | Optional plaintext `apiKey` (chmod `0600` when a key is present) |
 
 Override the config root with `PIGO_CODING_AGENT_DIR` (or `--config-dir`).
 See [auth.md](auth.md).
 
 Print a stored secret only when you mean to: `pigo auth print-api-key` /
-`print-bearer-token`. OAuth loopback binds `127.0.0.1` by default
-(`PIGO_OAUTH_CALLBACK_HOST`).
+`print-bearer-token`. OAuth loopback binds `127.0.0.1` by default.
+`PIGO_OAUTH_CALLBACK_HOST` is ignored unless it is a loopback address.
 
 ## Project trust
 
@@ -55,9 +57,12 @@ Load paths (see [extensions.md](extensions.md)):
 Project-local extension trees need trust, the same as other `.pigo/`
 resources.
 
-Extensions can register tools, intercept events (including `tool_call`),
-and call host methods. Only run extensions you would run as a binary on
-this machine.
+Extensions inherit a filtered environment: API keys, tokens, and
+`*_SESSION_FILE` are stripped. Host methods `model.getApiKey*` /
+`model.getProviderAuth` return an error instead of credentials. Use
+`model.stream` / `model.complete` so the host attaches auth. `exec` still
+runs as the current user — only load extensions you would run as a binary
+on this machine.
 
 ## Tool isolation
 
@@ -70,7 +75,12 @@ Skipped when Docker isolation is on. Windows never wraps.
 **Docker** ([tools.md](tools.md#docker-tools-in-container)): opt-in
 `settings.container.image`. pigo and `auth.json` stay on the host.
 `read` / `write` / `edit` / `bash` / `grep` / `find` / `ls` and `!` / `!!`
-run in a session-long container. API keys and OAuth tokens are never passed
+run in a session-long container. The container uses `--network=none` unless
+`container.network` is true. API keys and OAuth tokens are never passed
 into the container, even if named in `container.env`. Extension tools and
 Windows `powershell` stay on the host. Missing Docker is an error, not a
 fallback to the host.
+
+`pigo server` Unix sockets are chmod `0600`. `/share` redacts common secret
+patterns before upload. Self-update verifies `checksums.txt` from the GitHub
+release.

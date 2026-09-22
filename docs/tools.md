@@ -52,7 +52,7 @@ Files (project overrides global):
     "deniedDomains": []
   },
   "filesystem": {
-    "denyRead": ["~/.ssh"],
+    "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg", "~/.pigo"],
     "allowWrite": [".", "/tmp"],
     "denyWrite": [".env", "*.pem"]
   }
@@ -67,13 +67,15 @@ isolation is on.
 Opt-in via `settings.container.image`. pigo and `auth.json` stay on the host.
 `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, and `!` / `!!` run
 against a session-long container: cwd is mounted at `/workspace`. Extra binds
-and an env allowlist are optional. API keys and OAuth tokens are never passed
-into the container, even if listed in `container.env`.
+Extra binds and an env allowlist are optional. The container is started with
+`--network=none` unless `container.network` is `true`. API keys and OAuth
+tokens are never passed into the container, even if listed in `container.env`.
 
 ```json
 {
   "container": {
     "image": "debian:bookworm-slim",
+    "network": false,
     "mounts": [{ "host": "/opt/cache", "container": "/cache" }],
     "env": ["GOPATH"]
   }

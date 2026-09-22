@@ -269,6 +269,30 @@ func TestApplyEnvWritesCredentialEnv(t *testing.T) {
 	}
 }
 
+func TestApplyEnvDoesNotExportAPIKeys(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	if err := SetAPIKey(dir, "anthropic", "sk-stored"); err != nil {
+		t.Fatal(err)
+	}
+	ApplyEnv(dir)
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		t.Fatalf("stored key leaked into env: %q", os.Getenv("ANTHROPIC_API_KEY"))
+	}
+}
+
+func TestProcessAPIKeyIsInMemoryOnly(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Cleanup(func() { ClearProcessAPIKey("anthropic") })
+	SetProcessAPIKey("anthropic", "sk-cli")
+	if APIKey(t.TempDir(), "anthropic") != "sk-cli" {
+		t.Fatal("process key should win")
+	}
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		t.Fatal("process key must not be exported")
+	}
+}
+
 func TestCheckAuthGoogleEnv(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "g-key")
 	s := Open(t.TempDir())

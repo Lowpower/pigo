@@ -80,9 +80,10 @@ type Config struct {
 
 // ContainerSettings is settings.container (opt-in Docker tool isolation).
 type ContainerSettings struct {
-	Image  string           `mapstructure:"image" json:"image,omitempty"`
-	Mounts []ContainerMount `mapstructure:"mounts" json:"mounts,omitempty"`
-	Env    []string         `mapstructure:"env" json:"env,omitempty"`
+	Image   string           `mapstructure:"image" json:"image,omitempty"`
+	Mounts  []ContainerMount `mapstructure:"mounts" json:"mounts,omitempty"`
+	Env     []string         `mapstructure:"env" json:"env,omitempty"`
+	Network *bool            `mapstructure:"network" json:"network,omitempty"`
 }
 
 // ContainerMount is one extra host→container bind.
@@ -361,6 +362,12 @@ func (c Config) DoubleEscape() string {
 // ContainerImage is settings.container.image (empty means host tools).
 func (c Config) ContainerImage() string {
 	return strings.TrimSpace(c.Container.Image)
+}
+
+// ContainerNetwork reports whether the tool container may use the host network.
+// Default is false: docker run --network=none.
+func (c Config) ContainerNetwork() bool {
+	return c.Container.Network != nil && *c.Container.Network
 }
 
 // DefaultBuiltinTools is the initial built-in selection when defaultTools is unset.
@@ -667,7 +674,7 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 // Save writes settings.json, merging with any existing file so extra keys
 // (and packages/extensions) are not dropped.
 func Save(configDir string, cfg Config) error {
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return err
 	}
 	path := filepath.Join(configDir, "settings.json")

@@ -226,6 +226,13 @@ func TestLoadUserJSONExposesAPIKey(t *testing.T) {
 	if found.API != "openai-completions" || found.BaseURL != "https://example.invalid/v1" {
 		t.Fatalf("got %+v", found)
 	}
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("models.json mode=%o", st.Mode().Perm())
+	}
 }
 
 func TestOpenAICatalogUsesResponsesAPI(t *testing.T) {

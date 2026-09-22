@@ -18,6 +18,9 @@ const (
 
 // Resolve derives request auth for a provider.
 func Resolve(ctx context.Context, s *Store, p Provider, opts ResolveOpts) (*Result, error) {
+	if k := ProcessAPIKey(p.ID); k != "" && p.APIKey != nil {
+		return resolveAPIKey(p, &Credential{Type: TypeAPIKey, Key: k, Env: opts.Env})
+	}
 	if opts.APIKey != "" && p.APIKey != nil {
 		return resolveAPIKey(p, &Credential{Type: TypeAPIKey, Key: opts.APIKey, Env: opts.Env})
 	}

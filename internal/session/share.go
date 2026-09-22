@@ -89,6 +89,9 @@ func Share(opts ShareOptions) (ShareResult, error) {
 	if err := WriteShareJSONL(opts.Session, jsonlPath, opts.SystemPrompt, opts.Tools); err != nil {
 		return ShareResult{}, fmt.Errorf("failed to export session: %w", err)
 	}
+	if err := redactShareFile(jsonlPath); err != nil {
+		return ShareResult{}, fmt.Errorf("failed to export session: %w", err)
+	}
 	if url, ok, err := shareRadius(jsonlPath, opts.AgentDir); ok {
 		if err != nil {
 			return ShareResult{}, err
@@ -112,6 +115,9 @@ func Share(opts ShareOptions) (ShareResult, error) {
 		SystemPrompt: opts.SystemPrompt,
 		Tools:        opts.Tools,
 	})); err != nil {
+		return ShareResult{}, fmt.Errorf("failed to export session: %w", err)
+	}
+	if err := redactShareFile(htmlPath); err != nil {
 		return ShareResult{}, fmt.Errorf("failed to export session: %w", err)
 	}
 	gistURL, err := shareGistCreate(htmlPath)
@@ -236,6 +242,7 @@ func tryShareViaRadius(jsonlPath, agentDir string) (string, bool, error) {
 	if err != nil {
 		return "", true, shareErrorf("Failed to upload Radius artifact: %v", err)
 	}
+	body = redactSecrets(body)
 	if gateway == "" {
 		gateway = models.RadiusGateway()
 	}

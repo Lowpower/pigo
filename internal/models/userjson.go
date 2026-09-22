@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"os"
+	"strings"
 )
 
 type userModelsFile struct {
@@ -74,5 +75,15 @@ func LoadUserJSON(path string) error {
 		SetUserOverlay(id, models)
 	}
 	setUserJSONProviders(specs)
+	hasKey := false
+	for _, p := range file.Providers {
+		if strings.TrimSpace(p.APIKey) != "" {
+			hasKey = true
+			break
+		}
+	}
+	if hasKey {
+		_ = os.Chmod(path, 0o600)
+	}
 	return nil
 }

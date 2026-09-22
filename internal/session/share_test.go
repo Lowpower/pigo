@@ -43,6 +43,14 @@ func TestWriteShareJSONLAddsShareEntry(t *testing.T) {
 	}
 }
 
+func TestRedactSecretsStripsKeys(t *testing.T) {
+	in := []byte(`{"text":"sk-ant-api03-abcdefghijklmnop","hdr":"Bearer abcdefghijklmnop","apiKey":"secret-value-here"}`)
+	got := string(redactSecrets(in))
+	if strings.Contains(got, "sk-ant") || strings.Contains(got, "abcdefghijklmnop") || strings.Contains(got, "secret-value-here") {
+		t.Fatalf("not redacted: %s", got)
+	}
+}
+
 func TestShareViewerURLEnvOverride(t *testing.T) {
 	t.Setenv("PIGO_SHARE_VIEWER_URL", "https://example.test/s/")
 	got := ShareViewerURL("abc123")

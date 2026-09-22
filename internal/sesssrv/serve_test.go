@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,6 +60,22 @@ func TestUnixJSONLRoundTrip(t *testing.T) {
 	}
 	if !sawAgent {
 		t.Fatalf("missing agent events: %s", out.String())
+	}
+}
+
+func TestListenUnixModeIsPrivate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pigo.sock")
+	ln, err := ListenUnix(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("socket mode=%o", st.Mode().Perm())
 	}
 }
 

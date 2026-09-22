@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -125,6 +126,30 @@ func TestBufferUntilAssistantThenFlush(t *testing.T) {
 	}
 	if roles[0] != "user" || roles[1] != "assistant" || roles[2] != "toolResult" {
 		t.Errorf("roles = %v, want [user assistant toolResult]", roles)
+	}
+}
+
+func TestSessionFileIsPrivate(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(m.File())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("session mode=%o", st.Mode().Perm())
+	}
+	dir, err := os.Stat(filepath.Dir(m.File()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir.Mode().Perm() != 0o700 {
+		t.Fatalf("session dir mode=%o", dir.Mode().Perm())
 	}
 }
 

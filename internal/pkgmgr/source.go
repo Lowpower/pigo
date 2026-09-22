@@ -1,6 +1,7 @@
 package pkgmgr
 
 import (
+	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
@@ -57,6 +58,9 @@ func IsCLIPackageSource(spec string) bool {
 func ParseSource(source string) (Source, error) {
 	source = strings.TrimSpace(source)
 	out := Source{Raw: source}
+	if insecureGitURL(source) || (strings.HasPrefix(strings.ToLower(source), "git:") && insecureGitURL(strings.TrimSpace(source[4:]))) {
+		return Source{}, fmt.Errorf("insecure git protocol (use https or ssh): %s", source)
+	}
 	if strings.HasPrefix(source, "npm:") {
 		spec := strings.TrimSpace(source[len("npm:"):])
 		name, version := parseNpmSpec(spec)
@@ -72,6 +76,9 @@ func ParseSource(source string) (Source, error) {
 		return out, nil
 	}
 	if g, ok := parseGitURL(source); ok {
+		if insecureGitURL(g.Repo) {
+			return Source{}, fmt.Errorf("insecure git protocol (use https or ssh): %s", source)
+		}
 		return g, nil
 	}
 	out.Kind = KindLocal
@@ -137,7 +144,12 @@ func parseGitURL(source string) (Source, bool) {
 func hasGitProtocol(u string) bool {
 	l := strings.ToLower(u)
 	return strings.HasPrefix(l, "https://") || strings.HasPrefix(l, "http://") ||
-		strings.HasPrefix(l, "ssh://") || strings.HasPrefix(l, "git://")
+		strings.HasPrefix(l, "ssh://")
+}
+
+func insecureGitURL(repo string) bool {
+	l := strings.ToLower(strings.TrimSpace(repo))
+	return strings.HasPrefix(l, "git://") || strings.HasPrefix(l, "file://")
 }
 
 func splitGitRef(u string) (repo, ref string) {

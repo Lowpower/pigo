@@ -137,7 +137,7 @@ Environment:
 	cmd.Flags().StringVar(&f.fork, "fork", "", "fork session file or id into a new session")
 	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "use exact project session id, creating it if missing")
 	cmd.Flags().StringVarP(&f.name, "name", "n", "", "set session display name")
-	cmd.Flags().StringVar(&f.apiKey, "api-key", "", "API key for this process (does not persist)")
+	cmd.Flags().StringVar(&f.apiKey, "api-key", "", "API key for this process (does not persist or enter the environment)")
 	cmd.Flags().BoolVar(&f.noBuiltinTools, "no-builtin-tools", false, "disable built-in tools (extensions still load)")
 	cmd.Flags().StringVar(&f.modelsFlag, "models", "", "comma-separated model patterns for Ctrl+P cycling")
 	cmd.Flags().StringArrayVar(&f.promptTemplates, "prompt-template", nil, "load a prompt template file or directory")
@@ -208,18 +208,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		cfg.QuietStartupFlag = &off
 	}
 	if f.apiKey != "" {
-		switch cfg.ResolvedProvider() {
-		case "openai":
-			_ = os.Setenv("OPENAI_API_KEY", f.apiKey)
-		case "opencode":
-			_ = os.Setenv("OPENCODE_API_KEY", f.apiKey)
-		case "google":
-			_ = os.Setenv("GEMINI_API_KEY", f.apiKey)
-		case "amazon-bedrock":
-			_ = os.Setenv("AWS_BEARER_TOKEN_BEDROCK", f.apiKey)
-		default:
-			_ = os.Setenv("ANTHROPIC_API_KEY", f.apiKey)
-		}
+		auth.SetProcessAPIKey(cfg.ResolvedProvider(), f.apiKey)
 	}
 	auth.ApplyEnv(agentDir)
 	cwd, _ := os.Getwd()

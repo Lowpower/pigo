@@ -2,6 +2,8 @@ package auth
 
 import (
 	"os"
+
+	"github.com/Lowpower/pigo/internal/secretname"
 )
 
 // SetAPIKey stores a provider API key.
@@ -28,6 +30,9 @@ func Get(agentDir, provider string) (Credential, bool) {
 
 // APIKey returns a stored API key, falling back to the usual env vars.
 func APIKey(agentDir, provider string) string {
+	if k := ProcessAPIKey(provider); k != "" {
+		return k
+	}
 	if c, ok := Get(agentDir, provider); ok {
 		if c.Type == TypeAPIKey && c.Key != "" {
 			return c.Key
@@ -64,7 +69,8 @@ func ambientAPIKey(provider string) string {
 	}
 }
 
-// ApplyEnv sets provider env vars from stored credentials when they are not already set.
+// ApplyEnv applies non-secret credential env overlays and Copilot catalog filters.
+// API keys and OAuth tokens stay in auth.json; they are not copied into the process environment.
 func ApplyEnv(agentDir string) {
 	s := Open(agentDir)
 	s.mu.Lock()
@@ -74,41 +80,16 @@ func ApplyEnv(agentDir string) {
 		return
 	}
 	set := func(env, key string) {
+		if secretname.ShouldDrop(env) {
+			return
+		}
 		if os.Getenv(env) == "" && key != "" {
 			_ = os.Setenv(env, key)
 		}
 	}
 	for id, c := range data {
-		key := c.Key
-		if c.Type == TypeOAuth {
-			key = c.Access
-		} else if c.Type == TypeAPIKey && c.Key != "" {
-			if resolved := ResolveConfigValue(c.Key, c.Env); resolved != "" {
-				key = resolved
-			}
-		}
 		for env, val := range c.Env {
 			set(env, val)
-		}
-		switch id {
-		case "anthropic":
-			set("ANTHROPIC_API_KEY", key)
-		case "openai", "openai-codex":
-			set("OPENAI_API_KEY", key)
-		case "opencode":
-			set("OPENCODE_API_KEY", key)
-		case "openrouter":
-			set("OPENROUTER_API_KEY", key)
-		case "google":
-			set("GEMINI_API_KEY", key)
-		case "google-vertex":
-			set("GOOGLE_CLOUD_API_KEY", key)
-		case "amazon-bedrock":
-			set("AWS_BEARER_TOKEN_BEDROCK", key)
-		case "radius":
-			set("RADIUS_API_KEY", key)
-		case "mistral":
-			set("MISTRAL_API_KEY", key)
 		}
 		if id == "github-copilot" {
 			applyCopilotAvailableModels(c)

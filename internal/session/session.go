@@ -260,13 +260,14 @@ func (m *Manager) persistEntry(e *Entry) error {
 	}
 
 	if !m.flushed {
-		if err := os.MkdirAll(m.dir, 0o755); err != nil {
+		if err := os.MkdirAll(m.dir, 0o700); err != nil {
 			return err
 		}
-		f, err := os.OpenFile(m.file, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(m.file, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return err
 		}
+		_ = f.Chmod(0o600)
 		defer func() { _ = f.Close() }()
 		if err := writeLine(f, m.header); err != nil {
 			return err
@@ -280,10 +281,11 @@ func (m *Manager) persistEntry(e *Entry) error {
 		return nil
 	}
 
-	f, err := os.OpenFile(m.file, os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(m.file, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
+	_ = f.Chmod(0o600)
 	defer func() { _ = f.Close() }()
 	return writeLine(f, e)
 }
@@ -295,6 +297,7 @@ func Load(path string) (Header, []Entry, error) {
 		return Header{}, nil, err
 	}
 	defer func() { _ = f.Close() }()
+	_ = os.Chmod(path, 0o600)
 
 	var header Header
 	var entries []Entry

@@ -8,7 +8,8 @@ pigo server --listen "$XDG_RUNTIME_DIR/pigo.sock"
 pigo client --connect "$XDG_RUNTIME_DIR/pigo.sock"
 ```
 
-Defaults: `PIGO_SERVER_LISTEN` / `PIGO_SERVER_CONNECT`.
+Defaults: `PIGO_SERVER_LISTEN` / `PIGO_SERVER_CONNECT`. The socket file is
+chmod `0600` after bind.
 
 The server process starts with extensions disabled (`NoExtensions: true`) so
 the socket is a headless control plane, not a second TUI. Commands match

@@ -14,10 +14,20 @@ import (
 )
 
 func callbackHost() string {
-	if h := os.Getenv("PIGO_OAUTH_CALLBACK_HOST"); h != "" {
+	h := strings.TrimSpace(os.Getenv("PIGO_OAUTH_CALLBACK_HOST"))
+	if h != "" && isLoopbackHost(h) {
 		return h
 	}
 	return "127.0.0.1"
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 type callbackServer struct {

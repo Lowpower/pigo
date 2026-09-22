@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/tools"
@@ -192,5 +193,23 @@ func TestModelProviderSnapshot(t *testing.T) {
 	mode := e.HandleHostCall(nil, "mode", nil)
 	if mode["mode"] != "print" {
 		t.Fatalf("mode=%v", mode)
+	}
+}
+
+func TestHostCallHidesAPIKeys(t *testing.T) {
+	dir := t.TempDir()
+	if err := auth.SetAPIKey(dir, "anthropic", "sk-secret-host"); err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{Provider: "anthropic", Opts: Options{AgentDir: dir}}
+	for _, name := range []string{"model.getApiKeyForProvider", "model.getApiKeyAndHeaders", "model.getProviderAuth"} {
+		got := e.HandleHostCall(nil, name, map[string]any{"provider": "anthropic"})
+		if fmt.Sprint(got["error"]) == "" {
+			t.Fatalf("%s should error: %v", name, got)
+		}
+		raw := fmt.Sprint(got)
+		if strings.Contains(raw, "sk-secret-host") {
+			t.Fatalf("%s leaked key: %v", name, got)
+		}
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,7 +79,22 @@ func runSelfUpdate(ctx context.Context, dest string, force bool) error {
 	if url == "" {
 		return fmt.Errorf("pigo cannot self-update this installation: no asset for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	bin, err := downloadSelfUpdateBinary(ctx, client, url, strings.HasSuffix(strings.ToLower(asset), ".zip"))
+	sumURL := pickChecksumsURL(rel)
+	if sumURL == "" {
+		return fmt.Errorf("pigo cannot self-update this installation: release is missing checksums.txt")
+	}
+	raw, err := downloadSelfUpdateBytes(ctx, client, url)
+	if err != nil {
+		return err
+	}
+	sums, err := downloadSelfUpdateBytes(ctx, client, sumURL)
+	if err != nil {
+		return fmt.Errorf("download checksums: %w", err)
+	}
+	if err := verifySelfUpdateChecksum(string(sums), asset, raw); err != nil {
+		return err
+	}
+	bin, err := extractSelfUpdateBinary(raw, strings.HasSuffix(strings.ToLower(asset), ".zip"))
 	if err != nil {
 		return err
 	}
@@ -104,7 +121,16 @@ func pickSelfUpdateAsset(rel githubRelease, tag string) (name, url string) {
 	return "", ""
 }
 
-func downloadSelfUpdateBinary(ctx context.Context, client *http.Client, url string, zipArchive bool) ([]byte, error) {
+func pickChecksumsURL(rel githubRelease) string {
+	for _, a := range rel.Assets {
+		if a.Name == "checksums.txt" {
+			return a.BrowserDownloadURL
+		}
+	}
+	return ""
+}
+
+func downloadSelfUpdateBytes(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -118,14 +144,33 @@ func downloadSelfUpdateBinary(ctx context.Context, client *http.Client, url stri
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("download asset: %s", resp.Status)
 	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	return io.ReadAll(resp.Body)
+}
+
+func verifySelfUpdateChecksum(sums, asset string, raw []byte) error {
+	want := ""
+	for _, line := range strings.Split(sums, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[len(fields)-1] == asset {
+			want = strings.ToLower(fields[0])
+			break
+		}
 	}
+	if want == "" {
+		return fmt.Errorf("pigo cannot self-update this installation: checksums.txt has no entry for %s", asset)
+	}
+	sum := sha256.Sum256(raw)
+	if hex.EncodeToString(sum[:]) != want {
+		return fmt.Errorf("pigo cannot self-update this installation: checksum mismatch for %s", asset)
+	}
+	return nil
+}
+
+func extractSelfUpdateBinary(raw []byte, zipArchive bool) ([]byte, error) {
 	if zipArchive {
-		return extractNamedFileZip(body, "pigo.exe", "pigo")
+		return extractNamedFileZip(raw, "pigo.exe", "pigo")
 	}
-	return extractNamedFileTarGz(body, "pigo", "pigo.exe")
+	return extractNamedFileTarGz(raw, "pigo", "pigo.exe")
 }
 
 func extractNamedFileTarGz(raw []byte, names ...string) ([]byte, error) {
