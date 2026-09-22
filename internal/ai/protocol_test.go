@@ -266,8 +266,8 @@ func TestBuildOpenAIRequestThinkingFormats(t *testing.T) {
 	}
 	tools, _ := req["tools"].([]any)
 	fn, _ := tools[0].(map[string]any)["function"].(map[string]any)
-	if fn["strict"] != true {
-		t.Fatalf("strict = %#v", fn)
+	if _, ok := fn["strict"]; ok {
+		t.Fatalf("unknown provider should omit strict: %#v", fn)
 	}
 }
 
@@ -399,6 +399,94 @@ func TestResolveWireAPIOpenCode(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 	if got := resolveWireAPI("opencode", "claude-sonnet-4", "opencode"); got != "anthropic-messages" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestChatCompletionsStrictGate(t *testing.T) {
+	on := true
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "strict-gate", DefaultAPI: "openai-completions", DefaultID: "plain",
+		Models: []models.Model{
+			{Provider: "strict-gate", ID: "plain"},
+			{Provider: "strict-gate", ID: "strict", Compat: &models.Compat{SupportsStrictMode: &on}},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("strict-gate") })
+
+	tool := Tool{Name: "read", Parameters: map[string]any{"type": "object"}, ConstrainedSampling: &ConstrainedSampling{Type: "json_schema", Strict: "prefer"}}
+	ctx := Context{Tools: []Tool{tool}}
+
+	assertStrict := func(opts Options, want bool) {
+		t.Helper()
+		body, err := buildOpenAIRequest(ctx, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var req map[string]any
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatal(err)
+		}
+		tools, _ := req["tools"].([]any)
+		fn, _ := tools[0].(map[string]any)["function"].(map[string]any)
+		_, has := fn["strict"]
+		if has != want || (want && fn["strict"] != true) {
+			t.Fatalf("opts=%+v strict=%#v want %v", opts, fn["strict"], want)
+		}
+	}
+	assertStrict(Options{Provider: "strict-gate", Model: "plain"}, false)
+	assertStrict(Options{Provider: "strict-gate", Model: "strict"}, true)
+	assertStrict(Options{Provider: "cerebras", Model: "strict"}, false)
+	assertStrict(Options{Provider: "unknown-provider", Model: "whatever"}, false)
+}
+
+func TestAnthropicAllowedFallbackModels(t *testing.T) {
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "fb-ant", DefaultAPI: "anthropic-messages", DefaultID: "claude",
+		Models: []models.Model{
+			{Provider: "fb-ant", ID: "with", Compat: &models.Compat{AllowedFallbackModels: []models.FallbackModel{{Provider: "anthropic", Model: "claude-haiku-4"}}}},
+			{Provider: "fb-ant", ID: "empty", Compat: &models.Compat{AllowedFallbackModels: []models.FallbackModel{}}},
+			{Provider: "fb-ant", ID: "none"},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("fb-ant") })
+
+	bodyFor := func(id string) map[string]any {
+		t.Helper()
+		body, err := buildAnthropicRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Provider: "fb-ant", Model: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var req map[string]any
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	with := bodyFor("with")
+	fb, _ := with["fallbacks"].([]any)
+	if len(fb) != 1 || fb[0].(map[string]any)["model"] != "claude-haiku-4" {
+		t.Fatalf("fallbacks = %#v", with["fallbacks"])
+	}
+	if _, ok := bodyFor("empty")["fallbacks"]; ok {
+		t.Fatal("empty allowedFallbackModels should omit fallbacks")
+	}
+	if _, ok := bodyFor("none")["fallbacks"]; ok {
+		t.Fatal("missing allowedFallbackModels should omit fallbacks")
+	}
+}
+
+func TestOpenAIHTTPErrorCerebrasBodyless(t *testing.T) {
+	if got := openAIHTTPError(400, "", true); got != "400 status code (no body)" {
+		t.Fatalf("%q", got)
+	}
+	if got := openAIHTTPError(413, "  ", true); got != "413 status code (no body)" {
+		t.Fatalf("%q", got)
+	}
+	if got := openAIHTTPError(400, "", false); got != "openai API error 400: " {
+		t.Fatalf("%q", got)
+	}
+	if got := openAIHTTPError(400, "nope", true); got != "openai API error 400: nope" {
 		t.Fatalf("%q", got)
 	}
 }
