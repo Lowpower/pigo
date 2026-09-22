@@ -119,6 +119,23 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				return map[string]any{"message": msg}
 			},
 		})
+	case "userbash":
+		_ = ext.Serve(ext.Handler{
+			Name:   "userbash-ext",
+			Events: []string{"user_bash"},
+			OnEvent: func(string, map[string]any) map[string]any {
+				switch os.Getenv("PIGO_USER_BASH") {
+				case "result":
+					return map[string]any{"result": map[string]any{
+						"output": "from-ext", "cancelled": false, "truncated": false, "exitCode": 0.0,
+					}}
+				case "invalid":
+					return map[string]any{"block": true}
+				default:
+					return nil
+				}
+			},
+		})
 	case "span":
 		_ = ext.Serve(ext.Handler{
 			Name:   "span-ext",
@@ -393,5 +410,33 @@ func TestSpanEventDeniedSkipsExtension(t *testing.T) {
 	b, err := os.ReadFile(logPath)
 	if err == nil && strings.Contains(string(b), "telemetry_span") {
 		t.Fatalf("denied export still sent: %s", b)
+	}
+}
+
+func TestUserBashResultReplacesLocal(t *testing.T) {
+	h := spawnRuntimeExt(t, "userbash", nil, "PIGO_USER_BASH=result")
+	e := &Engine{Hosts: []*ext.Host{h}, Opts: Options{Cwd: t.TempDir()}}
+	res := e.RunUserBash(context.Background(), "echo should-not-run", false, nil)
+	if res.Error != "" || res.Output != "from-ext" {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestUserBashInvalidFailsClosed(t *testing.T) {
+	h := spawnRuntimeExt(t, "userbash", nil, "PIGO_USER_BASH=invalid")
+	e := &Engine{Hosts: []*ext.Host{h}, Opts: Options{Cwd: t.TempDir()}}
+	res := e.RunUserBash(context.Background(), "echo should-not-run", false, nil)
+	if res.Error == "" || strings.Contains(res.Output, "should-not-run") {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestUserBashEmptyRunsLocal(t *testing.T) {
+	h := spawnRuntimeExt(t, "userbash", nil, "PIGO_USER_BASH=empty")
+	dir := t.TempDir()
+	e := &Engine{Hosts: []*ext.Host{h}, Opts: Options{Cwd: dir}}
+	res := e.RunUserBash(context.Background(), "printf pigo-local", false, nil)
+	if res.Error != "" || !strings.Contains(res.Output, "pigo-local") {
+		t.Fatalf("%+v", res)
 	}
 }

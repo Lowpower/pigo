@@ -153,6 +153,10 @@ func (m Model) handleBashDone(msg bashDoneMsg) (tea.Model, tea.Cmd) {
 	m.bashEvents = nil
 	m.bashLive = ""
 	m.bashCommand = ""
+	if msg.result.Error != "" {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.errStyle.Render(msg.result.Error)})
+		return m, nil
+	}
 	header := "$ " + msg.command
 	if msg.exclude {
 		header = "!! " + msg.command
