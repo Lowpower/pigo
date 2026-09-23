@@ -85,7 +85,7 @@ func TestMetaRefreshRemints(t *testing.T) {
 }
 
 func TestMetaMintSetupURL(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"action_url":"https://api.meta.ai/setup"}`))
 	}))
 	defer srv.Close()
@@ -98,7 +98,7 @@ func TestMetaMintSetupURL(t *testing.T) {
 }
 
 func TestMetaMintExpiredSession(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"invalid_token"}`))
 	}))
