@@ -9,7 +9,7 @@ import (
 func TestWSLCopyWritesPowerShellFromFile(t *testing.T) {
 	var cmds []string
 	old := runClipCmd
-	runClipCmd = func(name string, timeout time.Duration, args ...string) ([]byte, error) {
+	runClipCmd = func(name string, _ time.Duration, args ...string) ([]byte, error) {
 		cmds = append(cmds, name+" "+strings.Join(args, " "))
 		if name == "wslpath" {
 			return []byte("C:\\tmp\\clip.txt\r\n"), nil
