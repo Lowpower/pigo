@@ -1,9 +1,12 @@
 package ai
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 var overflowPatterns = compileAll([]string{
-	`prompt is too long`,
+	`prompt (?:is )?too long`,
 	`request_too_large`,
 	`input is too long for requested model`,
 	`exceeds the context window`,
@@ -27,8 +30,9 @@ var overflowPatterns = compileAll([]string{
 	`context[_ ]length[_ ]exceeded`,
 	`too many tokens`,
 	`token limit exceeded`,
-	`^4(?:00|13)\s*(?:status code)?\s*\(no body\)`,
 })
+
+var cerebrasBodylessOverflow = regexp.MustCompile(`(?i)^4(?:00|13)\s*(?:status code)?\s*\(no body\)`)
 
 var nonOverflowPatterns = compileAll([]string{
 	`^(Throttling error|Service unavailable):`,
@@ -62,6 +66,9 @@ func IsContextOverflow(message *AssistantMessage, contextWindow int) bool {
 				if p.MatchString(message.ErrorMessage) {
 					return true
 				}
+			}
+			if strings.EqualFold(message.Provider, "cerebras") && cerebrasBodylessOverflow.MatchString(message.ErrorMessage) {
+				return true
 			}
 		}
 	}

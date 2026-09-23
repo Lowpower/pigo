@@ -273,10 +273,50 @@ func mergeOverlay(base, extra []Model) []Model {
 			if m.MaxTokens > 0 {
 				out[i].MaxTokens = m.MaxTokens
 			}
+			if m.Compat != nil {
+				out[i].Compat = mergeCompat(out[i].Compat, m.Compat)
+			}
 			continue
 		}
 		idx[m.ID] = len(out)
 		out = append(out, m)
 	}
+	return out
+}
+
+func mergeCompat(base, extra *Compat) *Compat {
+	if extra == nil {
+		return base
+	}
+	if base == nil {
+		c := *extra
+		c.SupportsStrictMode = cloneBool(extra.SupportsStrictMode)
+		c.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
+		return &c
+	}
+	out := *base
+	if extra.SupportsStrictMode != nil {
+		out.SupportsStrictMode = cloneBool(extra.SupportsStrictMode)
+	}
+	if extra.AllowedFallbackModels != nil {
+		out.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
+	}
+	return &out
+}
+
+func cloneBool(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	b := *v
+	return &b
+}
+
+func cloneFallbacks(in []FallbackModel) []FallbackModel {
+	if in == nil {
+		return nil
+	}
+	out := make([]FallbackModel, len(in))
+	copy(out, in)
 	return out
 }

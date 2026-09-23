@@ -60,12 +60,11 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			msg, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			return errorStreamProvider(opts.Model, "openai-completions",
-				fmt.Sprintf("openai API error %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))), nil
+			return errorStreamOpenAI(chatProvider(opts), opts.Model, openAIHTTPError(resp.StatusCode, string(msg), isCerebras(opts))), nil
 		}
 
 		s := NewEventStream(16)
-		out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "openai-completions", Provider: "openai", Model: opts.Model, StopReason: StopPending}
+		out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "openai-completions", Provider: chatProvider(opts), Model: opts.Model, StopReason: StopPending}
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
@@ -126,7 +125,7 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 		tools := make([]map[string]any, 0, len(reqCtx.Tools))
 		for _, t := range reqCtx.Tools {
 			fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters}
-			if toolStrict(t) {
+			if sendChatStrict(t, opts) {
 				fn["strict"] = true
 			}
 			tools = append(tools, map[string]any{
@@ -348,6 +347,29 @@ func mapOpenAIFinishReason(reason string) (StopReason, string) {
 	default:
 		return StopError, "Provider finish_reason: " + reason
 	}
+}
+
+func chatProvider(opts Options) string {
+	if p := strings.TrimSpace(opts.Provider); p != "" {
+		return p
+	}
+	return "openai"
+}
+
+func openAIHTTPError(status int, body string, cerebras bool) string {
+	body = strings.TrimSpace(body)
+	if cerebras && body == "" && (status == 400 || status == 413) {
+		return fmt.Sprintf("%d status code (no body)", status)
+	}
+	return fmt.Sprintf("openai API error %d: %s", status, body)
+}
+
+func errorStreamOpenAI(provider, model, msg string) *EventStream {
+	s := NewEventStream(1)
+	out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "openai-completions", Provider: provider, Model: model, StopReason: StopError, ErrorMessage: msg}
+	s.ch <- Event{Type: EventError, Reason: StopError, Message: out}
+	close(s.ch)
+	return s
 }
 
 func errorStreamProvider(model, api, msg string) *EventStream {
