@@ -18,6 +18,9 @@ type BashResult struct {
 	Cancelled      bool
 	Truncated      bool
 	FullOutputPath string
+	// Error is set when a user_bash handler failed or returned an illegal
+	// payload. The local shell is not run.
+	Error string
 }
 
 func (r BashResult) asData() map[string]any {
@@ -36,35 +39,70 @@ func (r BashResult) asData() map[string]any {
 }
 
 // RunUserBash runs bang/RPC bash, allowing extensions to replace the result.
+// A handler error or any payload other than empty or a valid {result} stops
+// the command. The local shell runs only when every handler leaves the
+// payload empty.
 func (e *Engine) RunUserBash(ctx context.Context, command string, exclude bool, onChunk func(string)) BashResult {
-	if e != nil {
-		res := e.DispatchEvent(ctx, "user_bash", map[string]any{
-			"command":            command,
-			"excludeFromContext": exclude,
-			"cwd":                e.Opts.Cwd,
-		})
-		if r := asMap(res["result"]); r != nil {
-			out := asString(r["stdout"])
-			if errText := asString(r["stderr"]); errText != "" {
-				if out != "" {
-					out += "\n"
-				}
-				out += errText
-			}
-			code := 0
-			switch v := r["exitCode"].(type) {
-			case float64:
-				code = int(v)
-			case int:
-				code = v
-			}
-			return BashResult{Output: out, ExitCode: &code}
-		}
-		cwd := e.Opts.Cwd
-		extra := e.sessionToolEnv()
-		return runBash(ctx, e.toolRunner, cwd, command, extra, onChunk)
+	if e == nil {
+		return runBash(ctx, tools.NewHostRunner(), "", command, nil, onChunk)
 	}
-	return runBash(ctx, tools.NewHostRunner(), "", command, nil, onChunk)
+	payload := map[string]any{
+		"command":            command,
+		"excludeFromContext": exclude,
+		"cwd":                e.Opts.Cwd,
+	}
+	for _, h := range e.Hosts {
+		if h == nil || !h.Subscribed("user_bash") {
+			continue
+		}
+		res, err := h.QueryEventErr(ctx, "user_bash", payload)
+		if err != nil {
+			return BashResult{Error: err.Error()}
+		}
+		local, parsed, perr := interpretUserBash(res)
+		if perr != nil {
+			return BashResult{Error: perr.Error()}
+		}
+		if !local {
+			return parsed
+		}
+	}
+	return runBash(ctx, e.toolRunner, e.Opts.Cwd, command, e.sessionToolEnv(), onChunk)
+}
+
+func interpretUserBash(payload map[string]any) (local bool, result BashResult, err error) {
+	if len(payload) == 0 {
+		return true, BashResult{}, nil
+	}
+	_, hasOps := payload["operations"]
+	raw, hasResult := payload["result"]
+	if hasOps == hasResult || hasOps {
+		return false, BashResult{}, errors.New("invalid user_bash handler result")
+	}
+	m := asMap(raw)
+	output, okOut := m["output"].(string)
+	cancelled, okCancelled := m["cancelled"].(bool)
+	truncated, okTruncated := m["truncated"].(bool)
+	if m == nil || !okOut || !okCancelled || !okTruncated {
+		return false, BashResult{}, errors.New("invalid user_bash handler result")
+	}
+	result = BashResult{Output: output, Cancelled: cancelled, Truncated: truncated}
+	if v, ok := m["exitCode"]; ok && v != nil {
+		switch n := v.(type) {
+		case float64:
+			code := int(n)
+			result.ExitCode = &code
+		case int:
+			code := n
+			result.ExitCode = &code
+		default:
+			return false, BashResult{}, errors.New("invalid user_bash handler result")
+		}
+	}
+	if path, ok := m["fullOutputPath"].(string); ok {
+		result.FullOutputPath = path
+	}
+	return false, result, nil
 }
 
 // RunBash executes command with the resolved shell in cwd.

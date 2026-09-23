@@ -164,7 +164,20 @@ func (h *Host) SendShortcut(name string) error {
 
 // QueryEvent sends a subscribed event and waits for event_result.
 // Unsubscribed events return an empty payload without sending.
+// A transport error is logged and returned as an empty payload so other
+// events keep the historical continue-on-failure behavior.
 func (h *Host) QueryEvent(ctx context.Context, event string, payload map[string]any) (map[string]any, error) {
+	res, err := h.QueryEventErr(ctx, event, payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pigo: extension %q event %s: %v\n", h.name, event, err)
+		return map[string]any{}, nil
+	}
+	return res, nil
+}
+
+// QueryEventErr is QueryEvent without swallowing transport errors.
+// An empty payload means the handler did not override the event.
+func (h *Host) QueryEventErr(ctx context.Context, event string, payload map[string]any) (map[string]any, error) {
 	if !h.Subscribed(event) {
 		return map[string]any{}, nil
 	}
@@ -172,8 +185,7 @@ func (h *Host) QueryEvent(ctx context.Context, event string, payload map[string]
 		Type: protocol.TypeEvent, Event: event, Payload: payload,
 	}, protocol.TypeEventResult)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "pigo: extension %q event %s: %v\n", h.name, event, err)
-		return map[string]any{}, nil
+		return nil, err
 	}
 	if m.Payload == nil {
 		return map[string]any{}, nil

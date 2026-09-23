@@ -354,6 +354,10 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				result := e.RunUserBash(bctx, cmdStr, exclude, func(delta string) {
 					emit(map[string]any{"type": "bash_execution_update", "id": id, "delta": delta})
 				})
+				if result.Error != "" {
+					reply(id, "bash", false, nil, result.Error)
+					return
+				}
 				payload := map[string]any{
 					"role":      "bashExecution",
 					"command":   cmdStr,
