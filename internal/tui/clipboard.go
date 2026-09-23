@@ -283,3 +283,50 @@ func runClipOK(name string, timeout time.Duration, args ...string) bool {
 	cmd := exec.CommandContext(ctx, name, args...)
 	return cmd.Run() == nil
 }
+
+// runClipCmd is the WSL clipboard writer. Tests replace it.
+var runClipCmd = func(name string, timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+// copyText returns an OSC 52 sequence and, on WSL, also writes the Windows clipboard.
+func copyText(text string) string {
+	_ = copyWindowsClipboard(text, os.Getenv, runtime.GOOS)
+	return osc52(text)
+}
+
+func copyWindowsClipboard(text string, getenv func(string) string, goos string) bool {
+	if goos != "linux" || !isWSL(getenv) {
+		return false
+	}
+	f, err := os.CreateTemp("", "pigo-wsl-clip-*.txt")
+	if err != nil {
+		return false
+	}
+	path := f.Name()
+	defer func() { _ = os.Remove(path) }()
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return false
+	}
+	if _, err := f.WriteString(text); err != nil {
+		_ = f.Close()
+		return false
+	}
+	if err := f.Close(); err != nil {
+		return false
+	}
+	out, err := runClipCmd("wslpath", time.Second, "-w", path)
+	if err != nil {
+		return false
+	}
+	winPath := strings.TrimSpace(string(out))
+	if winPath == "" {
+		return false
+	}
+	script := "Set-Clipboard -Value ([System.IO.File]::ReadAllText('" + strings.ReplaceAll(winPath, "'", "''") + "', [System.Text.Encoding]::UTF8))"
+	_, err = runClipCmd("powershell.exe", 5*time.Second, "-NoProfile", "-Command", script)
+	return err == nil
+}

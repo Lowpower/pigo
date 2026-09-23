@@ -11,7 +11,7 @@ const altWheelMultiplier = 5
 func (m Model) copySelectionOrAssistant() (tea.Model, tea.Cmd) {
 	if m.altScreen {
 		if text := m.selectedText(); text != "" {
-			m.clipOSC = osc52(text)
+			m.clipOSC = copyText(text)
 			return m, nil
 		}
 	}
@@ -24,7 +24,7 @@ func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("no assistant text to copy")})
 		return m, nil
 	}
-	m.clipOSC = osc52(text)
+	m.clipOSC = copyText(text)
 	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("copied last assistant message")})
 	return m, nil
 }
@@ -168,7 +168,7 @@ func (m Model) handleAltScreenMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.sel.active = true
 		if m.cfg.CopyOnSelect() {
 			if text := m.selectedText(); text != "" {
-				m.clipOSC = osc52(text)
+				m.clipOSC = copyText(text)
 			}
 		}
 	}

@@ -998,7 +998,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if text == "" {
 			return note("no assistant text to copy")
 		}
-		return note(osc52(text) + "copied last assistant message")
+		return note(copyText(text) + "copied last assistant message")
 	case "share":
 		if m.engine == nil || m.engine.Opts.Session == nil {
 			return note("no session to share")
