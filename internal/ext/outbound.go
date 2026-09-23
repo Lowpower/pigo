@@ -37,20 +37,28 @@ func writeOut(m protocol.Message) error {
 	return protocol.WriteMessage(out, m)
 }
 
-func waitReply(id string, timeout time.Duration) (protocol.Message, error) {
+func beginReply(id string) chan protocol.Message {
 	ch := make(chan protocol.Message, 1)
 	runtime.mu.Lock()
 	runtime.pending[id] = ch
 	runtime.mu.Unlock()
+	return ch
+}
+
+func cancelReply(id string) {
+	runtime.mu.Lock()
+	delete(runtime.pending, id)
+	runtime.mu.Unlock()
+}
+
+func awaitReply(id string, ch <-chan protocol.Message, timeout time.Duration) (protocol.Message, error) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case m := <-ch:
 		return m, nil
 	case <-timer.C:
-		runtime.mu.Lock()
-		delete(runtime.pending, id)
-		runtime.mu.Unlock()
+		cancelReply(id)
 		return protocol.Message{}, errors.New("ext: host call timed out")
 	}
 }
@@ -84,10 +92,12 @@ func UI(method string, args map[string]any) (map[string]any, error) {
 	if args == nil {
 		args = map[string]any{}
 	}
+	ch := beginReply(id)
 	if err := writeOut(protocol.Message{Type: protocol.TypeUIRequest, ID: id, Name: method, Args: args}); err != nil {
+		cancelReply(id)
 		return nil, err
 	}
-	m, err := waitReply(id, 70*time.Second)
+	m, err := awaitReply(id, ch, 70*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -103,10 +113,12 @@ func HostCall(name string, args map[string]any) (map[string]any, error) {
 	if args == nil {
 		args = map[string]any{}
 	}
+	ch := beginReply(id)
 	if err := writeOut(protocol.Message{Type: protocol.TypeHostRequest, ID: id, Name: name, Args: args}); err != nil {
+		cancelReply(id)
 		return nil, err
 	}
-	m, err := waitReply(id, 70*time.Second)
+	m, err := awaitReply(id, ch, 70*time.Second)
 	if err != nil {
 		return nil, err
 	}
