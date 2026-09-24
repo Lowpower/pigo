@@ -55,3 +55,15 @@ Unknown provider ids are registered, including API-key auth. `apiKey` in
 `models.json`, or the same id in `auth.json`, is enough for `--list-models` and
 requests. Overlaying a custom gateway onto a builtin id such as `openai` still
 merges catalogs; prefer a distinct provider id. See [providers.md](providers.md).
+
+## compat
+
+Per-model `compat` on a catalog entry:
+
+- `supportsStrictMode`: Chat Completions sends `strict: true` only when this is
+  `true` and the tool asked for constrained sampling. Unknown providers leave
+  it off. `cerebras` never sends `strict`.
+- `allowedFallbackModels`: Anthropic server-side fallbacks (`provider`, `model`,
+  `cost`). A non-empty list is sent as `fallbacks`. An empty list omits the
+  field. Overlaying an existing model replaces these two fields and keeps the
+  rest of `compat`.

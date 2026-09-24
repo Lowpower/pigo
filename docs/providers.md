@@ -8,8 +8,9 @@ Core ids: `anthropic`, `openai`, `openai-codex`, `opencode`, `google`,
 `amazon-bedrock`, `llama.cpp`, `radius`, `github-copilot`, `openrouter`, `xai`.
 
 Additional catalog ids are registered from `internal/models` (OpenRouter-style
-gateways, Cloudflare, Azure, Vertex, MiniMax, Moonshot, Z.AI, …). Run
-`pigo --list-models` for the current set.
+gateways, Cloudflare, Azure, Vertex, MiniMax, Moonshot, Z.AI, Meta, …). Run
+`pigo --list-models` for the current set. `meta` uses `openai-responses` at
+`https://api.meta.ai/v1` with offline model `muse-spark-1.3`.
 
 Wire APIs include `anthropic-messages`, `openai-completions`,
 `openai-responses`, `openai-codex-responses`, `google-generative-ai`,
@@ -20,7 +21,7 @@ Wire APIs include `anthropic-messages`, `openai-completions`,
 
 `pigo auth login <provider>` stores keys in `~/.pigo/agent/auth.json`.
 OAuth is available for several providers (Anthropic, OpenAI Codex, GitHub
-Copilot, OpenRouter, Kimi, xAI, Radius). See [auth.md](auth.md).
+Copilot, OpenRouter, Kimi, Meta, xAI, Radius). See [auth.md](auth.md).
 
 `--api-key` injects a key for this process only.
 

@@ -243,7 +243,25 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 			req["thinking"] = map[string]any{"type": "adaptive"}
 		}
 	}
+	if fb := anthropicFallbacks(opts); len(fb) > 0 {
+		req["fallbacks"] = fb
+	}
 	return json.Marshal(req)
+}
+
+func anthropicFallbacks(opts Options) []map[string]any {
+	c := lookupCompat(opts)
+	if c == nil || len(c.AllowedFallbackModels) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(c.AllowedFallbackModels))
+	for _, m := range c.AllowedFallbackModels {
+		if m.Model == "" {
+			continue
+		}
+		out = append(out, map[string]any{"model": m.Model})
+	}
+	return out
 }
 
 func anthropicToolDefs(tools []Tool, deferLoading bool) []map[string]any {

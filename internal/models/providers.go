@@ -20,6 +20,7 @@ var extraProviders = []extraProvider{
 	{ID: "groq", Name: "Groq API key", DefaultAPI: "openai-completions", DefaultID: "llama-3.1-8b-instant", BaseURL: "https://api.groq.com/openai/v1", Env: []string{"GROQ_API_KEY"}},
 	{ID: "huggingface", Name: "Hugging Face token", DefaultAPI: "openai-completions", DefaultID: "MiniMaxAI/MiniMax-M2", BaseURL: "https://router.huggingface.co/v1", Env: []string{"HF_TOKEN"}},
 	{ID: "kimi-coding", Name: "Kimi API key", DefaultAPI: "anthropic-messages", DefaultID: "k3", BaseURL: "https://api.kimi.com/coding", Env: []string{"KIMI_API_KEY"}},
+	{ID: "meta", Name: "Meta Model API key", DefaultAPI: "openai-responses", DefaultID: "muse-spark-1.3", BaseURL: "https://api.meta.ai/v1", Env: []string{"META_API_KEY"}},
 	{ID: "minimax", Name: "MiniMax API key", DefaultAPI: "anthropic-messages", DefaultID: "MiniMax-M2.7", BaseURL: "https://api.minimax.io/anthropic", Env: []string{"MINIMAX_API_KEY"}},
 	{ID: "minimax-cn", Name: "MiniMax CN API key", DefaultAPI: "anthropic-messages", DefaultID: "MiniMax-M2.7", BaseURL: "https://api.minimaxi.com/anthropic", Env: []string{"MINIMAX_CN_API_KEY"}},
 	{ID: "moonshotai", Name: "Moonshot AI API key", DefaultAPI: "openai-completions", DefaultID: "kimi-k2-0711-preview", BaseURL: "https://api.moonshot.ai/v1", Env: []string{"MOONSHOT_API_KEY"}},

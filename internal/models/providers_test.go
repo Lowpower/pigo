@@ -11,6 +11,7 @@ func TestThinProvidersAreRegistered(t *testing.T) {
 		"groq":                       "openai-completions",
 		"huggingface":                "openai-completions",
 		"kimi-coding":                "anthropic-messages",
+		"meta":                       "openai-responses",
 		"minimax":                    "anthropic-messages",
 		"minimax-cn":                 "anthropic-messages",
 		"moonshotai":                 "openai-completions",

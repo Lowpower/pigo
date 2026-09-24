@@ -109,6 +109,7 @@ func registerBuiltins() {
 		},
 	})
 	registerCatalogAPIKeys()
+	registerMetaAuth()
 	registerCloudflareAuth()
 	registerAzureAuth()
 	registerVertexAuth()
@@ -160,6 +161,22 @@ func registerCatalogAPIKeys() {
 			},
 		})
 	}
+}
+
+func registerMetaAuth() {
+	existing, found := Lookup("meta")
+	if !found {
+		existing = Provider{ID: "meta"}
+	}
+	existing.OAuth = metaOAuth{}
+	if existing.APIKey == nil {
+		existing.APIKey = &APIKeyHandler{
+			Name:  "Meta Model API key",
+			Env:   []string{"META_API_KEY"},
+			Login: promptAPIKey("Meta Model API key"),
+		}
+	}
+	registerProvider(existing)
 }
 
 func registerCloudflareAuth() {

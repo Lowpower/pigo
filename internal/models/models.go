@@ -73,6 +73,19 @@ type Compat struct {
 	// (defer_loading / tool_reference). Fireworks Messages also enable this
 	// when Options.Provider is "fireworks", even if this flag is unset.
 	SupportsToolReferences bool `json:"supportsToolReferences,omitempty"`
+	// SupportsStrictMode gates Chat Completions function.strict.
+	// Nil or false keeps the field off. Cerebras never sends it.
+	SupportsStrictMode *bool `json:"supportsStrictMode,omitempty"`
+	// AllowedFallbackModels is the Anthropic server-side fallback list.
+	// A non-empty list is sent as `fallbacks`. Nil or empty omits the field.
+	AllowedFallbackModels []FallbackModel `json:"allowedFallbackModels,omitempty"`
+}
+
+// FallbackModel is one Anthropic server-side fallback target.
+type FallbackModel struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model"`
+	Cost     *Cost  `json:"cost,omitempty"`
 }
 
 // Cost is catalog pricing in dollars per million tokens.

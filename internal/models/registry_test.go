@@ -129,3 +129,35 @@ func TestOverlayMergesPromptCache(t *testing.T) {
 		t.Fatalf("promptCache=%+v", m.PromptCache)
 	}
 }
+
+func TestOverlayMergesFallbackAndStrict(t *testing.T) {
+	on := true
+	RegisterProvider(ProviderSpec{
+		ID: "compat-merge", DefaultAPI: "anthropic-messages", DefaultID: "m",
+		Models: []Model{{
+			Provider: "compat-merge", ID: "m",
+			Compat: &Compat{ThinkingFormat: "zai"},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("compat-merge")
+	})
+	SetUserOverlay("compat-merge", []Model{{
+		ID: "m",
+		Compat: &Compat{
+			SupportsStrictMode:    &on,
+			AllowedFallbackModels: []FallbackModel{},
+		},
+	}})
+	m, ok := Lookup("compat-merge", "m")
+	if !ok || m.Compat == nil || m.Compat.SupportsStrictMode == nil || !*m.Compat.SupportsStrictMode {
+		t.Fatalf("strict = %+v ok=%v", m.Compat, ok)
+	}
+	if m.Compat.AllowedFallbackModels == nil || len(m.Compat.AllowedFallbackModels) != 0 {
+		t.Fatalf("fallbacks = %#v", m.Compat.AllowedFallbackModels)
+	}
+	if m.Compat.ThinkingFormat != "zai" {
+		t.Fatalf("thinking format lost: %+v", m.Compat)
+	}
+}

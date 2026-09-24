@@ -70,6 +70,27 @@ func toolStrict(t Tool) bool {
 	}
 }
 
+// sendChatStrict reports whether Chat Completions should set function.strict.
+// Unknown providers stay off. Cerebras never sends the field.
+func sendChatStrict(t Tool, opts Options) bool {
+	if !toolStrict(t) || isCerebras(opts) {
+		return false
+	}
+	c := lookupCompat(opts)
+	return c != nil && c.SupportsStrictMode != nil && *c.SupportsStrictMode
+}
+
+func isCerebras(opts Options) bool {
+	if strings.EqualFold(strings.TrimSpace(opts.Provider), "cerebras") {
+		return true
+	}
+	m, ok := models.Lookup(opts.Provider, opts.Model)
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(m.BaseURL), "cerebras.ai")
+}
+
 func longCacheOK(c *models.Compat) bool {
 	if c == nil || c.SupportsLongCacheRetention == nil {
 		return true
