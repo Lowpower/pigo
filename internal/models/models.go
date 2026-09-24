@@ -47,6 +47,13 @@ type Model struct {
 	Input            []string           `json:"input,omitempty"`
 	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap,omitempty"`
 	Compat           *Compat            `json:"compat,omitempty"`
+	PromptCache      *PromptCache       `json:"promptCache,omitempty"`
+}
+
+// PromptCache is the best-effort prompt-cache lifetime in seconds for each retention tier.
+type PromptCache struct {
+	Short int `json:"short,omitempty"`
+	Long  int `json:"long,omitempty"`
 }
 
 // Compat is optional per-model wire-protocol knobs from the catalog overlay.

@@ -186,6 +186,9 @@ func (e *Engine) onAgentLifecycle(ctx context.Context, ev agent.Event) {
 		e.setBusy(false)
 		e.DispatchEvent(ctx, "agent_end", map[string]any{})
 		e.DispatchEvent(ctx, "agent_settled", map[string]any{})
+		if e.warmer != nil {
+			e.warmer.Settled()
+		}
 	case agent.EventTurnStart:
 		e.DispatchEvent(ctx, "turn_start", map[string]any{})
 	case agent.EventTurnEnd:

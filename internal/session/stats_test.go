@@ -53,6 +53,40 @@ func TestCollectStatsIncludesToolResultUsage(t *testing.T) {
 	}
 }
 
+func TestCollectStatsIncludesCacheWarmUsage(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	u := costUsage(20, 0.2)
+	if _, err := m.AppendUsage("cache_warm", "anthropic", "claude-sonnet-4", u, ""); err != nil {
+		t.Fatal(err)
+	}
+	got := CollectStats(m, nil, 0)
+	if got.Cost != 0.2 || got.Tokens.Input != 20 {
+		t.Fatalf("got cost=%v tokens=%+v", got.Cost, got.Tokens)
+	}
+	if got.TotalMessages != 1 {
+		t.Fatalf("usage counted as a message: %d", got.TotalMessages)
+	}
+	msgs := RestoreAIMessages(ContextEntries(m))
+	if len(msgs) != 1 || msgs[0].Role != ai.RoleUser {
+		t.Fatalf("context=%+v", msgs)
+	}
+	text := FormatInfo(got, "")
+	if strings.Contains(text, "cache_warm") {
+		t.Fatalf("format leaked kind:\n%s", text)
+	}
+}
+
+func TestFormatInfoShowsCacheWarming(t *testing.T) {
+	s := Stats{SessionID: "s", CacheWarming: "Inactive (cache warming disabled)"}
+	text := FormatInfo(s, "")
+	if !strings.Contains(text, "Cache warming\nInactive (cache warming disabled)") {
+		t.Fatalf("text:\n%s", text)
+	}
+}
+
 func TestCollectStatsIncludesCompactionUsage(t *testing.T) {
 	m := New(t.TempDir(), t.TempDir())
 	e, err := m.AppendCompaction("summary", "", 0)

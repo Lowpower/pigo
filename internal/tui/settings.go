@@ -55,6 +55,7 @@ func (m *Model) refreshSettingsItems() {
 		{"block-images", "Block images", "Omit images from requests sent to the model", boolText(m.cfg.BlockImages())},
 		{"hide-thinking", "Hide thinking", "Hide thinking blocks in the transcript", boolText(m.cfg.HideThinking())},
 		{"cache-miss-notices", "Cache miss notices", "Show transcript notices for significant prompt-cache misses", boolText(m.cfg.CacheMissNotices())},
+		{"cache-warming", "Cache warming", "Refresh a prompt cache during a run, or also while idle", m.cfg.CacheWarmingMode()},
 		{"default-project-trust", "Default project trust", "When a project has local resources and no saved decision", m.cfg.ProjectTrustDefault()},
 		{"double-escape-action", "Double-escape action", "Action when pressing Escape twice with empty editor", m.cfg.DoubleEscape()},
 		{"tree-filter-mode", "Tree filter mode", "Default filter when opening /tree", m.cfg.TreeFilter()},
@@ -127,6 +128,8 @@ func (m Model) settingChoices(id string) []string {
 		return []string{"one-at-a-time", "all"}
 	case "mermaid-rendering":
 		return []string{"off", "final", "streaming"}
+	case "cache-warming":
+		return []string{"off", "streaming", "idle"}
 	case "double-escape-action":
 		return []string{"tree", "fork", "none"}
 	case "default-project-trust":
@@ -197,6 +200,8 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.ScrollbarMode()
 	case "anthropic-extra-usage":
 		return boolText(m.cfg.AnthropicExtraUsageWarning())
+	case "cache-warming":
+		return m.cfg.CacheWarmingMode()
 	default:
 		return ""
 	}
@@ -236,6 +241,11 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 	case "cache-miss-notices":
 		on := value == "true"
 		patch(func(c *config.Config) { c.ShowCacheMissNotices = &on })
+	case "cache-warming":
+		patch(func(c *config.Config) { c.CacheWarming = value })
+		if m.engine != nil {
+			m.engine.CacheWarmingChanged()
+		}
 	case "default-project-trust":
 		patch(func(c *config.Config) { c.DefaultProjectTrust = value })
 	case "double-escape-action":

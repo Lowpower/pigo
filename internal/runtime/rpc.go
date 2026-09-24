@@ -595,6 +595,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			hist := history
 			stateMu.Unlock()
 			stats := session.CollectStats(e.Opts.Session, hist, e.contextWindow())
+			stats.CacheWarming = e.CacheWarmingStatus()
 			reply(id, "get_session_stats", true, stats, "")
 		case "abort_bash":
 			stateMu.Lock()

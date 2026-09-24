@@ -110,8 +110,11 @@ payload is a `SpanRecord`: `name`, `trace_id`, `span_id`, `parent_span_id`,
 unix-nano timestamps, `status`, `attrs`. Prompt text and tool arguments are
 not included. Official sample: [`examples/extensions/telemetry`](../examples/extensions/telemetry).
 
-`cache_warming_decision` is emitted at `session_start`. pigo does not warm
-caches; the payload is `{ "warm": false }`.
+`cache_warming_decision` is emitted before each cache refresh. The payload is
+`warmCost`, `missCost`, `continuationProbability`, and `action` (`warm` or
+`stop`). Return `{ "action": "warm" }` or `{ "action": "stop" }` to override
+that decision. A handler error keeps pigo's decision. There is no event at
+`session_start`.
 
 Useful return payloads:
 

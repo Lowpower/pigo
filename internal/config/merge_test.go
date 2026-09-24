@@ -19,7 +19,7 @@ func TestApplyProjectOverlaysTrustedSettings(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"defaultTools":["grep"],"images":{"blockImages":true},"shellPath":"/bin/custom-bash","theme":"light","defaultProjectTrust":"always"}`
+	body := `{"defaultTools":["grep"],"images":{"blockImages":true},"shellPath":"/bin/custom-bash","theme":"light","defaultProjectTrust":"always","cacheWarming":"off"}`
 	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +47,9 @@ func TestApplyProjectOverlaysTrustedSettings(t *testing.T) {
 	}
 	if got.ProjectTrustDefault() != "ask" {
 		t.Fatalf("defaultProjectTrust must stay global, got %q", got.ProjectTrustDefault())
+	}
+	if got.CacheWarmingMode() != "streaming" {
+		t.Fatalf("cacheWarming must stay global, got %q", got.CacheWarmingMode())
 	}
 }
 
@@ -191,4 +194,3 @@ func TestApplyProjectOverlaysContainer(t *testing.T) {
 		t.Fatalf("untrusted image=%q", untrusted.ContainerImage())
 	}
 }
-

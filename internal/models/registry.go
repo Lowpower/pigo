@@ -273,6 +273,9 @@ func mergeOverlay(base, extra []Model) []Model {
 			if m.MaxTokens > 0 {
 				out[i].MaxTokens = m.MaxTokens
 			}
+			if m.PromptCache != nil {
+				out[i].PromptCache = m.PromptCache
+			}
 			continue
 		}
 		idx[m.ID] = len(out)
