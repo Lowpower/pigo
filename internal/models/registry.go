@@ -273,6 +273,9 @@ func mergeOverlay(base, extra []Model) []Model {
 			if m.MaxTokens > 0 {
 				out[i].MaxTokens = m.MaxTokens
 			}
+			if m.PromptCache != nil {
+				out[i].PromptCache = m.PromptCache
+			}
 			if m.Compat != nil {
 				out[i].Compat = mergeCompat(out[i].Compat, m.Compat)
 			}

@@ -14,6 +14,7 @@ import (
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
+	"github.com/Lowpower/pigo/internal/cachewarm"
 	"github.com/Lowpower/pigo/internal/compaction"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
@@ -120,6 +121,11 @@ type Engine struct {
 	toolRender   map[string]*ext.Host
 	mdTransforms []*ext.Host
 	autoComplete []autoCompleteReg
+
+	warmer     *cachewarm.Warmer
+	warmReq    []ai.Message
+	warmKey    string
+	warmTokens int
 }
 
 type autoCompleteReg struct {
@@ -279,7 +285,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		"cwd":       e.Opts.Cwd,
 		"reason":    "startup",
 	})
-	e.DispatchEvent(ctx, "cache_warming_decision", map[string]any{"warm": false})
+	e.warmer = e.newCacheWarmer()
 	e.extendResourcesFromExtensions(ctx, "startup")
 	e.rebuildSystemPrompt()
 	return e, nil

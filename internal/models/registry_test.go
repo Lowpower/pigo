@@ -106,6 +106,30 @@ func TestOverlayMergesCostAndMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAnthropicPromptCacheLifetime(t *testing.T) {
+	m, ok := Lookup("anthropic", "claude-sonnet-4")
+	if !ok || m.PromptCache == nil || m.PromptCache.Short != 300 || m.PromptCache.Long != 3600 {
+		t.Fatalf("promptCache=%+v", m.PromptCache)
+	}
+	openai, ok := Lookup("openai", "gpt-4o")
+	if !ok || openai.PromptCache != nil {
+		t.Fatalf("openai promptCache=%+v", openai.PromptCache)
+	}
+}
+
+func TestOverlayMergesPromptCache(t *testing.T) {
+	ClearOverlays()
+	t.Cleanup(ClearOverlays)
+	SetUserOverlay("openai", []Model{{
+		ID:          "gpt-4o",
+		PromptCache: &PromptCache{Short: 120},
+	}})
+	m, ok := Lookup("openai", "gpt-4o")
+	if !ok || m.PromptCache == nil || m.PromptCache.Short != 120 {
+		t.Fatalf("promptCache=%+v", m.PromptCache)
+	}
+}
+
 func TestOverlayMergesFallbackAndStrict(t *testing.T) {
 	on := true
 	RegisterProvider(ProviderSpec{

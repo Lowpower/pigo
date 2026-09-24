@@ -112,6 +112,7 @@ func TestLoadSaveExtraRuntimeKeys(t *testing.T) {
 	raw := `{
   "hideThinkingBlock": true,
   "showCacheMissNotices": true,
+  "cacheWarming": "idle",
   "shellCommandPrefix": "set -e",
   "autocompleteMaxVisible": 8,
   "editorPaddingX": 2,
@@ -162,7 +163,10 @@ func TestLoadSaveExtraRuntimeKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, want := range []string{`"hideThinkingBlock"`, `"showCacheMissNotices"`, `"shellCommandPrefix"`, `"autocompleteMaxVisible"`, `"clearOnShrink"`} {
+	if cfg.CacheWarmingMode() != "idle" {
+		t.Fatalf("cacheWarming=%q", cfg.CacheWarmingMode())
+	}
+	for _, want := range []string{`"hideThinkingBlock"`, `"showCacheMissNotices"`, `"shellCommandPrefix"`, `"autocompleteMaxVisible"`, `"clearOnShrink"`, `"cacheWarming"`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %s in %s", want, s)
 		}

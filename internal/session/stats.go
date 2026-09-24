@@ -23,6 +23,7 @@ type Stats struct {
 	CostBreakdown     []CostBreakdown `json:"costBreakdown,omitempty"`
 	CacheWaste        *CacheWaste     `json:"cacheWaste,omitempty"`
 	ContextUsage      *ContextUsage   `json:"contextUsage,omitempty"`
+	CacheWarming      string          `json:"cacheWarming,omitempty"`
 }
 
 // CostBreakdown is one provider/model (or Tools/summaries) bucket.
@@ -63,7 +64,7 @@ func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats
 		s.SessionFile = m.File()
 		s.SessionID = m.ID()
 		for _, e := range m.Entries() {
-			if e.Type == "compaction" || e.Type == "branch_summary" {
+			if e.Type == "compaction" || e.Type == "branch_summary" || e.Type == "usage" {
 				if e.Usage != nil {
 					addUsage(&s, *e.Usage)
 				}
@@ -188,6 +189,9 @@ func FormatInfo(s Stats, name string) string {
 			pct = *s.ContextUsage.Percent
 		}
 		fmt.Fprintf(&b, "\nContext\nTokens: %d / %d (%.1f%%)\n", tok, s.ContextUsage.ContextWindow, pct)
+	}
+	if s.CacheWarming != "" {
+		fmt.Fprintf(&b, "\nCache warming\n%s\n", s.CacheWarming)
 	}
 	return b.String()
 }

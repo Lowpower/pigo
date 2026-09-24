@@ -42,6 +42,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `quietStartup` | Skip startup notes |
 | `httpProxy` / `httpIdleTimeoutMs` / `websocketConnectTimeoutMs` | Networking |
 | `hideThinkingBlock` / `showCacheMissNotices` | Display |
+| `cacheWarming` | `off` \| `streaming` \| `idle` (default `streaming`). Global file only. Replays an eligible request with a 1-token output cap at 90% of the model's prompt-cache lifetime, when expected savings are at least $0.05. `streaming` stops when the agent settles (60 minute cap). `idle` continues between runs (30 minute cap). |
 | `lastChangelogVersion` / `collapseChangelog` | `/changelog` |
 | `enableInstallTelemetry` / `enableAnalytics` / `trackingId` | Telemetry. `enableInstallTelemetry` (default true) also gates span export unless `PIGO_TELEMETRY` overrides |
 | `packages` / `extensions` / `skills` / `prompts` / `themes` / `npmCommand` | Resource lists |

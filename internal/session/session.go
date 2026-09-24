@@ -56,6 +56,9 @@ type Entry struct {
 
 	Provider        string   `json:"provider,omitempty"`
 	ModelID         string   `json:"modelId,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	Kind            string   `json:"kind,omitempty"`
+	Note            string   `json:"note,omitempty"`
 	ThinkingLevel   string   `json:"thinkingLevel,omitempty"`
 	ActiveToolNames []string `json:"activeToolNames,omitempty"`
 

@@ -24,6 +24,14 @@ func usageCostBreakdown(entries []Entry) []CostBreakdown {
 	}
 	for _, e := range entries {
 		switch e.Type {
+		case "usage":
+			if e.Usage != nil {
+				key := e.Provider + "/" + e.Model
+				if e.Provider == "" && e.Model == "" {
+					key = "unknown"
+				}
+				add(key, *e.Usage)
+			}
 		case "compaction", "branch_summary":
 			if e.Usage != nil {
 				add("Tools/summaries", *e.Usage)

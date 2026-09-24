@@ -11,6 +11,7 @@ import (
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
+	"github.com/Lowpower/pigo/internal/cachewarm"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
 )
@@ -329,6 +330,10 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 		return nil
 	}
 	return func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		if cachewarm.IsRefresh(ctx) {
+			opts.MaxTokens = 1
+			return fn(ctx, req, opts)
+		}
 		e.mu.Lock()
 		stop := e.stopAfterTools
 		e.stopAfterTools = false
@@ -368,6 +373,10 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 				})
 			}
 		}
-		return fn(ctx, req, opts)
+		stream, err := fn(ctx, req, opts)
+		if err != nil || stream == nil {
+			return stream, err
+		}
+		return e.observeCacheWarm(ctx, stream, req, opts), nil
 	}
 }

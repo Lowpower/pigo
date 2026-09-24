@@ -9,6 +9,10 @@ func usd(input, output, cacheRead, cacheWrite float64) *Cost {
 	return &Cost{Input: input, Output: output, CacheRead: cacheRead, CacheWrite: cacheWrite}
 }
 
+func anthropicPromptCache() *PromptCache {
+	return &PromptCache{Short: 300, Long: 3600}
+}
+
 func registerBuiltins() {
 	anthropicCost := map[string]*Cost{
 		"claude-sonnet-4": usd(3, 15, 0.30, 3.75),
@@ -31,9 +35,9 @@ func registerBuiltins() {
 		DefaultAPI: "anthropic-messages",
 		DefaultID:  "claude-sonnet-4",
 		Models: []Model{
-			{Provider: "anthropic", ID: "claude-sonnet-4", API: "anthropic-messages", Cost: anthropicCost["claude-sonnet-4"], MaxTokens: 64000},
-			{Provider: "anthropic", ID: "claude-opus-4", API: "anthropic-messages", Cost: anthropicCost["claude-opus-4"], MaxTokens: 32000},
-			{Provider: "anthropic", ID: "claude-haiku-4", API: "anthropic-messages", Cost: anthropicCost["claude-haiku-4"], MaxTokens: 64000},
+			{Provider: "anthropic", ID: "claude-sonnet-4", API: "anthropic-messages", Cost: anthropicCost["claude-sonnet-4"], MaxTokens: 64000, PromptCache: anthropicPromptCache()},
+			{Provider: "anthropic", ID: "claude-opus-4", API: "anthropic-messages", Cost: anthropicCost["claude-opus-4"], MaxTokens: 32000, PromptCache: anthropicPromptCache()},
+			{Provider: "anthropic", ID: "claude-haiku-4", API: "anthropic-messages", Cost: anthropicCost["claude-haiku-4"], MaxTokens: 64000, PromptCache: anthropicPromptCache()},
 		},
 	})
 	RegisterProvider(ProviderSpec{

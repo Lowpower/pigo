@@ -85,6 +85,17 @@ func (c Config) CacheMissNotices() bool {
 	return c.ShowCacheMissNotices != nil && *c.ShowCacheMissNotices
 }
 
+// CacheWarmingMode is off, streaming, or idle. Unset or unknown values are streaming.
+// Project settings cannot change it; only the global file is read.
+func (c Config) CacheWarmingMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.CacheWarming)) {
+	case "off", "streaming", "idle":
+		return strings.ToLower(strings.TrimSpace(c.CacheWarming))
+	default:
+		return "streaming"
+	}
+}
+
 // ShellPrefix is prepended to every bash command (empty when unset).
 func (c Config) ShellPrefix() string {
 	return c.ShellCommandPrefix

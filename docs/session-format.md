@@ -27,6 +27,7 @@ Common fields: `type`, `id`, `parentId` (null on the first entry), `timestamp`.
 | `branch_summary` | `fromId`, `summary`, `fromHook?` |
 | `label` | `targetId`, `label` |
 | `session_info` | `name` |
+| `usage` | `kind` (e.g. `cache_warm`), `provider`, `model`, `usage`, `note?`. Counted in session totals. Not sent to the model |
 | `custom` | `customType`, `data` (e.g. `pigo.share`) |
 | `custom_message` | `customType`, `content`, `display` (included in the LLM context) |
 

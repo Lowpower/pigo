@@ -183,6 +183,23 @@ func (m *Manager) AppendBranchSummary(fromID, summary string, fromHook bool) (*E
 	return m.appendEntry(e)
 }
 
+// AppendUsage records model usage that stays out of the LLM context.
+func (m *Manager) AppendUsage(kind, provider, model string, usage ai.Usage, note string) (*Entry, error) {
+	e := &Entry{
+		Type:      "usage",
+		ID:        newUUID(),
+		Timestamp: isoNow(),
+		Kind:      kind,
+		Provider:  provider,
+		Model:     model,
+		Usage:     &usage,
+	}
+	if note != "" {
+		e.Note = note
+	}
+	return m.appendEntry(e)
+}
+
 // AppendSessionInfo records a display-name change.
 func (m *Manager) AppendSessionInfo(name string) (*Entry, error) {
 	e := &Entry{

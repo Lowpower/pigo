@@ -45,6 +45,12 @@ Remote overlays: `PIGO_CATALOG_BASE_URL` and `pigo update --models` (cache
 }
 ```
 
+A model may declare prompt-cache lifetimes in seconds. Built-in Anthropic models use `short` 300 and `long` 3600. Other built-ins are unannotated. Cache warming runs only when the active retention tier has a lifetime.
+
+```json
+{ "id": "my-model", "promptCache": { "short": 300, "long": 3600 } }
+```
+
 Unknown provider ids are registered, including API-key auth. `apiKey` in
 `models.json`, or the same id in `auth.json`, is enough for `--list-models` and
 requests. Overlaying a custom gateway onto a builtin id such as `openai` still

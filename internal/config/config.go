@@ -55,6 +55,7 @@ type Config struct {
 	EnableSkillCommands       *bool                 `mapstructure:"enableSkillCommands"`
 	HideThinkingBlock         *bool                 `mapstructure:"hideThinkingBlock"`
 	ShowCacheMissNotices      *bool                 `mapstructure:"showCacheMissNotices"`
+	CacheWarming              string                `mapstructure:"cacheWarming"`
 	ShellCommandPrefix        string                `mapstructure:"shellCommandPrefix"`
 	EditorPaddingX            *int                  `mapstructure:"editorPaddingX"`
 	OutputPad                 *int                  `mapstructure:"outputPad"`
@@ -785,6 +786,7 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	if cfg.ShowCacheMissNotices != nil {
 		existing["showCacheMissNotices"] = *cfg.ShowCacheMissNotices
 	}
+	existing["cacheWarming"] = cfg.CacheWarmingMode()
 	if cfg.ShellCommandPrefix != "" {
 		existing["shellCommandPrefix"] = cfg.ShellCommandPrefix
 	}
