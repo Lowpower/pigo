@@ -141,6 +141,7 @@ func (e *Engine) noteCacheRequest(req ai.Context, opts ai.Options, msg *ai.Assis
 	})
 }
 
+// CacheWarmingStatus is the one-line /session diagnostic.
 func (e *Engine) CacheWarmingStatus() string {
 	if e.warmer == nil {
 		return "Inactive (waiting for first request)"
@@ -148,6 +149,7 @@ func (e *Engine) CacheWarmingStatus() string {
 	return cachewarm.FormatStatus(e.warmer.Status(), time.Now())
 }
 
+// CacheWarmingChanged re-reads the mode after a settings change.
 func (e *Engine) CacheWarmingChanged() {
 	if e.warmer != nil {
 		e.warmer.ModeChanged()

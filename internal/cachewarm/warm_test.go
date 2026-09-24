@@ -139,7 +139,7 @@ func newHarness(t *testing.T) *harness {
 			h.done <- struct{}{}
 			return ai.Usage{Output: 1, Cost: ai.UsageCost{Total: 0.01}}, "stop", nil
 		},
-		Record: func(usage ai.Usage, provider, model, note string) {
+		Record: func(_ ai.Usage, _, _, _ string) {
 			h.recorded++
 		},
 	})
@@ -288,7 +288,7 @@ func TestExtensionCanStop(t *testing.T) {
 
 func TestExtensionErrorKeepsDecision(t *testing.T) {
 	h := newHarness(t)
-	h.decide = func(d Decision) (string, error) { return "stop", errors.New("boom") }
+	h.decide = func(_ Decision) (string, error) { return "stop", errors.New("boom") }
 	h.start(100_000)
 	h.clock.Advance(270 * time.Second)
 	h.waitRefresh()
