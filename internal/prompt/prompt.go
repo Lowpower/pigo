@@ -25,6 +25,11 @@ type Options struct {
 
 // Build returns the system prompt.
 func Build(opts Options) string {
+	return Collect(opts).Render()
+}
+
+// Collect splits the system prompt into stable named sections.
+func Collect(opts Options) SectionSet {
 	custom := strings.TrimSpace(opts.Custom)
 	if custom == "" {
 		custom = readPromptFile(discoverSystemPromptFile(opts.Cwd, opts.AgentDir, opts.ProjectTrusted))
@@ -35,14 +40,15 @@ func Build(opts Options) string {
 			appendParts = []string{body}
 		}
 	}
-	var b strings.Builder
+	var s SectionSet
 	if custom != "" {
-		b.WriteString(custom)
+		s.Set(SectionPreamble, custom)
 	} else {
-		b.WriteString("You are an expert coding assistant in pigo.\n")
-		b.WriteString("Be concise. Prefer editing existing files over writing new ones. Use tools to inspect the repo before proposing changes.\n")
+		s.Set(SectionPreamble, "You are an expert coding assistant in pigo.\n"+
+			"Be concise. Prefer editing existing files over writing new ones. Use tools to inspect the repo before proposing changes.")
 		if opts.IncludeToolHints && len(opts.Tools) > 0 {
-			b.WriteString("\nAvailable tools:\n")
+			var b strings.Builder
+			b.WriteString("Available tools:\n")
 			for _, t := range opts.Tools {
 				b.WriteString("- ")
 				b.WriteString(t.Name)
@@ -50,36 +56,32 @@ func Build(opts Options) string {
 				b.WriteString(t.Description)
 				b.WriteByte('\n')
 			}
+			s.Set(SectionTools, b.String())
 		}
 	}
+	var appends []string
 	for _, a := range appendParts {
 		if strings.TrimSpace(a) == "" {
 			continue
 		}
-		b.WriteString("\n")
-		b.WriteString(a)
+		appends = append(appends, a)
+	}
+	if len(appends) > 0 {
+		s.Set(SectionAppend, strings.Join(appends, "\n"))
 	}
 	if !opts.NoContextFiles {
 		if ctx := loadContextFiles(opts.Cwd, opts.AgentDir, opts.ProjectTrusted); ctx != "" {
-			b.WriteString("\n<project_context>\n")
-			b.WriteString(ctx)
-			b.WriteString("\n</project_context>\n")
+			s.Set(SectionProjectContext, "<project_context>\n"+ctx+"\n</project_context>")
 		}
 	}
 	if tool := skillFileReadTool(opts.Tools); tool != "" && len(opts.Skills) > 0 {
-		b.WriteString("\n")
-		b.WriteString(skills.FormatForPrompt(opts.Skills, tool))
-		b.WriteByte('\n')
+		s.Set(SectionSkills, skills.FormatForPrompt(opts.Skills, tool))
 	}
 	if opts.Cwd != "" {
-		b.WriteString("\nCurrent working directory: ")
-		b.WriteString(opts.Cwd)
-		b.WriteByte('\n')
+		s.Set(SectionCwd, "Current working directory: "+opts.Cwd)
 	}
-	b.WriteString("Current date: ")
-	b.WriteString(time.Now().Format("2006-01-02"))
-	b.WriteByte('\n')
-	return b.String()
+	s.Set(SectionDate, "Current date: "+time.Now().Format("2006-01-02"))
+	return s
 }
 
 func skillFileReadTool(tools []ai.Tool) string {

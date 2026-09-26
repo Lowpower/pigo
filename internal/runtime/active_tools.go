@@ -35,6 +35,7 @@ func (e *Engine) SetActiveTools(names []string) []string {
 	e.mu.Unlock()
 	if changed && sess != nil {
 		_, _ = sess.AppendActiveToolsChange(snapshot)
+		e.syncToolsIfDeclared()
 	}
 	return added
 }

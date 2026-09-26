@@ -55,6 +55,8 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 		}
 		role, _ := payload["role"].(string)
 		switch role {
+		case "system":
+			continue
 		case "assistant":
 			var am ai.AssistantMessage
 			if err := json.Unmarshal(e.Message, &am); err == nil && (len(am.Content) > 0 || am.Role != "") {
