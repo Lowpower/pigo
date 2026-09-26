@@ -119,6 +119,17 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				return map[string]any{"message": msg}
 			},
 		})
+	case "forcesys":
+		_ = ext.Serve(ext.Handler{
+			Name:   "force-ext",
+			Events: []string{"before_agent_start"},
+			OnEvent: func(string, map[string]any) map[string]any {
+				if os.Getenv("PIGO_FORCE_SYS") == "turn" {
+					return map[string]any{"systemPrompt": "TURN-ONLY"}
+				}
+				return map[string]any{"forceSystemPrompt": "LEAD"}
+			},
+		})
 	case "userbash":
 		_ = ext.Serve(ext.Handler{
 			Name:   "userbash-ext",
