@@ -110,6 +110,10 @@ type Engine struct {
 	extStreams        map[string]ai.StreamFn
 	stopAfterTools    bool
 	overflowAttempted bool
+	// preambleAnchor is the built preamble last compared against the session.
+	// While it is unchanged, a forced preamble in the session stays in place.
+	preambleAnchor string
+	sawPreamble    bool
 
 	busy         bool
 	runAbort     context.CancelFunc
@@ -579,7 +583,9 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	if replacement := asString(hook["compaction"]); replacement != "" {
 		e.emitSession(map[string]any{"type": "compaction_start", "reason": reason})
 		if e.Opts.Session != nil {
-			if entry, err := e.Opts.Session.AppendCompaction(replacement, keep, tokensBefore); err == nil && entry != nil {
+			if entry, err := e.Opts.Session.AppendCompaction(replacement, keep, tokensBefore, session.CompactionMeta{
+				SystemMessage: e.currentSystemCheckpoint(),
+			}); err == nil && entry != nil {
 				e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 			}
 		}
@@ -620,7 +626,9 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	out := resultOf(compacted, summary)
 	span.SetAttribute("pigo.compaction.tokens_after", out.EstimatedTokensAfter)
 	if summary != "" && e.Opts.Session != nil {
-		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokensBefore); err == nil && entry != nil {
+		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokensBefore, session.CompactionMeta{
+			SystemMessage: e.currentSystemCheckpoint(),
+		}); err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 		}
 	}
@@ -987,12 +995,20 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 		user, images = prep.User, prep.Images
 	}
 
-	sys := e.System
+	sent := e.System
 	start := e.DispatchEvent(ctx, "before_agent_start", map[string]any{
-		"prompt": user, "images": imagesPayload(images), "systemPrompt": sys,
+		"prompt": user, "images": imagesPayload(images), "systemPrompt": sent,
 	})
-	if s := asString(start["systemPrompt"]); s != "" {
-		sys = s
+	// systemPrompt is already on the outbound payload, so an unchanged echo is
+	// not a turn override. A different value replaces this request only.
+	returned := asString(start["systemPrompt"])
+	force := asString(start["forceSystemPrompt"])
+	synced := e.syncSystem(force)
+	sys := synced
+	if returned != "" && returned != sent {
+		sys = returned
+	} else if force == "" {
+		e.System = synced
 	}
 
 	e.overflowAttempted = false
@@ -1014,8 +1030,8 @@ func (e *Engine) runLoop(ctx context.Context, history, newUsers []ai.Message) *a
 
 func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.Message, system string) *agent.Stream {
 	req := ai.Context{System: system, Messages: history}
-	if e.Tools != nil {
-		req.Tools = e.providerTools()
+	if tools, fromSession := e.requestTools(); fromSession || e.Tools != nil {
+		req.Tools = tools
 	}
 	sf := e.Stream
 	if sf == nil {
@@ -1044,7 +1060,10 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 			return out
 		},
 		ToolAddedNames: e.toolAddedNames,
-		NextTools:      e.providerTools,
+		NextTools: func() []ai.Tool {
+			tools, _ := e.requestTools()
+			return tools
+		},
 	})
 }
 
@@ -1064,6 +1083,7 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 	}
 	e.persisted = len(session.RestoreAIMessages(session.ContextEntries(s)))
 	e.restoreActiveTools(s)
+	e.restoreSystem(s)
 }
 
 // NewSession starts a fresh session, emitting shutdown/start extension events.

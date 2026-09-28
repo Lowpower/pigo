@@ -135,9 +135,10 @@ func (m *Manager) Fork(cwd, agentDir string) (*Manager, error) {
 
 // CompactionMeta is optional compaction JSONL fields.
 type CompactionMeta struct {
-	Details  any
-	Usage    *ai.Usage
-	FromHook bool
+	Details       any
+	Usage         *ai.Usage
+	FromHook      bool
+	SystemMessage *SystemMessage
 }
 
 // AppendCompaction records a compaction summary entry.
@@ -156,6 +157,7 @@ func (m *Manager) AppendCompaction(summary, firstKeptEntryID string, tokensBefor
 		extra := meta[0]
 		e.FromHook = extra.FromHook
 		e.Usage = extra.Usage
+		e.SystemMessage = extra.SystemMessage
 		if extra.Details != nil {
 			raw, err := json.Marshal(extra.Details)
 			if err != nil {

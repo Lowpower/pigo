@@ -120,7 +120,7 @@ Useful return payloads:
 
 - `tool_call`: `{ "block": true, "reason": "…", "terminate": true? }` or `{ "input": { … } }` to rewrite args
 - `input`: `{ "action": "handled" }` or `{ "action": "transform", "text": "…" }`
-- `before_agent_start`: `{ "systemPrompt": "…" }`
+- `before_agent_start`: `{ "systemPrompt": "…" }` replaces the system prompt for this turn only and is not written to the session. `{ "forceSystemPrompt": "…" }` persists as the `preamble` section: on the first request it is part of the full declaration; once a system message exists it is a preamble-only patch, leaving other sections and tools in place.
 - `project_trust`: `{ "block": true }`
 - `user_bash`: omit the payload to run the local shell. Replace execution with `{ "result": { "output": "…", "cancelled": false, "truncated": false, "exitCode": 0 } }`. Any other payload, including `{ "block": true }` or `{ "operations": … }`, fails the command and does not run the local shell. A handler timeout or crash does the same.
 
