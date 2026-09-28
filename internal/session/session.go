@@ -14,6 +14,8 @@ import (
 )
 
 // CurrentVersion is the session file schema version.
+// System messages and compaction systemMessage checkpoints are optional
+// fields on version 3; old files stay valid without a version bump.
 const CurrentVersion = 3
 
 // Header is the first line of a session file.
@@ -47,6 +49,7 @@ type Entry struct {
 
 	// Compaction / custom fields (top-level).
 	FirstKeptEntryID string          `json:"firstKeptEntryId,omitempty"`
+	SystemMessage    *SystemMessage  `json:"systemMessage,omitempty"`
 	TokensBefore     *int            `json:"tokensBefore,omitempty"`
 	FromHook         bool            `json:"fromHook,omitempty"`
 	CustomType       string          `json:"customType,omitempty"`

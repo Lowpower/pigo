@@ -291,6 +291,56 @@ func TestSystemPromptPathsForStartup(t *testing.T) {
 	}
 }
 
+func TestCollectSectionsAreNamedAndOrdered(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("Use tabs."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Collect(Options{
+		Cwd:              cwd,
+		Custom:           "",
+		Append:           []string{"extra rules"},
+		Tools:            []ai.Tool{{Name: "read", Description: "read a file"}},
+		IncludeToolHints: true,
+		Skills:           []skills.Skill{{Name: "demo", Description: "Do the demo", FilePath: "/tmp/SKILL.md"}},
+	})
+	for _, name := range []string{SectionPreamble, SectionAppend, SectionTools, SectionProjectContext, SectionSkills, SectionCwd, SectionDate} {
+		if strings.TrimSpace(got.Get(name)) == "" {
+			t.Fatalf("missing section %s: %#v", name, got.Map())
+		}
+	}
+	text := got.Render()
+	if text != Build(Options{
+		Cwd:              cwd,
+		Append:           []string{"extra rules"},
+		Tools:            []ai.Tool{{Name: "read", Description: "read a file"}},
+		IncludeToolHints: true,
+		Skills:           []skills.Skill{{Name: "demo", Description: "Do the demo", FilePath: "/tmp/SKILL.md"}},
+	}) {
+		t.Fatal("Build and Collect.Render diverged")
+	}
+	order := []string{SectionPreamble, SectionAppend, SectionTools, SectionProjectContext, SectionSkills, SectionCwd, SectionDate}
+	pos := -1
+	for _, name := range order {
+		i := strings.Index(text, got.Get(name))
+		if i < pos {
+			t.Fatalf("section %s out of order in:\n%s", name, text)
+		}
+		pos = i
+	}
+	custom := Collect(Options{
+		Custom:           "only custom",
+		Tools:            []ai.Tool{{Name: "read", Description: "read a file"}},
+		IncludeToolHints: true,
+	})
+	if custom.Get(SectionTools) != "" {
+		t.Fatalf("custom prompt should not grow a tools section: %q", custom.Get(SectionTools))
+	}
+	if !strings.Contains(custom.Render(), "only custom") {
+		t.Fatalf("render=%s", custom.Render())
+	}
+}
+
 func TestBuildInjectsSkillsWithBashOnly(t *testing.T) {
 	got := Build(Options{
 		Skills: []skills.Skill{{Name: "demo", Description: "Do the demo", FilePath: "/tmp/SKILL.md"}},
