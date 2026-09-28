@@ -12,6 +12,12 @@ var (
 	shareKeyJSON  = regexp.MustCompile(`(?i)("(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization)"\s*:\s*")([^"]+)(")`)
 )
 
+// RedactSecrets replaces credential-shaped substrings. Callers that export
+// settings or transcripts use this so /share and /bug stay on one pattern set.
+func RedactSecrets(b []byte) []byte {
+	return redactSecrets(b)
+}
+
 func redactSecrets(b []byte) []byte {
 	s := string(b)
 	s = shareKeyJSON.ReplaceAllString(s, `${1}[redacted]$3`)

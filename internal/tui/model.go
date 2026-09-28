@@ -177,6 +177,7 @@ type Model struct {
 	thinkingLabel   string
 	extCustom       *extCustomState
 	termHosts       []*ext.Host
+	bugHintShown    bool
 }
 
 // New builds the interactive model from the resolved config.
@@ -321,7 +322,17 @@ func (m Model) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			return
+		}
+		recordTUIPanic(m.engine, rec)
+		m.quitting = true
+		out = m
+		nextCmd = tea.Quit
+	}()
 	if next, ok := m.handleExtMsg(msg); ok {
 		return next, nil
 	}
@@ -606,6 +617,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactDoneMsg:
 		return m.handleCompactDone(msg)
+
+	case bugSummaryMsg:
+		return m.finishBugSummary(msg)
 
 	case afterAgentEndMsg:
 		return m.handleAfterAgentEnd(msg)
@@ -1022,6 +1036,8 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			}
 			return shareDoneMsg{text: res.String()}
 		}
+	case "bug":
+		return m.startBugReport(cmd.Rest)
 	case "changelog":
 		body := changelog.FullMarkdown()
 		rendered := m.renderMarkdown("What's New\n\n" + body)
@@ -1189,6 +1205,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 				m.transcript = append(m.transcript, entry{role: "assistant", rendered: m.renderMarkdown(text)})
 				m.history = append(m.history, ai.Message{Role: ai.RoleAssistant, Content: text})
 			}
+			m.noteBugHint(ev.Assistant)
 		}
 
 	case agent.EventToolStart:
@@ -1644,7 +1661,16 @@ func RunEngineResumePicker(cfg config.Config, eng *runtime.Engine) error {
 	return runEngine(cfg, eng, true)
 }
 
-func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
+func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err error) {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			return
+		}
+		fmt.Fprint(os.Stderr, "\x1b[?25h\x1b[0m\x1b[?1049l\n")
+		recordTUIPanic(eng, rec)
+		err = fmt.Errorf("pigo panicked: %v", rec)
+	}()
 	m := New(cfg)
 	m.engine = eng
 	if eng != nil {
@@ -1658,6 +1684,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(trust.UntrustedHint)})
 		}
 	}
+	m.noteCrash()
 	m.applyStartupChangelog()
 	m.maybeWarnAnthropicExtraUsage()
 	if openResume {
@@ -1694,6 +1721,9 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		})
 	}
 	final, err := p.Run()
+	if errors.Is(err, tea.ErrProgramPanic) {
+		recordCaughtPanic(eng, err)
+	}
 	if err != nil {
 		return err
 	}
