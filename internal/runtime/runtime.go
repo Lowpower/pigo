@@ -14,6 +14,7 @@ import (
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
+	"github.com/Lowpower/pigo/internal/bugreport"
 	"github.com/Lowpower/pigo/internal/cachewarm"
 	"github.com/Lowpower/pigo/internal/compaction"
 	"github.com/Lowpower/pigo/internal/config"
@@ -72,6 +73,7 @@ type Engine struct {
 	Provider   string
 	Tools      *tools.Registry
 	Hosts      []*ext.Host
+	bugExts    []bugreport.Extension
 	Skills     []skills.Skill
 	Templates  []prompt.Template
 	ThemeFiles []string // enabled theme files from pkgmgr.Resolve; CLI --theme stays on Opts.ThemePaths
@@ -257,6 +259,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 
 	e.Tools = reg
 	e.Hosts = hosts
+	e.setBugExtensions(hostPaths(hosts), extSpecs, rs)
 	e.Skills = sk
 	e.Templates = tpls
 	e.ThemeFiles = themeFiles
@@ -1244,6 +1247,7 @@ func (e *Engine) Reload() {
 	}
 	e.dropAllProviders()
 	e.Hosts = nil
+	e.bugExts = nil
 	e.extCommands = nil
 	e.extStreams = nil
 	e.syncToolRunner()
@@ -1262,6 +1266,7 @@ func (e *Engine) Reload() {
 			hosts, r, err := spawnExtensions(ctx, specs, reg, e.Opts.UnknownFlags)
 			if err == nil {
 				e.Hosts = hosts
+				e.setBugExtensions(hostPaths(hosts), specs, rs)
 				reg = r
 			}
 		}

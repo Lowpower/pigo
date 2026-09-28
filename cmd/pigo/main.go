@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/bugreport"
 
 	"github.com/spf13/cobra"
 
@@ -25,6 +28,21 @@ import (
 )
 
 func main() {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			return
+		}
+		cwd, _ := os.Getwd()
+		bugreport.RecordCrash("", bugreport.CrashInput{
+			Kind:  bugreport.KindUncaught,
+			Err:   rec,
+			Stack: string(debug.Stack()),
+			Cwd:   cwd,
+		})
+		fmt.Fprintf(os.Stderr, "pigo panicked: %v\n", rec)
+		os.Exit(2)
+	}()
 	expanded := expandShortFlags(os.Args[1:])
 	rest, unknown := peelUnknownFlags(expanded)
 	extraFlags = unknown
@@ -170,6 +188,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	if agentDir == "" {
 		agentDir = config.DefaultConfigDir()
 	}
+	bugreport.SetCrashAgentDir(agentDir)
 	sandbox.SetAgentDir(agentDir)
 	sandbox.SetNoSandbox(f.noSandbox)
 	if f.thinking != "" && !models.IsThinkingLevel(f.thinking) {

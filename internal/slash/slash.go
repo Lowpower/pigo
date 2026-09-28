@@ -71,6 +71,7 @@ func Builtins() []Command {
 		{Name: "export", Description: "export the session (HTML default, or .html/.jsonl path)"},
 		{Name: "import", Description: "import and resume a session from a JSONL file"},
 		{Name: "share", Description: "share the session (Radius or private gist)"},
+		{Name: "bug", Description: "write a local bug report zip"},
 		{Name: "copy", Description: "copy last agent message to clipboard"},
 		{Name: "name", Description: "set session display name"},
 		{Name: "session", Description: "show session info and stats"},

@@ -28,8 +28,14 @@ Common fields: `type`, `id`, `parentId` (null on the first entry), `timestamp`.
 | `label` | `targetId`, `label` |
 | `session_info` | `name` |
 | `usage` | `kind` (e.g. `cache_warm`), `provider`, `model`, `usage`, `note?`. Counted in session totals. Not sent to the model |
-| `custom` | `customType`, `data` (e.g. `pigo.share`) |
+| `custom` | `customType`, `data` (e.g. `pigo.share`, `pigo.bug-report`) |
 | `custom_message` | `customType`, `content`, `display` (included in the LLM context) |
 
 Entries are buffered until the first assistant message, then flushed and
 appended. Do not rewrite historical lines in place; fork instead.
+
+`customType: pigo.bug-report` records a local `/bug` zip. `data` has `id`,
+`createdAt`, `hint`, `sessionIncluded`, `summaryIncluded`, `delivery` (`zip`),
+and `path`. Crash records live in `agentDir/crashes.json` (`timestamp`,
+`version`, `kind`, `message`, `stack`, `sessionFile`, `cwd`, `notified`), not
+in the session file.
