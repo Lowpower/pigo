@@ -85,7 +85,12 @@ func (m Model) finishBugReport(args bugreport.Args, summary string) (tea.Model, 
 	if m.engine.Opts.Session != nil {
 		_, _ = m.engine.Opts.Session.AppendCustomEntry(bugreport.CustomType, bugreport.SessionData(written, args.Hint, args.Transcript, summary != ""))
 	}
-	return note("bug report: " + written.Path + "\n" + written.URL)
+	link := written.URL
+	if m.cfg.HyperlinksEnabled(true) {
+		link = osc8(written.URL, written.URL)
+	}
+	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("bug report: "+written.Path) + "\n" + link})
+	return m, nil
 }
 
 func (m *Model) noteBugHint(msg *ai.AssistantMessage) {

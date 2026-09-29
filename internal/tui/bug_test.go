@@ -53,6 +53,25 @@ func TestSlashBugWritesZip(t *testing.T) {
 	if !strings.Contains(text, "pigo-bug-report-") || !strings.Contains(text, "https://github.com/Lowpower/pigo/issues/new?") {
 		t.Fatalf("%s", text)
 	}
+	if !strings.Contains(text, "\x1b]8;;https://github.com/Lowpower/pigo/issues/new?") {
+		t.Fatal("issue URL was not an OSC 8 hyperlink")
+	}
+	for _, line := range strings.Split(stripANSI(text), "\n") {
+		if strings.Contains(line, "issues/new") && strings.Contains(line, dir) {
+			t.Fatalf("issue URL includes the local directory: %s", line)
+		}
+	}
+	shown := next.(Model)
+	shown.width = 40
+	view := stripANSI(shown.View())
+	i := strings.Index(view, "https://github.com/Lowpower/pigo/issues/new?")
+	if i < 0 {
+		t.Fatalf("view missing issue URL:\n%s", view)
+	}
+	line, _, _ := strings.Cut(view[i:], "\n")
+	if !strings.Contains(line, "title=") || !strings.Contains(line, "body=") {
+		t.Fatalf("view split the issue URL: %q", line)
+	}
 	found := false
 	for _, e := range sess.GetBranch("") {
 		if e.CustomType == bugreport.CustomType {

@@ -23,6 +23,21 @@ func TestOSC8FileLink(t *testing.T) {
 	}
 }
 
+func TestWrapDisplayKeepsIssueURL(t *testing.T) {
+	raw := "https://github.com/Lowpower/pigo/issues/new?title=pigo%20bug%20report%2036dff4e8-dcc4-468f-86dc-f164fe2a906a&body=Report"
+	if got := wrapDisplay(raw, 40); strings.Contains(got, "\n") {
+		t.Fatalf("hard wrap split the issue URL:\n%s", got)
+	}
+	linked := osc8(raw, raw)
+	if got := wrapDisplay(linked, 40); strings.Contains(got, "\n") {
+		t.Fatalf("hard wrap split the hyperlink:\n%q", got)
+	}
+	plain := wrapDisplay("hello hello hello hello hello hello", 10)
+	if !strings.Contains(plain, "\n") {
+		t.Fatal("ordinary text should still wrap")
+	}
+}
+
 func TestHyperlinksOffSkipsOSC8(t *testing.T) {
 	m := New(testCfg())
 	m.cfg.Terminal.Hyperlinks = false

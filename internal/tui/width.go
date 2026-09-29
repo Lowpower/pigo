@@ -13,10 +13,22 @@ func isImageProtocol(s string) bool {
 }
 
 func wrapDisplay(s string, width int) string {
-	if width <= 0 || s == "" || isImageProtocol(s) {
+	if width <= 0 || s == "" || isImageProtocol(s) || keepOneLine(s) {
 		return s
 	}
 	return wrap.String(s, width)
+}
+
+// keepOneLine leaves a line whose visible text is a single URL unwrapped.
+// A hard newline in the middle of that URL makes the terminal open only the
+// first visual row. Other lines, including ones that contain a file hyperlink,
+// still wrap.
+func keepOneLine(s string) bool {
+	plain := strings.TrimSpace(stripANSI(s))
+	if plain == "" || strings.ContainsAny(plain, " \t\n") {
+		return false
+	}
+	return strings.HasPrefix(plain, "https://") || strings.HasPrefix(plain, "http://")
 }
 
 func wrapDisplayBlock(s string, width int) string {

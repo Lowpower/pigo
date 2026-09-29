@@ -91,12 +91,15 @@ Prefix a line with `!` to run bash without going through the model.
 (`PIGO_SHARE_VIEWER_URL`).
 
 `/bug [description]` writes `pigo-bug-report-<id>.zip` in the working directory
-and prints a GitHub new-issue URL. The zip contains the environment, model,
-loaded extensions, redacted settings, and assistant error diagnostics.
-`--transcript` adds the current session branch. `--summary` asks the current
-model for a summary instead. The two flags cannot be combined. Crashes are
-stored in `~/.pigo/agent/crashes.json` and attached to the next report. You
-submit the issue yourself and attach the zip.
+and prints that path plus a GitHub new-issue URL. The form's title is the
+description's first line, or `pigo bug report <id>`. The body names the zip
+file and asks you to attach it; it does not include the local directory.
+The zip contains the environment, model, loaded extensions, redacted
+settings, and assistant error diagnostics. `--transcript` adds the current
+session branch. `--summary` asks the current model for a summary instead.
+The two flags cannot be combined. Crashes are stored in
+`~/.pigo/agent/crashes.json` and attached to the next report. You submit the
+issue yourself and attach the zip.
 
 ## Context files
 
