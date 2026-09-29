@@ -1064,6 +1064,7 @@ func (e *Engine) runLoop(ctx context.Context, history, newUsers []ai.Message) *a
 }
 
 func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.Message, system string) *agent.Stream {
+	e.persistPendingUsers(history)
 	req := ai.Context{System: system, Messages: history}
 	if tools, fromSession := e.requestTools(); fromSession || e.Tools != nil {
 		req.Tools = tools
@@ -1371,17 +1372,45 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 			}
 			entry, err = e.Opts.Session.AppendMessage("toolResult", payload)
 		default:
-			payload := map[string]any{"role": "user", "content": msg.Text}
-			if len(msg.Images) > 0 {
-				payload["content"] = agent.UserContentBlocks(msg.Text, msg.Images)
-			}
-			entry, err = e.Opts.Session.AppendMessage("user", payload)
+			entry, err = e.Opts.Session.AppendMessage("user", userSessionPayload(msg.Text, msg.Images))
 		}
 		if err == nil && entry != nil {
 			e.recordEntry(entry, nil)
 		}
 	}
 	e.persisted = len(msgs)
+}
+
+// persistPendingUsers writes user messages that are already in history but not
+// yet on disk, before the provider is called. A non-user in that suffix means
+// the prefix index no longer lines up (for example after compaction shrinks
+// history), so the turn-end persist keeps those lines.
+func (e *Engine) persistPendingUsers(history []ai.Message) {
+	if e == nil || e.Opts.Session == nil || e.persisted > len(history) {
+		return
+	}
+	pending := history[e.persisted:]
+	for _, m := range pending {
+		if m.Role != ai.RoleUser {
+			return
+		}
+	}
+	for _, m := range pending {
+		entry, err := e.Opts.Session.AppendMessage("user", userSessionPayload(m.Content, m.Images))
+		if err != nil || entry == nil {
+			return
+		}
+		e.recordEntry(entry, nil)
+		e.persisted++
+	}
+}
+
+func userSessionPayload(text string, images []ai.ImageContent) map[string]any {
+	payload := map[string]any{"role": "user", "content": text}
+	if len(images) > 0 {
+		payload["content"] = agent.UserContentBlocks(text, images)
+	}
+	return payload
 }
 
 // CycleModel steps through --models or the catalog (ctrl+p).

@@ -32,7 +32,7 @@ Common fields: `type`, `id`, `parentId` (null on the first entry), `timestamp`.
 | `custom` | `customType`, `data` (e.g. `pigo.share`, `pigo.bug-report`) |
 | `custom_message` | `customType`, `content`, `display` (included in the LLM context) |
 
-Entries are buffered until the first assistant message, then flushed and
+Entries are buffered until the first user message, then flushed and
 appended. Do not rewrite historical lines in place; fork instead.
 
 `customType: pigo.bug-report` records a local `/bug` zip. `data` has `id`,
