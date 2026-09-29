@@ -25,19 +25,31 @@ func RadiusGateway() string {
 }
 
 type radiusGatewayConfig struct {
-	BaseURL string `json:"baseUrl"`
-	Models  []struct {
-		ID string `json:"id"`
-	} `json:"models"`
+	BaseURL string               `json:"baseUrl"`
+	Models  []radiusGatewayModel `json:"models"`
+}
+
+type radiusGatewayModel struct {
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Reasoning        *bool              `json:"reasoning"`
+	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap"`
+	Input            []string           `json:"input"`
+	Cost             *Cost              `json:"cost"`
+	ContextWindow    int                `json:"contextWindow"`
+	MaxTokens        int                `json:"maxTokens"`
 }
 
 func refreshRadius(store CatalogStore) error {
-	return refreshRadiusCatalog(context.Background(), store, os.Getenv("RADIUS_API_KEY"))
+	return refreshRadiusProvider(context.Background(), store, "radius", RadiusGateway(), os.Getenv("RADIUS_API_KEY"), true)
 }
 
-func refreshRadiusCatalog(ctx context.Context, store CatalogStore, token string) error {
-	gateway := RadiusGateway()
+func refreshRadiusProvider(ctx context.Context, store CatalogStore, providerID, gateway, token string, seedPublic bool) error {
+	gateway = strings.TrimRight(strings.TrimSpace(gateway), "/")
 	if gateway == "" {
+		if seedPublic {
+			seedPublicRadius(store)
+		}
 		return nil
 	}
 	if token == "" {
@@ -68,29 +80,96 @@ func refreshRadiusCatalog(ctx context.Context, store CatalogStore, token string)
 	if err := json.Unmarshal(body, &cfg); err != nil || cfg.BaseURL == "" {
 		return fmt.Errorf("invalid Radius config from %s", gateway)
 	}
+	out := modelsFromRadiusConfig(providerID, cfg)
+	SetRemoteOverlay(providerID, out)
+	if store != nil {
+		_ = store.Write(providerID, StoreEntry{Models: out, CheckedAt: time.Now().UnixMilli()})
+	}
+	return nil
+}
+
+func modelsFromRadiusConfig(providerID string, cfg radiusGatewayConfig) []Model {
+	base := strings.TrimRight(cfg.BaseURL, "/")
 	out := make([]Model, 0, len(cfg.Models))
 	for _, m := range cfg.Models {
 		if m.ID == "" {
 			continue
 		}
 		out = append(out, Model{
-			Provider: "radius",
-			ID:       m.ID,
-			API:      "pigo-messages",
-			BaseURL:  strings.TrimRight(cfg.BaseURL, "/"),
+			Provider:         providerID,
+			ID:               m.ID,
+			Name:             m.Name,
+			API:              "pigo-messages",
+			BaseURL:          base,
+			Cost:             m.Cost,
+			MaxTokens:        m.MaxTokens,
+			ContextWindow:    m.ContextWindow,
+			Reasoning:        m.Reasoning,
+			Input:            m.Input,
+			ThinkingLevelMap: m.ThinkingLevelMap,
 		})
 	}
-	SetRemoteOverlay("radius", out)
-	if store != nil {
-		_ = store.Write("radius", StoreEntry{Models: out, CheckedAt: time.Now().UnixMilli()})
-	}
-	return nil
+	return out
 }
 
-// WaitForRadiusCatalog polls the Radius gateway until the overlay is non-empty
-// or ctx ends. Timeout is not an error: the caller should keep the credential.
+// seedPublicRadius writes the built-in public list when models-store has no
+// radius entry. An existing gateway cache is left in place.
+func seedPublicRadius(store CatalogStore) {
+	if store == nil {
+		return
+	}
+	spec, ok := LookupProvider("radius")
+	if !ok || spec.RadiusGateway != "" {
+		return
+	}
+	if _, found, err := store.Read("radius"); err != nil || found {
+		return
+	}
+	models := publicRadiusModels()
+	if len(models) == 0 {
+		return
+	}
+	_ = store.Write("radius", StoreEntry{Models: models, CheckedAt: time.Now().UnixMilli()})
+}
+
+// registerRadiusGatewayProvider installs a models.json oauth:radius gateway
+// with an empty baseline. It does not inherit the public catalog.
+func registerRadiusGatewayProvider(id, name, gateway, api string) {
+	gateway = strings.TrimRight(strings.TrimSpace(gateway), "/")
+	if api == "" {
+		api = "pigo-messages"
+	}
+	if name == "" {
+		name = id
+	}
+	providerID := id
+	captured := gateway
+	RegisterProvider(ProviderSpec{
+		ID:            providerID,
+		Name:          name,
+		BaseURL:       captured,
+		DefaultAPI:    api,
+		RadiusGateway: captured,
+		RefreshModels: func(store CatalogStore) error {
+			return refreshRadiusProvider(context.Background(), store, providerID, captured, os.Getenv("RADIUS_API_KEY"), false)
+		},
+	})
+}
+
+// WaitForRadiusCatalog polls the built-in Radius gateway until its overlay is
+// non-empty or ctx ends. Timeout is not an error: the caller should keep the credential.
 func WaitForRadiusCatalog(ctx context.Context, store CatalogStore, token string, notify func(string)) bool {
-	if RadiusGateway() == "" {
+	return WaitForRadiusProvider(ctx, store, "radius", RadiusGateway(), token, notify)
+}
+
+// WaitForRadiusProvider polls gateway until providerID's overlay is non-empty
+// or ctx ends. With no gateway, the built-in public catalog counts as ready.
+func WaitForRadiusProvider(ctx context.Context, store CatalogStore, providerID, gateway, token string, notify func(string)) bool {
+	gateway = strings.TrimRight(strings.TrimSpace(gateway), "/")
+	if gateway == "" {
+		if providerID == "radius" && len(publicRadiusModels()) > 0 {
+			return true
+		}
 		notifyRadiusCatalog(notify, "Radius model catalog timed out; models may be unavailable until refresh.")
 		return false
 	}
@@ -101,8 +180,8 @@ func WaitForRadiusCatalog(ctx context.Context, store CatalogStore, token string,
 	}
 	notifyRadiusCatalog(notify, "Waiting for Radius model catalog…")
 	for {
-		err := refreshRadiusCatalog(ctx, store, token)
-		if err == nil && len(remoteOverlay("radius")) > 0 {
+		err := refreshRadiusProvider(ctx, store, providerID, gateway, token, false)
+		if err == nil && len(remoteOverlay(providerID)) > 0 {
 			return true
 		}
 		timer := time.NewTimer(radiusCatalogRetry)

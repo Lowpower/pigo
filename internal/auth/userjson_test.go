@@ -137,3 +137,47 @@ func TestRegisterUserJSONDoesNotReplaceBuiltin(t *testing.T) {
 		t.Fatalf("openai auth replaced: %+v", p.APIKey)
 	}
 }
+
+func TestRegisterUserJSONRadiusOAuth(t *testing.T) {
+	t.Cleanup(func() {
+		UnregisterProvider("radius-dev")
+		models.ClearOverlays()
+		models.UnregisterProvider("radius-dev")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "radius-dev": {
+      "name": "Radius (dev)",
+      "baseUrl": "http://127.0.0.1:8788",
+      "oauth": "radius"
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	RegisterUserJSON()
+	p, ok := Lookup("radius-dev")
+	if !ok {
+		t.Fatal("radius-dev auth missing")
+	}
+	r, isRadius := p.OAuth.(radiusOAuth)
+	if !isRadius || r.gateway != "http://127.0.0.1:8788" || r.name != "Radius (dev)" {
+		t.Fatalf("oauth = %#v radius=%v", p.OAuth, isRadius)
+	}
+	if p.APIKey != nil {
+		t.Fatal("radius oauth provider registered as api key")
+	}
+	got, err := p.OAuth.ToAuth(Credential{Access: "tok"})
+	if err != nil || got.APIKey != "tok" || got.BaseURL != "" {
+		t.Fatalf("toAuth = %+v err=%v", got, err)
+	}
+	if _, ok := models.Lookup("radius-dev", "balanced"); ok {
+		t.Fatal("custom gateway inherited the public catalog")
+	}
+}

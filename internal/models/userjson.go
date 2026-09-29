@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -11,9 +12,11 @@ type userModelsFile struct {
 }
 
 type userProvider struct {
+	Name    string  `json:"name"`
 	BaseURL string  `json:"baseUrl"`
 	API     string  `json:"api"`
 	APIKey  string  `json:"apiKey"`
+	OAuth   string  `json:"oauth"`
 	Models  []Model `json:"models"`
 }
 
@@ -32,13 +35,21 @@ func LoadUserJSON(path string) error {
 	if err := json.Unmarshal(b, &file); err != nil {
 		return err
 	}
+	for id, p := range file.Providers {
+		if strings.TrimSpace(p.OAuth) == "radius" && strings.TrimSpace(p.BaseURL) == "" {
+			return fmt.Errorf("models.json provider %q: \"baseUrl\" is required when \"oauth\" is \"radius\"", id)
+		}
+	}
 	specs := make([]UserJSONProvider, 0, len(file.Providers))
 	for id, p := range file.Providers {
+		oauth := strings.TrimSpace(p.OAuth)
 		specs = append(specs, UserJSONProvider{
 			ID:      id,
+			Name:    p.Name,
 			BaseURL: p.BaseURL,
 			API:     p.API,
 			APIKey:  p.APIKey,
+			OAuth:   oauth,
 		})
 		models := make([]Model, 0, len(p.Models))
 		for _, m := range p.Models {
@@ -51,8 +62,9 @@ func LoadUserJSON(path string) error {
 			}
 			models = append(models, m)
 		}
-		spec, ok := LookupProvider(id)
-		if !ok {
+		if oauth == "radius" {
+			registerRadiusGatewayProvider(id, p.Name, p.BaseURL, p.API)
+		} else if spec, ok := LookupProvider(id); !ok {
 			defID := ""
 			if len(models) > 0 {
 				defID = models[0].ID

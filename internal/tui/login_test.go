@@ -7,8 +7,18 @@ import (
 )
 
 func TestLoginDoneWarnsWhenRadiusCatalogMissing(t *testing.T) {
-	t.Cleanup(models.ClearOverlays)
+	orig, ok := models.LookupProvider("radius")
+	if !ok {
+		t.Fatal("radius provider missing")
+	}
+	t.Cleanup(func() {
+		models.RegisterProvider(orig)
+		models.ClearOverlays()
+	})
 	models.ClearOverlays()
+	spec := orig
+	spec.Models = nil
+	models.RegisterProvider(spec)
 	m := New(testCfg())
 	m.login.provider = "radius"
 	m.login.phase = loginRunning
