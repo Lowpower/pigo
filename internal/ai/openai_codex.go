@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -193,19 +196,64 @@ func (c *OpenAICodexClient) websocketHeaders(sessionID string) http.Header {
 	return h
 }
 
+var (
+	wsConnectMu      sync.Mutex
+	wsConnectTimeout = 15 * time.Second
+)
+
+// SetWebSocketConnectTimeout limits the Codex WebSocket TCP, TLS, and HTTP upgrade.
+// Zero disables that limit.
+func SetWebSocketConnectTimeout(d time.Duration) {
+	if d < 0 {
+		d = 0
+	}
+	wsConnectMu.Lock()
+	wsConnectTimeout = d
+	wsConnectMu.Unlock()
+}
+
+func websocketConnectTimeout() time.Duration {
+	wsConnectMu.Lock()
+	defer wsConnectMu.Unlock()
+	return wsConnectTimeout
+}
+
 func (c *OpenAICodexClient) dialWebSocket(ctx context.Context, sessionID string) (*websocket.Conn, error) {
 	dialer := *websocket.DefaultDialer
+	limit := websocketConnectTimeout()
+	if limit > 0 {
+		dialer.HandshakeTimeout = limit
+	} else {
+		dialer.HandshakeTimeout = 0
+	}
 	if deadline, ok := ctx.Deadline(); ok {
-		dialer.HandshakeTimeout = time.Until(deadline)
-		if dialer.HandshakeTimeout <= 0 {
+		remain := time.Until(deadline)
+		if remain <= 0 {
 			return nil, ctx.Err()
+		}
+		if dialer.HandshakeTimeout == 0 || remain < dialer.HandshakeTimeout {
+			dialer.HandshakeTimeout = remain
 		}
 	}
 	conn, resp, err := dialer.DialContext(ctx, resolveCodexWebSocketURL(c.BaseURL), c.websocketHeaders(sessionID))
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
-	return conn, err
+	if err != nil {
+		return nil, wrapWSConnectError(err, limit)
+	}
+	return conn, nil
+}
+
+func wrapWSConnectError(err error, limit time.Duration) error {
+	if err == nil || limit <= 0 || errors.Is(err, context.Canceled) {
+		return err
+	}
+	var ne net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+		return fmt.Errorf("websocket connect timeout (websocketConnectTimeoutMs): %w", err)
+	}
+	return err
 }
 
 func (c *OpenAICodexClient) wsEventStream(ctx context.Context, acq wsAcquire, first []byte, bodyMap map[string]any, opts Options) *EventStream {

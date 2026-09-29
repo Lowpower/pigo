@@ -245,3 +245,20 @@ func TestSaveMintsTrackingIDWhenAnalyticsOn(t *testing.T) {
 		t.Fatalf("trackingId=%q", got.TrackingID)
 	}
 }
+
+func TestWebSocketConnectTimeoutDefault(t *testing.T) {
+	var cfg Config
+	if cfg.WebSocketConnectTimeout() != 15*time.Second {
+		t.Fatalf("default = %s", cfg.WebSocketConnectTimeout())
+	}
+	zero := 0
+	cfg.WebsocketConnectTimeoutMs = &zero
+	if cfg.WebSocketConnectTimeout() != 0 {
+		t.Fatalf("explicit 0 = %s", cfg.WebSocketConnectTimeout())
+	}
+	ms := 4000
+	cfg.WebsocketConnectTimeoutMs = &ms
+	if cfg.WebSocketConnectTimeout() != 4*time.Second {
+		t.Fatalf("4000ms = %s", cfg.WebSocketConnectTimeout())
+	}
+}

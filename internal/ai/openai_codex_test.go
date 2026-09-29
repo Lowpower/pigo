@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
@@ -418,5 +420,53 @@ func TestOpenAICodexStickySSEAfterWSFailure(t *testing.T) {
 	}
 	if posts != 2 {
 		t.Fatalf("posts = %d, want 2", posts)
+	}
+}
+
+func TestDialWebSocketConnectTimeout(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+				_, _ = io.Copy(io.Discard, c)
+			}(conn)
+		}
+	}()
+
+	SetWebSocketConnectTimeout(200 * time.Millisecond)
+	t.Cleanup(func() { SetWebSocketConnectTimeout(15 * time.Second) })
+
+	client := &OpenAICodexClient{BaseURL: "http://" + ln.Addr().String(), APIKey: "k", Transport: "websocket"}
+	start := time.Now()
+	_, err = client.dialWebSocket(context.Background(), "")
+	if err == nil || !strings.Contains(err.Error(), "websocketConnectTimeoutMs") {
+		t.Fatalf("err=%v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("elapsed %s", time.Since(start))
+	}
+
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	if final == nil || !strings.Contains(final.ErrorMessage, "websocketConnectTimeoutMs") {
+		msg := ""
+		if final != nil {
+			msg = final.ErrorMessage
+		}
+		t.Fatalf("message = %q", msg)
 	}
 }

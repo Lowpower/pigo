@@ -297,9 +297,12 @@ func (c Config) CacheRetention() string {
 	return firstEnv("PIGO_CACHE_RETENTION", "PI_CACHE_RETENTION")
 }
 
-// WebSocketConnectTimeout is settings.websocketConnectTimeoutMs when set.
+// WebSocketConnectTimeout is settings.websocketConnectTimeoutMs (default 15s). 0 disables it.
 func (c Config) WebSocketConnectTimeout() time.Duration {
-	if c.WebsocketConnectTimeoutMs == nil || *c.WebsocketConnectTimeoutMs <= 0 {
+	if c.WebsocketConnectTimeoutMs == nil {
+		return 15 * time.Second
+	}
+	if *c.WebsocketConnectTimeoutMs <= 0 {
 		return 0
 	}
 	return time.Duration(*c.WebsocketConnectTimeoutMs) * time.Millisecond
