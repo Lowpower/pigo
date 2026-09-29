@@ -196,14 +196,14 @@ func (m *Manager) flushCopied() error {
 	if !m.persist {
 		return nil
 	}
-	hasAssistant := false
+	hasUser := false
 	for _, e := range m.entries {
-		if entryRole(e) == "assistant" {
-			hasAssistant = true
+		if entryRole(e) == "user" {
+			hasUser = true
 			break
 		}
 	}
-	if !hasAssistant {
+	if !hasUser {
 		return nil
 	}
 	if err := os.MkdirAll(m.dir, 0o755); err != nil {

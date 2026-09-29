@@ -187,6 +187,9 @@ func lastJSONLObject(t *testing.T, path string) map[string]any {
 
 func TestAppendCustomMessageJSONLHasNoSummary(t *testing.T) {
 	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"}); err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +210,9 @@ func TestAppendCustomMessageJSONLHasNoSummary(t *testing.T) {
 
 func TestAppendBranchSummaryFromHookIsTopLevel(t *testing.T) {
 	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := m.AppendBranchSummary("from-1", "branch-sum", true); err != nil {
 		t.Fatal(err)
 	}

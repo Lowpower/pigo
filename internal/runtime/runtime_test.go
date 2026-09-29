@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -48,6 +49,63 @@ func TestPersistTranscriptWritesOnlyNewMessages(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("entries restored = %d, want 2 (no duplicates); %+v", len(got), got)
 	}
+}
+
+func TestRunPromptPersistsUserBeforeProvider(t *testing.T) {
+	cwd := t.TempDir()
+	sess := session.New(cwd, t.TempDir())
+	var sawUserAtCall bool
+	e := &Engine{
+		Opts: Options{Session: sess, Cwd: cwd, Config: config.Config{Model: "x"}},
+		Stream: func(context.Context, ai.Context, ai.Options) (*ai.EventStream, error) {
+			if n := countSessionRole(t, sess.File(), "user"); n != 1 {
+				t.Errorf("user entries when provider is called = %d, want 1", n)
+			} else {
+				sawUserAtCall = true
+			}
+			return nil, fmt.Errorf("provider down")
+		},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	events := e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
+	if !sawUserAtCall {
+		t.Fatal("provider was not called")
+	}
+	var last []agent.Msg
+	for _, ev := range events {
+		if ev.Type == agent.EventAgentEnd {
+			last = ev.Messages
+		}
+	}
+	e.PersistTurn(last, 0)
+	if n := countSessionRole(t, sess.File(), "user"); n != 1 {
+		t.Fatalf("user entries after turn = %d, want 1", n)
+	}
+}
+
+func countSessionRole(t *testing.T, path, role string) int {
+	t.Helper()
+	_, entries, err := session.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		var msg struct {
+			Role string `json:"role"`
+		}
+		if len(e.Message) == 0 {
+			continue
+		}
+		if err := json.Unmarshal(e.Message, &msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.Role == role {
+			n++
+		}
+	}
+	return n
 }
 
 func TestRPCSetModelAndPrompt(t *testing.T) {

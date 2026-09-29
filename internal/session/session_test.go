@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -75,26 +76,27 @@ func TestSessionDirAndFilenameEncoding(t *testing.T) {
 	}
 }
 
-func TestBufferUntilAssistantThenFlush(t *testing.T) {
+func TestFlushOnFirstUserMessage(t *testing.T) {
 	agentDir := t.TempDir()
 	m := New("/work/proj", agentDir)
+
+	if _, err := m.AppendModelChange("openai", "gpt-4o"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendMessage("system", map[string]any{"role": "system", "content": ""}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(m.File()); !os.IsNotExist(err) {
+		t.Fatal("session file should not exist before the first user message")
+	}
 
 	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	// No assistant yet -> nothing on disk.
-	if _, _, err := Load(m.File()); err == nil {
-		t.Fatal("session file should not exist before the first assistant message")
-	}
-
-	assistant := map[string]any{"role": "assistant", "content": "hello back", "stopReason": "stop"}
-	if _, err := m.AppendMessage("assistant", assistant); err != nil {
+	before, err := os.ReadFile(m.File())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.AppendMessage("toolResult", map[string]any{"role": "toolResult", "content": "ok"}); err != nil {
-		t.Fatal(err)
-	}
-
 	header, entries, err := Load(m.File())
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -106,7 +108,10 @@ func TestBufferUntilAssistantThenFlush(t *testing.T) {
 		t.Errorf("header cwd = %q", header.Cwd)
 	}
 	if len(entries) != 3 {
-		t.Fatalf("entries = %d, want 3", len(entries))
+		t.Fatalf("entries after user = %d, want model_change, system, user", len(entries))
+	}
+	if entries[0].Type != "model_change" || messageRole(t, entries[1]) != "system" || messageRole(t, entries[2]) != "user" {
+		t.Fatalf("types/roles = %s %s %s", entries[0].Type, messageRole(t, entries[1]), messageRole(t, entries[2]))
 	}
 	if entries[0].ParentID != nil {
 		t.Errorf("first entry parentId = %v, want null", *entries[0].ParentID)
@@ -115,18 +120,41 @@ func TestBufferUntilAssistantThenFlush(t *testing.T) {
 		t.Errorf("entry[1] parentId = %v, want %q", entries[1].ParentID, entries[0].ID)
 	}
 
-	// roles round-trip via the message payload
-	roles := make([]string, len(entries))
-	for i, e := range entries {
-		var msg struct {
-			Role string `json:"role"`
-		}
-		_ = json.Unmarshal(e.Message, &msg)
-		roles[i] = msg.Role
+	assistant := map[string]any{"role": "assistant", "content": "hello back", "stopReason": "stop"}
+	if _, err := m.AppendMessage("assistant", assistant); err != nil {
+		t.Fatal(err)
 	}
-	if roles[0] != "user" || roles[1] != "assistant" || roles[2] != "toolResult" {
-		t.Errorf("roles = %v, want [user assistant toolResult]", roles)
+	if _, err := m.AppendMessage("toolResult", map[string]any{"role": "toolResult", "content": "ok"}); err != nil {
+		t.Fatal(err)
 	}
+	after, err := os.ReadFile(m.File())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(after, before) {
+		t.Fatal("later entries rewrote the flushed prefix")
+	}
+	_, entries, err = Load(m.File())
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("entries = %d, want 5", len(entries))
+	}
+	if messageRole(t, entries[3]) != "assistant" || messageRole(t, entries[4]) != "toolResult" {
+		t.Fatalf("appended roles = %s %s", messageRole(t, entries[3]), messageRole(t, entries[4]))
+	}
+}
+
+func messageRole(t *testing.T, e Entry) string {
+	t.Helper()
+	var msg struct {
+		Role string `json:"role"`
+	}
+	if err := json.Unmarshal(e.Message, &msg); err != nil {
+		t.Fatal(err)
+	}
+	return msg.Role
 }
 
 func TestSessionFileIsPrivate(t *testing.T) {

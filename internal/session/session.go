@@ -65,12 +65,12 @@ type Entry struct {
 	ThinkingLevel   string   `json:"thinkingLevel,omitempty"`
 	ActiveToolNames []string `json:"activeToolNames,omitempty"`
 
-	// role is used only for the buffer-until-assistant flush rule; not serialized.
+	// role is used only for the buffer-until-user flush rule; not serialized.
 	role string
 }
 
 // Manager creates and appends to a single session file. Entries are buffered
-// until the first assistant message exists, then the whole file is written and
+// until the first user message exists, then the whole file is written and
 // subsequent entries are appended.
 type Manager struct {
 	agentDir string
@@ -210,7 +210,8 @@ func (m *Manager) Entries() []Entry {
 }
 
 // AppendMessage records a message entry. role must be the message's role
-// ("user", "assistant", or "toolResult") so the flush rule works. message is any
+// ("user", "assistant", or "toolResult") so the flush rule works. The file is
+// created when the first user message is appended. message is any
 // JSON-serializable payload (its shape is written verbatim under "message").
 func (m *Manager) AppendMessage(role string, message any) (*Entry, error) {
 	raw, err := json.Marshal(message)
@@ -254,15 +255,15 @@ func (m *Manager) persistEntry(e *Entry) error {
 	if !m.persist {
 		return nil
 	}
-	hasAssistant := false
+	hasUser := false
 	for _, en := range m.entries {
-		if en.role == "assistant" {
-			hasAssistant = true
+		if en != nil && en.role == "user" {
+			hasUser = true
 			break
 		}
 	}
-	if !hasAssistant {
-		return nil // buffer until an assistant message arrives
+	if !hasUser {
+		return nil // buffer until a user message arrives
 	}
 
 	if !m.flushed {
