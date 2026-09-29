@@ -497,6 +497,10 @@ func transcriptFromMessages(m Model, msgs []ai.Message) []entry {
 	for _, msg := range msgs {
 		switch msg.Role {
 		case ai.RoleUser:
+			if fe, ok := foldUserEntry(msg.Text()); ok {
+				out = append(out, fe)
+				continue
+			}
 			out = append(out, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(msg.Text())})
 		case ai.RoleAssistant:
 			text := msg.Text()

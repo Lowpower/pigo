@@ -160,6 +160,10 @@ func (m Model) handleAltScreenMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		if !m.sel.dragged {
 			m.sel = textSel{}
+			if id := m.titleAt(ev.Y); id != "" {
+				m.toggleFold(id)
+				return m, nil
+			}
 			if m.scrollOff > 0 && m.height > 0 && ev.Y >= m.height-1 {
 				m.scrollBottom()
 			}
