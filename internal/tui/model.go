@@ -1140,6 +1140,7 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	} else {
 		m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
 	}
+	text, images = m.preparePromptImages(text, images)
 	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 
 	ctx, cancel := context.WithCancel(context.Background())
