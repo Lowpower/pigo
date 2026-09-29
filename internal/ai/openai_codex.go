@@ -188,6 +188,7 @@ func (c *OpenAICodexClient) websocketHeaders(sessionID string) http.Header {
 		}
 		h.Set(k, v)
 	}
+	setDefaultUserAgent(h)
 	h.Set("OpenAI-Beta", openaiBetaWS)
 	if sessionID != "" {
 		h.Set("session-id", sessionID)

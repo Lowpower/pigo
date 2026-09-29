@@ -33,15 +33,27 @@ func (c *GoogleClient) providerID() string {
 	return "google"
 }
 
-func (c *GoogleClient) genaiConfig() *genai.ClientConfig {
-	cfg := &genai.ClientConfig{HTTPClient: c.HTTPClient}
-	if c.BaseURL != "" || len(c.Headers) > 0 {
-		hdr := make(http.Header, len(c.Headers))
-		for k, v := range c.Headers {
-			hdr.Set(k, v)
-		}
-		cfg.HTTPOptions = genai.HTTPOptions{BaseURL: c.BaseURL, Headers: hdr}
+func (c *GoogleClient) outboundHeaders(opts Options) http.Header {
+	hdr := make(http.Header, len(c.Headers)+1)
+	for k, v := range c.Headers {
+		hdr.Set(k, v)
 	}
+	setDefaultUserAgent(hdr)
+	applyExtraHeaders(hdr, opts.ExtraHeaders)
+	return hdr
+}
+
+func (c *GoogleClient) genaiConfig() *genai.ClientConfig {
+	return c.clientConfig(Options{})
+}
+
+func (c *GoogleClient) clientConfig(opts Options) *genai.ClientConfig {
+	cfg := &genai.ClientConfig{HTTPClient: c.HTTPClient}
+	httpOpts := genai.HTTPOptions{Headers: c.outboundHeaders(opts)}
+	if c.BaseURL != "" {
+		httpOpts.BaseURL = c.BaseURL
+	}
+	cfg.HTTPOptions = httpOpts
 	if c.Vertex {
 		cfg.Backend = genai.BackendVertexAI
 		cfg.Project = c.Project
@@ -78,15 +90,7 @@ func (c *GoogleClient) StreamFn() StreamFn {
 		if msg := c.missingAuth(); msg != "" {
 			return errorStreamProvider(opts.Model, c.apiID(), msg), nil
 		}
-		clientCfg := c.genaiConfig()
-		if len(opts.ExtraHeaders) > 0 {
-			hdr := make(http.Header)
-			if clientCfg.HTTPOptions.Headers != nil {
-				hdr = clientCfg.HTTPOptions.Headers.Clone()
-			}
-			applyExtraHeaders(hdr, opts.ExtraHeaders)
-			clientCfg.HTTPOptions.Headers = hdr
-		}
+		clientCfg := c.clientConfig(opts)
 		client, err := genai.NewClient(ctx, clientCfg)
 		if err != nil {
 			return errorStreamProvider(opts.Model, c.apiID(), err.Error()), nil
