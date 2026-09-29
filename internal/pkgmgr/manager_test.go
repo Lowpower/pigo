@@ -2,7 +2,10 @@ package pkgmgr
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -336,4 +339,76 @@ func TestResolveCLIExtensionInvalidSource(t *testing.T) {
 	if _, err := m.ResolveCLIExtension(context.Background(), "npm:"); err == nil || !strings.Contains(err.Error(), "missing npm package name") {
 		t.Fatalf("err=%v", err)
 	}
+}
+
+func TestInstallGitWithoutRefFollowsForcePush(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	remote := t.TempDir()
+	runGit(t, remote, "init", "-b", "main")
+	runGit(t, remote, "config", "user.email", "t@example.com")
+	runGit(t, remote, "config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(remote, "f"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, remote, "add", "f")
+	runGit(t, remote, "commit", "-m", "a")
+	if err := os.WriteFile(filepath.Join(remote, "f"), []byte("b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, remote, "add", "f")
+	runGit(t, remote, "commit", "-m", "b")
+
+	root := t.TempDir()
+	bare := filepath.Join(root, "bare.git")
+	runGit(t, "", "clone", "--bare", remote, bare)
+	runGit(t, bare, "update-server-info")
+	srv := httptest.NewServer(http.FileServer(http.Dir(root)))
+	t.Cleanup(srv.Close)
+
+	m, err := Open(t.TempDir(), t.TempDir(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := Source{Kind: KindGit, Host: "example.com", RepoPath: "org/demo", Repo: srv.URL + "/bare.git"}
+	if err := m.installGit(context.Background(), src, false); err != nil {
+		t.Fatal(err)
+	}
+	installed := m.gitPath(src, false)
+	before := runGit(t, installed, "rev-parse", "HEAD")
+
+	runGit(t, remote, "reset", "--hard", "HEAD~1")
+	if err := os.WriteFile(filepath.Join(remote, "f"), []byte("c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, remote, "add", "f")
+	runGit(t, remote, "commit", "-m", "c")
+	runGit(t, remote, "push", "--force", bare, "HEAD:main")
+	runGit(t, bare, "update-server-info")
+	want := runGit(t, remote, "rev-parse", "HEAD")
+	if want == before {
+		t.Fatal("force-push did not change upstream HEAD")
+	}
+
+	if err := m.installGit(context.Background(), src, false); err != nil {
+		t.Fatalf("update after force-push: %v", err)
+	}
+	if got := runGit(t, installed, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("HEAD = %s, want %s", got, want)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
