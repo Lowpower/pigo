@@ -34,7 +34,9 @@ Summary of that exploration:
 `
 
 // BranchSummaryPrompt is the default instruction given to the summarizer.
-const BranchSummaryPrompt = `Create a structured summary of this conversation branch for context when returning later.
+const BranchSummaryPrompt = `The messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.
+
+Create a structured summary of this conversation branch for context when returning later.
 
 Use this EXACT format:
 
@@ -61,7 +63,9 @@ Use this EXACT format:
 ## Next Steps
 1. [What should happen next to continue this work]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`
+Keep each section concise. Preserve exact file paths, function names, and error messages.
+
+Only summarize information explicitly present above. Do not infer or recreate later messages.`
 
 // BranchSummaryOpts controls generateBranchSummary.
 type BranchSummaryOpts struct {
@@ -120,7 +124,7 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 	} else if opts.CustomInstructions != "" {
 		instructions = BranchSummaryPrompt + "\n\nAdditional focus: " + opts.CustomInstructions
 	}
-	prompt := "<conversation>\n" + conv.String() + "</conversation>\n\n" + instructions
+	prompt := "# Conversation\n" + conv.String() + "\n# Instructions\n" + instructions
 
 	stream, err := sf(ctx, ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: prompt}}}, ai.Options{Model: model})
 	if err != nil {

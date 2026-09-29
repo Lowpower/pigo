@@ -125,6 +125,90 @@ func TestGenerateBranchSummaryPrependsPreamble(t *testing.T) {
 	}
 }
 
+func TestGenerateBranchSummaryPromptBoundary(t *testing.T) {
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: "try something"},
+		{Role: ai.RoleAssistant, Content: "did it"},
+	}
+	prompt := captureBranchSummaryPrompt(t, msgs, BranchSummaryOpts{})
+
+	const boundary = "# Conversation\nuser: try something\nassistant: did it\n\n# Instructions\n"
+	if !strings.HasPrefix(prompt, boundary) {
+		t.Fatalf("prompt = %q, want prefix %q", prompt, boundary)
+	}
+	if strings.Contains(prompt, "<conversation>") || strings.Contains(prompt, "</conversation>") {
+		t.Fatalf("prompt still wraps the conversation in XML:\n%s", prompt)
+	}
+	instr := strings.TrimPrefix(prompt, boundary)
+	for _, sentence := range []string{
+		"The messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.",
+		"Only summarize information explicitly present above. Do not infer or recreate later messages.",
+		"## Goal",
+	} {
+		if !strings.Contains(instr, sentence) {
+			t.Fatalf("instructions missing %q:\n%s", sentence, instr)
+		}
+	}
+	if strings.Index(instr, "Later messages are stored separately") > strings.Index(instr, "## Goal") {
+		t.Fatalf("stored-separately wording should introduce the instructions:\n%s", instr)
+	}
+	if strings.Index(instr, "## Next Steps") > strings.Index(instr, "Do not infer or recreate later messages.") {
+		t.Fatalf("do-not-recreate wording should close the instructions:\n%s", instr)
+	}
+}
+
+func TestGenerateBranchSummaryCustomInstructions(t *testing.T) {
+	msgs := []ai.Message{{Role: ai.RoleUser, Content: "try something"}}
+	prompt := captureBranchSummaryPrompt(t, msgs, BranchSummaryOpts{CustomInstructions: "Focus on file paths"})
+	if !strings.Contains(prompt, "# Instructions\n") || !strings.Contains(prompt, "## Goal") {
+		t.Fatalf("custom focus should keep the default instructions:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Additional focus: Focus on file paths") {
+		t.Fatalf("prompt missing custom instructions:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "<conversation>") {
+		t.Fatalf("prompt still wraps the conversation in XML:\n%s", prompt)
+	}
+}
+
+func TestGenerateBranchSummaryReplaceInstructions(t *testing.T) {
+	msgs := []ai.Message{{Role: ai.RoleUser, Content: "try something"}}
+	prompt := captureBranchSummaryPrompt(t, msgs, BranchSummaryOpts{
+		CustomInstructions:  "Just the decisions.",
+		ReplaceInstructions: true,
+	})
+	const boundary = "# Conversation\nuser: try something\n\n# Instructions\n"
+	if !strings.HasPrefix(prompt, boundary) {
+		t.Fatalf("prompt = %q, want prefix %q", prompt, boundary)
+	}
+	instr := strings.TrimPrefix(prompt, boundary)
+	if instr != "Just the decisions." {
+		t.Fatalf("instructions = %q, want custom text only", instr)
+	}
+	if strings.Contains(prompt, "## Goal") || strings.Contains(prompt, "<conversation>") {
+		t.Fatalf("replaced prompt kept default sections or XML:\n%s", prompt)
+	}
+}
+
+func captureBranchSummaryPrompt(t *testing.T, msgs []ai.Message, opts BranchSummaryOpts) string {
+	t.Helper()
+	var prompt string
+	sf := func(ctx context.Context, req ai.Context, streamOpts ai.Options) (*ai.EventStream, error) {
+		if len(req.Messages) != 1 {
+			t.Fatalf("messages = %d, want 1", len(req.Messages))
+		}
+		prompt = req.Messages[0].Content
+		return ai.ScriptedStreamFn("## Goal\nExplore.", 0)(ctx, req, streamOpts)
+	}
+	if _, err := GenerateBranchSummary(context.Background(), sf, "test", msgs, opts); err != nil {
+		t.Fatal(err)
+	}
+	if prompt == "" {
+		t.Fatal("summarizer was not called")
+	}
+	return prompt
+}
+
 func TestGenerateBranchSummaryAbort(t *testing.T) {
 	sf := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
 		return ai.EmitMessage(ctx, &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopAborted}), nil
