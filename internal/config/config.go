@@ -339,7 +339,7 @@ func (c *Config) SetAnthropicExtraUsageWarning(on bool) {
 	c.Warnings = next
 }
 
-// HTTPIdleTimeout is the HTTP client timeout (default 5m). 0 disables it.
+// HTTPIdleTimeout is how long a provider response may go without bytes (default 5m). 0 disables it.
 func (c Config) HTTPIdleTimeout() time.Duration {
 	if c.HTTPIdleTimeoutMs == nil {
 		return 5 * time.Minute

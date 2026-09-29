@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // PigoMessagesClient posts {model, context, options} to {base}/messages and
@@ -57,7 +56,7 @@ func (c *PigoMessagesClient) StreamFn() StreamFn {
 		}
 		client := c.HTTPClient
 		if client == nil {
-			client = &http.Client{Timeout: 5 * time.Minute}
+			client = defaultHTTPClient()
 		}
 		resp, err := doHTTP(client, httpReq, opts)
 		if err != nil {

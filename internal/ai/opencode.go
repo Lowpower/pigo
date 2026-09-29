@@ -3,10 +3,8 @@ package ai
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
-	"time"
 )
 
 // defaultOpenCodeBaseURL is the OpenCode Zen gateway base. The adapters append
@@ -26,9 +24,8 @@ func NewOpenCodeFromEnv() (StreamFn, bool) {
 		base = defaultOpenCodeBaseURL
 	}
 	return openCodeMux(ClientConfig{
-		APIKey:     key,
-		BaseURL:    strings.TrimRight(base, "/"),
-		HTTPClient: &http.Client{Timeout: 5 * time.Minute},
+		APIKey:  key,
+		BaseURL: strings.TrimRight(base, "/"),
 	}), true
 }
 
