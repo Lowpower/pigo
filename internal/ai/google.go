@@ -128,6 +128,13 @@ func (c *GoogleClient) StreamFn() StreamFn {
 					finishError(ctx, out, s, err.Error())
 					return
 				}
+				if opts.OnProviderStreamEvent != nil && resp != nil {
+					// SDKHTTPResponse carries response headers, which are not part of the event.
+					saved := resp.SDKHTTPResponse
+					resp.SDKHTTPResponse = nil
+					observeSDKEvent(opts.OnProviderStreamEvent, resp)
+					resp.SDKHTTPResponse = saved
+				}
 				if resp == nil || len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
 					continue
 				}

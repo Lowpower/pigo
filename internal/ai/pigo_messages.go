@@ -77,7 +77,7 @@ func (c *PigoMessagesClient) StreamFn() StreamFn {
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamPigoMessagesSSE(ctx, resp.Body, out, s)
+			streamPigoMessagesSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent)
 		}()
 		return s, nil
 	}
@@ -117,7 +117,7 @@ type pigoMessagesEvent struct {
 	ResponseID   string     `json:"responseId"`
 }
 
-func streamPigoMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream) {
+func streamPigoMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	var data strings.Builder
@@ -130,7 +130,7 @@ func streamPigoMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessa
 		if payload == "[DONE]" {
 			return true
 		}
-		return handlePigoMessagesEvent(ctx, payload, out, s)
+		return handlePigoMessagesEvent(ctx, payload, out, s, observe)
 	}
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -150,11 +150,12 @@ func streamPigoMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessa
 	}
 }
 
-func handlePigoMessagesEvent(ctx context.Context, payload string, out *AssistantMessage, s *EventStream) bool {
+func handlePigoMessagesEvent(ctx context.Context, payload string, out *AssistantMessage, s *EventStream, observe func([]byte)) bool {
 	var ev pigoMessagesEvent
 	if json.Unmarshal([]byte(payload), &ev) != nil {
 		return true
 	}
+	emitProviderStreamEvent(observe, []byte(payload))
 	switch ev.Type {
 	case "start":
 		return s.push(ctx, Event{Type: EventStart, Partial: out})

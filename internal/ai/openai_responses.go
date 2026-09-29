@@ -37,8 +37,8 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			option.WithAPIKey(c.APIKey),
 			option.WithBaseURL(base + "/"),
 		}
-		if c.HTTPClient != nil {
-			optsList = append(optsList, option.WithHTTPClient(c.HTTPClient))
+		if httpClient := withSSEObserve(c.HTTPClient, opts.OnProviderStreamEvent); httpClient != nil {
+			optsList = append(optsList, option.WithHTTPClient(httpClient))
 		}
 		for k, v := range c.Headers {
 			optsList = append(optsList, option.WithHeader(k, v))

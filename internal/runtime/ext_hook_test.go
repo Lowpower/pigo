@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,6 +132,40 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 			Events: []string{"before_provider_headers"},
 			OnEvent: func(string, map[string]any) map[string]any {
 				return map[string]any{"headers": map[string]any{"X-Pigo-Test": "1"}}
+			},
+		})
+	case "provider-stream":
+		_ = ext.Serve(ext.Handler{
+			Name:   "provider-stream-ext",
+			Events: []string{"provider_stream_event", "message_update"},
+			OnEvent: func(event string, payload map[string]any) map[string]any {
+				if p := os.Getenv("PIGO_EXT_LOG"); p != "" {
+					line := event
+					raw, _ := json.Marshal(payload)
+					switch event {
+					case "provider_stream_event":
+						data, _ := payload["data"].(map[string]any)
+						line = fmt.Sprintf("provider_stream_event %v %v %v %v", payload["provider"], payload["api"], payload["model"], data["type"])
+						if note, _ := data["vendorNote"].(string); note != "" {
+							line += " " + note
+						}
+					case "message_update":
+						ame, _ := payload["assistantMessageEvent"].(map[string]any)
+						line = fmt.Sprintf("message_update %v", ame["type"])
+						if strings.Contains(string(raw), "vendorNote") {
+							line += " HAS_VENDOR"
+						}
+					}
+					if strings.Contains(string(raw), "sk-provider-secret") {
+						line += " LEAKED"
+					}
+					f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+					if err == nil {
+						_, _ = fmt.Fprintln(f, line)
+						_ = f.Close()
+					}
+				}
+				return nil
 			},
 		})
 	case "messages":
@@ -483,6 +520,76 @@ func TestResourcesDiscoverInjectsSkills(t *testing.T) {
 	e.rebuildSystemPrompt()
 	if !strings.Contains(e.System, "ext-skill") {
 		t.Fatalf("system prompt missing injected skill:\n%s", e.System)
+	}
+}
+
+func TestProviderStreamEventNotInstalledWithoutSubscriber(t *testing.T) {
+	h := spawnRuntimeExt(t, "messages", nil)
+	var installed bool
+	e := &Engine{
+		Hosts: []*ext.Host{h},
+		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	e.Stream = e.gatedStream(func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		installed = opts.OnProviderStreamEvent != nil
+		return textReply("ok")(ctx, req, ai.Options{})
+	})
+	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
+	if installed {
+		t.Fatal("OnProviderStreamEvent installed without a subscriber")
+	}
+}
+
+func TestProviderStreamEventBeforeMessageUpdate(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "events.log")
+	h := spawnRuntimeExt(t, "provider-stream", nil, "PIGO_EXT_LOG="+logPath)
+	const fixture = "" +
+		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-test\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n" +
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"},\"vendorNote\":\"raw-delta\"}\n\n" +
+		"data: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n" +
+		"data: {\"type\":\"message_stop\"}\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, fixture)
+	}))
+	t.Cleanup(srv.Close)
+	client := &ai.AnthropicClient{BaseURL: srv.URL, APIKey: "sk-provider-secret", HTTPClient: srv.Client()}
+	e := &Engine{
+		Hosts:    []*ext.Host{h},
+		Provider: "anthropic",
+		Opts:     Options{Config: config.Config{Model: "claude-test", Provider: "anthropic"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	e.Stream = e.gatedStream(client.StreamFn())
+	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
+
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	rawAt, normAt := -1, -1
+	for i, line := range lines {
+		if strings.Contains(line, "LEAKED") {
+			t.Fatalf("payload included a secret that was not in the event: %s", line)
+		}
+		if strings.HasPrefix(line, "provider_stream_event anthropic anthropic-messages claude-test content_block_delta raw-delta") {
+			rawAt = i
+		}
+		if line == "message_update text_delta" {
+			normAt = i
+		}
+		if strings.HasPrefix(line, "message_update") && strings.Contains(line, "HAS_VENDOR") {
+			t.Fatalf("message_update included the raw vendor field: %s", line)
+		}
+	}
+	if rawAt < 0 || normAt < 0 || rawAt > normAt {
+		t.Fatalf("raw event must precede text_delta message_update:\n%s", body)
 	}
 }
 

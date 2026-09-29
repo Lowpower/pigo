@@ -96,7 +96,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamAnthropicSSE(ctx, resp.Body, out, s)
+			streamAnthropicSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent)
 		}()
 		return s, nil
 	}
@@ -109,7 +109,7 @@ func StreamAnthropicReader(ctx context.Context, r io.Reader, model string) *Even
 	out := newOutputMessage(model)
 	go func() {
 		defer s.end()
-		streamAnthropicSSE(ctx, r, out, s)
+		streamAnthropicSSE(ctx, r, out, s, nil)
 	}()
 	return s
 }
@@ -360,7 +360,7 @@ type anthropicSSE struct {
 
 // streamAnthropicSSE reads Anthropic SSE from r and pushes AssistantMessageEvents
 // onto s, building out in place. It does not close s (the caller does).
-func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream) {
+func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
 	if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 		return
 	}
@@ -377,7 +377,7 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 		}
 		payload := data.String()
 		data.Reset()
-		return handleAnthropicEvent(ctx, payload, out, pos, s)
+		return handleAnthropicEvent(ctx, payload, out, pos, s, observe)
 	}
 
 	for scanner.Scan() {
@@ -410,11 +410,12 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 	}
 }
 
-func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, s *EventStream) bool {
+func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, s *EventStream, observe func([]byte)) bool {
 	var ev anthropicSSE
 	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 		return true // ignore unparseable keepalive/comment payloads
 	}
+	emitProviderStreamEvent(observe, []byte(payload))
 
 	switch ev.Type {
 	case "message_start":

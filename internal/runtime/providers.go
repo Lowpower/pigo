@@ -377,6 +377,26 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 				})
 			}
 		}
+		if e.hasEvent("provider_stream_event") {
+			provider := opts.Provider
+			if provider == "" {
+				provider = e.Provider
+			}
+			modelID := opts.Model
+			api := models.APIFor(provider, modelID)
+			opts.OnProviderStreamEvent = func(data []byte) {
+				var payload any
+				if json.Unmarshal(data, &payload) != nil {
+					return
+				}
+				e.DispatchEvent(ctx, "provider_stream_event", map[string]any{
+					"provider": provider,
+					"api":      api,
+					"model":    modelID,
+					"data":     payload,
+				})
+			}
+		}
 		stream, err := fn(ctx, req, opts)
 		if err != nil || stream == nil {
 			return stream, err

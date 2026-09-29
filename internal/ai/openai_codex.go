@@ -228,7 +228,9 @@ func (c *OpenAICodexClient) wsEventStream(ctx context.Context, acq wsAcquire, fi
 				var meta struct {
 					Type string `json:"type"`
 				}
-				_ = json.Unmarshal(data, &meta)
+				if json.Unmarshal(data, &meta) == nil {
+					emitProviderStreamEvent(opts.OnProviderStreamEvent, data)
+				}
 				switch meta.Type {
 				case "response.done", "response.incomplete":
 					var obj map[string]any
@@ -316,6 +318,7 @@ func (c *OpenAICodexClient) sseEventStream(ctx context.Context, body []byte, opt
 		if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 			return
 		}
+		resp.Body = observeSSEBody(resp.Body, opts.OnProviderStreamEvent)
 		stream := ssestream.NewStream[responses.ResponseStreamEventUnion](ssestream.NewDecoder(resp), nil)
 		c.finishResponses(ctx, stream, out, s)
 	}()
