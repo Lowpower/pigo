@@ -42,6 +42,10 @@ func resolveExportColors(themeName, cwd, agentDir string) exportColors {
 		}
 	}
 	th := theme.Load(name, cwd, agentDir)
+	if strings.EqualFold(name, "system") {
+		th.Colors = nil
+		th.ExportPageBg, th.ExportCardBg, th.ExportInfoBg = "", "", ""
+	}
 	fileName := "dark.json"
 	if strings.EqualFold(name, "light") || strings.EqualFold(th.Name, "light") {
 		fileName = "light.json"
@@ -69,7 +73,7 @@ func resolveExportColors(themeName, cwd, agentDir string) exportColors {
 		}
 	} else {
 		switch strings.ToLower(name) {
-		case "dark", "default", "light", "":
+		case "dark", "default", "light", "system", "":
 		default:
 			overlayPigoTheme(base.CSS, th)
 		}

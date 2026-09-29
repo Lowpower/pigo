@@ -94,10 +94,12 @@ type queuedPrompt struct {
 // assistant response to screen live (plain text during the turn), then rendering
 // it as markdown via glamour once the turn ends.
 type Model struct {
-	cfg    config.Config
-	engine *runtime.Engine
-	theme  theme.Theme
-	editor promptEditor
+	cfg          config.Config
+	engine       *runtime.Engine
+	theme        theme.Theme
+	termColors   theme.SystemInput
+	termColorsOK bool
+	editor       promptEditor
 
 	transcript []entry
 	history    []ai.Message // raw user/assistant messages carried across turns
@@ -215,15 +217,22 @@ func applyTrueColor(cfg config.Config) {
 	}
 }
 
+func styleFG(s lipgloss.Style, color string) lipgloss.Style {
+	if strings.TrimSpace(color) == "" {
+		return s
+	}
+	return s.Foreground(lipgloss.Color(color))
+}
+
 func (m *Model) applyTheme(th theme.Theme) {
 	m.theme = th
-	m.titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(th.Accent))
+	m.titleStyle = styleFG(lipgloss.NewStyle().Bold(true), th.Accent)
 	m.metaStyle = lipgloss.NewStyle().Faint(true)
-	m.userStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(th.User))
-	m.toolStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(th.Tool))
-	m.errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(th.Error))
-	m.streamStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(th.Assistant))
-	m.footerStyle = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color(th.Muted))
+	m.userStyle = styleFG(lipgloss.NewStyle().Bold(true), th.User)
+	m.toolStyle = styleFG(lipgloss.NewStyle(), th.Tool)
+	m.errStyle = styleFG(lipgloss.NewStyle(), th.Error)
+	m.streamStyle = styleFG(lipgloss.NewStyle(), th.Assistant)
+	m.footerStyle = styleFG(lipgloss.NewStyle().Faint(true), th.Muted)
 	m.editor.applyTheme(th)
 }
 
@@ -274,6 +283,9 @@ func (m Model) framedEditor() string {
 
 func (m Model) themeOpts(name string) theme.LoadOptions {
 	opt := theme.LoadOptions{Name: name, NoDiscovery: true}
+	if m.termColorsOK {
+		opt.Terminal = m.termColors
+	}
 	if m.engine != nil {
 		extra := append([]string{}, m.engine.Opts.ThemePaths...)
 		if !m.engine.Opts.NoThemes {
@@ -1724,6 +1736,11 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 	}()
 	m := New(cfg)
 	m.engine = eng
+	if systemThemeSelected(cfg.Theme, m.theme.Name) {
+		m.termColors = readTerminalColors(os.Stdin, os.Stdout, terminalColorQueryTimeout)
+		m.termColorsOK = true
+		m.applyTheme(theme.LoadWith(m.themeOpts(cfg.Theme)))
+	}
 	if eng != nil {
 		m.provider = eng.Provider
 		m.reloadFromSession()
