@@ -211,6 +211,76 @@ func (stubToolRenderer) RenderResult(string, string, []map[string]any, any, bool
 	return "<div>COL</div>", "<div>EXP</div>"
 }
 
+func TestExportHTMLHiddenCustomMessageToggle(t *testing.T) {
+	dir := t.TempDir()
+	m := New(t.TempDir(), dir)
+	_, _ = m.AppendMessage("user", map[string]any{"role": "user", "content": "hello"})
+	_, _ = m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
+	if _, err := m.AppendCustomMessage("recall", "hidden-body", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendCustomMessage("note", "visible-body", true); err != nil {
+		t.Fatal(err)
+	}
+	omitted, err := m.AppendCustomMessage("aside", "omitted-body", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	omitted.Display = nil
+
+	html, err := RenderHTML(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, needle := range []string{
+		`body:not(.show-hidden-messages) .hook-message-hidden`,
+		`let showHiddenMessages = false`,
+		`H toggle hidden messages`,
+		`data-action="toggle-hidden-messages"`,
+		`setHiddenMessagesVisible(!showHiddenMessages)`,
+		`key === 'h'`,
+		`document.body.classList.toggle('show-hidden-messages', visible)`,
+		`Hidden in terminal`,
+		`entry.display === false`,
+		`.header-toggle-btn[aria-pressed="true"]`,
+	} {
+		if !strings.Contains(html, needle) {
+			t.Errorf("export HTML missing %q", needle)
+		}
+	}
+
+	data := decodeSessionData(t, html)
+	entries, _ := data["entries"].([]any)
+	var hidden, visible any
+	var sawOmitted bool
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		if entry["type"] != "custom_message" {
+			continue
+		}
+		switch entry["content"] {
+		case "hidden-body":
+			hidden = entry["display"]
+		case "visible-body":
+			visible = entry["display"]
+		case "omitted-body":
+			if _, ok := entry["display"]; ok {
+				t.Fatalf("omitted display should stay absent: %v", entry["display"])
+			}
+			sawOmitted = true
+		}
+	}
+	if hidden != false {
+		t.Fatalf("hidden display=%v", hidden)
+	}
+	if visible != true {
+		t.Fatalf("visible display=%v", visible)
+	}
+	if !sawOmitted {
+		t.Fatal("omitted custom message missing from session data")
+	}
+}
+
 func TestFormatTreeAndExportHTML(t *testing.T) {
 	dir := t.TempDir()
 	cwd := t.TempDir()
