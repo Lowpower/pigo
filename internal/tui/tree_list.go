@@ -468,8 +468,15 @@ func formatToolCall(name string, args map[string]any, link pathLink) string {
 	case "read":
 		path := shorten(argStr("path", "file_path"))
 		display := path
-		_, hasOff := args["offset"]
-		_, hasLim := args["limit"]
+		off, hasOff := args["offset"]
+		lim, hasLim := args["limit"]
+		// Strict schemas send JSON null for omitted optional fields.
+		if off == nil {
+			hasOff = false
+		}
+		if lim == nil {
+			hasLim = false
+		}
 		if hasOff || hasLim {
 			start := 1
 			if hasOff {
