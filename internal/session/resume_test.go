@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -145,6 +146,80 @@ func TestInMemoryDoesNotWrite(t *testing.T) {
 	}
 	if _, err := os.Stat(m.File()); !os.IsNotExist(err) {
 		t.Fatalf("in-memory session wrote %s: %v", m.File(), err)
+	}
+}
+
+func TestRestoreAIMessagesToolResultBlocks(t *testing.T) {
+	cases := []struct {
+		name    string
+		content any
+		details any
+		want    string
+		images  int
+		data    string
+		mime    string
+	}{
+		{name: "string", content: "hello", want: "hello"},
+		{
+			name: "text blocks",
+			content: []any{
+				map[string]any{"type": "text", "text": "a"},
+				map[string]any{"type": "text", "text": "b"},
+			},
+			want: "a\nb",
+		},
+		{
+			name: "text and image",
+			content: []any{
+				map[string]any{"type": "text", "text": "look"},
+				map[string]any{"type": "image", "data": "AAA", "mimeType": "image/png"},
+			},
+			want:   "look",
+			images: 1,
+			data:   "AAA",
+			mime:   "image/png",
+		},
+		{name: "empty array", content: []any{}, want: ""},
+		{
+			name: "details ignored",
+			content: []any{
+				map[string]any{"type": "text", "text": "body"},
+			},
+			details: map[string]any{"extra": true},
+			want:    "body",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := map[string]any{
+				"role": "toolResult", "toolCallId": "c1", "toolName": "bash",
+				"content": tc.content, "isError": false,
+			}
+			if tc.details != nil {
+				payload["details"] = tc.details
+			}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			msgs := RestoreAIMessages([]Entry{{Type: "message", Message: raw}})
+			if len(msgs) != 1 {
+				t.Fatalf("len=%d", len(msgs))
+			}
+			got := msgs[0]
+			if got.Role != ai.RoleToolResult || got.ToolCallID != "c1" || got.ToolName != "bash" || got.IsError {
+				t.Fatalf("message = %+v", got)
+			}
+			if got.Content != tc.want {
+				t.Fatalf("content = %q, want %q", got.Content, tc.want)
+			}
+			if len(got.Images) != tc.images {
+				t.Fatalf("images = %#v, want %d", got.Images, tc.images)
+			}
+			if tc.images == 1 && (got.Images[0].Data != tc.data || got.Images[0].MimeType != tc.mime) {
+				t.Fatalf("image = %#v", got.Images[0])
+			}
+		})
 	}
 }
 

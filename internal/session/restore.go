@@ -85,7 +85,7 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 			}
 			out = append(out, ai.Message{Role: ai.RoleUser, Content: BashContextText(command, content, cancelled, exitCode, truncated, fullPath)})
 		case "toolResult", "tool":
-			content, _ := payload["content"].(string)
+			content, images := toolResultContent(payload["content"])
 			id, _ := payload["toolCallId"].(string)
 			if id == "" {
 				id, _ = payload["tool_call_id"].(string)
@@ -95,6 +95,7 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 			out = append(out, ai.Message{
 				Role:           ai.RoleToolResult,
 				Content:        content,
+				Images:         images,
 				ToolCallID:     id,
 				ToolName:       name,
 				IsError:        errFlag,
@@ -129,6 +130,42 @@ func stringSlice(v any) []string {
 		return out
 	default:
 		return nil
+	}
+}
+
+// toolResultContent reads pi tool results. A string is kept as-is. A block
+// array joins text blocks with newlines and keeps image blocks, matching
+// ai.ParseToolContent. Other shapes, including an empty array, yield no text.
+func toolResultContent(v any) (string, []ai.ImageContent) {
+	switch t := v.(type) {
+	case string:
+		return t, nil
+	case []any:
+		var texts []string
+		var images []ai.ImageContent
+		for _, item := range t {
+			m, _ := item.(map[string]any)
+			if m == nil {
+				continue
+			}
+			switch m["type"] {
+			case "text":
+				text, _ := m["text"].(string)
+				if text != "" {
+					texts = append(texts, text)
+				}
+			case "image":
+				data, _ := m["data"].(string)
+				if data == "" {
+					continue
+				}
+				mime, _ := m["mimeType"].(string)
+				images = append(images, ai.ImageContent{Type: "image", Data: data, MimeType: mime})
+			}
+		}
+		return strings.Join(texts, "\n"), images
+	default:
+		return "", nil
 	}
 }
 
