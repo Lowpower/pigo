@@ -160,6 +160,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	auth.RegisterUserJSON()
 	models.SetThinkingBudgets(opts.Config.ThinkingBudgets)
 	ai.SetHTTPIdleTimeout(opts.Config.StreamIdleTimeout())
+	ai.SetWebSocketConnectTimeout(opts.Config.WebSocketConnectTimeout())
 
 	store := auth.Open(opts.AgentDir)
 	patterns := opts.Models
