@@ -525,7 +525,7 @@ func Load(configDir string) (Config, error) {
 
 	v.SetDefault("provider", "anthropic")
 	v.SetDefault("model", "claude-sonnet-4")
-	v.SetDefault("theme", "default")
+	v.SetDefault("theme", "system")
 	v.SetDefault("thinking", "medium")
 	v.SetDefault("contextWindow", 200000)
 	v.SetDefault("compactionReserveTokens", 16384)
@@ -549,7 +549,7 @@ func Load(configDir string) (Config, error) {
 		return cfg, err
 	}
 	if cfg.Theme == "" {
-		cfg.Theme = "default"
+		cfg.Theme = "system"
 	}
 	if cfg.ContextWindow <= 0 {
 		cfg.ContextWindow = 200000

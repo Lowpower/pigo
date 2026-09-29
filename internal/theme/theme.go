@@ -1,3 +1,4 @@
+// Package theme loads TUI colour sets and builds the system theme from the terminal palette.
 package theme
 
 import (
@@ -28,6 +29,11 @@ type Theme struct {
 	ExportPageBg string `json:"-"`
 	ExportCardBg string `json:"-"`
 	ExportInfoBg string `json:"-"`
+
+	// Appearance is "dark" or "light" for a generated system theme.
+	Appearance string `json:"-"`
+	// Dim lists system-theme tokens drawn faint when the terminal reported no colors.
+	Dim []string `json:"-"`
 }
 
 // LoadOptions is how CLI flags and the TUI ask for a theme.
@@ -38,6 +44,7 @@ type LoadOptions struct {
 	Extra       []string // --theme paths (files or directories)
 	NoDiscovery bool     // --no-themes: skip agentDir/cwd discovery
 	NoProject   bool     // skip cwd/.pigo/themes (untrusted project)
+	Terminal    SystemInput
 }
 
 var builtins = []Theme{
@@ -52,10 +59,11 @@ func Load(name, cwd, agentDir string) Theme {
 }
 
 // LoadWith searches extra --theme paths, then discovered dirs, then builtins.
+// An empty name and the reserved name "system" build the system theme.
 func LoadWith(opt LoadOptions) Theme {
 	name := strings.TrimSpace(opt.Name)
 	if name == "" {
-		name = "dark"
+		name = systemThemeName
 	}
 	if strings.Contains(name, "/") {
 		parts := strings.SplitN(name, "/", 2)
@@ -63,6 +71,9 @@ func LoadWith(opt LoadOptions) Theme {
 		if name == "" {
 			name = "dark"
 		}
+	}
+	if strings.EqualFold(name, systemThemeName) {
+		return System(opt.Terminal)
 	}
 	catalog := collect(opt)
 	for i := range catalog {
@@ -95,6 +106,7 @@ func NamesWith(opt LoadOptions) []string {
 		seen[n] = true
 		out = append(out, n)
 	}
+	add(systemThemeName)
 	for _, t := range collect(opt) {
 		add(t.Name)
 	}
@@ -109,7 +121,7 @@ func collect(opt LoadOptions) []Theme {
 	seen := map[string]bool{}
 	add := func(t Theme) {
 		key := strings.ToLower(strings.TrimSpace(t.Name))
-		if key == "" || seen[key] {
+		if key == "" || key == systemThemeName || seen[key] {
 			return
 		}
 		seen[key] = true

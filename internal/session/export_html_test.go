@@ -12,6 +12,22 @@ import (
 	"github.com/Lowpower/pigo/internal/theme"
 )
 
+func TestSystemExportStaysStaticDark(t *testing.T) {
+	sys := resolveExportColors("system", "", "")
+	dark := resolveExportColors("dark", "", "")
+	if sys.PageBg != dark.PageBg || sys.CardBg != dark.CardBg || sys.InfoBg != dark.InfoBg {
+		t.Fatalf("system export backgrounds differ from dark")
+	}
+	if len(sys.CSS) != len(dark.CSS) {
+		t.Fatalf("css len system=%d dark=%d", len(sys.CSS), len(dark.CSS))
+	}
+	for k, v := range dark.CSS {
+		if sys.CSS[k] != v {
+			t.Fatalf("%s system=%q dark=%q", k, sys.CSS[k], v)
+		}
+	}
+}
+
 func TestRenderHTMLThemedSessionData(t *testing.T) {
 	dir := t.TempDir()
 	cwd := t.TempDir()

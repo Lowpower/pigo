@@ -82,8 +82,8 @@ func (e *promptEditor) refreshPrompt() {
 }
 
 func (e *promptEditor) applyTheme(th theme.Theme) {
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(th.Muted))
-	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(th.Tool))
+	muted := styleFG(lipgloss.NewStyle(), th.Muted)
+	prompt := styleFG(lipgloss.NewStyle(), th.Tool)
 	e.ta.FocusedStyle.Placeholder = muted
 	e.ta.BlurredStyle.Placeholder = muted
 	e.ta.FocusedStyle.Prompt = prompt
