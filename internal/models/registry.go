@@ -22,6 +22,9 @@ type ProviderSpec struct {
 	FilterModels func([]Model) []Model
 	// RefreshModels optionally pulls a remote/dynamic catalog into store.
 	RefreshModels func(store CatalogStore) error
+	// RadiusGateway is the models.json oauth:radius gateway.
+	// Empty on the built-in radius provider, which reads RadiusGateway() instead.
+	RadiusGateway string
 }
 
 var (
@@ -278,6 +281,21 @@ func mergeOverlay(base, extra []Model) []Model {
 			}
 			if m.Compat != nil {
 				out[i].Compat = mergeCompat(out[i].Compat, m.Compat)
+			}
+			if m.Name != "" {
+				out[i].Name = m.Name
+			}
+			if m.ContextWindow > 0 {
+				out[i].ContextWindow = m.ContextWindow
+			}
+			if m.Reasoning != nil {
+				out[i].Reasoning = m.Reasoning
+			}
+			if len(m.Input) > 0 {
+				out[i].Input = m.Input
+			}
+			if len(m.ThinkingLevelMap) > 0 {
+				out[i].ThinkingLevelMap = m.ThinkingLevelMap
 			}
 			continue
 		}
