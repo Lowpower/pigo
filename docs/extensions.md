@@ -103,7 +103,7 @@ protocol does not apply there.
 `tool_result`, `input`, `before_agent_start`, `context`, `context_with_system`,
 `resources_discover`,
 `project_trust`, `user_bash`, `before_provider_headers`,
-`before_provider_request`, `after_provider_response`, `model_select`,
+`before_provider_request`, `after_provider_response`, `provider_stream_event`, `model_select`,
 `thinking_level_select`, `ui_prompt_start`, `ui_prompt_end`,
 `telemetry_span`, `agent_settled`, `cache_warming_decision`.
 
@@ -111,6 +111,15 @@ protocol does not apply there.
 payload is a `SpanRecord`: `name`, `trace_id`, `span_id`, `parent_span_id`,
 unix-nano timestamps, `status`, `attrs`. Prompt text and tool arguments are
 not included. Official sample: [`examples/extensions/telemetry`](../examples/extensions/telemetry).
+
+`provider_stream_event` fires for each parsed provider stream event before pigo
+normalizes it into `message_update`. The payload is `provider`, `api`, `model`,
+and `data` (the earliest structured value the adapter has: raw JSON for HTTP/SSE,
+or the SDK chunk encoded as JSON for Google and Bedrock). It does not add
+request headers or API keys. The event is notification-only, is not written to
+the session, and a handler error does not change the provider response. With no
+subscriber the adapters skip this path. `data` can contain vendor fields that
+`message_update`'s `assistantMessageEvent` (`text_delta` and the rest) drops.
 
 `cache_warming_decision` is emitted before each cache refresh. The payload is
 `warmCost`, `missCost`, `continuationProbability`, and `action` (`warm` or

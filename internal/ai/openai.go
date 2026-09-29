@@ -68,7 +68,7 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamOpenAISSE(ctx, resp.Body, out, s)
+			streamOpenAISSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent)
 		}()
 		return s, nil
 	}
@@ -80,7 +80,7 @@ func StreamOpenAIReader(ctx context.Context, r io.Reader, model string) *EventSt
 	out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "openai-completions", Provider: "openai", Model: model, StopReason: StopPending}
 	go func() {
 		defer s.end()
-		streamOpenAISSE(ctx, r, out, s)
+		streamOpenAISSE(ctx, r, out, s, nil)
 	}()
 	return s
 }
@@ -164,7 +164,7 @@ type oaiChunk struct {
 	} `json:"usage"`
 }
 
-func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream) {
+func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
 	if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 		return
 	}
@@ -186,7 +186,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 		if payload == "[DONE]" {
 			return true
 		}
-		return handleOpenAIChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s)
+		return handleOpenAIChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s, observe)
 	}
 
 	for scanner.Scan() {
@@ -245,11 +245,12 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 	}
 }
 
-func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream) bool {
+func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream, observe func([]byte)) bool {
 	var chunk oaiChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return true
 	}
+	emitProviderStreamEvent(observe, []byte(payload))
 
 	if chunk.Usage != nil {
 		out.Usage.Input = chunk.Usage.PromptTokens

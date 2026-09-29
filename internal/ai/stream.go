@@ -93,6 +93,10 @@ type Options struct {
 	TransformBody func([]byte) []byte
 	// OnHTTPResponse observes the provider HTTP response.
 	OnHTTPResponse func(status int, header http.Header)
+	// OnProviderStreamEvent observes one parsed provider stream event before it
+	// is normalized into an AssistantMessageEvent. data is raw JSON and is only
+	// valid for the duration of the call. Nil skips the observation path.
+	OnProviderStreamEvent func(data []byte)
 }
 
 // StreamFn is the spine abstraction: given a request context it returns a stream

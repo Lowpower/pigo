@@ -65,7 +65,7 @@ func TestMistralThinkingContentArray(t *testing.T) {
 	out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "mistral-conversations", StopReason: StopPending}
 	go func() {
 		defer s.end()
-		streamMistralSSE(context.Background(), strings.NewReader(mistralThinkingFixture), out, s)
+		streamMistralSSE(context.Background(), strings.NewReader(mistralThinkingFixture), out, s, nil)
 	}()
 	_, final := s.Collect()
 	if final == nil || final.Text() != "ok" {

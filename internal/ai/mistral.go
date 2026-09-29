@@ -68,7 +68,7 @@ func (c *MistralClient) StreamFn() StreamFn {
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamMistralSSE(ctx, resp.Body, out, s)
+			streamMistralSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent)
 		}()
 		return s, nil
 	}
@@ -236,7 +236,7 @@ type mistralChunk struct {
 	} `json:"usage"`
 }
 
-func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream) {
+func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
 	if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 		return
 	}
@@ -254,7 +254,7 @@ func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s
 		if payload == "[DONE]" {
 			return true
 		}
-		return handleMistralChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s)
+		return handleMistralChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s, observe)
 	}
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -296,11 +296,12 @@ func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s
 	}
 }
 
-func handleMistralChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream) bool {
+func handleMistralChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream, observe func([]byte)) bool {
 	var chunk mistralChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return true
 	}
+	emitProviderStreamEvent(observe, []byte(payload))
 	if chunk.ID != "" && out.ResponseID == "" {
 		out.ResponseID = chunk.ID
 	}

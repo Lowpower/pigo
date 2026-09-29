@@ -105,7 +105,7 @@ func (c *BedrockClient) StreamFn() StreamFn {
 				finishError(ctx, out, s, err.Error())
 				return
 			}
-			processBedrockStream(ctx, resp.GetStream(), out, s)
+			processBedrockStream(ctx, resp.GetStream(), out, s, opts.OnProviderStreamEvent)
 		}()
 		return s, nil
 	}
@@ -223,12 +223,13 @@ func bedrockImageBlock(img ImageContent) *types.ContentBlockMemberImage {
 	}}
 }
 
-func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseStreamEventStream, out *AssistantMessage, s *EventStream) {
+func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseStreamEventStream, out *AssistantMessage, s *EventStream, observe func([]byte)) {
 	defer func() { _ = stream.Close() }()
 	textIdx := map[int32]int{}
 	thinkIdx := map[int32]int{}
 	toolIdx := map[int32]int{}
 	for ev := range stream.Events() {
+		observeSDKEvent(observe, ev)
 		switch v := ev.(type) {
 		case *types.ConverseStreamOutputMemberContentBlockStart:
 			idx := int32(0)
