@@ -348,8 +348,10 @@ func (m *Manager) installGit(ctx context.Context, src Source, local bool) error 
 			_ = m.Run(ctx, "git", gitSafeArgs("fetch", "origin", src.Ref), target)
 			return m.Run(ctx, "git", gitSafeArgs("checkout", src.Ref), target)
 		}
-		_ = m.Run(ctx, "git", gitSafeArgs("fetch", "--all"), target)
-		return m.Run(ctx, "git", gitSafeArgs("pull", "--ff-only"), target)
+		if err := m.Run(ctx, "git", gitSafeArgs("fetch", "origin"), target); err != nil {
+			return err
+		}
+		return m.Run(ctx, "git", gitSafeArgs("reset", "--hard", "@{upstream}"), target)
 	}
 	if err := m.Run(ctx, "git", gitSafeArgs("clone", "--", src.Repo, target), ""); err != nil {
 		_ = os.RemoveAll(target)
