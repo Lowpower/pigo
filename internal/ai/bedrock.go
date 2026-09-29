@@ -45,16 +45,44 @@ func withBearerHTTP(client *http.Client, token string) *http.Client {
 	return &out
 }
 
+type userAgentRoundTripper struct {
+	base http.RoundTripper
+	ua   string
+	set  bool
+}
+
+func (u userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	r := req.Clone(req.Context())
+	if u.set {
+		r.Header.Set("User-Agent", u.ua)
+	} else {
+		r.Header.Del("User-Agent")
+	}
+	base := u.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(r)
+}
+
+func withBedrockHTTP(client *http.Client, apiKey string, configured, extra map[string]string) *http.Client {
+	ua, set := selectUserAgent(configured, extra)
+	if client == nil {
+		client = &http.Client{}
+	}
+	out := *client
+	out.Transport = userAgentRoundTripper{base: client.Transport, ua: ua, set: set}
+	if apiKey != "" {
+		return withBearerHTTP(&out, apiKey)
+	}
+	return &out
+}
+
 // StreamFn returns a StreamFn bound to this client.
 func (c *BedrockClient) StreamFn() StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
-		loadOpts := []func(*awsconfig.LoadOptions) error{}
-		httpClient := c.HTTPClient
-		if c.APIKey != "" {
-			httpClient = withBearerHTTP(httpClient, c.APIKey)
-		}
-		if httpClient != nil {
-			loadOpts = append(loadOpts, awsconfig.WithHTTPClient(httpClient))
+		loadOpts := []func(*awsconfig.LoadOptions) error{
+			awsconfig.WithHTTPClient(withBedrockHTTP(c.HTTPClient, c.APIKey, c.Headers, opts.ExtraHeaders)),
 		}
 		awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
 		if err != nil {

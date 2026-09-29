@@ -26,6 +26,7 @@ func transformRequestBody(opts Options, body []byte) []byte {
 }
 
 func doHTTP(client *http.Client, req *http.Request, opts Options) (*http.Response, error) {
+	setDefaultUserAgent(req.Header)
 	applyExtraHeaders(req.Header, extraHeaders(opts))
 	if client == nil {
 		client = http.DefaultClient
