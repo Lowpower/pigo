@@ -116,7 +116,7 @@ func PrepareCatalog(agentDir, catalogBaseURL string, offline bool) error {
 	}
 	store := OpenFileStore(filepath.Join(agentDir, "models-store.json"))
 	RestoreOverlays(store)
-	refreshLocalProviders(store)
+	refreshLocalProviders(store, offline)
 	if offline || catalogBaseURL == "" {
 		return nil
 	}
@@ -131,8 +131,25 @@ func DefaultCatalogBaseURL() string {
 	return os.Getenv("PIGO_CATALOG_BASE_URL")
 }
 
-func refreshLocalProviders(store CatalogStore) {
+func refreshLocalProviders(store CatalogStore, offline bool) {
 	if spec, ok := LookupProvider("llama.cpp"); ok && spec.RefreshModels != nil {
+		_ = spec.RefreshModels(store)
+	}
+	if offline {
+		seedPublicRadius(store)
+		return
+	}
+	for _, id := range ProviderIDs() {
+		if id == "llama.cpp" {
+			continue
+		}
+		spec, ok := LookupProvider(id)
+		if !ok || spec.RefreshModels == nil {
+			continue
+		}
+		if id != "radius" && spec.RadiusGateway == "" {
+			continue
+		}
 		_ = spec.RefreshModels(store)
 	}
 }

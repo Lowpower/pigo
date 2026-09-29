@@ -47,6 +47,13 @@ type entry struct {
 	toolCallID string
 	partial    bool
 	isError    bool
+
+	// foldID is set for branch summary, compaction summary, and skill invocation.
+	// Fold open/closed lives in Model.blockOpen and is not written to the session.
+	foldID    string
+	foldKind  string
+	foldTitle string
+	foldBody  string
 }
 
 // agentEventMsg / agentClosedMsg carry agent-loop events into the bubbletea loop.
@@ -161,6 +168,7 @@ type Model struct {
 	searchHits    []int
 	thinkingPick  listPicker
 	sel           textSel
+	blockOpen     map[string]bool
 
 	extHub          *extUIHub
 	extStatus       map[string]string
@@ -177,6 +185,7 @@ type Model struct {
 	thinkingLabel   string
 	extCustom       *extCustomState
 	termHosts       []*ext.Host
+	bugHintShown    bool
 }
 
 // New builds the interactive model from the resolved config.
@@ -321,7 +330,17 @@ func (m Model) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			return
+		}
+		recordTUIPanic(m.engine, rec)
+		m.quitting = true
+		out = m
+		nextCmd = tea.Quit
+	}()
 	if next, ok := m.handleExtMsg(msg); ok {
 		return next, nil
 	}
@@ -606,6 +625,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactDoneMsg:
 		return m.handleCompactDone(msg)
+
+	case bugSummaryMsg:
+		return m.finishBugSummary(msg)
 
 	case afterAgentEndMsg:
 		return m.handleAfterAgentEnd(msg)
@@ -1022,6 +1044,8 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			}
 			return shareDoneMsg{text: res.String()}
 		}
+	case "bug":
+		return m.startBugReport(cmd.Rest)
 	case "changelog":
 		body := changelog.FullMarkdown()
 		rendered := m.renderMarkdown("What's New\n\n" + body)
@@ -1111,8 +1135,12 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	}
 	m.editor.AddHistory(text)
 	m.editor.Reset()
+	if fe, ok := foldUserEntry(text); ok {
+		m.transcript = append(m.transcript, fe)
+	} else {
+		m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
+	}
 	text, images = m.preparePromptImages(text, images)
-	m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
 	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1190,6 +1218,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 				m.transcript = append(m.transcript, entry{role: "assistant", rendered: m.renderMarkdown(text)})
 				m.history = append(m.history, ai.Message{Role: ai.RoleAssistant, Content: text})
 			}
+			m.noteBugHint(ev.Assistant)
 		}
 
 	case agent.EventToolStart:
@@ -1317,6 +1346,9 @@ func (m Model) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 		return note("compaction not needed")
 	}
 	m.history = msg.history
+	if fe, ok := foldUserEntry(compaction.SummaryPrefix + msg.summary + compaction.SummarySuffix); ok {
+		m.transcript = append(m.transcript, fe)
+	}
 	return note("compacted history")
 }
 
@@ -1370,95 +1402,16 @@ func (m Model) View() string {
 		return m.present(m.forkView())
 	}
 
-	var body strings.Builder
-	if len(m.extHeader) > 0 {
-		body.WriteString(strings.Join(m.extHeader, "\n"))
-		body.WriteString("\n\n")
+	raw, titles := m.rawChatBody()
+	bodyStr, _ := wrapWithTitleHits(raw, titles, m.transcriptWidth())
+	dock := m.viewDock()
+	if m.altScreen && m.height > 0 {
+		return m.withTitle(m.layoutFullscreen(bodyStr, dock))
 	}
-	if s := m.startupView(); s != "" {
-		body.WriteString(s)
-		if !strings.HasSuffix(s, "\n") {
-			body.WriteByte('\n')
-		}
-		body.WriteByte('\n')
-	}
+	return m.withTitle(m.present(bodyStr + dock))
+}
 
-	for _, e := range m.transcript {
-		switch e.role {
-		case "thinking":
-			if m.hideThinking {
-				body.WriteString(m.metaStyle.Render(m.hiddenThinkingText()))
-			} else if e.rendered != "" {
-				body.WriteString(e.rendered)
-			} else {
-				body.WriteString(m.metaStyle.Render(e.thinking))
-			}
-		case "tool":
-			if e.partial {
-				body.WriteString(e.rendered)
-				if out := strings.TrimRight(previewTail(e.toolOut, 20), "\n"); out != "" {
-					body.WriteByte('\n')
-					body.WriteString(m.toolStyle.Render(indent(out)))
-				}
-			} else if e.toolOut != "" {
-				style := m.toolStyle
-				mark := "→"
-				if e.isError {
-					style = m.errStyle
-					mark = "✗"
-				}
-				text, imgs := splitToolImages(e.toolOut)
-				if text != "" || len(imgs) == 0 {
-					body.WriteString(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBody(text, m.toolsExpanded))))
-				} else {
-					body.WriteString(style.Render("  " + mark))
-				}
-				for _, img := range imgs {
-					body.WriteByte('\n')
-					out := m.renderInlineImage(img)
-					if strings.HasPrefix(out, "\x1b") {
-						body.WriteString(out)
-					} else {
-						body.WriteString(style.Render(out))
-					}
-				}
-			} else {
-				body.WriteString(e.rendered)
-			}
-		default:
-			body.WriteString(e.rendered)
-		}
-		body.WriteString("\n\n")
-	}
-
-	if m.streamingThinking != "" {
-		if m.hideThinking {
-			body.WriteString(m.metaStyle.Render(m.hiddenThinkingText()))
-		} else {
-			body.WriteString(m.metaStyle.Render(m.streamingThinking))
-		}
-		body.WriteString("\n\n")
-	}
-	if m.streamingActive && m.streaming != "" {
-		body.WriteString(m.streamStyle.Render(transformLatexJoins(transformMermaid(m.streaming, m.mermaidOpts(true)))))
-		body.WriteString("\n\n")
-	}
-	if line := m.workingLine(); line != "" {
-		body.WriteString(m.metaStyle.Render(line))
-		body.WriteString("\n\n")
-	}
-	if m.bashRunning {
-		header := "$ " + m.bashCommand
-		body.WriteString(m.toolStyle.Render(header))
-		if out := strings.TrimRight(previewTail(m.bashLive, 20), "\n"); out != "" {
-			body.WriteByte('\n')
-			body.WriteString(indent(out))
-		}
-		body.WriteByte('\n')
-		body.WriteString(m.metaStyle.Render("…bash (Esc to cancel)"))
-		body.WriteString("\n\n")
-	}
-
+func (m Model) viewDock() string {
 	var dock strings.Builder
 	dock.WriteString(m.widgets("aboveEditor"))
 	if m.extCustom != nil && !m.extCustom.overlay && !m.extCustom.hidden {
@@ -1473,11 +1426,111 @@ func (m Model) View() string {
 		dock.WriteString(m.complete.view())
 	}
 	dock.WriteString(m.footerStyle.Render(m.footerText()))
-	bodyStr := wrapDisplayBlock(body.String(), m.transcriptWidth())
-	if m.altScreen && m.height > 0 {
-		return m.withTitle(m.layoutFullscreen(bodyStr, dock.String()))
+	return dock.String()
+}
+
+func (m Model) rawChatBody() (string, map[int]string) {
+	var body strings.Builder
+	titles := map[int]string{}
+	line := 0
+	write := func(s string) {
+		body.WriteString(s)
+		line += strings.Count(s, "\n")
 	}
-	return m.withTitle(m.present(bodyStr + dock.String()))
+	if len(m.extHeader) > 0 {
+		write(strings.Join(m.extHeader, "\n"))
+		write("\n\n")
+	}
+	if s := m.startupView(); s != "" {
+		write(s)
+		if !strings.HasSuffix(s, "\n") {
+			write("\n")
+		}
+		write("\n")
+	}
+
+	for _, e := range m.transcript {
+		if e.foldID != "" {
+			titles[line] = e.foldID
+			write(m.foldRendered(e))
+			write("\n\n")
+			continue
+		}
+		switch e.role {
+		case "thinking":
+			if m.hideThinking {
+				write(m.metaStyle.Render(m.hiddenThinkingText()))
+			} else if e.rendered != "" {
+				write(e.rendered)
+			} else {
+				write(m.metaStyle.Render(e.thinking))
+			}
+		case "tool":
+			if e.partial {
+				write(e.rendered)
+				if out := strings.TrimRight(previewTail(e.toolOut, 20), "\n"); out != "" {
+					write("\n")
+					write(m.toolStyle.Render(indent(out)))
+				}
+			} else if e.toolOut != "" {
+				style := m.toolStyle
+				mark := "→"
+				if e.isError {
+					style = m.errStyle
+					mark = "✗"
+				}
+				text, imgs := splitToolImages(e.toolOut)
+				if text != "" || len(imgs) == 0 {
+					write(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBody(text, m.toolsExpanded))))
+				} else {
+					write(style.Render("  " + mark))
+				}
+				for _, img := range imgs {
+					write("\n")
+					out := m.renderInlineImage(img)
+					if strings.HasPrefix(out, "\x1b") {
+						write(out)
+					} else {
+						write(style.Render(out))
+					}
+				}
+			} else {
+				write(e.rendered)
+			}
+		default:
+			write(e.rendered)
+		}
+		write("\n\n")
+	}
+
+	if m.streamingThinking != "" {
+		if m.hideThinking {
+			write(m.metaStyle.Render(m.hiddenThinkingText()))
+		} else {
+			write(m.metaStyle.Render(m.streamingThinking))
+		}
+		write("\n\n")
+	}
+	if m.streamingActive && m.streaming != "" {
+		write(m.streamStyle.Render(transformLatexJoins(transformMermaid(m.streaming, m.mermaidOpts(true)))))
+		write("\n\n")
+	}
+	if wline := m.workingLine(); wline != "" {
+		write(m.metaStyle.Render(wline))
+		write("\n\n")
+	}
+	if m.bashRunning {
+		header := "$ " + m.bashCommand
+		write(m.toolStyle.Render(header))
+		if out := strings.TrimRight(previewTail(m.bashLive, 20), "\n"); out != "" {
+			write("\n")
+			write(indent(out))
+		}
+		write("\n")
+		write(m.metaStyle.Render("…bash (Esc to cancel)"))
+		write("\n\n")
+	}
+	return body.String(), titles
 }
 
 type pendingNav struct {
@@ -1645,7 +1698,16 @@ func RunEngineResumePicker(cfg config.Config, eng *runtime.Engine) error {
 	return runEngine(cfg, eng, true)
 }
 
-func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
+func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err error) {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			return
+		}
+		fmt.Fprint(os.Stderr, "\x1b[?25h\x1b[0m\x1b[?1049l\n")
+		recordTUIPanic(eng, rec)
+		err = fmt.Errorf("pigo panicked: %v", rec)
+	}()
 	m := New(cfg)
 	m.engine = eng
 	if eng != nil {
@@ -1659,6 +1721,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(trust.UntrustedHint)})
 		}
 	}
+	m.noteCrash()
 	m.applyStartupChangelog()
 	m.maybeWarnAnthropicExtraUsage()
 	if openResume {
@@ -1695,6 +1758,9 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) error {
 		})
 	}
 	final, err := p.Run()
+	if errors.Is(err, tea.ErrProgramPanic) {
+		recordCaughtPanic(eng, err)
+	}
 	if err != nil {
 		return err
 	}

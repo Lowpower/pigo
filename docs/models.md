@@ -28,6 +28,20 @@ and others. `pigo --list-models` is the live list.
 Remote overlays: `PIGO_CATALOG_BASE_URL` and `pigo update --models` (cache
 `models-store.json`).
 
+`radius` ships a public model list, so `radius/balanced` and the other public
+ids can be selected before a gateway responds. `RADIUS_GATEWAY` /
+`PIGO_RADIUS_GATEWAY` has no default host. When one of those is set,
+`GET /v1/config` overlays the public list and the fetched models are cached in
+`models-store.json`. With no gateway and no cached `radius` entry, the public
+list itself is written there.
+
+A `models.json` provider with `"oauth": "radius"` and `baseUrl` is a separate
+gateway. It does not inherit the public list, and `baseUrl` is required:
+
+```json
+{ "providers": { "radius-dev": { "name": "Radius (dev)", "baseUrl": "http://127.0.0.1:8788", "oauth": "radius" } } }
+```
+
 ## User overlay
 
 `~/.pigo/agent/models.json`:

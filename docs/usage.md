@@ -75,7 +75,7 @@ Unknown `--flags` on the root command are held for extensions that
 Type `/` in the editor. Built-ins:
 
 `settings`, `model`, `tree`, `thinking`, `scoped-models`, `image`, `export`,
-`import`, `share`, `copy`, `name`, `session`, `changelog`, `hotkeys`, `help`
+`import`, `share`, `bug`, `copy`, `name`, `session`, `changelog`, `hotkeys`, `help`
 (`?`), `fork`, `clone`, `trust`, `login`, `logout`, `new`, `compact`, `resume`,
 `reload`, `quit` (`exit`, `q`), `provider`, `theme`, `skills`, `tools`, `llama`,
 `clear`.
@@ -89,6 +89,14 @@ Prefix a line with `!` to run bash without going through the model.
 `/image` generates an image through OpenRouter (`OPENROUTER_API_KEY`).
 `/share` uploads via Radius when authenticated, otherwise a private GitHub gist
 (`PIGO_SHARE_VIEWER_URL`).
+
+`/bug [description]` writes `pigo-bug-report-<id>.zip` in the working directory
+and prints a GitHub new-issue URL. The zip contains the environment, model,
+loaded extensions, redacted settings, and assistant error diagnostics.
+`--transcript` adds the current session branch. `--summary` asks the current
+model for a summary instead. The two flags cannot be combined. Crashes are
+stored in `~/.pigo/agent/crashes.json` and attached to the next report. You
+submit the issue yourself and attach the zip.
 
 ## Context files
 

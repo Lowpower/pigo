@@ -21,9 +21,11 @@ type CatalogStore interface {
 // UserJSONProvider is one models.json provider overlay (including optional apiKey).
 type UserJSONProvider struct {
 	ID      string
+	Name    string
 	BaseURL string
 	API     string
 	APIKey  string
+	OAuth   string
 }
 
 var (

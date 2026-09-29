@@ -18,6 +18,15 @@ func RegisterUserJSON() {
 	userJSONAuthMu.Lock()
 	defer userJSONAuthMu.Unlock()
 	for _, p := range models.UserJSONProviders() {
+		if p.OAuth == "radius" {
+			name := p.Name
+			if name == "" {
+				name = p.ID
+			}
+			AttachRadius(p.ID, name, p.BaseURL)
+			userJSONAuthIDs[p.ID] = true
+			continue
+		}
 		if _, found := Lookup(p.ID); found && !userJSONAuthIDs[p.ID] {
 			continue
 		}
