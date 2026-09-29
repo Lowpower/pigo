@@ -187,6 +187,48 @@ func TestLoadUserJSONReadsSendSessionAffinityHeaders(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONMergesImageResize(t *testing.T) {
+	orig, _ := LookupProvider("openai")
+	t.Cleanup(func() {
+		ClearOverlays()
+		RegisterProvider(orig)
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "openai": {
+      "models": [
+        {"id": "gpt-4o", "inputLimits": {"images": {"resize": {"maxWidth": 1568, "jpegQuality": 75}}}}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := Lookup("openai", "gpt-4o")
+	if !ok {
+		t.Fatal("gpt-4o missing")
+	}
+	resize := m.ImageResize()
+	if resize == nil || resize.MaxWidth == nil || *resize.MaxWidth != 1568 {
+		t.Fatalf("maxWidth = %+v", resize)
+	}
+	if resize.JPEGQuality == nil || *resize.JPEGQuality != 75 {
+		t.Fatalf("jpegQuality = %+v", resize)
+	}
+	if resize.MaxHeight != nil || resize.MaxBytes != nil {
+		t.Fatalf("unset resize fields = %+v", resize)
+	}
+	if m.MaxTokens != 16384 {
+		t.Fatalf("maxTokens = %d", m.MaxTokens)
+	}
+}
+
 func TestLoadUserJSONExposesAPIKey(t *testing.T) {
 	t.Cleanup(func() {
 		ClearOverlays()

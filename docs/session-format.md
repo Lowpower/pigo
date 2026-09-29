@@ -24,6 +24,7 @@ Common fields: `type`, `id`, `parentId` (null on the first entry), `timestamp`.
 | --- | --- |
 | `message` | `message`, `usage?`, `provider?`, `modelId?`, `thinkingLevel?` |
 | `compaction` | `summary`, `firstKeptEntryId`, `tokensBefore?`, `fromHook?`, `details?`, `usage?`, `systemMessage?` |
+| `context_edit` | `targetId`, `replacement` (`null` omits the target from later model context) |
 | `branch_summary` | `fromId`, `summary`, `fromHook?` |
 | `label` | `targetId`, `label` |
 | `session_info` | `name` |
@@ -62,3 +63,17 @@ checkpoint and ignores system messages that fall before it, including ones in
 the kept tail. Older compaction entries omit the field and keep the previous
 behavior. Sessions without a leading system message declare it on the next
 request. The session version stays `3`.
+
+`firstKeptEntryId` is the first entry kept from before the compaction. A
+retain-none compaction stores its own id there, so nothing before it stays in
+model context. The field is always a string; JSON `null` is not written.
+
+## Context edits
+
+A `context_edit` changes only later model context. The target entry stays in
+the file, the tree, exports, and session usage. `replacement: null` omits the
+target. A string replacement of an assistant or tool-result message becomes one
+text block; role and tool metadata stay. When several edits name the same
+target, the latest one on the current branch wins. Navigating to a point before
+the edit shows the original text again. `context_edit` itself is not a model
+message.

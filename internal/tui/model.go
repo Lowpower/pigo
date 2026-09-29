@@ -1140,6 +1140,7 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	} else {
 		m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
 	}
+	text, images = m.preparePromptImages(text, images)
 	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1302,6 +1303,20 @@ func (m Model) handleAfterAgentEnd(msg afterAgentEndMsg) (tea.Model, tea.Cmd) {
 		ctx, cancel := context.WithCancel(context.Background())
 		m.cancel = cancel
 		stream := m.engine.Continue(ctx, msg.hist)
+		m.agentEvents = stream.Events()
+		m.running = true
+		m.streamingActive = true
+		if m.cfg.CacheMissNotices() {
+			m.appendCacheMissNotice()
+		}
+		return m, waitForAgentEvent(m.agentEvents)
+	}
+	if m.engine != nil && m.engine.BeforeSettle(context.Background()) {
+		m.history = m.engine.History()
+		m.retryPrefix = len(m.history)
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancel = cancel
+		stream := m.engine.Continue(ctx, m.history)
 		m.agentEvents = stream.Events()
 		m.running = true
 		m.streamingActive = true

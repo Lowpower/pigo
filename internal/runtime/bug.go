@@ -167,7 +167,7 @@ func (e *Engine) SummarizeBugReport(ctx context.Context, fallback []ai.Message, 
 	}
 	msgs := fallback
 	if e.Opts.Session != nil {
-		if restored := session.RestoreAIMessages(e.Opts.Session.GetBranch("")); len(restored) > 0 {
+		if restored := session.ModelMessages(e.Opts.Session.GetBranch("")); len(restored) > 0 {
 			msgs = restored
 		}
 	}

@@ -28,6 +28,20 @@ and others. `pigo --list-models` is the live list.
 Remote overlays: `PIGO_CATALOG_BASE_URL` and `pigo update --models` (cache
 `models-store.json`).
 
+`radius` ships a public model list, so `radius/balanced` and the other public
+ids can be selected before a gateway responds. `RADIUS_GATEWAY` /
+`PIGO_RADIUS_GATEWAY` has no default host. When one of those is set,
+`GET /v1/config` overlays the public list and the fetched models are cached in
+`models-store.json`. With no gateway and no cached `radius` entry, the public
+list itself is written there.
+
+A `models.json` provider with `"oauth": "radius"` and `baseUrl` is a separate
+gateway. It does not inherit the public list, and `baseUrl` is required:
+
+```json
+{ "providers": { "radius-dev": { "name": "Radius (dev)", "baseUrl": "http://127.0.0.1:8788", "oauth": "radius" } } }
+```
+
 ## User overlay
 
 `~/.pigo/agent/models.json`:
@@ -49,6 +63,21 @@ A model may declare prompt-cache lifetimes in seconds. Built-in Anthropic models
 
 ```json
 { "id": "my-model", "promptCache": { "short": 300, "long": 3600 } }
+```
+
+`inputLimits.images.resize` sets how new images are scaled before they enter the session. It applies to user attachments, images returned by `read`, and image blocks in other tool results. Overlaying an existing model merges these fields and leaves the rest of the model in place. Omitted width and height fall back to 2000. `maxBytes` is the base64 payload cap and is enforced only when set. `jpegQuality` is used when the image is encoded as JPEG (default 80).
+
+Images already in history are not rewritten when you switch models. With no `resize` object, `images.autoResize` still scales the longest edge to 2000px. Turning `images.autoResize` off skips resizing even when a profile is present.
+
+```json
+{
+  "id": "vision-model",
+  "inputLimits": {
+    "images": {
+      "resize": { "maxWidth": 1568, "maxHeight": 1568, "maxBytes": 524288, "jpegQuality": 75 }
+    }
+  }
+}
 ```
 
 Unknown provider ids are registered, including API-key auth. `apiKey` in

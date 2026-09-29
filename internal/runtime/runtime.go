@@ -83,6 +83,11 @@ type Engine struct {
 	Steering  func() []ai.Message
 	FollowUp  func() []ai.Message
 	persisted int
+	// contextGen increases when a boundary appends session entries that change
+	// the next provider transcript. appliedGen is the generation already folded
+	// into the in-memory transcript.
+	contextGen int
+	appliedGen int
 
 	mu         sync.Mutex
 	steer      []ai.Message
@@ -324,7 +329,10 @@ func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, u
 
 func (e *Engine) builtinRegistry() *tools.Registry {
 	return tools.NewBuiltins(tools.Options{
-		AutoResize:   e.Opts.Config.AutoResize(),
+		AutoResize: e.Opts.Config.AutoResize(),
+		ImageResize: func() *models.ImageResize {
+			return e.currentModel().ImageResize()
+		},
 		ShellPrefix:  e.Opts.Config.ShellPrefix(),
 		Cwd:          e.Opts.Cwd,
 		EnvFn:        e.sessionToolEnv,
@@ -744,7 +752,7 @@ func (e *Engine) drainSteer() []ai.Message {
 	if len(out) > 0 {
 		e.emitQueueUpdate()
 	}
-	return out
+	return e.fitMessages(out)
 }
 
 func (e *Engine) drainFollow() []ai.Message {
@@ -754,7 +762,29 @@ func (e *Engine) drainFollow() []ai.Message {
 	if len(out) > 0 {
 		e.emitQueueUpdate()
 	}
-	return out
+	return e.fitMessages(out)
+}
+
+// FitPromptImages applies the current model's image resize profile to user
+// attachments. Images already inside the limits keep their original bytes.
+func (e *Engine) FitPromptImages(text string, images []ai.ImageContent) (string, []ai.ImageContent) {
+	if e == nil || len(images) == 0 {
+		return text, images
+	}
+	return tools.FitUserImages(text, images, e.Opts.Config.AutoResize(), e.currentModel().ImageResize())
+}
+
+func (e *Engine) fitMessages(msgs []ai.Message) []ai.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	for i := range msgs {
+		if len(msgs[i].Images) == 0 {
+			continue
+		}
+		msgs[i].Content, msgs[i].Images = e.FitPromptImages(msgs[i].Content, msgs[i].Images)
+	}
+	return msgs
 }
 
 // drainQueue: "all" empties the queue; "one-at-a-time" (default) returns only
@@ -901,6 +931,7 @@ func (e *Engine) Executor() agent.ToolExecutor {
 		if v, ok := post["isError"]; ok {
 			isErr = asBool(v)
 		}
+		result = tools.NormalizeToolResultImages(result, e.Opts.Config.AutoResize(), e.currentModel().ImageResize())
 		return result, isErr
 	})
 }
@@ -997,6 +1028,7 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 		}
 		user, images = prep.User, prep.Images
 	}
+	user, images = e.FitPromptImages(user, images)
 
 	sent := e.System
 	start := e.DispatchEvent(ctx, "before_agent_start", map[string]any{
@@ -1015,7 +1047,7 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 	}
 
 	e.overflowAttempted = false
-	queued := e.TakeNextTurn()
+	queued := e.fitMessages(e.TakeNextTurn())
 	userMsg := ai.Message{Role: ai.RoleUser, Content: user, Images: images}
 	history = append(append([]ai.Message(nil), history...), queued...)
 	history = append(history, userMsg)
@@ -1063,6 +1095,10 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 			}
 			return out
 		},
+		RefreshMessages: e.refreshModelMessages,
+		OnTurnBoundary: func(ctx context.Context, ev agent.Event, transcript []ai.Message) bool {
+			return e.onTurnBoundary(ctx, ev, transcript)
+		},
 		ToolAddedNames: e.toolAddedNames,
 		NextTools: func() []ai.Tool {
 			tools, _ := e.requestTools()
@@ -1085,7 +1121,7 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 		e.persisted = 0
 		return
 	}
-	e.persisted = len(session.RestoreAIMessages(session.ContextEntries(s)))
+	e.persisted = len(session.ModelMessages(session.ContextEntries(s)))
 	e.restoreActiveTools(s)
 	e.restoreSystem(s)
 }
@@ -1188,7 +1224,7 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 		var summary string
 		err := e.withSummarizationRetry(ctx, map[string]any{"source": "branchSummary"}, func() error {
 			var serr error
-			summary, serr = compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.RestoreAIMessages(abandoned), compaction.BranchSummaryOpts{
+			summary, serr = compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.ModelMessages(abandoned), compaction.BranchSummaryOpts{
 				CustomInstructions:  opts.CustomInstructions,
 				ReplaceInstructions: opts.ReplaceInstructions,
 				ReserveTokens:       e.Opts.Config.BranchSummaryReserveTokens(),
@@ -1231,7 +1267,7 @@ func (e *Engine) History() []ai.Message {
 	if e.Opts.Session == nil {
 		return nil
 	}
-	msgs := session.RestoreAIMessages(session.ContextEntries(e.Opts.Session))
+	msgs := session.ModelMessages(session.ContextEntries(e.Opts.Session))
 	e.persisted = len(msgs)
 	return msgs
 }
@@ -1550,23 +1586,44 @@ func (e *Engine) PersistThinking(level string) error {
 
 // PrintText streams a prompt to out as plain text (--mode text / --print).
 func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
-	stream := e.RunPrompt(ctx, history, user, nil)
-	var last []agent.Msg
-	for ev := range stream.Events() {
-		switch ev.Type {
-		case agent.EventMessageUpdate:
-			if ev.AIEvent != nil && ev.AIEvent.Type == ai.EventTextDelta {
-				_, _ = io.WriteString(out, ev.AIEvent.Delta)
-			}
-		case agent.EventToolStart:
-			fmt.Fprintf(out, "\n⚙ %s\n", ev.ToolName)
-		case agent.EventAgentEnd:
-			last = ev.Messages
+	hist := history
+	first := true
+	for {
+		var stream *agent.Stream
+		if first {
+			stream = e.RunPrompt(ctx, hist, user, nil)
+			first = false
+		} else {
+			stream = e.Continue(ctx, hist)
 		}
+		var last []agent.Msg
+		for ev := range stream.Events() {
+			switch ev.Type {
+			case agent.EventMessageUpdate:
+				if ev.AIEvent != nil && ev.AIEvent.Type == ai.EventTextDelta {
+					_, _ = io.WriteString(out, ev.AIEvent.Delta)
+				}
+			case agent.EventToolStart:
+				fmt.Fprintf(out, "\n⚙ %s\n", ev.ToolName)
+			case agent.EventAgentEnd:
+				last = ev.Messages
+			}
+		}
+		fmt.Fprintln(out)
+		e.PersistTranscript(last)
+		stopErr := printStopErr(last)
+		cont := e.BeforeSettle(ctx)
+		if stopErr != nil {
+			if cont {
+				e.DispatchEvent(ctx, "agent_settled", map[string]any{})
+			}
+			return stopErr
+		}
+		if !cont {
+			return nil
+		}
+		hist = e.History()
 	}
-	fmt.Fprintln(out)
-	e.PersistTranscript(last)
-	return printStopErr(last)
 }
 
 // WriteSessionHeader writes the session JSONL header as one JSON object.
@@ -1658,12 +1715,19 @@ func (e *Engine) printJSON(ctx context.Context, out io.Writer, history []ai.Mess
 			continued = true
 			continue
 		}
-		if !e.prepareRetry(ctx, last) {
-			break
+		if e.prepareRetry(ctx, last) {
+			hist = stripLastAssistant(last)
+			prefixLen = len(hist)
+			continued = true
+			continue
 		}
-		hist = stripLastAssistant(last)
-		prefixLen = len(hist)
-		continued = true
+		if e.BeforeSettle(ctx) {
+			hist = e.History()
+			prefixLen = len(hist)
+			continued = true
+			continue
+		}
+		break
 	}
 	write(map[string]any{"type": "agent_settled"})
 	return printStopErr(last)

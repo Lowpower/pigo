@@ -69,6 +69,13 @@ type Config struct {
 	// PrepareNextTurn may rewrite the transcript after tool results, before
 	// the next provider call (threshold compaction).
 	PrepareNextTurn func(ctx context.Context, msgs []ai.Message) []ai.Message
+	// RefreshMessages rebuilds the transcript from session state before each
+	// provider call so append-only context edits apply inside a run.
+	RefreshMessages func(msgs []ai.Message) []ai.Message
+	// OnTurnBoundary runs after the assistant message and tool results are in
+	// the transcript. continueTurn requests one more provider call when the
+	// turn would otherwise stop. Error and aborted turns ignore it.
+	OnTurnBoundary func(ctx context.Context, ev Event, transcript []ai.Message) (continueTurn bool)
 	// OnLifecycle is invoked after lifecycle events are pushed, including
 	// message_start/update/end and tool_execution_update.
 	OnLifecycle func(Event)
@@ -170,6 +177,9 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 					transcript = append(transcript, msg)
 				}
 			}
+			if cfg.RefreshMessages != nil {
+				transcript = transcriptFromAI(cfg.RefreshMessages(toAIMessages(transcript)))
+			}
 
 			aiCtx := ai.Context{System: reqCtx.System, Messages: toAIMessages(transcript), Tools: reqCtx.Tools}
 			if cfg.NextTools != nil {
@@ -183,7 +193,13 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 			transcript = append(transcript, Msg{Role: RoleAssistant, Assistant: message})
 
 			if message.StopReason == ai.StopError || message.StopReason == ai.StopAborted {
-				emit(Event{Type: EventTurnEnd, Assistant: message})
+				if !emit(Event{Type: EventTurnEnd, Assistant: message}) {
+					outcome = turnAbort
+					return
+				}
+				if cfg.OnTurnBoundary != nil {
+					_ = cfg.OnTurnBoundary(turnCtx, Event{Type: EventTurnEnd, Assistant: message}, toAIMessages(transcript))
+				}
 				emit(Event{Type: EventAgentEnd, Messages: transcript})
 				outcome = turnAbort
 				return
@@ -215,23 +231,27 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 						return
 					}
 				}
-				if cfg.PrepareNextTurn != nil {
-					next := cfg.PrepareNextTurn(turnCtx, toAIMessages(transcript))
-					transcript = transcriptFromAI(next)
-				}
 			}
 
 			if !emit(Event{Type: EventTurnEnd, Assistant: message, ToolResults: toolResults}) {
 				outcome = turnAbort
 				return
 			}
+			boundaryContinue := false
+			if cfg.OnTurnBoundary != nil {
+				boundaryContinue = cfg.OnTurnBoundary(turnCtx, Event{Type: EventTurnEnd, Assistant: message, ToolResults: toolResults}, toAIMessages(transcript))
+			}
 
 			pending = drainQueue(cfg.Steering)
 			if len(toolResults) == 0 && len(pending) == 0 {
 				pending = drainQueue(cfg.FollowUp)
-				if len(pending) == 0 {
-					outcome = turnComplete
-				}
+			}
+			willContinue := len(toolResults) > 0 || len(pending) > 0 || boundaryContinue
+			if !willContinue {
+				outcome = turnComplete
+			} else if len(toolResults) > 0 && cfg.PrepareNextTurn != nil {
+				next := cfg.PrepareNextTurn(turnCtx, toAIMessages(transcript))
+				transcript = transcriptFromAI(next)
 			}
 		}()
 		if outcome == turnAbort {

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,6 +79,42 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				}
 			},
 		})
+	case "context-hooks":
+		_ = ext.Serve(ext.Handler{
+			Name:   "context-hooks",
+			Events: []string{"context", "context_with_system"},
+			OnEvent: func(event string, payload map[string]any) map[string]any {
+				if p := os.Getenv("PIGO_EXT_LOG"); p != "" {
+					f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+					if err == nil {
+						raw, _ := json.Marshal(payload["messages"])
+						_, _ = fmt.Fprintf(f, "%s %s\n", event, raw)
+						_ = f.Close()
+					}
+				}
+				msgs, _ := payload["messages"].([]any)
+				switch os.Getenv("PIGO_CONTEXT_MODE") {
+				case "drop":
+					if event == "context_with_system" {
+						return map[string]any{"messages": []any{map[string]any{"role": "user", "content": "no-system"}}}
+					}
+				case "rewrite":
+					if event == "context_with_system" {
+						return map[string]any{"messages": []any{
+							map[string]any{
+								"role": "system", "content": "CHANGED",
+								"tools": []any{map[string]any{"name": "other", "description": "other"}},
+							},
+							map[string]any{"role": "user", "content": "kept"},
+						}}
+					}
+				}
+				if event == "context" && len(msgs) > 0 {
+					return map[string]any{"messages": []any{msgs[len(msgs)-1]}}
+				}
+				return nil
+			},
+		})
 	case "resources":
 		_ = ext.Serve(ext.Handler{
 			Name:   "res-ext",
@@ -145,6 +182,64 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				default:
 					return nil
 				}
+			},
+		})
+	case "boundary":
+		_ = ext.Serve(ext.Handler{
+			Name:   "boundary-ext",
+			Events: []string{"turn_end", "agent_before_settle"},
+			OnEvent: func(event string, payload map[string]any) map[string]any {
+				mode := os.Getenv("PIGO_BOUNDARY")
+				mark := os.Getenv("PIGO_BOUNDARY_MARK")
+				seen := false
+				if mark != "" {
+					if _, err := os.Stat(mark); err == nil {
+						seen = true
+					}
+				}
+				if mode == "turn" && event == "turn_end" {
+					if seen {
+						return nil
+					}
+					if mark != "" {
+						_ = os.WriteFile(mark, []byte("1"), 0o644)
+					}
+					return map[string]any{
+						"entries": []any{map[string]any{
+							"type":        "context_edit",
+							"targetId":    payload["messageEntryId"],
+							"replacement": nil,
+						}},
+						"continue": true,
+					}
+				}
+				if mode == "settle" && event == "agent_before_settle" {
+					if seen {
+						return nil
+					}
+					if mark != "" {
+						_ = os.WriteFile(mark, []byte("1"), 0o644)
+					}
+					return map[string]any{
+						"entries": []any{map[string]any{
+							"type":       "custom_message",
+							"customType": "review",
+							"content":    "review please",
+							"display":    false,
+						}},
+						"continue": true,
+					}
+				}
+				if mode == "bad" && event == "turn_end" {
+					return map[string]any{
+						"entries":  []any{map[string]any{"type": "nope"}},
+						"continue": true,
+					}
+				}
+				if mode == "error" && event == "turn_end" {
+					return map[string]any{"continue": true}
+				}
+				return nil
 			},
 		})
 	case "span":
@@ -250,6 +345,105 @@ func TestBindExtensionStream(t *testing.T) {
 	_, msg := es.Collect()
 	if msg == nil || msg.Text() != "hello from capdemo" {
 		t.Fatalf("got %+v", msg)
+	}
+}
+
+func TestContextHookRestoresPromptAndTools(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "hooks.log")
+	h := spawnRuntimeExt(t, "context-hooks", nil, "PIGO_CONTEXT_MODE=restore", "PIGO_EXT_LOG="+logPath)
+	var seen ai.Context
+	inner := func(ctx context.Context, req ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		seen = req
+		return textReply("ok")(ctx, req, ai.Options{})
+	}
+	e := &Engine{
+		Hosts: []*ext.Host{h},
+		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
+	}
+	fn := e.gatedStream(inner)
+	_, err := fn(context.Background(), ai.Context{
+		System: "PROMPT",
+		Tools:  []ai.Tool{{Name: "read", Description: "read a file", Parameters: map[string]any{"type": "object"}}},
+		Messages: []ai.Message{
+			{Role: ai.RoleSystem, Content: "mid-system"},
+			{Role: ai.RoleUser, Content: "keep"},
+			{Role: ai.RoleUser, Content: "tail"},
+		},
+	}, ai.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen.System != "PROMPT" {
+		t.Fatalf("system = %q", seen.System)
+	}
+	if len(seen.Tools) != 1 || seen.Tools[0].Name != "read" {
+		t.Fatalf("tools = %+v", seen.Tools)
+	}
+	if len(seen.Messages) != 1 || seen.Messages[0].Content != "tail" || seen.Messages[0].Role == ai.RoleSystem {
+		t.Fatalf("messages = %+v", seen.Messages)
+	}
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "context ") || strings.Contains(strings.Split(text, "\n")[0], "mid-system") || strings.Contains(strings.Split(text, "\n")[0], `"role":"system"`) {
+		t.Fatalf("context saw system messages:\n%s", text)
+	}
+	if !strings.Contains(text, "context_with_system ") || !strings.Contains(text, "PROMPT") {
+		t.Fatalf("context_with_system log:\n%s", text)
+	}
+}
+
+func TestContextWithSystemSendsResultVerbatim(t *testing.T) {
+	h := spawnRuntimeExt(t, "context-hooks", nil, "PIGO_CONTEXT_MODE=rewrite")
+	var seen ai.Context
+	var calls int
+	inner := func(ctx context.Context, req ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		calls++
+		seen = req
+		return textReply("ok")(ctx, req, ai.Options{})
+	}
+	e := &Engine{
+		Hosts: []*ext.Host{h},
+		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
+	}
+	_, err := e.gatedStream(inner)(context.Background(), ai.Context{
+		System:   "PROMPT",
+		Tools:    []ai.Tool{{Name: "read", Description: "read"}},
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "tail"}},
+	}, ai.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || seen.System != "CHANGED" {
+		t.Fatalf("calls=%d system=%q", calls, seen.System)
+	}
+	if len(seen.Tools) != 1 || seen.Tools[0].Name != "other" {
+		t.Fatalf("tools=%+v", seen.Tools)
+	}
+	if len(seen.Messages) != 1 || seen.Messages[0].Content != "kept" {
+		t.Fatalf("messages=%+v", seen.Messages)
+	}
+}
+
+func TestContextWithSystemRejectsMissingHead(t *testing.T) {
+	h := spawnRuntimeExt(t, "context-hooks", nil, "PIGO_CONTEXT_MODE=drop")
+	calls := 0
+	inner := func(ctx context.Context, req ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		calls++
+		return textReply("ok")(ctx, req, ai.Options{})
+	}
+	e := &Engine{
+		Hosts: []*ext.Host{h},
+		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
+	}
+	_, err := e.gatedStream(inner)(context.Background(), ai.Context{
+		System:   "PROMPT",
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "tail"}},
+	}, ai.Options{})
+	if err == nil || calls != 0 {
+		t.Fatalf("err=%v calls=%d", err, calls)
 	}
 }
 

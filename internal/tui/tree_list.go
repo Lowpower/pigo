@@ -136,7 +136,7 @@ func nodePassesFilter(n flatNode, mode, leafID string) bool {
 	if role == "assistant" && !isLeaf && !assistantHasText(e) && !assistantErrorOrAbort(e) {
 		return false
 	}
-	settings := e.Type == "label" || e.Type == "custom" || e.Type == "model_change" || e.Type == "thinking_level_change" || e.Type == "active_tools_change" || e.Type == "session_info"
+	settings := e.Type == "label" || e.Type == "custom" || e.Type == "context_edit" || e.Type == "model_change" || e.Type == "thinking_level_change" || e.Type == "active_tools_change" || e.Type == "session_info"
 	switch mode {
 	case filterUserOnly:
 		return (e.Type == "message" || e.Type == "") && role == "user"
@@ -468,8 +468,15 @@ func formatToolCall(name string, args map[string]any, link pathLink) string {
 	case "read":
 		path := shorten(argStr("path", "file_path"))
 		display := path
-		_, hasOff := args["offset"]
-		_, hasLim := args["limit"]
+		off, hasOff := args["offset"]
+		lim, hasLim := args["limit"]
+		// Strict schemas send JSON null for omitted optional fields.
+		if off == nil {
+			hasOff = false
+		}
+		if lim == nil {
+			hasLim = false
+		}
 		if hasOff || hasLim {
 			start := 1
 			if hasOff {

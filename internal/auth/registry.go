@@ -515,13 +515,29 @@ func Login(ctx context.Context, s *Store, providerID, authType string, ix Intera
 	if err != nil {
 		return err
 	}
-	if providerID == "radius" && authType == TypeOAuth {
-		waitRadiusCatalogAfterLogin(ix, s.dir, cred.Access)
+	if authType == TypeOAuth {
+		if gateway, ok := radiusLoginGateway(p, providerID); ok {
+			waitRadiusCatalogAfterLogin(ix, s.dir, providerID, gateway, cred.Access)
+		}
 	}
 	return nil
 }
 
-func waitRadiusCatalogAfterLogin(ix Interaction, agentDir, token string) {
+func radiusLoginGateway(p Provider, providerID string) (string, bool) {
+	if r, ok := p.OAuth.(radiusOAuth); ok {
+		g := strings.TrimRight(strings.TrimSpace(r.gateway), "/")
+		if g == "" {
+			g = models.RadiusGateway()
+		}
+		return g, true
+	}
+	if providerID == "radius" {
+		return models.RadiusGateway(), true
+	}
+	return "", false
+}
+
+func waitRadiusCatalogAfterLogin(ix Interaction, agentDir, providerID, gateway, token string) {
 	notify := func(msg string) {
 		if ix.Notify == nil {
 			return
@@ -532,7 +548,7 @@ func waitRadiusCatalogAfterLogin(ix Interaction, agentDir, token string) {
 		}
 		ix.Notify(Event{Type: typ, Message: msg})
 	}
-	_ = models.WaitForRadiusCatalog(ix.ctx(), models.OpenFileStore(filepath.Join(agentDir, "models-store.json")), token, notify)
+	_ = models.WaitForRadiusProvider(ix.ctx(), models.OpenFileStore(filepath.Join(agentDir, "models-store.json")), providerID, gateway, token, notify)
 }
 
 // CheckAuth is side-effect-free (no refresh).

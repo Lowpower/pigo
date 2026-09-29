@@ -12,6 +12,7 @@ const (
 	RoleAssistant  = "assistant"
 	RoleToolResult = "toolResult"
 	RoleTool       = "tool"
+	RoleSystem     = "system"
 )
 
 // Message is a single conversation message in a request Context.
@@ -32,6 +33,9 @@ type Message struct {
 	AddedToolNames []string `json:"addedToolNames,omitempty"`
 	// Images are extra user-message blocks. Empty for text-only.
 	Images []ImageContent `json:"images,omitempty"`
+	// Tools is set on a synthetic leading system message so a context handler
+	// cannot drop the current tool declaration by slicing the transcript.
+	Tools []Tool `json:"tools,omitempty"`
 }
 
 // ImageContent is a base64 image attached to a user (or tool-result) message.

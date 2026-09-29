@@ -185,14 +185,14 @@ func (e *Engine) onAgentLifecycle(ctx context.Context, ev agent.Event) {
 	case agent.EventAgentEnd:
 		e.setBusy(false)
 		e.DispatchEvent(ctx, "agent_end", map[string]any{})
-		e.DispatchEvent(ctx, "agent_settled", map[string]any{})
 		if e.warmer != nil {
 			e.warmer.Settled()
 		}
 	case agent.EventTurnStart:
 		e.DispatchEvent(ctx, "turn_start", map[string]any{})
 	case agent.EventTurnEnd:
-		e.DispatchEvent(ctx, "turn_end", map[string]any{})
+		// Actionable turn_end is dispatched from OnTurnBoundary after the
+		// assistant and tool results are stored.
 	case agent.EventMessageStart, agent.EventMessageUpdate:
 		e.emitAgentJSONEvent(ctx, ev)
 	case agent.EventMessageEnd:
@@ -262,30 +262,129 @@ func (e *Engine) rewriteAssistantMessageEnd(ctx context.Context, m *ai.Assistant
 	return &next
 }
 
-func (e *Engine) emitContext(ctx context.Context, msgs []ai.Message) []ai.Message {
-	if !e.hasEvent("context") {
-		return msgs
+func (e *Engine) emitContext(ctx context.Context, req ai.Context) (ai.Context, error) {
+	msgs := append([]ai.Message(nil), req.Messages...)
+	owned := false
+	if e.hasEvent("context") {
+		visible := stripSystemMessages(msgs)
+		res := e.DispatchEvent(ctx, "context", map[string]any{"messages": messagesAsAny(visible)})
+		if next, ok := messagesFromAny(res["messages"]); ok && !sameMessageJSON(next, visible) {
+			msgs = withPromptHead(e.promptHead(req), next)
+			owned = true
+		}
 	}
+	if e.hasEvent("context_with_system") {
+		full := msgs
+		if len(full) == 0 || full[0].Role != ai.RoleSystem {
+			full = withPromptHead(e.promptHead(req), full)
+		}
+		res := e.DispatchEvent(ctx, "context_with_system", map[string]any{"messages": messagesAsAny(full)})
+		next, ok := messagesFromAny(res["messages"])
+		if !ok {
+			next = full
+		}
+		if len(next) == 0 || next[0].Role != ai.RoleSystem {
+			return req, fmt.Errorf("context_with_system dropped the leading system message")
+		}
+		msgs = next
+		owned = true
+	}
+	if owned {
+		return liftLeadingSystem(req, msgs), nil
+	}
+	req.Messages = msgs
+	return req, nil
+}
+
+func (e *Engine) promptHead(req ai.Context) ai.Message {
+	content := req.System
+	if content == "" {
+		content = e.System
+	}
+	tools := req.Tools
+	if len(tools) == 0 {
+		if declared, _ := e.requestTools(); len(declared) > 0 {
+			tools = declared
+		}
+	}
+	return ai.Message{Role: ai.RoleSystem, Content: content, Tools: append([]ai.Tool(nil), tools...)}
+}
+
+func stripSystemMessages(msgs []ai.Message) []ai.Message {
+	out := make([]ai.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == ai.RoleSystem {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// withPromptHead puts the current prompt and tool declaration first.
+// System messages the handler added stay after that head.
+func withPromptHead(head ai.Message, msgs []ai.Message) []ai.Message {
+	var added, rest []ai.Message
+	for _, m := range msgs {
+		if m.Role == ai.RoleSystem {
+			added = append(added, m)
+			continue
+		}
+		rest = append(rest, m)
+	}
+	out := make([]ai.Message, 0, 1+len(msgs))
+	out = append(out, head)
+	out = append(out, added...)
+	out = append(out, rest...)
+	return out
+}
+
+func liftLeadingSystem(req ai.Context, msgs []ai.Message) ai.Context {
+	if len(msgs) > 0 && msgs[0].Role == ai.RoleSystem {
+		req.System = msgs[0].Content
+		if msgs[0].Tools != nil {
+			req.Tools = msgs[0].Tools
+		}
+		msgs = append([]ai.Message(nil), msgs[1:]...)
+	}
+	req.Messages = msgs
+	return req
+}
+
+func messagesAsAny(msgs []ai.Message) any {
 	raw, err := json.Marshal(msgs)
 	if err != nil {
-		return msgs
+		return []any{}
 	}
-	var asAny any
-	if json.Unmarshal(raw, &asAny) != nil {
-		return msgs
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return []any{}
 	}
-	res := e.DispatchEvent(ctx, "context", map[string]any{"messages": asAny})
-	if v, ok := res["messages"]; ok {
-		b, err := json.Marshal(v)
-		if err != nil {
-			return msgs
-		}
-		var next []ai.Message
-		if json.Unmarshal(b, &next) == nil {
-			return next
-		}
+	return v
+}
+
+func messagesFromAny(v any) ([]ai.Message, bool) {
+	if v == nil {
+		return nil, false
 	}
-	return msgs
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, false
+	}
+	var next []ai.Message
+	if json.Unmarshal(b, &next) != nil {
+		return nil, false
+	}
+	return next, true
+}
+
+func sameMessageJSON(a, b []ai.Message) bool {
+	ab, errA := json.Marshal(a)
+	bb, errB := json.Marshal(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return string(ab) == string(bb)
 }
 
 // UnclaimedFlags are leftover CLI flags no extension registered.

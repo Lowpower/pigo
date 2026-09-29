@@ -165,7 +165,7 @@ func (r radiusOAuth) Refresh(ctx context.Context, cred Credential) (Credential, 
 }
 
 func (r radiusOAuth) ToAuth(cred Credential) (ModelAuth, error) {
-	return ModelAuth{APIKey: cred.Access, BaseURL: r.gateway}, nil
+	return ModelAuth{APIKey: cred.Access}, nil
 }
 
 func (r radiusOAuth) token(ctx context.Context, fields url.Values) (Credential, error) {
