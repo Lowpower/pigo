@@ -87,7 +87,7 @@ func (e *Engine) warmContextCurrent() bool {
 	if e.Opts.Session == nil {
 		return true
 	}
-	cur := session.RestoreAIMessages(session.ContextEntries(e.Opts.Session))
+	cur := session.ModelMessages(session.ContextEntries(e.Opts.Session))
 	return messagesPrefix(base, cur)
 }
 

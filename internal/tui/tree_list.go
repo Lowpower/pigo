@@ -136,7 +136,7 @@ func nodePassesFilter(n flatNode, mode, leafID string) bool {
 	if role == "assistant" && !isLeaf && !assistantHasText(e) && !assistantErrorOrAbort(e) {
 		return false
 	}
-	settings := e.Type == "label" || e.Type == "custom" || e.Type == "model_change" || e.Type == "thinking_level_change" || e.Type == "active_tools_change" || e.Type == "session_info"
+	settings := e.Type == "label" || e.Type == "custom" || e.Type == "context_edit" || e.Type == "model_change" || e.Type == "thinking_level_change" || e.Type == "active_tools_change" || e.Type == "session_info"
 	switch mode {
 	case filterUserOnly:
 		return (e.Type == "message" || e.Type == "") && role == "user"

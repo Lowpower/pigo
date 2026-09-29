@@ -96,10 +96,12 @@ protocol does not apply there.
 `session_start`, `session_shutdown`, `session_info_changed`,
 `session_before_switch`, `session_before_fork`, `session_before_tree`,
 `session_tree`, `session_before_compact`, `session_compact`,
-`session_compact_failed`, `agent_start`, `agent_end`, `turn_start`, `turn_end`,
+`session_compact_failed`, `agent_start`, `agent_end`, `agent_before_settle`,
+`turn_start`, `turn_end`,
 `message_start`, `message_update`, `message_end`, `tool_call`,
 `tool_execution_start`, `tool_execution_update`, `tool_execution_end`,
-`tool_result`, `input`, `before_agent_start`, `context`, `resources_discover`,
+`tool_result`, `input`, `before_agent_start`, `context`, `context_with_system`,
+`resources_discover`,
 `project_trust`, `user_bash`, `before_provider_headers`,
 `before_provider_request`, `after_provider_response`, `model_select`,
 `thinking_level_select`, `ui_prompt_start`, `ui_prompt_end`,
@@ -121,6 +123,9 @@ Useful return payloads:
 - `tool_call`: `{ "block": true, "reason": "…", "terminate": true? }` or `{ "input": { … } }` to rewrite args
 - `input`: `{ "action": "handled" }` or `{ "action": "transform", "text": "…" }`
 - `before_agent_start`: `{ "systemPrompt": "…" }` replaces the system prompt for this turn only and is not written to the session. `{ "forceSystemPrompt": "…" }` persists as the `preamble` section: on the first request it is part of the full declaration; once a system message exists it is a preamble-only patch, leaving other sections and tools in place.
+- `context`: `{ "messages": [ … ] }` replaces the conversation for this request. System messages are not in the list. If the returned list differs, pigo puts the current prompt and tool declaration back at the front. An unchanged list leaves the request as it was.
+- `context_with_system`: runs after `context`. `messages` includes the leading system message. The returned list is sent as-is, and index 0 must stay a system message.
+- `turn_end` and `agent_before_settle`: `{ "entries": [ … ], "continue": true }`. Allowed entry types are `custom`, `custom_message`, `context_edit`, and `compaction`. Omitted fields keep the previous proposal. `continue: true` asks for one more provider request when this turn would otherwise stop; tool results, steering, and follow-ups already satisfy that request. Error and aborted turns ignore `continue`. `agent_settled` is notification-only and runs once the run will not continue.
 - `project_trust`: `{ "block": true }`
 - `user_bash`: omit the payload to run the local shell. Replace execution with `{ "result": { "output": "…", "cancelled": false, "truncated": false, "exitCode": 0 } }`. Any other payload, including `{ "block": true }` or `{ "operations": … }`, fails the command and does not run the local shell. A handler timeout or crash does the same.
 
