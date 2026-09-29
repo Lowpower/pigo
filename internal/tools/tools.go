@@ -7,6 +7,7 @@ import (
 	"github.com/invopop/jsonschema"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // Tool is one built-in tool: a name, a description, a JSON-Schema for its
@@ -40,6 +41,7 @@ func NewRegistry(ts ...Tool) *Registry {
 // Options configures built-in tool runtime behaviour.
 type Options struct {
 	AutoResize   bool
+	ImageResize  func() *models.ImageResize
 	ShellPrefix  string
 	Cwd          string
 	Env          map[string]string
@@ -57,7 +59,7 @@ func Default() *Registry {
 func NewBuiltins(opt Options) *Registry {
 	r := useRunner(opt.Runner)
 	ts := []Tool{
-		readTool{autoResize: opt.AutoResize, cwd: opt.Cwd, imageCapable: opt.ImageCapable, fs: r},
+		readTool{autoResize: opt.AutoResize, resize: opt.ImageResize, cwd: opt.Cwd, imageCapable: opt.ImageCapable, fs: r},
 		writeTool{cwd: opt.Cwd, fs: r},
 		editTool{cwd: opt.Cwd, fs: r},
 		bashTool{prefix: opt.ShellPrefix, cwd: opt.Cwd, env: opt.Env, envFn: opt.EnvFn, fs: r},

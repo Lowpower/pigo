@@ -3,7 +3,11 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -454,6 +458,103 @@ func TestRPCPromptPersistsImages(t *testing.T) {
 	}
 	if user == nil || user.Content != "look" || len(user.Images) != 1 || user.Images[0].Data != "AAA" {
 		t.Fatalf("restored user = %+v from entries %+v", user, sess.Entries())
+	}
+}
+
+func widePNG(t *testing.T, w, h int) string {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 20, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+type staticImageTool struct{ out string }
+
+func (staticImageTool) Name() string        { return "shot" }
+func (staticImageTool) Description() string { return "shot" }
+func (staticImageTool) Schema() map[string]any {
+	return map[string]any{"type": "object"}
+}
+func (s staticImageTool) Execute(context.Context, map[string]any) (string, bool) { return s.out, false }
+
+func TestRunPromptResizesAttachmentToModelProfile(t *testing.T) {
+	width := 20
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "resize-rt", DefaultAPI: "openai-completions", DefaultID: "vision",
+		Models: []models.Model{{
+			Provider: "resize-rt", ID: "vision",
+			InputLimits: &models.InputLimits{Images: &models.ImageInputLimits{Resize: &models.ImageResize{
+				MaxWidth: &width,
+			}}},
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("resize-rt") })
+
+	var content string
+	e := &Engine{
+		Provider: "resize-rt",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "resize-rt", Model: "vision"}},
+		Stream: func(ctx context.Context, req ai.Context, opt ai.Options) (*ai.EventStream, error) {
+			if n := len(req.Messages); n > 0 {
+				content = req.Messages[n-1].Content
+			}
+			return textReply("ok")(ctx, req, opt)
+		},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+	stream := e.RunPrompt(context.Background(), nil, "look", []ai.ImageContent{{
+		Type: "image", Data: widePNG(t, 80, 8), MimeType: "image/png",
+	}})
+	for range stream.Events() {
+	}
+	if !strings.Contains(content, "resized from 80x8 to 20x2") {
+		t.Fatalf("prompt content = %q", content)
+	}
+}
+
+func TestExecutorAppliesResizeProfileToToolResult(t *testing.T) {
+	width := 10
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "resize-tool", DefaultAPI: "openai-completions", DefaultID: "vision",
+		Models: []models.Model{{
+			Provider: "resize-tool", ID: "vision",
+			InputLimits: &models.InputLimits{Images: &models.ImageInputLimits{Resize: &models.ImageResize{
+				MaxWidth: &width,
+			}}},
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("resize-tool") })
+
+	raw, err := json.Marshal(map[string]any{
+		"content": []map[string]any{
+			{"type": "text", "text": "shot"},
+			{"type": "image", "data": widePNG(t, 40, 4), "mimeType": "image/png"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{
+		Provider: "resize-tool",
+		Tools:    tools.NewRegistry(staticImageTool{out: string(raw)}),
+		Opts:     Options{Config: config.Config{Provider: "resize-tool", Model: "vision"}},
+	}
+	out, isErr := e.Executor().Execute(context.Background(), agent.ToolCall{Name: "shot"})
+	if isErr {
+		t.Fatalf("shot: %s", out)
+	}
+	if !strings.Contains(out, "resized from 40x4 to 10x1") {
+		t.Fatalf("tool result = %s", out)
 	}
 }
 

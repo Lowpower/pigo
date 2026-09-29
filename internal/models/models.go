@@ -48,6 +48,35 @@ type Model struct {
 	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap,omitempty"`
 	Compat           *Compat            `json:"compat,omitempty"`
 	PromptCache      *PromptCache       `json:"promptCache,omitempty"`
+	InputLimits      *InputLimits       `json:"inputLimits,omitempty"`
+}
+
+// InputLimits is per-model provider input metadata from the catalog overlay.
+// Only image resize is applied; other limit fields are not interpreted.
+type InputLimits struct {
+	Images *ImageInputLimits `json:"images,omitempty"`
+}
+
+// ImageInputLimits holds the cache-safe resize profile for new images.
+type ImageInputLimits struct {
+	Resize *ImageResize `json:"resize,omitempty"`
+}
+
+// ImageResize is the optional per-model image resize profile.
+// Nil fields fall back to the global auto-resize edge (2000px).
+type ImageResize struct {
+	MaxWidth    *int `json:"maxWidth,omitempty"`
+	MaxHeight   *int `json:"maxHeight,omitempty"`
+	MaxBytes    *int `json:"maxBytes,omitempty"`
+	JPEGQuality *int `json:"jpegQuality,omitempty"`
+}
+
+// ImageResize reports the model's resize profile, or nil when unset.
+func (m Model) ImageResize() *ImageResize {
+	if m.InputLimits == nil || m.InputLimits.Images == nil {
+		return nil
+	}
+	return m.InputLimits.Images.Resize
 }
 
 // PromptCache is the best-effort prompt-cache lifetime in seconds for each retention tier.

@@ -161,3 +161,111 @@ func TestOverlayMergesFallbackAndStrict(t *testing.T) {
 		t.Fatalf("thinking format lost: %+v", m.Compat)
 	}
 }
+
+func TestOverlayMergesImageResizeOntoExistingModel(t *testing.T) {
+	height := 800
+	quality := 70
+	width := 1568
+	on := true
+	RegisterProvider(ProviderSpec{
+		ID: "resize-merge", DefaultAPI: "openai-completions", DefaultID: "vision",
+		Models: []Model{{
+			Provider: "resize-merge", ID: "vision",
+			Compat: &Compat{ThinkingFormat: "zai"},
+			InputLimits: &InputLimits{Images: &ImageInputLimits{Resize: &ImageResize{
+				MaxHeight:   &height,
+				JPEGQuality: &quality,
+			}}},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("resize-merge")
+	})
+	SetUserOverlay("resize-merge", []Model{
+		{
+			ID: "vision",
+			Compat: &Compat{
+				SupportsStrictMode: &on,
+			},
+			InputLimits: &InputLimits{Images: &ImageInputLimits{Resize: &ImageResize{
+				MaxWidth: &width,
+			}}},
+		},
+		{
+			ID: "fresh",
+			InputLimits: &InputLimits{Images: &ImageInputLimits{Resize: &ImageResize{
+				MaxWidth: &width,
+				MaxBytes: &height,
+			}}},
+		},
+	})
+
+	m, ok := Lookup("resize-merge", "vision")
+	if !ok || m.InputLimits == nil || m.InputLimits.Images == nil || m.InputLimits.Images.Resize == nil {
+		t.Fatalf("resize profile missing: %+v ok=%v", m.InputLimits, ok)
+	}
+	got := m.InputLimits.Images.Resize
+	if got.MaxWidth == nil || *got.MaxWidth != 1568 {
+		t.Fatalf("maxWidth = %v", got.MaxWidth)
+	}
+	if got.MaxHeight == nil || *got.MaxHeight != 800 {
+		t.Fatalf("maxHeight = %v", got.MaxHeight)
+	}
+	if got.JPEGQuality == nil || *got.JPEGQuality != 70 {
+		t.Fatalf("jpegQuality = %v", got.JPEGQuality)
+	}
+	if got.MaxBytes != nil {
+		t.Fatalf("maxBytes = %v, want unset", got.MaxBytes)
+	}
+	if m.Compat == nil || m.Compat.ThinkingFormat != "zai" {
+		t.Fatalf("compat thinking format lost: %+v", m.Compat)
+	}
+	if m.Compat.SupportsStrictMode == nil || !*m.Compat.SupportsStrictMode {
+		t.Fatalf("strict = %+v", m.Compat)
+	}
+
+	fresh, ok := Lookup("resize-merge", "fresh")
+	if !ok || fresh.InputLimits == nil || fresh.InputLimits.Images == nil || fresh.InputLimits.Images.Resize == nil {
+		t.Fatalf("new model profile = %+v ok=%v", fresh.InputLimits, ok)
+	}
+	if fresh.InputLimits.Images.Resize.MaxWidth == nil || *fresh.InputLimits.Images.Resize.MaxWidth != 1568 {
+		t.Fatalf("fresh maxWidth = %v", fresh.InputLimits.Images.Resize.MaxWidth)
+	}
+	if fresh.InputLimits.Images.Resize.MaxBytes == nil || *fresh.InputLimits.Images.Resize.MaxBytes != 800 {
+		t.Fatalf("fresh maxBytes = %v", fresh.InputLimits.Images.Resize.MaxBytes)
+	}
+}
+
+func TestOverlayWithoutImageResizeKeepsExistingProfile(t *testing.T) {
+	width := 1024
+	RegisterProvider(ProviderSpec{
+		ID: "resize-keep", DefaultAPI: "openai-completions", DefaultID: "vision",
+		Models: []Model{{
+			Provider: "resize-keep", ID: "vision",
+			Compat: &Compat{ThinkingFormat: "openai"},
+			InputLimits: &InputLimits{Images: &ImageInputLimits{Resize: &ImageResize{
+				MaxWidth: &width,
+			}}},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("resize-keep")
+	})
+	SetUserOverlay("resize-keep", []Model{{
+		ID:        "vision",
+		MaxTokens: 1234,
+	}})
+	m, ok := Lookup("resize-keep", "vision")
+	if !ok || m.MaxTokens != 1234 {
+		t.Fatalf("maxTokens = %d ok=%v", m.MaxTokens, ok)
+	}
+	if m.InputLimits == nil || m.InputLimits.Images == nil || m.InputLimits.Images.Resize == nil ||
+		m.InputLimits.Images.Resize.MaxWidth == nil || *m.InputLimits.Images.Resize.MaxWidth != 1024 {
+		t.Fatalf("profile cleared: %+v", m.InputLimits)
+	}
+	if m.Compat == nil || m.Compat.ThinkingFormat != "openai" {
+		t.Fatalf("compat = %+v", m.Compat)
+	}
+}

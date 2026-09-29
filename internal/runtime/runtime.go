@@ -321,7 +321,10 @@ func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, u
 
 func (e *Engine) builtinRegistry() *tools.Registry {
 	return tools.NewBuiltins(tools.Options{
-		AutoResize:   e.Opts.Config.AutoResize(),
+		AutoResize: e.Opts.Config.AutoResize(),
+		ImageResize: func() *models.ImageResize {
+			return e.currentModel().ImageResize()
+		},
 		ShellPrefix:  e.Opts.Config.ShellPrefix(),
 		Cwd:          e.Opts.Cwd,
 		EnvFn:        e.sessionToolEnv,
@@ -741,7 +744,7 @@ func (e *Engine) drainSteer() []ai.Message {
 	if len(out) > 0 {
 		e.emitQueueUpdate()
 	}
-	return out
+	return e.fitMessages(out)
 }
 
 func (e *Engine) drainFollow() []ai.Message {
@@ -751,7 +754,29 @@ func (e *Engine) drainFollow() []ai.Message {
 	if len(out) > 0 {
 		e.emitQueueUpdate()
 	}
-	return out
+	return e.fitMessages(out)
+}
+
+// FitPromptImages applies the current model's image resize profile to user
+// attachments. Images already inside the limits keep their original bytes.
+func (e *Engine) FitPromptImages(text string, images []ai.ImageContent) (string, []ai.ImageContent) {
+	if e == nil || len(images) == 0 {
+		return text, images
+	}
+	return tools.FitUserImages(text, images, e.Opts.Config.AutoResize(), e.currentModel().ImageResize())
+}
+
+func (e *Engine) fitMessages(msgs []ai.Message) []ai.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	for i := range msgs {
+		if len(msgs[i].Images) == 0 {
+			continue
+		}
+		msgs[i].Content, msgs[i].Images = e.FitPromptImages(msgs[i].Content, msgs[i].Images)
+	}
+	return msgs
 }
 
 // drainQueue: "all" empties the queue; "one-at-a-time" (default) returns only
@@ -898,6 +923,7 @@ func (e *Engine) Executor() agent.ToolExecutor {
 		if v, ok := post["isError"]; ok {
 			isErr = asBool(v)
 		}
+		result = tools.NormalizeToolResultImages(result, e.Opts.Config.AutoResize(), e.currentModel().ImageResize())
 		return result, isErr
 	})
 }
@@ -994,6 +1020,7 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 		}
 		user, images = prep.User, prep.Images
 	}
+	user, images = e.FitPromptImages(user, images)
 
 	sent := e.System
 	start := e.DispatchEvent(ctx, "before_agent_start", map[string]any{
@@ -1012,7 +1039,7 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 	}
 
 	e.overflowAttempted = false
-	queued := e.TakeNextTurn()
+	queued := e.fitMessages(e.TakeNextTurn())
 	userMsg := ai.Message{Role: ai.RoleUser, Content: user, Images: images}
 	history = append(append([]ai.Message(nil), history...), queued...)
 	history = append(history, userMsg)

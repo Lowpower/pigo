@@ -7,9 +7,20 @@ import (
 	"strings"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/tools"
 )
 
 const maxImageBytes = 50 * 1024 * 1024
+
+func (m Model) preparePromptImages(text string, images []ai.ImageContent) (string, []ai.ImageContent) {
+	if len(images) == 0 {
+		return text, images
+	}
+	if m.engine != nil {
+		return m.engine.FitPromptImages(text, images)
+	}
+	return tools.FitUserImages(text, images, m.cfg.AutoResize(), nil)
+}
 
 func extractImages(text string) []ai.ImageContent {
 	var out []ai.ImageContent

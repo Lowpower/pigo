@@ -51,6 +51,21 @@ A model may declare prompt-cache lifetimes in seconds. Built-in Anthropic models
 { "id": "my-model", "promptCache": { "short": 300, "long": 3600 } }
 ```
 
+`inputLimits.images.resize` sets how new images are scaled before they enter the session. It applies to user attachments, images returned by `read`, and image blocks in other tool results. Overlaying an existing model merges these fields and leaves the rest of the model in place. Omitted width and height fall back to 2000. `maxBytes` is the base64 payload cap and is enforced only when set. `jpegQuality` is used when the image is encoded as JPEG (default 80).
+
+Images already in history are not rewritten when you switch models. With no `resize` object, `images.autoResize` still scales the longest edge to 2000px. Turning `images.autoResize` off skips resizing even when a profile is present.
+
+```json
+{
+  "id": "vision-model",
+  "inputLimits": {
+    "images": {
+      "resize": { "maxWidth": 1568, "maxHeight": 1568, "maxBytes": 524288, "jpegQuality": 75 }
+    }
+  }
+}
+```
+
 Unknown provider ids are registered, including API-key auth. `apiKey` in
 `models.json`, or the same id in `auth.json`, is enough for `--list-models` and
 requests. Overlaying a custom gateway onto a builtin id such as `openai` still

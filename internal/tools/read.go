@@ -4,14 +4,24 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // readTool returns the contents of a text file, or image content for supported images.
 type readTool struct {
 	autoResize   bool
+	resize       func() *models.ImageResize
 	cwd          string
 	imageCapable func() bool
 	fs           Runner
+}
+
+func (t readTool) imageResize() *models.ImageResize {
+	if t.resize == nil {
+		return nil
+	}
+	return t.resize()
 }
 
 type readParams struct {
@@ -42,7 +52,7 @@ func (t readTool) Execute(_ context.Context, args map[string]any) (string, bool)
 		return err.Error(), true
 	}
 	if mime := sniffImageMIME(data); mime != "" {
-		processed, ok := processImage(data, mime, t.autoResize)
+		processed, ok := processImage(data, mime, t.autoResize, t.imageResize())
 		note := ""
 		if t.imageCapable != nil && !t.imageCapable() {
 			note = "\n[Current model does not support images. The image will be omitted from this request.]"

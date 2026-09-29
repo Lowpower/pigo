@@ -279,6 +279,9 @@ func mergeOverlay(base, extra []Model) []Model {
 			if m.Compat != nil {
 				out[i].Compat = mergeCompat(out[i].Compat, m.Compat)
 			}
+			if m.InputLimits != nil {
+				out[i].InputLimits = mergeInputLimits(out[i].InputLimits, m.InputLimits)
+			}
 			continue
 		}
 		idx[m.ID] = len(out)
@@ -305,6 +308,95 @@ func mergeCompat(base, extra *Compat) *Compat {
 		out.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
 	}
 	return &out
+}
+
+func mergeInputLimits(base, extra *InputLimits) *InputLimits {
+	if extra == nil {
+		return base
+	}
+	var baseImages *ImageInputLimits
+	if base != nil {
+		baseImages = base.Images
+	}
+	out := &InputLimits{}
+	if extra.Images != nil {
+		out.Images = mergeImageInputLimits(baseImages, extra.Images)
+		return out
+	}
+	out.Images = cloneImageInputLimits(baseImages)
+	return out
+}
+
+func mergeImageInputLimits(base, extra *ImageInputLimits) *ImageInputLimits {
+	if extra == nil {
+		return cloneImageInputLimits(base)
+	}
+	var baseResize *ImageResize
+	if base != nil {
+		baseResize = base.Resize
+	}
+	out := &ImageInputLimits{}
+	if extra.Resize != nil {
+		out.Resize = mergeImageResize(baseResize, extra.Resize)
+		return out
+	}
+	out.Resize = cloneImageResize(baseResize)
+	return out
+}
+
+func mergeImageResize(base, extra *ImageResize) *ImageResize {
+	if extra == nil {
+		return cloneImageResize(base)
+	}
+	if base == nil {
+		return cloneImageResize(extra)
+	}
+	out := ImageResize{
+		MaxWidth:    cloneInt(base.MaxWidth),
+		MaxHeight:   cloneInt(base.MaxHeight),
+		MaxBytes:    cloneInt(base.MaxBytes),
+		JPEGQuality: cloneInt(base.JPEGQuality),
+	}
+	if extra.MaxWidth != nil {
+		out.MaxWidth = cloneInt(extra.MaxWidth)
+	}
+	if extra.MaxHeight != nil {
+		out.MaxHeight = cloneInt(extra.MaxHeight)
+	}
+	if extra.MaxBytes != nil {
+		out.MaxBytes = cloneInt(extra.MaxBytes)
+	}
+	if extra.JPEGQuality != nil {
+		out.JPEGQuality = cloneInt(extra.JPEGQuality)
+	}
+	return &out
+}
+
+func cloneImageInputLimits(in *ImageInputLimits) *ImageInputLimits {
+	if in == nil {
+		return nil
+	}
+	return &ImageInputLimits{Resize: cloneImageResize(in.Resize)}
+}
+
+func cloneImageResize(in *ImageResize) *ImageResize {
+	if in == nil {
+		return nil
+	}
+	return &ImageResize{
+		MaxWidth:    cloneInt(in.MaxWidth),
+		MaxHeight:   cloneInt(in.MaxHeight),
+		MaxBytes:    cloneInt(in.MaxBytes),
+		JPEGQuality: cloneInt(in.JPEGQuality),
+	}
+}
+
+func cloneInt(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	n := *v
+	return &n
 }
 
 func cloneBool(v *bool) *bool {

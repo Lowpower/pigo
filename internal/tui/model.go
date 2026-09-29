@@ -1111,6 +1111,7 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	}
 	m.editor.AddHistory(text)
 	m.editor.Reset()
+	text, images = m.preparePromptImages(text, images)
 	m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
 	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 
