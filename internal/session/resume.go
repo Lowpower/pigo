@@ -139,17 +139,25 @@ type CompactionMeta struct {
 	Usage         *ai.Usage
 	FromHook      bool
 	SystemMessage *SystemMessage
+	// RetainNone stores this compaction entry's own id as firstKeptEntryId.
+	// No entries before the compaction are kept in model context.
+	RetainNone bool
 }
 
 // AppendCompaction records a compaction summary entry.
 func (m *Manager) AppendCompaction(summary, firstKeptEntryID string, tokensBefore int, meta ...CompactionMeta) (*Entry, error) {
 	tok := tokensBefore
+	id := newUUID()
+	kept := firstKeptEntryID
+	if len(meta) > 0 && meta[0].RetainNone {
+		kept = id
+	}
 	e := &Entry{
 		Type:             "compaction",
-		ID:               newUUID(),
+		ID:               id,
 		Timestamp:        isoNow(),
 		Summary:          summary,
-		FirstKeptEntryID: firstKeptEntryID,
+		FirstKeptEntryID: kept,
 		TokensBefore:     &tok,
 		role:             "assistant",
 	}

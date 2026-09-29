@@ -47,15 +47,18 @@ type Entry struct {
 	Details  json.RawMessage `json:"details,omitempty"`
 	Name     string          `json:"name,omitempty"`
 
-	// Compaction / custom fields (top-level).
-	FirstKeptEntryID string          `json:"firstKeptEntryId,omitempty"`
-	SystemMessage    *SystemMessage  `json:"systemMessage,omitempty"`
-	TokensBefore     *int            `json:"tokensBefore,omitempty"`
-	FromHook         bool            `json:"fromHook,omitempty"`
-	CustomType       string          `json:"customType,omitempty"`
-	Content          json.RawMessage `json:"content,omitempty"`
-	Display          *bool           `json:"display,omitempty"`
-	Data             json.RawMessage `json:"data,omitempty"`
+	// Compaction / custom / context_edit fields (top-level).
+	FirstKeptEntryID string `json:"firstKeptEntryId,omitempty"`
+	// Replacement is set on context_edit. A non-nil value is written even when
+	// it is JSON null, which omits the target from later model context.
+	Replacement   *JSONValue      `json:"replacement,omitempty"`
+	SystemMessage *SystemMessage  `json:"systemMessage,omitempty"`
+	TokensBefore  *int            `json:"tokensBefore,omitempty"`
+	FromHook      bool            `json:"fromHook,omitempty"`
+	CustomType    string          `json:"customType,omitempty"`
+	Content       json.RawMessage `json:"content,omitempty"`
+	Display       *bool           `json:"display,omitempty"`
+	Data          json.RawMessage `json:"data,omitempty"`
 
 	Provider        string   `json:"provider,omitempty"`
 	ModelID         string   `json:"modelId,omitempty"`

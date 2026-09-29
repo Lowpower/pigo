@@ -245,6 +245,7 @@ func runOne(ctx context.Context, sc Scenario, opts Options, provider, variant st
 	res.Latency = time.Since(start)
 	res.LatencyMs = res.Latency.Milliseconds()
 	eng.PersistTranscript(last)
+	_ = eng.BeforeSettle(ctx)
 	if err := stopErr(last); err != nil {
 		res.Status = StatusError
 		res.Error = err.Error()

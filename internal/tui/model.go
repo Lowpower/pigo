@@ -1310,6 +1310,20 @@ func (m Model) handleAfterAgentEnd(msg afterAgentEndMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForAgentEvent(m.agentEvents)
 	}
+	if m.engine != nil && m.engine.BeforeSettle(context.Background()) {
+		m.history = m.engine.History()
+		m.retryPrefix = len(m.history)
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancel = cancel
+		stream := m.engine.Continue(ctx, m.history)
+		m.agentEvents = stream.Events()
+		m.running = true
+		m.streamingActive = true
+		if m.cfg.CacheMissNotices() {
+			m.appendCacheMissNotice()
+		}
+		return m, waitForAgentEvent(m.agentEvents)
+	}
 	m.running = false
 	m.streamingActive = false
 	m.cancel = nil

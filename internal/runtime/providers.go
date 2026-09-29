@@ -345,7 +345,11 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 				Content:    []*ai.Content{},
 			}), nil
 		}
-		req.Messages = e.emitContext(ctx, req.Messages)
+		next, err := e.emitContext(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		req = next
 		if e.hasEvent("before_provider_headers") {
 			res := e.DispatchEvent(ctx, "before_provider_headers", map[string]any{"headers": map[string]any{}})
 			opts.ExtraHeaders = stringMap(res["headers"])
