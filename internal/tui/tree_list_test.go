@@ -103,6 +103,48 @@ func TestFormatToolCallReadAndBash(t *testing.T) {
 	}
 }
 
+func TestFormatToolCallReadOmitsNullLineRange(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			name: "null offset and limit",
+			args: map[string]any{"path": "/tmp/a.go", "offset": nil, "limit": nil},
+			want: "[read: /tmp/a.go]",
+		},
+		{
+			name: "missing offset and limit",
+			args: map[string]any{"path": "/tmp/a.go"},
+			want: "[read: /tmp/a.go]",
+		},
+		{
+			name: "numeric range",
+			args: map[string]any{"path": "/tmp/a.go", "offset": 10, "limit": 5},
+			want: "[read: /tmp/a.go:10-14]",
+		},
+		{
+			name: "offset only",
+			args: map[string]any{"path": "/tmp/a.go", "offset": 10, "limit": nil},
+			want: "[read: /tmp/a.go:10]",
+		},
+		{
+			name: "limit only",
+			args: map[string]any{"path": "/tmp/a.go", "offset": nil, "limit": 5},
+			want: "[read: /tmp/a.go:1-5]",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatToolCall("read", tc.args, nil)
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestToolResultUsesAssistantToolCall(t *testing.T) {
 	m := session.New(t.TempDir(), t.TempDir())
 	_, _ = m.AppendMessage("user", map[string]any{"role": "user", "content": "read it"})
