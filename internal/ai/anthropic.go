@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/Lowpower/pigo/internal/models"
 )
@@ -45,9 +44,8 @@ func NewAnthropicFromEnv() (*AnthropicClient, bool) {
 		base = defaultAnthropicBaseURL
 	}
 	return &AnthropicClient{
-		BaseURL:    strings.TrimRight(base, "/"),
-		APIKey:     key,
-		HTTPClient: &http.Client{Timeout: 5 * time.Minute},
+		BaseURL: strings.TrimRight(base, "/"),
+		APIKey:  key,
 	}, true
 }
 
@@ -77,7 +75,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 
 		client := c.HTTPClient
 		if client == nil {
-			client = http.DefaultClient
+			client = defaultHTTPClient()
 		}
 		resp, err := doHTTP(client, httpReq, opts)
 		if err != nil {

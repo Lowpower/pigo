@@ -150,7 +150,8 @@ func LookupAPI(id string) (APIFactory, bool) {
 	return f, ok
 }
 
-// SetHTTPIdleTimeout sets the default HTTP client timeout used when none is provided.
+// SetHTTPIdleTimeout sets how long a provider response may go without bytes.
+// Zero disables the limit. It is not a cap on the total length of a stream.
 func SetHTTPIdleTimeout(d time.Duration) {
 	apiMu.Lock()
 	defer apiMu.Unlock()
@@ -161,13 +162,7 @@ func httpClient(cfg ClientConfig) *http.Client {
 	if cfg.HTTPClient != nil {
 		return cfg.HTTPClient
 	}
-	apiMu.Lock()
-	d := idleTimeout
-	apiMu.Unlock()
-	if d == 0 {
-		return &http.Client{}
-	}
-	return &http.Client{Timeout: d}
+	return defaultHTTPClient()
 }
 
 // StreamFor dispatches by models.APIFor(provider, opts.Model).

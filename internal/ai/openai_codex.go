@@ -164,7 +164,7 @@ func (c *OpenAICodexClient) httpClient() *http.Client {
 	if c.HTTPClient != nil {
 		return c.HTTPClient
 	}
-	return &http.Client{Timeout: 5 * time.Minute}
+	return defaultHTTPClient()
 }
 
 func skipCodexWebSocketHeader(k string) bool {

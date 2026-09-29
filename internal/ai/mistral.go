@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 	"unicode"
 )
 
@@ -48,7 +47,7 @@ func (c *MistralClient) StreamFn() StreamFn {
 		}
 		client := c.HTTPClient
 		if client == nil {
-			client = &http.Client{Timeout: 5 * time.Minute}
+			client = defaultHTTPClient()
 		}
 		resp, err := doHTTP(client, httpReq, opts)
 		if err != nil {

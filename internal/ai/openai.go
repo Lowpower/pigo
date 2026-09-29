@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // This file streams OpenAI Chat Completions SSE: text, reasoning_content
@@ -51,7 +50,7 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 
 		client := c.HTTPClient
 		if client == nil {
-			client = &http.Client{Timeout: 5 * time.Minute}
+			client = defaultHTTPClient()
 		}
 		resp, err := doHTTP(client, httpReq, opts)
 		if err != nil {
