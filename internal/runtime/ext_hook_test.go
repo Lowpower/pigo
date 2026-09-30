@@ -27,6 +27,14 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 		return
 	}
 	switch os.Getenv("PIGO_RUNTIME_EXT") {
+	case "handled":
+		_ = ext.Serve(ext.Handler{
+			Name: "handled-ext",
+			Commands: []ext.CommandDef{{
+				Name:        "ping",
+				Description: "consumed by the extension",
+			}},
+		})
 	case "block":
 		_ = ext.Serve(ext.Handler{
 			Name:   "block-ext",

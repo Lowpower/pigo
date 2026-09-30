@@ -18,6 +18,13 @@ import (
 const rpcAlreadyStreaming = "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
 const rpcCompacting = "Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry."
 
+func rpcDisposition(queued bool) map[string]any {
+	if queued {
+		return map[string]any{"disposition": "queued"}
+	}
+	return map[string]any{"disposition": "handled"}
+}
+
 // ServeRPC is a JSONL stdin/stdout RPC mode.
 func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) error {
 	dec := json.NewDecoder(in)
@@ -154,19 +161,21 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			isRunning := running
 			stateMu.Unlock()
 			if isRunning && behavior == "steer" {
-				if err := e.queuePrepared(ctx, msg, imgs, e.PushSteerImages); err != nil {
+				queued, err := e.queuePrepared(ctx, msg, imgs, e.PushSteerImages)
+				if err != nil {
 					reply(id, "prompt", false, nil, err.Error())
 					continue
 				}
-				reply(id, "prompt", true, nil, "")
+				reply(id, "prompt", true, rpcDisposition(queued), "")
 				continue
 			}
 			if isRunning && behavior == "followUp" {
-				if err := e.queuePrepared(ctx, msg, imgs, e.PushFollowImages); err != nil {
+				queued, err := e.queuePrepared(ctx, msg, imgs, e.PushFollowImages)
+				if err != nil {
 					reply(id, "prompt", false, nil, err.Error())
 					continue
 				}
-				reply(id, "prompt", true, nil, "")
+				reply(id, "prompt", true, rpcDisposition(queued), "")
 				continue
 			}
 			if isRunning {
@@ -183,7 +192,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				continue
 			}
 			if prep.Handled {
-				reply(id, "prompt", true, nil, "")
+				reply(id, "prompt", true, rpcDisposition(false), "")
 				continue
 			}
 			stateMu.Lock()
@@ -195,7 +204,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			running = true
 			hist := history
 			stateMu.Unlock()
-			reply(id, "prompt", true, nil, "")
+			reply(id, "prompt", true, map[string]any{"disposition": "started"}, "")
 			wg.Add(1)
 			go func(msg string, hist []ai.Message, imgs []ai.ImageContent, cctx context.Context, id any) {
 				defer wg.Done()
@@ -214,17 +223,19 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				}
 			}(prep.User, hist, prep.Images, cctx, id)
 		case "steer":
-			if err := e.queuePrepared(ctx, msg, parseRPCImages(raw), e.PushSteerImages); err != nil {
+			queued, err := e.queuePrepared(ctx, msg, parseRPCImages(raw), e.PushSteerImages)
+			if err != nil {
 				reply(id, "steer", false, nil, err.Error())
 				break
 			}
-			reply(id, "steer", true, nil, "")
+			reply(id, "steer", true, rpcDisposition(queued), "")
 		case "follow_up":
-			if err := e.queuePrepared(ctx, msg, parseRPCImages(raw), e.PushFollowImages); err != nil {
+			queued, err := e.queuePrepared(ctx, msg, parseRPCImages(raw), e.PushFollowImages)
+			if err != nil {
 				reply(id, "follow_up", false, nil, err.Error())
 				break
 			}
-			reply(id, "follow_up", true, nil, "")
+			reply(id, "follow_up", true, rpcDisposition(queued), "")
 		case "new_session":
 			parent, _ := raw["parentSession"].(string)
 			if !e.NewSession(parent) {
