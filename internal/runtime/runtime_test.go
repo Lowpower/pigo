@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -72,8 +73,7 @@ func TestRunPromptPersistsUserBeforeProvider(t *testing.T) {
 			return nil, fmt.Errorf("provider down")
 		},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	events := e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
 	if !sawUserAtCall {
 		t.Fatal("provider was not called")
@@ -125,24 +125,19 @@ func TestRPCSetModelAndPrompt(t *testing.T) {
 		Tools:    tools.NewRegistry(),
 		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 
-	in := strings.NewReader(`{"type":"set_model","provider":"openai","modelId":"gpt-4o"}
+	out := serveRPC(t, e, `{"type":"set_model","provider":"openai","modelId":"gpt-4o"}
 {"type":"prompt","message":"hi"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
 	if e.Opts.Config.ResolvedModel() != "gpt-4o" {
 		t.Fatalf("model = %s", e.Opts.Config.ResolvedModel())
 	}
 	if atomic.LoadInt32(&calls) != 1 {
 		t.Fatalf("prompt calls = %d", calls)
 	}
-	dec := json.NewDecoder(&out)
+	dec := json.NewDecoder(strings.NewReader(out))
 	var sawReady, sawAgent bool
 	for {
 		var row map[string]any
@@ -158,9 +153,35 @@ func TestRPCSetModelAndPrompt(t *testing.T) {
 		}
 	}
 	if !sawReady {
-		t.Fatalf("missing ready event in %s", out.String())
+		t.Fatalf("missing ready event in %s", out)
 	}
 	_ = sawAgent
+}
+
+// newPongEngine returns an engine whose provider always answers "pong".
+func newPongEngine(opts Options) *Engine {
+	return &Engine{
+		Stream:   textReply("pong"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     opts,
+	}
+}
+
+// wireQueues connects the engine's steering and follow-up queues to the agent loop.
+func wireQueues(e *Engine) {
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+}
+
+// serveRPC feeds input to e.ServeRPC and returns everything written to the client.
+func serveRPC(t *testing.T, e *Engine, input string) string {
+	t.Helper()
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
 }
 
 func decodeRPCRows(t *testing.T, raw string) []map[string]any {
@@ -188,36 +209,26 @@ func rpcRowsOfType(rows []map[string]any, typ string) []map[string]any {
 }
 
 func TestRPCPromptEventStreamMatchesJSONEvent(t *testing.T) {
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newPongEngine(Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}})
+	wireQueues(e)
 
-	in := strings.NewReader(`{"type":"prompt","message":"hi"}
+	out := serveRPC(t, e, `{"type":"prompt","message":"hi"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	if len(rpcRowsOfType(rows, "agent_settled")) != 1 {
-		t.Fatalf("missing agent_settled in %s", out.String())
+		t.Fatalf("missing agent_settled in %s", out)
 	}
 	ends := rpcRowsOfType(rows, "agent_end")
 	if len(ends) != 1 {
-		t.Fatalf("agent_end count = %d in %s", len(ends), out.String())
+		t.Fatalf("agent_end count = %d in %s", len(ends), out)
 	}
 	if ends[0]["willRetry"] != false {
 		t.Fatalf("willRetry = %v", ends[0]["willRetry"])
 	}
 	updates := rpcRowsOfType(rows, "message_update")
 	if len(updates) == 0 {
-		t.Fatalf("no message_update in %s", out.String())
+		t.Fatalf("no message_update in %s", out)
 	}
 	for _, u := range updates {
 		if _, ok := u["text"]; ok {
@@ -242,7 +253,7 @@ func TestRPCPromptEventStreamMatchesJSONEvent(t *testing.T) {
 		}
 	}
 	if !sawUser {
-		t.Fatalf("missing user message_start in %s", out.String())
+		t.Fatalf("missing user message_start in %s", out)
 	}
 }
 
@@ -263,41 +274,20 @@ func TestRPCPromptWhileStreamingRequiresBehavior(t *testing.T) {
 		Tools:    tools.NewRegistry(),
 		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 
-	pr, pw := io.Pipe()
-	var out bytes.Buffer
-	done := make(chan error, 1)
-	go func() { done <- e.ServeRPC(context.Background(), pr, &out) }()
-
-	enc := json.NewEncoder(pw)
-	if err := enc.Encode(map[string]any{"type": "prompt", "message": "first", "id": "p1"}); err != nil {
-		t.Fatal(err)
-	}
+	c := startRPC(t, e)
+	c.send(map[string]any{"type": "prompt", "message": "first", "id": "p1"})
 	select {
 	case <-started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("provider was not called")
 	}
-	if err := enc.Encode(map[string]any{"type": "prompt", "message": "second", "id": "p2"}); err != nil {
-		t.Fatal(err)
-	}
+	c.send(map[string]any{"type": "prompt", "message": "second", "id": "p2"})
 	close(release)
-	if err := enc.Encode(map[string]any{"type": "quit"}); err != nil {
-		t.Fatal(err)
-	}
-	_ = pw.Close()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("ServeRPC did not return")
-	}
+	out := c.close()
 
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	var sawReject bool
 	for _, r := range rows {
 		if r["type"] == "response" && r["command"] == "prompt" && r["id"] == "p2" {
@@ -312,7 +302,7 @@ func TestRPCPromptWhileStreamingRequiresBehavior(t *testing.T) {
 		}
 	}
 	if !sawReject {
-		t.Fatalf("missing rejected second prompt in %s", out.String())
+		t.Fatalf("missing rejected second prompt in %s", out)
 	}
 	reject := rpcResponse(rows, "prompt", "p2")
 	if _, ok := reject["data"]; ok {
@@ -338,59 +328,32 @@ func TestRPCPromptDisposition(t *testing.T) {
 		Tools:    tools.NewRegistry(),
 		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 
-	pr, pw := io.Pipe()
-	var out bytes.Buffer
-	done := make(chan error, 1)
-	go func() { done <- e.ServeRPC(context.Background(), pr, &out) }()
-
-	enc := json.NewEncoder(pw)
-	if err := enc.Encode(map[string]any{"type": "prompt", "message": "first", "id": "p1"}); err != nil {
-		t.Fatal(err)
-	}
+	c := startRPC(t, e)
+	c.send(map[string]any{"type": "prompt", "message": "first", "id": "p1"})
 	select {
 	case <-started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("provider was not called")
 	}
-	if err := enc.Encode(map[string]any{"type": "steer", "message": "nudge-steer", "id": "s1"}); err != nil {
-		t.Fatal(err)
-	}
+	c.send(map[string]any{"type": "steer", "message": "nudge-steer", "id": "s1"})
 	waitQueueText(t, e, "nudge-steer", "")
-	if err := enc.Encode(map[string]any{"type": "follow_up", "message": "nudge-follow", "id": "f1"}); err != nil {
-		t.Fatal(err)
-	}
+	c.send(map[string]any{"type": "follow_up", "message": "nudge-follow", "id": "f1"})
 	waitQueueText(t, e, "nudge-steer", "nudge-follow")
-	if err := enc.Encode(map[string]any{
+	c.send(map[string]any{
 		"type": "prompt", "message": "via-steer", "id": "ps", "streamingBehavior": "steer",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 	waitQueueText(t, e, "via-steer", "nudge-follow")
-	if err := enc.Encode(map[string]any{
+	c.send(map[string]any{
 		"type": "prompt", "message": "via-follow", "id": "pf", "streamingBehavior": "followUp",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 	waitQueueText(t, e, "via-steer", "via-follow")
 
 	close(release)
-	if err := enc.Encode(map[string]any{"type": "quit"}); err != nil {
-		t.Fatal(err)
-	}
-	_ = pw.Close()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("ServeRPC did not return")
-	}
+	out := c.close()
 
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	if got := responseDisposition(t, rows, "prompt", "p1"); got != "started" {
 		t.Fatalf("idle prompt disposition = %q, want started", got)
 	}
@@ -422,25 +385,20 @@ func TestRPCHandledDisposition(t *testing.T) {
 		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
 	}
 	e.rebuildCommands()
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 
-	in := strings.NewReader(`{"id":"p","type":"prompt","message":"/ping"}
+	out := serveRPC(t, e, `{"id":"p","type":"prompt","message":"/ping"}
 {"id":"s","type":"steer","message":"/ping"}
 {"id":"f","type":"follow_up","message":"/ping"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
 	if atomic.LoadInt32(&calls) != 0 {
 		t.Fatalf("handled input started a turn: calls=%d", calls)
 	}
 	if n := e.pendingCount(); n != 0 {
 		t.Fatalf("handled input queued: pending=%d", n)
 	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	for _, spec := range []struct{ command, id string }{
 		{"prompt", "p"},
 		{"steer", "s"},
@@ -490,26 +448,16 @@ func waitQueueText(t *testing.T, e *Engine, steer, follow string) {
 }
 
 func TestRPCSteerEmitsQueueUpdate(t *testing.T) {
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newPongEngine(Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}})
+	wireQueues(e)
 
-	in := strings.NewReader(`{"type":"steer","message":"nudge"}
+	out := serveRPC(t, e, `{"type":"steer","message":"nudge"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	updates := rpcRowsOfType(rows, "queue_update")
 	if len(updates) == 0 {
-		t.Fatalf("missing queue_update in %s", out.String())
+		t.Fatalf("missing queue_update in %s", out)
 	}
 	steering, _ := updates[0]["steering"].([]any)
 	if len(steering) != 1 || steering[0] != "nudge" {
@@ -518,23 +466,14 @@ func TestRPCSteerEmitsQueueUpdate(t *testing.T) {
 }
 
 func TestRPCThinkingLevelEmitsChanged(t *testing.T) {
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Thinking: "off"}},
-	}
-	in := strings.NewReader(`{"type":"set_thinking_level","level":"low"}
+	e := newPongEngine(Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Thinking: "off"}})
+	out := serveRPC(t, e, `{"type":"set_thinking_level","level":"low"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	changed := rpcRowsOfType(rows, "thinking_level_changed")
 	if len(changed) != 1 || changed[0]["level"] != "low" {
-		t.Fatalf("thinking_level_changed = %v in %s", changed, out.String())
+		t.Fatalf("thinking_level_changed = %v in %s", changed, out)
 	}
 }
 
@@ -571,36 +510,26 @@ func TestRPCGetTreeAndCycleThinking(t *testing.T) {
 	if _, err := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"}); err != nil {
 		t.Fatal(err)
 	}
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts: Options{
-			Config:   config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Thinking: "off"},
-			Session:  sess,
-			Cwd:      cwd,
-			AgentDir: dir,
-		},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newPongEngine(Options{
+		Config:   config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Thinking: "off"},
+		Session:  sess,
+		Cwd:      cwd,
+		AgentDir: dir,
+	})
+	wireQueues(e)
 	e.AdoptSession(sess)
 
-	in := strings.NewReader(`{"type":"get_tree"}
+	out := serveRPC(t, e, `{"type":"get_tree"}
 {"type":"get_entries"}
 {"type":"cycle_thinking_level"}
 {"type":"cycle_model"}
 {"type":"get_fork_messages"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
 	if e.Opts.Config.Thinking != "minimal" {
 		t.Fatalf("thinking = %s want minimal", e.Opts.Config.Thinking)
 	}
-	s := out.String()
+	s := out
 	if !strings.Contains(s, `"command":"get_tree"`) || !strings.Contains(s, `"success":true`) {
 		t.Fatalf("missing get_tree response:\n%s", s)
 	}
@@ -613,23 +542,13 @@ func TestRPCGetTreeAndCycleThinking(t *testing.T) {
 }
 
 func TestRPCPromptAttachesImagesToUserMessage(t *testing.T) {
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newPongEngine(Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}})
+	wireQueues(e)
 
-	in := strings.NewReader(`{"type":"prompt","message":"look","images":[{"type":"image","data":"AAA","mimeType":"image/png"}]}
+	out := serveRPC(t, e, `{"type":"prompt","message":"look","images":[{"type":"image","data":"AAA","mimeType":"image/png"}]}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	var user map[string]any
 	for _, s := range rpcRowsOfType(rows, "message_start") {
 		msg, _ := s["message"].(map[string]any)
@@ -639,7 +558,7 @@ func TestRPCPromptAttachesImagesToUserMessage(t *testing.T) {
 		}
 	}
 	if user == nil {
-		t.Fatalf("missing user message_start in %s", out.String())
+		t.Fatalf("missing user message_start in %s", out)
 	}
 	blocks, ok := user["content"].([]any)
 	if !ok || len(blocks) != 2 {
@@ -659,28 +578,18 @@ func TestRPCPromptPersistsImages(t *testing.T) {
 	dir := t.TempDir()
 	cwd := t.TempDir()
 	sess := session.New(cwd, dir)
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts: Options{
-			Config:   config.Config{Provider: "anthropic", Model: "claude-sonnet-4"},
-			Session:  sess,
-			Cwd:      cwd,
-			AgentDir: dir,
-		},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newPongEngine(Options{
+		Config:   config.Config{Provider: "anthropic", Model: "claude-sonnet-4"},
+		Session:  sess,
+		Cwd:      cwd,
+		AgentDir: dir,
+	})
+	wireQueues(e)
 	e.AdoptSession(sess)
 
-	in := strings.NewReader(`{"type":"prompt","message":"look","images":[{"type":"image","data":"AAA","mimeType":"image/png"}]}
+	serveRPC(t, e, `{"type":"prompt","message":"look","images":[{"type":"image","data":"AAA","mimeType":"image/png"}]}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
 	msgs := session.RestoreAIMessages(sess.Entries())
 	var user *ai.Message
 	for i := range msgs {
@@ -743,8 +652,7 @@ func TestRunPromptResizesAttachmentToModelProfile(t *testing.T) {
 			return textReply("ok")(ctx, req, opt)
 		},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	stream := e.RunPrompt(context.Background(), nil, "look", []ai.ImageContent{{
 		Type: "image", Data: widePNG(t, 80, 8), MimeType: "image/png",
 	}})
@@ -793,13 +701,9 @@ func TestExecutorAppliesResizeProfileToToolResult(t *testing.T) {
 
 func TestRPCSteerQueuesImages(t *testing.T) {
 	e := &Engine{Opts: Options{Config: config.Config{SteeringMode: "one-at-a-time"}}}
-	in := strings.NewReader(`{"type":"steer","message":"nudge","images":[{"type":"image","data":"BBB","mimeType":"image/jpeg"}]}
+	serveRPC(t, e, `{"type":"steer","message":"nudge","images":[{"type":"image","data":"BBB","mimeType":"image/jpeg"}]}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
 	got := e.drainSteer()
 	if len(got) != 1 || got[0].Content != "nudge" || len(got[0].Images) != 1 || got[0].Images[0].Data != "BBB" {
 		t.Fatalf("queued = %+v", got)
@@ -817,23 +721,6 @@ func TestEnginePushSteerOneAtATime(t *testing.T) {
 	got = e.drainSteer()
 	if len(got) != 1 || got[0].Content != "second" {
 		t.Fatalf("%+v", got)
-	}
-}
-
-func TestTakeQueuesClearsSteerAndFollow(t *testing.T) {
-	e := &Engine{Opts: Options{Config: config.Config{}}}
-	e.PushSteer("s1")
-	e.PushFollow("f1")
-	e.PushFollow("f2")
-	steer, follow := e.TakeQueues()
-	if len(steer) != 1 || steer[0] != "s1" {
-		t.Fatalf("steer=%v", steer)
-	}
-	if len(follow) != 2 || follow[0] != "f1" || follow[1] != "f2" {
-		t.Fatalf("follow=%v", follow)
-	}
-	if n := e.pendingCount(); n != 0 {
-		t.Fatalf("pending=%d", n)
 	}
 }
 
@@ -1048,99 +935,44 @@ func TestApplyModelDoesNotOverwriteSavedDefault(t *testing.T) {
 	}
 }
 
-func TestNewScopedFromSettingsWhenCLIEmpty(t *testing.T) {
+func TestNewResolvesScopedModels(t *testing.T) {
+	cfg := config.Config{
+		Provider: "anthropic", Model: "claude-sonnet-4",
+		EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
+	}
 	dir := t.TempDir()
-	e, err := New(context.Background(), Options{
-		AgentDir:     dir,
-		Cwd:          t.TempDir(),
-		Offline:      true,
-		NoTools:      true,
-		NoSkills:     true,
-		NoExtensions: true,
-		Config: config.Config{
-			Provider: "anthropic", Model: "claude-sonnet-4",
-			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name string
+		opts Options
+		want []string
+	}{
+		{"settings when CLI empty", Options{Config: cfg}, []string{"claude-sonnet-4", "claude-haiku-4"}},
+		{"CLI models replace settings", Options{Config: cfg, Models: []string{"openai/gpt-4o"}}, []string{"gpt-4o"}},
+		{"user config wins over overlay", Options{Config: cfg, UserConfig: &config.Config{EnabledModels: []string{"openai/gpt-4o"}}}, []string{"gpt-4o"}},
+		{"nil user enabledModels is implicit all", Options{Config: cfg, UserConfig: &config.Config{}}, nil},
 	}
-	defer e.Close()
-	if len(e.Scoped) != 2 || e.Scoped[0].ID != "claude-sonnet-4" || e.Scoped[1].ID != "claude-haiku-4" {
-		t.Fatalf("%+v", e.Scoped)
-	}
-}
-
-func TestNewPrefersUserConfigEnabledModels(t *testing.T) {
-	dir := t.TempDir()
-	e, err := New(context.Background(), Options{
-		AgentDir:     dir,
-		Cwd:          t.TempDir(),
-		Offline:      true,
-		NoTools:      true,
-		NoSkills:     true,
-		NoExtensions: true,
-		Config: config.Config{
-			Provider:      "anthropic",
-			Model:         "claude-sonnet-4",
-			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
-		},
-		UserConfig: &config.Config{
-			EnabledModels: []string{"openai/gpt-4o"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e.Close()
-	if len(e.Scoped) != 1 || e.Scoped[0].ID != "gpt-4o" {
-		t.Fatalf("user settings should win over overlay config, got %+v", e.Scoped)
-	}
-
-	e2, err := New(context.Background(), Options{
-		AgentDir:     dir,
-		Cwd:          t.TempDir(),
-		Offline:      true,
-		NoTools:      true,
-		NoSkills:     true,
-		NoExtensions: true,
-		Config: config.Config{
-			Provider:      "anthropic",
-			Model:         "claude-sonnet-4",
-			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
-		},
-		UserConfig: &config.Config{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e2.Close()
-	if len(e2.Scoped) != 0 {
-		t.Fatalf("nil user enabledModels is implicit-all, got %+v", e2.Scoped)
-	}
-}
-
-func TestNewCLIModelsReplaceSettings(t *testing.T) {
-	dir := t.TempDir()
-	e, err := New(context.Background(), Options{
-		AgentDir:     dir,
-		Cwd:          t.TempDir(),
-		Offline:      true,
-		NoTools:      true,
-		NoSkills:     true,
-		NoExtensions: true,
-		Models:       []string{"openai/gpt-4o"},
-		Config: config.Config{
-			Provider: "anthropic", Model: "claude-sonnet-4",
-			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e.Close()
-	if len(e.Scoped) != 1 || e.Scoped[0].ID != "gpt-4o" {
-		t.Fatalf("%+v", e.Scoped)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := tt.opts
+			opts.AgentDir = dir
+			opts.Cwd = t.TempDir()
+			opts.Offline = true
+			opts.NoTools = true
+			opts.NoSkills = true
+			opts.NoExtensions = true
+			e, err := New(context.Background(), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer e.Close()
+			var got []string
+			for _, m := range e.Scoped {
+				got = append(got, m.ID)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("scoped = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1260,14 +1092,8 @@ func TestRPCNavigateTree(t *testing.T) {
 	a, _ := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"})
 	u2, _ := sess.AppendMessage("user", map[string]any{"role": "user", "content": "later"})
 	_, _ = sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "ok"})
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}, Session: sess, Cwd: cwd, AgentDir: dir},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newPongEngine(Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}, Session: sess, Cwd: cwd, AgentDir: dir})
+	wireQueues(e)
 	in := strings.NewReader(`{"type":"navigate_tree","targetId":"` + u2.ID + `"}
 {"type":"quit"}
 `)
@@ -1303,8 +1129,7 @@ func TestPrintTextErrorExit(t *testing.T) {
 		Tools:    tools.NewRegistry(),
 		Opts:     Options{Config: config.Config{Model: "x"}},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	err := e.PrintText(context.Background(), io.Discard, nil, "hi")
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err=%v", err)
@@ -1315,14 +1140,8 @@ func TestPrintJSONWritesSessionHeader(t *testing.T) {
 	dir := t.TempDir()
 	cwd := t.TempDir()
 	sess := session.New(cwd, dir)
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts:     Options{Config: config.Config{Model: "x"}, Session: sess},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newPongEngine(Options{Config: config.Config{Model: "x"}, Session: sess})
+	wireQueues(e)
 	var out bytes.Buffer
 	if err := e.WriteSessionHeader(&out); err != nil {
 		t.Fatal(err)
@@ -1341,22 +1160,14 @@ func TestPrintJSONWritesSessionHeader(t *testing.T) {
 }
 
 func TestRPCClearQueue(t *testing.T) {
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
-	}
+	e := newPongEngine(Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}})
 	e.PushSteer("steer-me")
 	e.PushFollow("follow-me")
-	in := strings.NewReader(`{"id":"c1","type":"clear_queue"}
+	e.PushFollow("follow-2")
+	out := serveRPC(t, e, `{"id":"c1","type":"clear_queue"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	var got map[string]any
 	for _, r := range rows {
 		if r["type"] == "response" && r["command"] == "clear_queue" {
@@ -1365,12 +1176,12 @@ func TestRPCClearQueue(t *testing.T) {
 		}
 	}
 	if got == nil {
-		t.Fatalf("missing clear_queue response in %s", out.String())
+		t.Fatalf("missing clear_queue response in %s", out)
 	}
 	data, _ := got["data"].(map[string]any)
 	steer, _ := data["steering"].([]any)
 	follow, _ := data["followUp"].([]any)
-	if len(steer) != 1 || steer[0] != "steer-me" || len(follow) != 1 || follow[0] != "follow-me" {
+	if len(steer) != 1 || steer[0] != "steer-me" || len(follow) != 2 || follow[0] != "follow-me" || follow[1] != "follow-2" {
 		t.Fatalf("data=%v", data)
 	}
 	if n := e.pendingCount(); n != 0 {
@@ -1378,59 +1189,30 @@ func TestRPCClearQueue(t *testing.T) {
 	}
 }
 
-func TestRPCPromptRejectedDuringCompaction(t *testing.T) {
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+func TestRPCRejectedDuringCompaction(t *testing.T) {
+	tests := []struct {
+		name string
+		e    *Engine
+		in   string
+	}{
+		{"prompt", newPongEngine(Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}}), `{"type":"prompt","message":"hi"}`},
+		{"steer", &Engine{Opts: Options{Config: config.Config{SteeringMode: "one-at-a-time"}}}, `{"type":"steer","message":"nudge"}`},
+		{"follow_up", &Engine{Opts: Options{Config: config.Config{FollowUpMode: "one-at-a-time"}}}, `{"type":"follow_up","message":"later"}`},
 	}
-	e.setCompacting(true)
-	in := strings.NewReader(`{"type":"prompt","message":"hi"}
-{"type":"quit"}
-`)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), `"success":false`) {
-		t.Fatalf("expected failure: %s", out.String())
-	}
-	if !strings.Contains(out.String(), "compaction") {
-		t.Fatalf("missing compaction error: %s", out.String())
-	}
-}
-
-func TestRPCSteerRejectedDuringCompaction(t *testing.T) {
-	e := &Engine{Opts: Options{Config: config.Config{SteeringMode: "one-at-a-time"}}}
-	e.setCompacting(true)
-	in := strings.NewReader(`{"type":"steer","message":"nudge"}
-{"type":"quit"}
-`)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), `"success":false`) || !strings.Contains(out.String(), "compaction") {
-		t.Fatalf("expected steer failure: %s", out.String())
-	}
-	if n := e.pendingCount(); n != 0 {
-		t.Fatalf("queued during compact: %d", n)
-	}
-}
-
-func TestRPCFollowUpRejectedDuringCompaction(t *testing.T) {
-	e := &Engine{Opts: Options{Config: config.Config{FollowUpMode: "one-at-a-time"}}}
-	e.setCompacting(true)
-	in := strings.NewReader(`{"type":"follow_up","message":"later"}
-{"type":"quit"}
-`)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), `"success":false`) || !strings.Contains(out.String(), "compaction") {
-		t.Fatalf("expected follow_up failure: %s", out.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.e.setCompacting(true)
+			var out bytes.Buffer
+			if err := tt.e.ServeRPC(context.Background(), strings.NewReader(tt.in+"\n{\"type\":\"quit\"}\n"), &out); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), `"success":false`) || !strings.Contains(out.String(), "compaction") {
+				t.Fatalf("expected %s failure: %s", tt.name, out.String())
+			}
+			if n := tt.e.pendingCount(); n != 0 {
+				t.Fatalf("queued during compact: %d", n)
+			}
+		})
 	}
 }
 
@@ -1456,14 +1238,10 @@ func TestRPCGetAvailableThinkingLevelsOmitsUnmappedXHigh(t *testing.T) {
 		Provider: "anthropic",
 		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
 	}
-	in := strings.NewReader(`{"type":"get_available_thinking_levels"}
+	out := serveRPC(t, e, `{"type":"get_available_thinking_levels"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	s := out.String()
+	s := out
 	if strings.Contains(s, `"xhigh"`) || strings.Contains(s, `"max"`) {
 		t.Fatalf("xhigh/max should be omitted: %s", s)
 	}
@@ -1540,23 +1318,5 @@ func TestBoundStreamUsesModelsJSONCustomProvider(t *testing.T) {
 	}
 	if gotModel != "GLM-5.3" {
 		t.Fatalf("model = %q", gotModel)
-	}
-}
-
-func TestAdoptSessionPersistedCountsAIMessages(t *testing.T) {
-	sess := session.New(t.TempDir(), t.TempDir())
-	if _, err := sess.AppendModelChange("openai", "gpt-4o"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sess.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"}); err != nil {
-		t.Fatal(err)
-	}
-	e := &Engine{}
-	e.AdoptSession(sess)
-	if e.persisted != 2 {
-		t.Fatalf("persisted=%d want 2", e.persisted)
 	}
 }

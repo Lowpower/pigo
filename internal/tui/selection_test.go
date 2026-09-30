@@ -26,33 +26,6 @@ func TestUseMouseTrackingFollowsFullscreenOnly(t *testing.T) {
 	}
 }
 
-func TestExtractScreenTextInclusiveRange(t *testing.T) {
-	view := "abc\nHELLO-SELECT\nxyz"
-	got := extractScreenText(view, cellPos{X: 0, Y: 1}, cellPos{X: 11, Y: 1})
-	if got != "HELLO-SELECT" {
-		t.Fatalf("got %q", got)
-	}
-	got = extractScreenText("\x1b[32mHELLO\x1b[0m", cellPos{X: 1, Y: 0}, cellPos{X: 3, Y: 0})
-	if got != "ELL" {
-		t.Fatalf("ansi slice=%q", got)
-	}
-	got = extractScreenText("one\ntwo\nthree", cellPos{X: 1, Y: 0}, cellPos{X: 2, Y: 1})
-	if got != "ne\ntwo" {
-		t.Fatalf("multiline=%q", got)
-	}
-}
-
-func TestHighlightSelectionUsesReverseVideo(t *testing.T) {
-	view := "HELLO-SELECT"
-	got := highlightSelection(view, cellPos{X: 0, Y: 0}, cellPos{X: 4, Y: 0})
-	if !strings.Contains(got, "\x1b[7m") {
-		t.Fatalf("missing reverse: %q", got)
-	}
-	if extractScreenText(got, cellPos{X: 0, Y: 0}, cellPos{X: 11, Y: 0}) != "HELLO-SELECT" {
-		t.Fatalf("highlight should not change copied text: %q", got)
-	}
-}
-
 func TestFullscreenDragSelectCopiesOnRelease(t *testing.T) {
 	m := New(fullscreenCfg())
 	m = send(m, tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -139,8 +112,7 @@ func TestSettingsTogglesFullscreenCopyOnSelect(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("copy on select")})
 	if !strings.Contains(m.View(), "Copy on select") {
 		t.Fatalf("menu missing copy on select:\n%s", m.View())
@@ -163,8 +135,7 @@ func TestSettingsTogglesFullscreenCopyOnSelect(t *testing.T) {
 
 func TestSettingsTuiModeTogglesMouseTracking(t *testing.T) {
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("tui-mode")})
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(Model)

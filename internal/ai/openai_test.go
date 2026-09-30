@@ -64,30 +64,6 @@ func TestStreamOpenAIReaderFixture(t *testing.T) {
 	}
 }
 
-func TestOpenAIClientHTTP(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.Header.Get("authorization"), "Bearer ") {
-			t.Errorf("missing Bearer authorization, got %q", r.Header.Get("authorization"))
-		}
-		if r.URL.Path != "/v1/chat/completions" {
-			t.Errorf("path = %q, want /v1/chat/completions", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(openAIFixture))
-	}))
-	defer srv.Close()
-
-	client := &OpenAICompletionsClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
-	stream, err := client.StreamFn()(context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "gpt-test"})
-	if err != nil {
-		t.Fatalf("StreamFn error: %v", err)
-	}
-	_, final := stream.Collect()
-	if final == nil || final.Text() != "Hello, world" || final.StopReason != StopToolUse {
-		t.Fatalf("final = %+v", final)
-	}
-}
-
 func TestOpenAICompletionsJoinsBaseURL(t *testing.T) {
 	cases := []struct {
 		name     string

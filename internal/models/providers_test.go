@@ -48,7 +48,12 @@ func TestThinProvidersAreRegistered(t *testing.T) {
 	}
 }
 
-func TestAvailableIncludesGroqWhenAuthenticated(t *testing.T) {
+func TestAvailableFiltersThinProviderByAuth(t *testing.T) {
+	for _, m := range Available([]string{"openai"}) {
+		if m.Provider == "groq" || m.Provider == "minimax" {
+			t.Fatalf("unauthenticated provider leaked: %+v", m)
+		}
+	}
 	got := Available([]string{"groq"})
 	if len(got) == 0 {
 		t.Fatal("expected groq models when authenticated")
@@ -59,14 +64,6 @@ func TestAvailableIncludesGroqWhenAuthenticated(t *testing.T) {
 		}
 		if m.API != "openai-completions" {
 			t.Fatalf("groq api = %q", m.API)
-		}
-	}
-}
-
-func TestAvailableOmitsThinProviderWhenUnauthenticated(t *testing.T) {
-	for _, m := range Available([]string{"openai"}) {
-		if m.Provider == "groq" || m.Provider == "minimax" {
-			t.Fatalf("unauthenticated provider leaked: %+v", m)
 		}
 	}
 }

@@ -7,60 +7,40 @@ import (
 	"github.com/Lowpower/pigo/internal/ext"
 )
 
-func TestPeelUnknownFlagsKeepsKnownAndPositional(t *testing.T) {
-	rest, unknown := peelUnknownFlags([]string{"--print", "hello", "--plan"})
-	if strings.Join(rest, ",") != "--print,hello" {
-		t.Fatalf("rest=%v", rest)
+func TestPeelUnknownFlags(t *testing.T) {
+	type flag struct {
+		name, value string
+		hasValue    bool
 	}
-	if len(unknown) != 1 || unknown[0].Name != "plan" || unknown[0].HasValue {
-		t.Fatalf("unknown=%+v", unknown)
+	tests := []struct {
+		name string
+		args []string
+		rest string
+		want []flag
+	}{
+		{"keeps known and positional", []string{"--print", "hello", "--plan"}, "--print,hello", []flag{{"plan", "", false}}},
+		{"equals and token", []string{"--foo=bar", "--name", "s1", "--baz", "qux"}, "--name,s1", []flag{{"foo", "bar", true}, {"baz", "qux", true}}},
+		{"does not eat next flag", []string{"--plan", "--verbose"}, "--verbose", []flag{{"plan", "", false}}},
+		{"skips auth subcommand", []string{"auth", "login", "--foo"}, "auth,login,--foo", nil},
+		{"skips server subcommand", []string{"server", "--listen", "unix:///tmp/pigo.sock"}, "server,--listen,unix:///tmp/pigo.sock", nil},
+		{"skips eval subcommand", []string{"eval", "--out", "r"}, "eval,--out,r", nil},
 	}
-}
-
-func TestPeelUnknownFlagsEqualsAndToken(t *testing.T) {
-	rest, unknown := peelUnknownFlags([]string{"--foo=bar", "--name", "s1", "--baz", "qux"})
-	if strings.Join(rest, ",") != "--name,s1" {
-		t.Fatalf("rest=%v", rest)
-	}
-	if len(unknown) != 2 {
-		t.Fatalf("unknown=%+v", unknown)
-	}
-	if unknown[0].Name != "foo" || unknown[0].Value != "bar" || !unknown[0].HasValue {
-		t.Fatalf("foo=%+v", unknown[0])
-	}
-	if unknown[1].Name != "baz" || unknown[1].Value != "qux" {
-		t.Fatalf("baz=%+v", unknown[1])
-	}
-}
-
-func TestPeelUnknownFlagsDoesNotEatNextFlag(t *testing.T) {
-	_, unknown := peelUnknownFlags([]string{"--plan", "--verbose"})
-	if len(unknown) != 1 || unknown[0].Name != "plan" || unknown[0].HasValue {
-		t.Fatalf("unknown=%+v", unknown)
-	}
-}
-
-func TestPeelUnknownFlagsSkipsSubcommands(t *testing.T) {
-	rest, unknown := peelUnknownFlags([]string{"auth", "login", "--foo"})
-	if len(unknown) != 0 {
-		t.Fatalf("unknown=%+v", unknown)
-	}
-	if strings.Join(rest, ",") != "auth,login,--foo" {
-		t.Fatalf("rest=%v", rest)
-	}
-	rest, unknown = peelUnknownFlags([]string{"server", "--listen", "unix:///tmp/pigo.sock"})
-	if len(unknown) != 0 {
-		t.Fatalf("server unknown=%+v", unknown)
-	}
-	if strings.Join(rest, ",") != "server,--listen,unix:///tmp/pigo.sock" {
-		t.Fatalf("server rest=%v", rest)
-	}
-	rest, unknown = peelUnknownFlags([]string{"eval", "--out", "r"})
-	if len(unknown) != 0 {
-		t.Fatalf("eval unknown=%+v", unknown)
-	}
-	if strings.Join(rest, ",") != "eval,--out,r" {
-		t.Fatalf("eval rest=%v", rest)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rest, unknown := peelUnknownFlags(tt.args)
+			if strings.Join(rest, ",") != tt.rest {
+				t.Fatalf("rest=%v want %s", rest, tt.rest)
+			}
+			if len(unknown) != len(tt.want) {
+				t.Fatalf("unknown=%+v", unknown)
+			}
+			for i, w := range tt.want {
+				u := unknown[i]
+				if u.Name != w.name || u.Value != w.value || u.HasValue != w.hasValue {
+					t.Fatalf("unknown[%d]=%+v want %+v", i, u, w)
+				}
+			}
+		})
 	}
 }
 

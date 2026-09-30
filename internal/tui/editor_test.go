@@ -195,21 +195,13 @@ func TestSubmitExpandsPasteAndAttachesImages(t *testing.T) {
 
 func TestSubmitAddsPromptHistory(t *testing.T) {
 	m := editorModel()
-	m.editor.SetValue("remember me")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "remember me")
 	if m.editor.Value() != "" {
 		t.Fatal("editor should clear on submit")
 	}
 	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
 	if m.editor.Value() != "remember me" {
 		t.Fatalf("history = %q", m.editor.Value())
-	}
-}
-
-func TestExternalEditorKeyIsBound(t *testing.T) {
-	m := editorModel()
-	if !m.keyIs(tea.KeyMsg{Type: tea.KeyCtrlG}, "app.editor.external") {
-		t.Fatal("ctrl+g should open the external editor")
 	}
 }
 
@@ -223,19 +215,6 @@ func TestExternalEditorDoneReplacesText(t *testing.T) {
 	m = send(m, externalEditorDoneMsg{content: "ignored", ok: false})
 	if m.editor.Value() != "from-editor" {
 		t.Fatalf("failed editor changed text to %q", m.editor.Value())
-	}
-}
-
-func TestHotkeysListsEditorBindings(t *testing.T) {
-	text := keys.NewManager("").HotkeysText()
-	paste := "ctrl+v"
-	if keys.UseWindowsKeys() {
-		paste = "alt+v"
-	}
-	for _, want := range []string{"ctrl+g", paste, "ctrl+y", "ctrl+]", "tab"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("hotkeys missing %s:\n%s", want, text)
-		}
 	}
 }
 

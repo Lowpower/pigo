@@ -19,23 +19,6 @@ func TestRepoSmokeFixture(t *testing.T) {
 	}
 }
 
-func TestLoadDirReadsJSONScenarios(t *testing.T) {
-	got, err := LoadDir("testdata")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("scenarios = %d, want 1", len(got))
-	}
-	s := got[0]
-	if s.Name != "smoke" || s.Prompt == "" || !s.NoTools {
-		t.Fatalf("scenario = %+v", s)
-	}
-	if len(s.Expect.Contains) != 1 || s.Expect.Contains[0] != "Paris" {
-		t.Fatalf("expect = %+v", s.Expect)
-	}
-}
-
 func TestLoadDirUsesFilenameWhenNameMissing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "capital.json")

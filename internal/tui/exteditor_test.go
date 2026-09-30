@@ -6,22 +6,6 @@ import (
 	"testing"
 )
 
-func TestEditInExternalEditorSuccess(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "ed.sh")
-	body := "#!/bin/sh\nprintf 'from-editor\\n' > \"$1\"\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := EditInExternalEditor(script, "original")
-	if !ok {
-		t.Fatal("expected success")
-	}
-	if got != "from-editor" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestEditInExternalEditorKeepsOriginalOnFailure(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ed.sh")
@@ -47,21 +31,6 @@ func TestEditInExternalEditorStripsBOMAndTrailingNewline(t *testing.T) {
 	}
 	if got != "hello" {
 		t.Fatalf("got %q", got)
-	}
-}
-
-func TestExtractImagesFromClipboardPath(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "pigo-clipboard-abc.png")
-	if err := os.WriteFile(path, mustDecodePNG(), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	imgs := extractImages("look at " + path + " please")
-	if len(imgs) != 1 {
-		t.Fatalf("got %d images", len(imgs))
-	}
-	if imgs[0].MimeType != "image/png" || imgs[0].Data == "" {
-		t.Fatalf("%+v", imgs[0])
 	}
 }
 

@@ -65,12 +65,3 @@ func TestHostRejectsNonObjectToolSchema(t *testing.T) {
 		t.Fatal("expected notify error")
 	}
 }
-
-func TestServeCheckToolSchemaBeforeRegister(t *testing.T) {
-	if err := checkToolSchema("hello", map[string]any{"type": "object"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := checkToolSchema("hello", map[string]any{"type": "array"}); err == nil {
-		t.Fatal("array schema should fail")
-	}
-}

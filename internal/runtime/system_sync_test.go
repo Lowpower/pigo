@@ -123,8 +123,7 @@ func TestRunPromptPersistsSystemAndUsesReplayTools(t *testing.T) {
 			return textReply("ok")(ctx, req, ai.Options{})
 		},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
 	if !strings.Contains(seenSystem, cwd) {
 		t.Fatalf("request system=%s", seenSystem)
@@ -153,8 +152,7 @@ func TestOldSessionDeclaresOnFirstRequest(t *testing.T) {
 		Opts:   Options{Session: sess, Cwd: cwd, Config: config.Config{Model: "x"}},
 		Stream: textReply("ok"),
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	e.AdoptSession(sess)
 	if session.ReplaySystem(sess.GetBranch("")).Declared {
 		t.Fatal("old session should not look declared")
@@ -217,8 +215,7 @@ func TestBeforeAgentStartForceAndTurnPrompt(t *testing.T) {
 		},
 	}
 	e.System = "built-prompt"
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
 	if e.System != "built-prompt" {
 		t.Fatalf("force replaced Engine.System: %q", e.System)

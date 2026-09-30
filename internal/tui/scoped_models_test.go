@@ -17,8 +17,7 @@ import (
 
 func TestSlashScopedModelsOpensPicker(t *testing.T) {
 	m := New(testCfg())
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	if !m.scopedModelsActive() {
 		t.Fatal("expected scoped-models picker")
 	}
@@ -32,8 +31,7 @@ func TestSlashScopedModelsPreservesExplicitEmptySelection(t *testing.T) {
 	cfg := testCfg()
 	cfg.EnabledModels = []string{}
 	m := New(cfg)
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	if m.scoped.enabled.all {
 		t.Fatal("explicit empty enabledModels opened in all mode")
 	}
@@ -50,8 +48,7 @@ func TestSlashScopedModelsSessionIgnoresSettingsUnmatched(t *testing.T) {
 		Scoped: []models.Spec{{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4"}}},
 		Opts:   runtime.Options{Config: cfg, Offline: true},
 	}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	for _, id := range m.scoped.enabled.ids {
 		if id == "missing/model" {
 			t.Fatalf("session scope should not reattach settings unmatched: %v", m.scoped.enabled.ids)
@@ -67,8 +64,7 @@ func TestSlashScopedModelsEmptySessionShowsSettingsUnmatched(t *testing.T) {
 	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4", "missing/model"}
 	m := New(cfg)
 	m.engine = &runtime.Engine{Opts: runtime.Options{Config: cfg, Offline: true}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 
 	found := false
 	for _, id := range m.scoped.enabled.ids {
@@ -96,11 +92,9 @@ func TestSlashScopedModelsEscReopenKeepsSessionDoesNotReattachUnmatched(t *testi
 		Scoped: []models.Spec{{Model: models.Model{Provider: "openai", ID: "gpt-4o"}}},
 		Opts:   runtime.Options{Config: cfg, Offline: true},
 	}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	if len(m.engine.Scoped) != 1 || m.engine.Scoped[0].ID != "gpt-4o" {
 		t.Fatalf("esc/reopen rolled back session: %+v", m.engine.Scoped)
 	}
@@ -123,8 +117,7 @@ func TestSlashScopedModelsCLIDoesNotMixSettingsUnmatched(t *testing.T) {
 			Offline: true,
 		},
 	}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	for _, id := range m.scoped.enabled.ids {
 		if id == "missing/settings" {
 			t.Fatalf("CLI --models mixed settings unmatched: %v", m.scoped.enabled.ids)
@@ -147,8 +140,7 @@ func TestSlashScopedModelsCLISessionDoesNotReattachUnmatched(t *testing.T) {
 			Offline: true,
 		},
 	}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	got := map[string]bool{}
 	for _, id := range m.scoped.enabled.ids {
 		got[id] = true
@@ -172,8 +164,7 @@ func TestSlashScopedModelsCLIEmptyScopeDoesNotFallBackToSettings(t *testing.T) {
 			Offline: true,
 		},
 	}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	if m.scoped.enabled.all {
 		t.Fatal("unmatched CLI --models fell back to implicit-all")
 	}
@@ -193,8 +184,7 @@ func TestScopedRefreshUsesCLIPatternsWhenOpenedEmpty(t *testing.T) {
 			Offline: true,
 		},
 	}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	next, _ := m.Update(scopedRefreshMsg{gen: m.scoped.gen})
 	m = next.(Model)
 	if len(m.scoped.enabled.ids) != 1 || m.scoped.enabled.ids[0] != "missing/cli" {
@@ -227,8 +217,7 @@ func TestScopedModelsEnterDoesNotWriteSettings(t *testing.T) {
 	dir := t.TempDir()
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: dir, Config: m.cfg}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter}) // toggle current
 	if _, err := os.Stat(filepath.Join(dir, "settings.json")); err == nil {
 		t.Fatal("toggle must not write settings.json")
@@ -245,8 +234,7 @@ func TestScopedModelsEscKeepsSessionDoesNotSave(t *testing.T) {
 	dir := t.TempDir()
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: dir, Config: m.cfg}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	scoped := append([]models.Spec(nil), m.engine.Scoped...)
 	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
@@ -265,8 +253,7 @@ func TestScopedModelsCtrlSWritesSettings(t *testing.T) {
 	dir := t.TempDir()
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: dir, Config: m.cfg}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlS})
 	if !m.scopedModelsActive() {
@@ -302,8 +289,7 @@ func TestScopedModelsCtrlSAllEnabledDeletesKey(t *testing.T) {
 	}
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: dir, Config: m.cfg}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	if !m.scoped.enabled.all {
 		t.Fatal("expected implicit-all picker")
 	}
@@ -323,8 +309,7 @@ func TestScopedModelsCtrlSKeepsUnavailableIDs(t *testing.T) {
 	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4", "missing/model"}
 	m := New(cfg)
 	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: dir, Config: cfg}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlA})
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlS})
 	loaded, err := config.Load(dir)
@@ -348,8 +333,7 @@ func TestScopedModelsCtrlSKeepsUnavailableIDs(t *testing.T) {
 func TestModelPickerSeesUpdatedScoped(t *testing.T) {
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlL})
@@ -361,8 +345,7 @@ func TestModelPickerSeesUpdatedScoped(t *testing.T) {
 func TestScopedRefreshTimeoutCopy(t *testing.T) {
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, CatalogBaseURL: "http://127.0.0.1:1"}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	m.scoped.refreshStatus = "Refreshing model catalogs…"
 	next, _ := m.Update(scopedRefreshMsg{gen: m.scoped.gen, timedOut: true, failed: []string{"anthropic"}})
 	m = next.(Model)
@@ -380,8 +363,7 @@ func TestScopedRefreshStatusIsMuted(t *testing.T) {
 
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, Offline: true}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	m.scoped.refreshStatus = "Refreshing model catalogs…"
 	plain := "Refreshing model catalogs…"
 	want := m.footerStyle.Render(plain)
@@ -397,8 +379,7 @@ func TestScopedRefreshStatusIsMuted(t *testing.T) {
 func TestScopedRefreshDoesNotClobberDirty(t *testing.T) {
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, CatalogBaseURL: "http://example"}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	before := m.scoped.enabled.clone()
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.scoped.dirty {
@@ -450,8 +431,7 @@ func openScopedPicker(t *testing.T) Model {
 	t.Helper()
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{Config: m.cfg, Offline: true}}
-	m.editor.SetValue("/scoped-models")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/scoped-models")
 	if !m.scopedModelsActive() {
 		t.Fatal("expected scoped-models picker")
 	}

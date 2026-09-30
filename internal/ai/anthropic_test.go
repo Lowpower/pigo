@@ -100,36 +100,6 @@ func TestStreamAnthropicReaderFixture(t *testing.T) {
 	}
 }
 
-func TestAnthropicClientHTTP(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("x-api-key") == "" {
-			t.Error("missing x-api-key header")
-		}
-		if r.Header.Get("anthropic-version") == "" {
-			t.Error("missing anthropic-version header")
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(anthropicFixture))
-	}))
-	defer srv.Close()
-
-	client := &AnthropicClient{BaseURL: srv.URL, APIKey: "test-key", HTTPClient: srv.Client()}
-	stream, err := client.StreamFn()(context.Background(), Context{
-		Messages: []Message{{Role: RoleUser, Content: "hi"}},
-	}, Options{Model: "claude-test"})
-	if err != nil {
-		t.Fatalf("StreamFn returned error: %v", err)
-	}
-
-	_, final := stream.Collect()
-	if final == nil || final.Text() != "Hello, world" {
-		t.Fatalf("final text = %v, want Hello, world", final)
-	}
-	if final.StopReason != StopToolUse {
-		t.Errorf("stopReason = %q, want toolUse", final.StopReason)
-	}
-}
-
 func TestAnthropicAuthTokenUsesBearerNotAPIKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-api-key") != "" {

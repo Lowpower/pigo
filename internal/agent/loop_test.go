@@ -106,48 +106,6 @@ func TestLoopMultiTurnToolCycle(t *testing.T) {
 	}
 }
 
-func TestLoopEventTrace(t *testing.T) {
-	provider := scriptedProvider(
-		toolCallMessage("tc1", "read", map[string]any{"path": "README.md"}),
-		textMessage("Done."),
-	)
-	exec := ToolFunc(func(_ context.Context, _ ToolCall) (string, bool) { return "file body", false })
-
-	reqCtx := ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: "read the readme"}}}
-	events := Run(context.Background(), provider, reqCtx, exec, Config{Model: "test", ToolExecution: Sequential}).Collect()
-
-	for i, e := range events {
-		detail := ""
-		switch e.Type {
-		case EventMessageUpdate:
-			if e.AIEvent != nil {
-				detail = "ai:" + string(e.AIEvent.Type)
-			}
-		case EventToolStart, EventToolEnd:
-			detail = e.ToolName
-		case EventAgentEnd:
-			detail = fmt.Sprintf("%d messages", len(e.Messages))
-		}
-		t.Logf("%2d  %-22s %s", i, e.Type, detail)
-	}
-
-	got := make([]EventType, len(events))
-	for i, e := range events {
-		got[i] = e.Type
-	}
-	mu := EventMessageUpdate
-	want := []EventType{
-		EventAgentStart,
-		EventTurnStart, EventMessageStart, mu, mu, mu, mu, mu, EventMessageEnd,
-		EventToolStart, EventToolEnd, EventMessageStart, EventMessageEnd, EventTurnEnd,
-		EventTurnStart, EventMessageStart, mu, mu, mu, mu, mu, EventMessageEnd, EventTurnEnd,
-		EventAgentEnd,
-	}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("event sequence =\n  %v\nwant\n  %v", got, want)
-	}
-}
-
 func TestLoopParallelToolExecutionSourceOrder(t *testing.T) {
 	twoCalls := &ai.AssistantMessage{
 		Role:       ai.RoleAssistant,

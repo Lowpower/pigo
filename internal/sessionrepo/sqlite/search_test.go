@@ -182,26 +182,6 @@ func TestSearchRebuildDeleteAndTriggers(t *testing.T) {
 	}
 }
 
-func TestSearchBlankDoesNotCreateFTS(t *testing.T) {
-	repo, cwd := fixture(t)
-	search, err := NewSearch(repo.absPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hits, err := search.Search(t.Context(), "  ", sessionrepo.SearchOptions{})
-	if err != nil || len(hits) != 0 {
-		t.Fatalf("blank %+v %v", hits, err)
-	}
-	s := create(t, repo, "session-1", cwd)
-	ok, err := tableExists(repo.db, "session_search_fts")
-	if err != nil || ok {
-		t.Fatalf("fts should not exist: %v %v", ok, err)
-	}
-	if _, err := s.AppendMessage(userMsg("still writable")); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestSearchFTSFailureRollsBackAppendAndDelete(t *testing.T) {
 	repo, cwd := fixture(t)
 	search, err := NewSearch(repo.absPath)

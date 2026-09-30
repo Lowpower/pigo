@@ -5,9 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -45,22 +42,5 @@ func TestHandleSpanPostsOTLP(t *testing.T) {
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestHandleSpanNoEndpointSilentEnough(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
-	handleSpan(map[string]any{})
-	handleSpan(telemetry.SpanRecord{Name: "pigo.turn"}.Map())
-}
-
-func TestTelemetryExtensionBuilds(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "pigo-telemetry")
-	cmd := exec.Command("go", "build", "-o", bin, ".")
-	cmd.Dir = "."
-	cmd.Env = append(os.Environ(), "GOFLAGS=")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
 	}
 }

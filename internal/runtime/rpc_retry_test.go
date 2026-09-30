@@ -3,8 +3,6 @@ package runtime
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"io"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,8 +53,7 @@ func retryEngine(t *testing.T, stream ai.StreamFn) *Engine {
 			},
 		}},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	return e
 }
 
@@ -76,20 +73,16 @@ func TestRPCRetriesTransientErrorAndSucceeds(t *testing.T) {
 	)
 	e := retryEngine(t, stream)
 
-	in := bytes.NewBufferString(`{"type":"prompt","message":"hi"}
+	out := serveRPC(t, e, `{"type":"prompt","message":"hi"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
 	if atomic.LoadInt32(&calls) != 2 {
 		t.Fatalf("calls = %d, want 2", calls)
 	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	starts := rpcRowsOfType(rows, "auto_retry_start")
 	if len(starts) != 1 {
-		t.Fatalf("auto_retry_start = %d in %s", len(starts), out.String())
+		t.Fatalf("auto_retry_start = %d in %s", len(starts), out)
 	}
 	if starts[0]["attempt"] != float64(1) || starts[0]["maxAttempts"] != float64(3) {
 		t.Fatalf("start payload = %v", starts[0])
@@ -99,7 +92,7 @@ func TestRPCRetriesTransientErrorAndSucceeds(t *testing.T) {
 	}
 	ends := rpcRowsOfType(rows, "auto_retry_end")
 	if len(ends) != 1 || ends[0]["success"] != true {
-		t.Fatalf("auto_retry_end = %v in %s", ends, out.String())
+		t.Fatalf("auto_retry_end = %v in %s", ends, out)
 	}
 	agentEnds := rpcRowsOfType(rows, "agent_end")
 	if len(agentEnds) != 2 {
@@ -109,7 +102,7 @@ func TestRPCRetriesTransientErrorAndSucceeds(t *testing.T) {
 		t.Fatalf("willRetry = %v %v", agentEnds[0]["willRetry"], agentEnds[1]["willRetry"])
 	}
 	if len(rpcRowsOfType(rows, "agent_settled")) != 1 {
-		t.Fatalf("agent_settled count in %s", out.String())
+		t.Fatalf("agent_settled count in %s", out)
 	}
 	for _, m := range secondReq.Messages {
 		if m.Role == ai.RoleAssistant && m.Assistant != nil && m.Assistant.StopReason == ai.StopError {
@@ -126,20 +119,16 @@ func TestRPCExhaustsMaxRetries(t *testing.T) {
 	})
 	e.Opts.Config.Retry.MaxRetries = intPtr(2)
 
-	in := bytes.NewBufferString(`{"type":"prompt","message":"hi"}
+	out := serveRPC(t, e, `{"type":"prompt","message":"hi"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
 	if atomic.LoadInt32(&calls) != 3 {
 		t.Fatalf("calls = %d, want 3", calls)
 	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	starts := rpcRowsOfType(rows, "auto_retry_start")
 	if len(starts) != 2 {
-		t.Fatalf("auto_retry_start = %d in %s", len(starts), out.String())
+		t.Fatalf("auto_retry_start = %d in %s", len(starts), out)
 	}
 	ends := rpcRowsOfType(rows, "auto_retry_end")
 	if len(ends) != 1 || ends[0]["success"] != false {
@@ -157,60 +146,50 @@ func TestRPCExhaustsMaxRetries(t *testing.T) {
 	}
 }
 
-func TestRPCDoesNotRetryWhenDisabled(t *testing.T) {
-	var calls int32
-	e := retryEngine(t, func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
-		atomic.AddInt32(&calls, 1)
-		return errorReply("overloaded_error")(ctx, req, opts)
-	})
-
-	in := bytes.NewBufferString(`{"type":"set_auto_retry","enabled":false,"id":"r1"}
-{"type":"prompt","message":"hi"}
+func TestRPCDoesNotRetry(t *testing.T) {
+	tests := []struct {
+		name, errMsg, prelude string
+	}{
+		{"non-retryable error", "invalid_api_key", ""},
+		{"retry disabled", "overloaded_error", `{"type":"set_auto_retry","enabled":false,"id":"r1"}` + "\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int32
+			e := retryEngine(t, func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+				atomic.AddInt32(&calls, 1)
+				return errorReply(tt.errMsg)(ctx, req, opts)
+			})
+			in := bytes.NewBufferString(tt.prelude + `{"type":"prompt","message":"hi"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	if atomic.LoadInt32(&calls) != 1 {
-		t.Fatalf("calls = %d, want 1", calls)
-	}
-	rows := decodeRPCRows(t, out.String())
-	if len(rpcRowsOfType(rows, "auto_retry_start")) != 0 {
-		t.Fatalf("unexpected retry in %s", out.String())
-	}
-	var sawSet bool
-	for _, r := range rows {
-		if r["type"] == "response" && r["command"] == "set_auto_retry" {
-			sawSet = true
-			if r["success"] != true {
-				t.Fatalf("set_auto_retry = %v", r)
+			var out bytes.Buffer
+			if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-	if !sawSet {
-		t.Fatalf("missing set_auto_retry response in %s", out.String())
-	}
-}
-
-func TestRPCDoesNotRetryNonRetryableError(t *testing.T) {
-	var calls int32
-	e := retryEngine(t, func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
-		atomic.AddInt32(&calls, 1)
-		return errorReply("invalid_api_key")(ctx, req, opts)
-	})
-	in := bytes.NewBufferString(`{"type":"prompt","message":"hi"}
-{"type":"quit"}
-`)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	if atomic.LoadInt32(&calls) != 1 {
-		t.Fatalf("calls = %d", calls)
-	}
-	if len(rpcRowsOfType(decodeRPCRows(t, out.String()), "auto_retry_start")) != 0 {
-		t.Fatalf("unexpected retry in %s", out.String())
+			if atomic.LoadInt32(&calls) != 1 {
+				t.Fatalf("calls = %d, want 1", calls)
+			}
+			rows := decodeRPCRows(t, out.String())
+			if len(rpcRowsOfType(rows, "auto_retry_start")) != 0 {
+				t.Fatalf("unexpected retry in %s", out.String())
+			}
+			if tt.prelude == "" {
+				return
+			}
+			var sawSet bool
+			for _, r := range rows {
+				if r["type"] == "response" && r["command"] == "set_auto_retry" {
+					sawSet = true
+					if r["success"] != true {
+						t.Fatalf("set_auto_retry = %v", r)
+					}
+				}
+			}
+			if !sawSet {
+				t.Fatalf("missing set_auto_retry response in %s", out.String())
+			}
+		})
 	}
 }
 
@@ -222,45 +201,16 @@ func TestRPCAbortRetryCancelsBackoff(t *testing.T) {
 	})
 	e.Opts.Config.Retry.BaseDelayMs = intPtr(500)
 
-	pr, pw := io.Pipe()
-	var out bytes.Buffer
-	done := make(chan error, 1)
-	go func() { done <- e.ServeRPC(context.Background(), pr, &out) }()
+	c := startRPC(t, e)
+	c.send(map[string]any{"type": "prompt", "message": "hi", "id": "p1"})
 
-	enc := json.NewEncoder(pw)
-	if err := enc.Encode(map[string]any{"type": "prompt", "message": "hi", "id": "p1"}); err != nil {
-		t.Fatal(err)
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for auto_retry_start")
-		}
-		if len(rpcRowsOfType(decodeRPCRows(t, out.String()), "auto_retry_start")) > 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if err := enc.Encode(map[string]any{"type": "abort_retry", "id": "a1"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := enc.Encode(map[string]any{"type": "quit"}); err != nil {
-		t.Fatal(err)
-	}
-	_ = pw.Close()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("ServeRPC did not return")
-	}
+	c.waitRow("auto_retry_start", 2*time.Second)
+	c.send(map[string]any{"type": "abort_retry", "id": "a1"})
+	out := c.close()
 	if atomic.LoadInt32(&calls) != 1 {
 		t.Fatalf("calls = %d, want 1", calls)
 	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	var sawAbort bool
 	for _, r := range rows {
 		if r["type"] == "response" && r["command"] == "abort_retry" {
@@ -271,7 +221,7 @@ func TestRPCAbortRetryCancelsBackoff(t *testing.T) {
 		}
 	}
 	if !sawAbort {
-		t.Fatalf("missing abort_retry response in %s", out.String())
+		t.Fatalf("missing abort_retry response in %s", out)
 	}
 	var cancelled bool
 	for _, ev := range rpcRowsOfType(rows, "auto_retry_end") {
@@ -280,7 +230,7 @@ func TestRPCAbortRetryCancelsBackoff(t *testing.T) {
 		}
 	}
 	if !cancelled {
-		t.Fatalf("missing cancelled auto_retry_end in %s", out.String())
+		t.Fatalf("missing cancelled auto_retry_end in %s", out)
 	}
 }
 
@@ -291,13 +241,9 @@ func TestRPCRetryPersistsErrorThenSuccess(t *testing.T) {
 	e := retryEngine(t, scriptedReplies(errorReply("overloaded_error"), textReply("recovered")))
 	e.Opts.Session = sess
 
-	in := bytes.NewBufferString(`{"type":"prompt","message":"hi"}
+	serveRPC(t, e, `{"type":"prompt","message":"hi"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
 	msgs := session.RestoreAIMessages(sess.Entries())
 	if len(msgs) < 3 {
 		t.Fatalf("session messages = %d (%+v), want user + error + success", len(msgs), msgs)

@@ -62,43 +62,31 @@ func TestGuessCopilotAPI(t *testing.T) {
 	}
 }
 
-func TestStreamForCopilotClaudeUsesAnthropicMessages(t *testing.T) {
-	var path string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(anthropicFixture))
-	}))
-	t.Cleanup(srv.Close)
-	stream, err := StreamFor("github-copilot", ClientConfig{
-		APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client(),
-	})(context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "claude-sonnet-4.6"})
-	if err != nil {
-		t.Fatal(err)
+func TestStreamForCopilotPicksAPIByModel(t *testing.T) {
+	tests := []struct{ model, fixture, wantPath string }{
+		{"claude-sonnet-4.6", anthropicFixture, "messages"},
+		{"gpt-5-mini", responsesFixture, "responses"},
 	}
-	stream.Collect()
-	if !strings.Contains(path, "messages") {
-		t.Fatalf("path = %q, want anthropic messages", path)
-	}
-}
-
-func TestStreamForCopilotGPT5UsesResponses(t *testing.T) {
-	var path string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(responsesFixture))
-	}))
-	t.Cleanup(srv.Close)
-	stream, err := StreamFor("github-copilot", ClientConfig{
-		APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client(),
-	})(context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "gpt-5-mini"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream.Collect()
-	if !strings.Contains(path, "responses") {
-		t.Fatalf("path = %q, want openai responses", path)
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			var path string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path = r.URL.Path
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(tt.fixture))
+			}))
+			t.Cleanup(srv.Close)
+			stream, err := StreamFor("github-copilot", ClientConfig{
+				APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client(),
+			})(context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: tt.model})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream.Collect()
+			if !strings.Contains(path, tt.wantPath) {
+				t.Fatalf("path = %q, want %s", path, tt.wantPath)
+			}
+		})
 	}
 }
 

@@ -276,27 +276,6 @@ func TestConformanceQueryStopBounds(t *testing.T) {
 	strsEq(t, ids(oldest), []string{"root", "old-note"})
 }
 
-func TestConformanceInvalidQueriesExtra(t *testing.T) {
-	repo, cwd := fixture(t)
-	s := create(t, repo, "invalid-queries", cwd)
-	if err := s.CreateLane("thread", nil); err != nil {
-		t.Fatal(err)
-	}
-	thread := s.View("thread")
-	_, err := s.FindEntry(sessionrepo.EntryQuery{Limit: 0, HasLimit: true})
-	mustCode(t, err, sessionrepo.ErrInvalidQuery)
-	_, err = s.FindEntriesOnBranch(sessionrepo.EntryQuery{Limit: 0, HasLimit: true})
-	mustCode(t, err, sessionrepo.ErrInvalidQuery)
-	_, err = thread.FindEntryOnBranch(sessionrepo.EntryQuery{Limit: 0, HasLimit: true})
-	mustCode(t, err, sessionrepo.ErrInvalidQuery)
-	_, err = s.FindRecords(sessionrepo.RecordQuery{Limit: 0, HasLimit: true})
-	mustCode(t, err, sessionrepo.ErrInvalidQuery)
-	_, err = s.FindRecords(sessionrepo.RecordQuery{Type: "step_attempt", OperationKind: "run"})
-	mustCode(t, err, sessionrepo.ErrInvalidQuery)
-	_, err = s.FindOpenOperations(sessionrepo.MainLane, sessionrepo.OpenOpOptions{Limit: -1, HasLimit: true})
-	mustCode(t, err, sessionrepo.ErrInvalidQuery)
-}
-
 func TestConformanceClearNameLogAndFork(t *testing.T) {
 	repo, cwd := fixture(t)
 	s := create(t, repo, "session", cwd)
@@ -317,6 +296,13 @@ func TestConformanceClearNameLogAndFork(t *testing.T) {
 	}
 	if meta.HasName || meta.Name != "" {
 		t.Fatalf("metadata still has name %+v", meta)
+	}
+	opened, err := repo.Open(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := opened.GetName(); err != nil || n != nil {
+		t.Fatalf("reopen name %v %v", n, err)
 	}
 	fork, err := repo.Fork(meta, sessionrepo.ForkOptions{CreateOptions: sessionrepo.CreateOptions{ID: "fork", CWD: cwd}})
 	if err != nil {

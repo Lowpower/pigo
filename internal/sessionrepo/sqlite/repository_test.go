@@ -141,22 +141,24 @@ END;`)
 	}
 }
 
-func TestRepositoryCorruptMetadataJSON(t *testing.T) {
-	repo, cwd := fixture(t)
-	create(t, repo, "session-meta", cwd)
-	execSQL(t, repo.db, `UPDATE sessions SET metadata = ? WHERE id = ?`, "not json", "session-meta")
-	_, err := repo.List(sessionrepo.ListOptions{})
-	mustCode(t, err, sessionrepo.ErrStorage)
-	errContains(t, err, "metadata is not valid JSON")
-}
-
-func TestRepositoryCorruptMetadataNonObject(t *testing.T) {
-	repo, cwd := fixture(t)
-	create(t, repo, "session-meta-obj", cwd)
-	execSQL(t, repo.db, `UPDATE sessions SET metadata = ? WHERE id = ?`, "[]", "session-meta-obj")
-	_, err := repo.List(sessionrepo.ListOptions{CWD: cwd})
-	mustCode(t, err, sessionrepo.ErrStorage)
-	errContains(t, err, "metadata must be an object")
+func TestRepositoryCorruptMetadata(t *testing.T) {
+	tests := []struct {
+		name, id, body, want string
+		opts                 func(cwd string) sessionrepo.ListOptions
+	}{
+		{"invalid json", "session-meta", "not json", "metadata is not valid JSON", func(string) sessionrepo.ListOptions { return sessionrepo.ListOptions{} }},
+		{"non object", "session-meta-obj", "[]", "metadata must be an object", func(cwd string) sessionrepo.ListOptions { return sessionrepo.ListOptions{CWD: cwd} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, cwd := fixture(t)
+			create(t, repo, tt.id, cwd)
+			execSQL(t, repo.db, `UPDATE sessions SET metadata = ? WHERE id = ?`, tt.body, tt.id)
+			_, err := repo.List(tt.opts(cwd))
+			mustCode(t, err, sessionrepo.ErrStorage)
+			errContains(t, err, tt.want)
+		})
+	}
 }
 
 func TestRepositoryCorruptNameJSON(t *testing.T) {

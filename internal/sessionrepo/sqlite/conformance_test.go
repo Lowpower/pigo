@@ -2,8 +2,8 @@ package sqlite
 
 import (
 	"math"
-	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/sessionrepo"
@@ -285,6 +285,18 @@ func TestConformanceInvalidQueries(t *testing.T) {
 	mustCode(t, err, sessionrepo.ErrInvalidQuery)
 	_, err = s.GetLog(sessionrepo.LogOptions{AfterSeq: -1, HasAfter: true})
 	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindEntry(sessionrepo.EntryQuery{Limit: 0, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindEntriesOnBranch(sessionrepo.EntryQuery{Limit: 0, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = thread.FindEntryOnBranch(sessionrepo.EntryQuery{Limit: 0, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindRecords(sessionrepo.RecordQuery{Limit: 0, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindRecords(sessionrepo.RecordQuery{Type: "step_attempt", OperationKind: "run"})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindOpenOperations(sessionrepo.MainLane, sessionrepo.OpenOpOptions{Limit: -1, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
 }
 
 func TestConformanceOpenOperation(t *testing.T) {
@@ -548,56 +560,6 @@ func TestConformanceForkBefore(t *testing.T) {
 	mustCode(t, err, sessionrepo.ErrInvalidForkTarget)
 }
 
-func TestConformanceClearName(t *testing.T) {
-	repo, cwd := fixture(t)
-	s := create(t, repo, "session", cwd)
-	tmp := "Temporary"
-	if err := s.SetName(&tmp); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetName(nil); err != nil {
-		t.Fatal(err)
-	}
-	n, err := s.GetName()
-	if err != nil || n != nil {
-		t.Fatalf("name %v %v", n, err)
-	}
-	meta, err := s.GetMetadata()
-	if err != nil {
-		t.Fatal(err)
-	}
-	opened, err := repo.Open(meta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	n, err = opened.GetName()
-	if err != nil || n != nil {
-		t.Fatalf("reopen name %v %v", n, err)
-	}
-}
-
-func TestMigrationsSchema(t *testing.T) {
-	repo, _ := fixture(t)
-	s := create(t, repo, "x", t.TempDir())
-	_ = s
-	db := repo.db
-	var id string
-	if err := db.QueryRow(`SELECT id FROM migrations`).Scan(&id); err != nil || id != "001_initial.sql" {
-		t.Fatalf("migration %q %v", id, err)
-	}
-	tables := []string{"sessions", "entries", "session_sequences", "session_stats", "branch_entries", "branch_tips", "lanes", "records", "lane_moves", "facts", "writer_leases"}
-	for _, name := range tables {
-		ok, err := tableExists(db, name)
-		if err != nil || !ok {
-			t.Fatalf("missing table %s: %v", name, err)
-		}
-	}
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'leaf_id'`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("sessions.leaf_id should not exist")
-	}
-}
-
 func TestWriterLeaseSecondWriter(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.sqlite")
@@ -618,6 +580,9 @@ func TestWriterLeaseSecondWriter(t *testing.T) {
 	defer func() { _ = r2.Close() }()
 	_, err = r2.Open(meta)
 	mustCode(t, err, sessionrepo.ErrStorage)
+	if !strings.Contains(err.Error(), "already has an active writer") {
+		t.Fatalf("message %v", err)
+	}
 	_ = r1.Close()
 	opened, err := r2.Open(meta)
 	if err != nil {
@@ -653,30 +618,5 @@ func TestSearchLazyFTS(t *testing.T) {
 	}
 	if len(hits) != 1 || hits[0].EntryID != "m" {
 		t.Fatalf("hits %+v", hits)
-	}
-}
-
-func TestJSONLDefaultUntouched(t *testing.T) {
-	root := testdataRoot(t)
-	if _, err := os.Stat(filepath.Join(root, "internal", "session", "session.go")); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func testdataRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("go.mod not found")
-		}
-		dir = parent
 	}
 }

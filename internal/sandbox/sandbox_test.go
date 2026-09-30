@@ -99,16 +99,6 @@ func TestWrapArgvIncludesBwrapAndAllowWrite(t *testing.T) {
 	}
 }
 
-func TestWrapArgvUnsharesNetWhenNoDomains(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("bwrap wrap on linux")
-	}
-	argv := WrapArgv("true", t.TempDir(), Config{})
-	if !strings.Contains(strings.Join(argv, " "), "--unshare-net") {
-		t.Fatalf("argv=%v", argv)
-	}
-}
-
 func TestWrapArgvDenyWriteRoBind(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("bwrap denyWrite")

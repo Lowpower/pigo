@@ -16,14 +16,10 @@ func TestRPCGetStatePendingMessageCount(t *testing.T) {
 	e := &Engine{Opts: Options{Config: config.Config{SteeringMode: "all"}}}
 	e.PushSteer("one")
 	e.PushFollow("two")
-	in := strings.NewReader(`{"type":"get_state"}
+	out := serveRPC(t, e, `{"type":"get_state"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	var data map[string]any
 	for _, r := range rows {
 		if r["type"] == "response" && r["command"] == "get_state" {
@@ -31,7 +27,7 @@ func TestRPCGetStatePendingMessageCount(t *testing.T) {
 		}
 	}
 	if data["pendingMessageCount"] != float64(2) {
-		t.Fatalf("pendingMessageCount = %#v in %s", data["pendingMessageCount"], out.String())
+		t.Fatalf("pendingMessageCount = %#v in %s", data["pendingMessageCount"], out)
 	}
 	if data["isCompacting"] != false {
 		t.Fatalf("isCompacting = %#v", data["isCompacting"])
@@ -44,13 +40,9 @@ func TestRPCNewSessionParentSession(t *testing.T) {
 	sess := session.New(cwd, dir)
 	e := &Engine{Opts: Options{Cwd: cwd, AgentDir: dir, Session: sess}}
 	parent := "/tmp/parent.jsonl"
-	in := strings.NewReader(`{"type":"new_session","parentSession":"/tmp/parent.jsonl"}
+	serveRPC(t, e, `{"type":"new_session","parentSession":"/tmp/parent.jsonl"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
 	if e.Opts.Session == nil || e.Opts.Session.ParentSession() != parent {
 		t.Fatalf("parentSession = %q", e.Opts.Session.ParentSession())
 	}
@@ -84,14 +76,10 @@ func TestRPCGetSessionStatsShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := &Engine{Opts: Options{Cwd: cwd, AgentDir: dir, Session: sess, Config: config.Config{ContextWindow: 1000}}}
-	in := strings.NewReader(`{"type":"get_session_stats"}
+	out := serveRPC(t, e, `{"type":"get_session_stats"}
 {"type":"quit"}
 `)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	rows := decodeRPCRows(t, out.String())
+	rows := decodeRPCRows(t, out)
 	var data map[string]any
 	for _, r := range rows {
 		if r["type"] == "response" && r["command"] == "get_session_stats" {
@@ -99,7 +87,7 @@ func TestRPCGetSessionStatsShape(t *testing.T) {
 		}
 	}
 	if data == nil {
-		t.Fatalf("missing stats in %s", out.String())
+		t.Fatalf("missing stats in %s", out)
 	}
 	if data["userMessages"] != float64(1) || data["assistantMessages"] != float64(1) || data["toolResults"] != float64(1) || data["toolCalls"] != float64(1) {
 		t.Fatalf("counts = %#v", data)

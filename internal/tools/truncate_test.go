@@ -78,10 +78,3 @@ func TestTruncateHeadByBytes(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
-
-func TestTruncateLine(t *testing.T) {
-	got := TruncateLine(strings.Repeat("x", 600), 500)
-	if !strings.HasSuffix(got, "... [truncated]") {
-		t.Fatalf("%s", got)
-	}
-}

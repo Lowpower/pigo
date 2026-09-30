@@ -87,29 +87,33 @@ func TestShareFallsBackToGist(t *testing.T) {
 }
 
 func TestShareRequiresGH(t *testing.T) {
-	dir := t.TempDir()
-	m := New(t.TempDir(), dir)
-	origRadius, origLook := shareRadius, shareLookPath
-	t.Cleanup(func() { shareRadius, shareLookPath = origRadius, origLook })
-	shareRadius = func(string, string) (string, bool, error) { return "", false, nil }
-	shareLookPath = func(string) (string, error) { return "", errors.New("not found") }
-	_, err := Share(ShareOptions{Session: m, AgentDir: dir})
-	if err == nil || !strings.Contains(err.Error(), "gh") {
-		t.Fatalf("err=%v", err)
+	tests := []struct {
+		name     string
+		lookPath func(string) (string, error)
+		auth     func() error
+		check    func(error) bool
+	}{
+		{"gh missing", func(string) (string, error) { return "", errors.New("not found") }, nil,
+			func(err error) bool { return strings.Contains(err.Error(), "gh") }},
+		{"gh not authenticated", func(string) (string, error) { return "/bin/gh", nil }, func() error { return errors.New(errGHAuth) },
+			func(err error) bool { return err.Error() == errGHAuth }},
 	}
-}
-
-func TestShareRequiresGHAuth(t *testing.T) {
-	dir := t.TempDir()
-	m := New(t.TempDir(), dir)
-	origRadius, origLook, origAuth := shareRadius, shareLookPath, shareGHAuthStatus
-	t.Cleanup(func() { shareRadius, shareLookPath, shareGHAuthStatus = origRadius, origLook, origAuth })
-	shareRadius = func(string, string) (string, bool, error) { return "", false, nil }
-	shareLookPath = func(string) (string, error) { return "/bin/gh", nil }
-	shareGHAuthStatus = func() error { return errors.New(errGHAuth) }
-	_, err := Share(ShareOptions{Session: m, AgentDir: dir})
-	if err == nil || err.Error() != errGHAuth {
-		t.Fatalf("err=%v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			m := New(t.TempDir(), dir)
+			origRadius, origLook, origAuth := shareRadius, shareLookPath, shareGHAuthStatus
+			t.Cleanup(func() { shareRadius, shareLookPath, shareGHAuthStatus = origRadius, origLook, origAuth })
+			shareRadius = func(string, string) (string, bool, error) { return "", false, nil }
+			shareLookPath = tt.lookPath
+			if tt.auth != nil {
+				shareGHAuthStatus = tt.auth
+			}
+			_, err := Share(ShareOptions{Session: m, AgentDir: dir})
+			if err == nil || !tt.check(err) {
+				t.Fatalf("err=%v", err)
+			}
+		})
 	}
 }
 

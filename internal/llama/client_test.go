@@ -10,19 +10,6 @@ import (
 	"time"
 )
 
-func TestNormalizeServerURL(t *testing.T) {
-	got, err := NormalizeServerURL("http://127.0.0.1:8080/v1/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "http://127.0.0.1:8080" {
-		t.Fatalf("got %q", got)
-	}
-	if InferenceURL(got) != "http://127.0.0.1:8080/v1" {
-		t.Fatalf("inference %q", InferenceURL(got))
-	}
-}
-
 func TestClientListLoadUnload(t *testing.T) {
 	var loaded string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

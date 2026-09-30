@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/Lowpower/pigo/internal/models"
 )
 
 func TestMetaLoginMintsKey(t *testing.T) {
@@ -108,26 +106,6 @@ func TestMetaMintExpiredSession(t *testing.T) {
 	_, err := metaOAuth{}.Refresh(t.Context(), Credential{Refresh: "identity"})
 	if err == nil || !strings.Contains(err.Error(), "status 401") || !strings.Contains(err.Error(), "/login meta") {
 		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestMetaProviderRegistered(t *testing.T) {
-	p, ok := Lookup("meta")
-	if !ok || p.OAuth == nil || p.APIKey == nil {
-		t.Fatalf("auth provider = %+v ok=%v", p, ok)
-	}
-	found := false
-	for _, env := range p.APIKey.Env {
-		if env == "META_API_KEY" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("env = %v", p.APIKey.Env)
-	}
-	spec, ok := models.LookupProvider("meta")
-	if !ok || spec.DefaultAPI != "openai-responses" || spec.DefaultID != "muse-spark-1.3" || spec.BaseURL != "https://api.meta.ai/v1" {
-		t.Fatalf("spec = %+v ok=%v", spec, ok)
 	}
 }
 

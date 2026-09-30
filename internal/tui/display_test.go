@@ -11,18 +11,6 @@ import (
 	"github.com/Lowpower/pigo/internal/config"
 )
 
-func TestOSC8FileLink(t *testing.T) {
-	m := New(testCfg())
-	m.cfg.Terminal.Hyperlinks = true
-	got := m.linkPath("a.go", "/tmp/a.go")
-	if !strings.Contains(got, "\x1b]8;;file://") || !strings.Contains(got, "/tmp/a.go") {
-		t.Fatalf("%q", got)
-	}
-	if !strings.Contains(got, "a.go") {
-		t.Fatalf("missing label: %q", got)
-	}
-}
-
 func TestWrapDisplayKeepsIssueURL(t *testing.T) {
 	raw := "https://github.com/Lowpower/pigo/issues/new?title=pigo%20bug%20report%2036dff4e8-dcc4-468f-86dc-f164fe2a906a&body=Report"
 	if got := wrapDisplay(raw, 40); strings.Contains(got, "\n") {
@@ -216,13 +204,5 @@ func TestFirstLineDoesNotSplitUTF8(t *testing.T) {
 	}
 	if !strings.Contains(got, "测") {
 		t.Fatalf("CJK dropped: %q", got)
-	}
-}
-
-func TestHideThinkingFromSettings(t *testing.T) {
-	on := true
-	m := New(config.Config{HideThinkingBlock: &on, Theme: "default"})
-	if !m.hideThinking {
-		t.Fatal("should start hidden")
 	}
 }

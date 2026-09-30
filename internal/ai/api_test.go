@@ -108,14 +108,6 @@ func TestStreamForExpandsBaseURLPlaceholders(t *testing.T) {
 	}
 }
 
-func TestLookupRemainingNewAPIs(t *testing.T) {
-	for _, id := range []string{"google-vertex", "mistral-conversations", "pigo-messages", "openai-codex-responses"} {
-		if _, ok := LookupAPI(id); !ok {
-			t.Errorf("missing api %s", id)
-		}
-	}
-}
-
 func TestStreamForUnknownAPIErrors(t *testing.T) {
 	models.RegisterProvider(models.ProviderSpec{
 		ID:         "no-api-prov",

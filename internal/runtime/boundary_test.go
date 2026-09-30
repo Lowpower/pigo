@@ -36,8 +36,7 @@ func TestTurnEndContextEditContinuesOnce(t *testing.T) {
 			return textReply("two")(ctx, req, opts)
 		},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	events := e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
 	if calls != 2 {
 		t.Fatalf("provider calls = %d", calls)
@@ -86,8 +85,7 @@ func TestTurnEndInvalidEntryDoesNotContinue(t *testing.T) {
 			return textReply("one")(ctx, req, opts)
 		},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
 	if calls != 1 {
 		t.Fatalf("provider calls = %d", calls)
@@ -108,8 +106,7 @@ func TestTurnEndErrorIgnoresContinue(t *testing.T) {
 			return errorReply("boom")(ctx, req, opts)
 		},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
 	if calls != 1 {
 		t.Fatalf("provider calls = %d", calls)
@@ -136,8 +133,7 @@ func TestBeforeSettleAppendsAndContinuesOnce(t *testing.T) {
 			return textReply("done")(ctx, req, opts)
 		},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
 	if calls != 1 {
 		t.Fatalf("calls before settle = %d", calls)

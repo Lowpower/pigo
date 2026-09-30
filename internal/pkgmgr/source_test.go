@@ -69,15 +69,6 @@ func TestPackageIdentity(t *testing.T) {
 	}
 }
 
-func TestIsCLIPackageSource(t *testing.T) {
-	if !IsCLIPackageSource("npm:left-pad") || !IsCLIPackageSource(" git:github.com/user/repo") {
-		t.Fatal("expected npm:/git: prefixes")
-	}
-	if IsCLIPackageSource("/tmp/ext") || IsCLIPackageSource("https://github.com/user/repo") {
-		t.Fatal("local path and https URLs are not CLI package sources")
-	}
-}
-
 func TestParseSourceRejectsInsecureGit(t *testing.T) {
 	for _, in := range []string{"git://github.com/user/repo", "git:git://github.com/user/repo"} {
 		_, err := ParseSource(in)

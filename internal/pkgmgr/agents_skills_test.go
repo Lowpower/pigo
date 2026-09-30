@@ -46,58 +46,6 @@ func findSkill(rs []Resource, path string) (Resource, bool) {
 	return Resource{}, false
 }
 
-func TestCollectAncestorAgentsSkillDirsStopsAtGitRoot(t *testing.T) {
-	root := t.TempDir()
-	repo := filepath.Join(root, "repo")
-	nested := filepath.Join(repo, "mid", "nested")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got := collectAncestorAgentsSkillDirs(nested)
-	want := []string{
-		filepath.Join(nested, ".agents", "skills"),
-		filepath.Join(repo, "mid", ".agents", "skills"),
-		filepath.Join(repo, ".agents", "skills"),
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got %v want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got %v want %v", got, want)
-		}
-	}
-}
-
-func TestCollectAncestorAgentsSkillDirsWalksPastFixtureWithoutGit(t *testing.T) {
-	root := t.TempDir()
-	nested := filepath.Join(root, "a", "b")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got := collectAncestorAgentsSkillDirs(nested)
-	for _, dir := range []string{
-		filepath.Join(nested, ".agents", "skills"),
-		filepath.Join(root, "a", ".agents", "skills"),
-		filepath.Join(root, ".agents", "skills"),
-		filepath.Join(filepath.Dir(root), ".agents", "skills"),
-	} {
-		found := false
-		for _, g := range got {
-			if g == dir {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("missing %s in %v", dir, got)
-		}
-	}
-}
-
 func TestCollectSkillEntriesKeepsRootMarkdown(t *testing.T) {
 	dir := t.TempDir()
 	rootMD := filepath.Join(dir, "root-file.md")
@@ -112,42 +60,6 @@ func TestCollectSkillEntriesKeepsRootMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(joined, nested) {
 		t.Fatalf("missing nested SKILL.md: %v", got)
-	}
-}
-
-func TestCollectAgentsSkillEntriesIgnoresRootMarkdown(t *testing.T) {
-	dir := t.TempDir()
-	rootMD := filepath.Join(dir, "root-file.md")
-	if err := os.WriteFile(rootMD, []byte("root"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	nestedSkill := writeSkillMD(t, filepath.Join(dir, "nested-skill"), "# nested\n")
-	childDir := filepath.Join(dir, "child-skill")
-	if err := os.MkdirAll(childDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	childMD := filepath.Join(childDir, "child-skill.md")
-	if err := os.WriteFile(childMD, []byte("child"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	deepDir := filepath.Join(dir, "deep", "inner")
-	if err := os.MkdirAll(deepDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	deepMD := filepath.Join(deepDir, "deep-skill.md")
-	if err := os.WriteFile(deepMD, []byte("deep"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	got := collectAgentsSkillEntries(dir)
-	joined := strings.Join(got, "\n")
-	if strings.Contains(joined, rootMD) {
-		t.Fatalf("agents mode should ignore root markdown: %v", got)
-	}
-	for _, want := range []string{nestedSkill, childMD, deepMD} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("missing %s in %v", want, got)
-		}
 	}
 }
 

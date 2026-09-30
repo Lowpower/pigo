@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -269,29 +268,4 @@ func TestWriterLeaseHeartbeatRenews(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("heartbeat did not renew expires_at_ms")
-}
-
-func TestWriterLeaseSecondWriterMessage(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "s.sqlite")
-	r1, err := NewRepository(Options{DatabasePath: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = r1.Close() }()
-	s := create(t, r1, "sess", dir)
-	meta, err := s.GetMetadata()
-	if err != nil {
-		t.Fatal(err)
-	}
-	r2, err := NewRepository(Options{DatabasePath: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = r2.Close() }()
-	_, err = r2.Open(meta)
-	mustCode(t, err, sessionrepo.ErrStorage)
-	if err == nil || !strings.Contains(err.Error(), "already has an active writer") {
-		t.Fatalf("message %v", err)
-	}
 }

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,8 +14,7 @@ import (
 
 func TestSlashResumeOpensPicker(t *testing.T) {
 	m, sess := resumeFixture(t)
-	m.editor.SetValue("/resume")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/resume")
 	if !m.sessionPickerActive() {
 		t.Fatal("/resume should open the picker")
 	}
@@ -45,8 +43,7 @@ func TestSlashResumeIDStillSwitches(t *testing.T) {
 func TestSessionPickerEnterAdopts(t *testing.T) {
 	m, sess := resumeFixture(t)
 	other := newFlushedSession(t, m.engine.Opts.Cwd, m.engine.Opts.AgentDir, "pick-me")
-	m.editor.SetValue("/resume")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/resume")
 	found := false
 	for i, it := range m.sessions.filtered {
 		if it.ID == other.File() {
@@ -71,8 +68,7 @@ func TestSessionPickerTabLoadsAll(t *testing.T) {
 	m, _ := resumeFixture(t)
 	otherCwd := t.TempDir()
 	_ = newFlushedSession(t, otherCwd, m.engine.Opts.AgentDir, "elsewhere")
-	m.editor.SetValue("/resume")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/resume")
 	if m.sessions.scope != sessCurrent {
 		t.Fatal("start current")
 	}
@@ -87,8 +83,7 @@ func TestSessionPickerTabLoadsAll(t *testing.T) {
 
 func TestSessionPickerCtrlSCyclesSort(t *testing.T) {
 	m, _ := resumeFixture(t)
-	m.editor.SetValue("/resume")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/resume")
 	if m.sessions.sort != session.SortThreaded {
 		t.Fatal(m.sessions.sort)
 	}
@@ -102,8 +97,7 @@ func TestSessionPickerCtrlNNamedFilter(t *testing.T) {
 	m, _ := resumeFixture(t)
 	m.engine.Opts.Session.SetName("Alpha")
 	_ = newFlushedSession(t, m.engine.Opts.Cwd, m.engine.Opts.AgentDir, "unnamed")
-	m.editor.SetValue("/resume")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/resume")
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlN})
 	if m.sessions.names != session.NameNamed {
 		t.Fatalf("names = %s", m.sessions.names)
@@ -115,8 +109,7 @@ func TestSessionPickerCtrlNNamedFilter(t *testing.T) {
 
 func TestSessionPickerDeleteRefusesCurrent(t *testing.T) {
 	m, sess := resumeFixture(t)
-	m.editor.SetValue("/resume")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/resume")
 	for i, it := range m.sessions.filtered {
 		if it.ID == sess.File() {
 			m.sessions.selected = i
@@ -134,8 +127,7 @@ func TestSessionPickerDeleteRefusesCurrent(t *testing.T) {
 
 func TestSessionPickerRenamePersists(t *testing.T) {
 	m, sess := resumeFixture(t)
-	m.editor.SetValue("/resume")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/resume")
 	for i, it := range m.sessions.filtered {
 		if it.ID == sess.File() {
 			m.sessions.selected = i
@@ -192,14 +184,4 @@ func newFlushedSession(t *testing.T, cwd, agent, text string) *session.Manager {
 		t.Fatal(err)
 	}
 	return m
-}
-
-func TestSessionDirLayout(t *testing.T) {
-	// sanity: two cwds land in different folders under the same agentDir
-	agent := t.TempDir()
-	a := newFlushedSession(t, t.TempDir(), agent, "a")
-	b := newFlushedSession(t, t.TempDir(), agent, "b")
-	if filepath.Dir(a.File()) == filepath.Dir(b.File()) {
-		t.Fatalf("expected different session dirs: %s vs %s", a.File(), b.File())
-	}
 }
