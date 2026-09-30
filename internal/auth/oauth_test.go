@@ -60,23 +60,27 @@ func TestCodexToAuthHeaders(t *testing.T) {
 	}
 }
 
-func TestKimiToAuthBearer(t *testing.T) {
-	a, err := kimiOAuth{}.ToAuth(Credential{Access: "abc"})
-	if err != nil {
-		t.Fatal(err)
+func TestOAuthToAuthBearer(t *testing.T) {
+	tests := []struct {
+		name string
+		p    interface {
+			ToAuth(Credential) (ModelAuth, error)
+		}
+		access string
+	}{
+		{"anthropic", anthropicOAuth{}, "sk-ant-oat-1"},
+		{"kimi", kimiOAuth{}, "abc"},
 	}
-	if a.Headers["Authorization"] != "Bearer abc" {
-		t.Fatalf("%+v", a)
-	}
-}
-
-func TestAnthropicToAuthBearer(t *testing.T) {
-	a, err := anthropicOAuth{}.ToAuth(Credential{Access: "sk-ant-oat-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.Headers["Authorization"] != "Bearer sk-ant-oat-1" {
-		t.Fatalf("%+v", a)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, err := tt.p.ToAuth(Credential{Access: tt.access})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a.Headers["Authorization"] != "Bearer "+tt.access {
+				t.Fatalf("%+v", a)
+			}
+		})
 	}
 }
 

@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,59 +27,44 @@ func deferredContext() Context {
 	}
 }
 
-func TestSplitDeferredToolsPlacesLateTool(t *testing.T) {
-	imm, def := splitDeferredTools(deferredContext().Messages, deferredContext().Tools, true)
-	if len(imm) != 1 || imm[0].Name != "tool_search" {
-		t.Fatalf("immediate = %+v", imm)
+func TestSplitDeferredTools(t *testing.T) {
+	ctx := deferredContext()
+	added := func(names ...string) []Message {
+		return []Message{{Role: RoleToolResult, ToolCallID: "c1", AddedToolNames: names}}
 	}
-	if len(def) != 1 || def[0].Name != "lookup" {
-		t.Fatalf("deferred = %+v", def)
-	}
-}
-
-func TestSplitDeferredToolsDisabledKeepsPrefix(t *testing.T) {
-	imm, def := splitDeferredTools(deferredContext().Messages, deferredContext().Tools, false)
-	if len(imm) != 2 || len(def) != 0 {
-		t.Fatalf("immediate=%+v deferred=%+v", imm, def)
-	}
-}
-
-func TestSplitDeferredToolsUsedBeforeMarkerStaysImmediate(t *testing.T) {
-	msgs := []Message{
+	usedEarly := []Message{
 		{Assistant: &AssistantMessage{Content: []*Content{
 			{Type: KindToolCall, ToolID: "c1", ToolName: "lookup"},
 		}}},
 		{Role: RoleToolResult, ToolCallID: "c1", ToolName: "lookup", Content: "early", AddedToolNames: []string{"lookup"}},
 	}
-	imm, def := splitDeferredTools(msgs, []Tool{testTool("base"), testTool("lookup")}, true)
-	if len(def) != 0 {
-		t.Fatalf("deferred = %+v, want empty (already used)", def)
+	tests := []struct {
+		name     string
+		msgs     []Message
+		tools    []Tool
+		enabled  bool
+		imm, def []string
+	}{
+		{"places late tool", ctx.Messages, ctx.Tools, true, []string{"tool_search"}, []string{"lookup"}},
+		{"disabled keeps prefix", ctx.Messages, ctx.Tools, false, []string{"tool_search", "lookup"}, nil},
+		{"used before marker stays immediate", usedEarly, []Tool{testTool("base"), testTool("lookup")}, true, []string{"base", "lookup"}, nil},
+		{"all deferred falls back", added("only"), []Tool{testTool("only")}, true, []string{"only"}, nil},
+		{"ignores unknown names", added("ghost", "lookup"), []Tool{testTool("base"), testTool("lookup")}, true, []string{"base"}, []string{"lookup"}},
 	}
-	if len(imm) != 2 {
-		t.Fatalf("immediate = %+v", imm)
+	toolNames := func(ts []Tool) []string {
+		var out []string
+		for _, tl := range ts {
+			out = append(out, tl.Name)
+		}
+		return out
 	}
-}
-
-func TestSplitDeferredToolsAllDeferredFallsBack(t *testing.T) {
-	msgs := []Message{
-		{Role: RoleToolResult, ToolCallID: "c1", AddedToolNames: []string{"only"}},
-	}
-	imm, def := splitDeferredTools(msgs, []Tool{testTool("only")}, true)
-	if len(imm) != 1 || imm[0].Name != "only" || len(def) != 0 {
-		t.Fatalf("fallback immediate=%+v deferred=%+v", imm, def)
-	}
-}
-
-func TestSplitDeferredToolsIgnoresUnknownNames(t *testing.T) {
-	msgs := []Message{
-		{Role: RoleToolResult, ToolCallID: "c1", AddedToolNames: []string{"ghost", "lookup"}},
-	}
-	imm, def := splitDeferredTools(msgs, []Tool{testTool("base"), testTool("lookup")}, true)
-	if len(imm) != 1 || imm[0].Name != "base" {
-		t.Fatalf("immediate = %+v", imm)
-	}
-	if len(def) != 1 || def[0].Name != "lookup" {
-		t.Fatalf("deferred = %+v", def)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			imm, def := splitDeferredTools(tt.msgs, tt.tools, tt.enabled)
+			if !slices.Equal(toolNames(imm), tt.imm) || !slices.Equal(toolNames(def), tt.def) {
+				t.Fatalf("immediate=%v deferred=%v, want %v / %v", toolNames(imm), toolNames(def), tt.imm, tt.def)
+			}
+		})
 	}
 }
 

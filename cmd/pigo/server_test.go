@@ -23,21 +23,6 @@ func TestServerRequiresListen(t *testing.T) {
 	}
 }
 
-func TestHelpListsServerAndClient(t *testing.T) {
-	cmd := newRootCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--help"})
-	_ = cmd.Execute()
-	s := out.String()
-	for _, want := range []string{"server", "client"} {
-		if !strings.Contains(s, want) {
-			t.Fatalf("help missing %s:\n%s", want, s)
-		}
-	}
-}
-
 func TestServerClientGetState(t *testing.T) {
 	t.Setenv("PIGO_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("PIGO_OFFLINE", "1")

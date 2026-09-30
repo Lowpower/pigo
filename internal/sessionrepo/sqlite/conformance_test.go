@@ -3,6 +3,7 @@ package sqlite
 import (
 	"math"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/sessionrepo"
@@ -284,6 +285,18 @@ func TestConformanceInvalidQueries(t *testing.T) {
 	mustCode(t, err, sessionrepo.ErrInvalidQuery)
 	_, err = s.GetLog(sessionrepo.LogOptions{AfterSeq: -1, HasAfter: true})
 	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindEntry(sessionrepo.EntryQuery{Limit: 0, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindEntriesOnBranch(sessionrepo.EntryQuery{Limit: 0, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = thread.FindEntryOnBranch(sessionrepo.EntryQuery{Limit: 0, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindRecords(sessionrepo.RecordQuery{Limit: 0, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindRecords(sessionrepo.RecordQuery{Type: "step_attempt", OperationKind: "run"})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
+	_, err = s.FindOpenOperations(sessionrepo.MainLane, sessionrepo.OpenOpOptions{Limit: -1, HasLimit: true})
+	mustCode(t, err, sessionrepo.ErrInvalidQuery)
 }
 
 func TestConformanceOpenOperation(t *testing.T) {
@@ -547,34 +560,6 @@ func TestConformanceForkBefore(t *testing.T) {
 	mustCode(t, err, sessionrepo.ErrInvalidForkTarget)
 }
 
-func TestConformanceClearName(t *testing.T) {
-	repo, cwd := fixture(t)
-	s := create(t, repo, "session", cwd)
-	tmp := "Temporary"
-	if err := s.SetName(&tmp); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetName(nil); err != nil {
-		t.Fatal(err)
-	}
-	n, err := s.GetName()
-	if err != nil || n != nil {
-		t.Fatalf("name %v %v", n, err)
-	}
-	meta, err := s.GetMetadata()
-	if err != nil {
-		t.Fatal(err)
-	}
-	opened, err := repo.Open(meta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	n, err = opened.GetName()
-	if err != nil || n != nil {
-		t.Fatalf("reopen name %v %v", n, err)
-	}
-}
-
 func TestWriterLeaseSecondWriter(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.sqlite")
@@ -595,6 +580,9 @@ func TestWriterLeaseSecondWriter(t *testing.T) {
 	defer func() { _ = r2.Close() }()
 	_, err = r2.Open(meta)
 	mustCode(t, err, sessionrepo.ErrStorage)
+	if !strings.Contains(err.Error(), "already has an active writer") {
+		t.Fatalf("message %v", err)
+	}
 	_ = r1.Close()
 	opened, err := r2.Open(meta)
 	if err != nil {

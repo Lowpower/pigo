@@ -68,14 +68,6 @@ func TestUpdateSelfNotImplemented(t *testing.T) {
 	}
 }
 
-func TestExpandNoApproveAlias(t *testing.T) {
-	got := expandShortFlags([]string{"install", "npm:x", "-na", "-l"})
-	want := []string{"install", "npm:x", "--no-approve", "-l"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("%v", got)
-	}
-}
-
 func TestConfigPrint(t *testing.T) {
 	agent := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", agent)

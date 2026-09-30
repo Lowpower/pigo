@@ -46,10 +46,10 @@ func TestHTTPClientIdleTimesOutOnSilence(t *testing.T) {
 	SetHTTPIdleTimeout(200 * time.Millisecond)
 	t.Cleanup(func() { SetHTTPIdleTimeout(5 * time.Minute) })
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher := w.(http.Flusher)
 		flusher.Flush()
-		time.Sleep(2 * time.Second)
+		sleepUnlessCanceled(r, 2*time.Second)
 		_, _ = io.WriteString(w, "late")
 	}))
 	t.Cleanup(srv.Close)
@@ -80,8 +80,8 @@ func TestHTTPClientIdleTimesOutWaitingForHeaders(t *testing.T) {
 	SetHTTPIdleTimeout(200 * time.Millisecond)
 	t.Cleanup(func() { SetHTTPIdleTimeout(5 * time.Minute) })
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(2 * time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sleepUnlessCanceled(r, 2*time.Second)
 		_, _ = io.WriteString(w, "late")
 	}))
 	t.Cleanup(srv.Close)
@@ -176,10 +176,10 @@ func TestOpenAINilClientUsesIdleTimeout(t *testing.T) {
 	SetHTTPIdleTimeout(200 * time.Millisecond)
 	t.Cleanup(func() { SetHTTPIdleTimeout(5 * time.Minute) })
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.(http.Flusher).Flush()
-		time.Sleep(2 * time.Second)
+		sleepUnlessCanceled(r, 2*time.Second)
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
 	}))
 	t.Cleanup(srv.Close)
@@ -196,6 +196,13 @@ func TestOpenAINilClientUsesIdleTimeout(t *testing.T) {
 			msg = final.ErrorMessage
 		}
 		t.Fatalf("message = %q", msg)
+	}
+}
+
+func sleepUnlessCanceled(r *http.Request, d time.Duration) {
+	select {
+	case <-time.After(d):
+	case <-r.Context().Done():
 	}
 }
 

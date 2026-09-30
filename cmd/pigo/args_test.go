@@ -42,10 +42,20 @@ func TestVersionFlag(t *testing.T) {
 }
 
 func TestExpandShortFlags(t *testing.T) {
-	got := expandShortFlags([]string{"-nt", "-ns", "-nc", "-np", "-p", "hi", "--", "-nt"})
-	want := []string{"--no-tools", "--no-skills", "--no-context-files", "--no-prompt-templates", "-p", "hi", "--", "-nt"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("got %v want %v", got, want)
+	tests := []struct{ in, want []string }{
+		{
+			[]string{"-nt", "-ns", "-nc", "-np", "-p", "hi", "--", "-nt"},
+			[]string{"--no-tools", "--no-skills", "--no-context-files", "--no-prompt-templates", "-p", "hi", "--", "-nt"},
+		},
+		{
+			[]string{"install", "npm:x", "-na", "-l"},
+			[]string{"install", "npm:x", "--no-approve", "-l"},
+		},
+	}
+	for _, tt := range tests {
+		if got := expandShortFlags(tt.in); strings.Join(got, ",") != strings.Join(tt.want, ",") {
+			t.Fatalf("got %v want %v", got, tt.want)
+		}
 	}
 }
 
@@ -74,7 +84,7 @@ func TestInlineFiles(t *testing.T) {
 	}
 }
 
-func TestApproveFlagsParse(t *testing.T) {
+func TestRootHelpDocumentsFlags(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{"--help"})
 	var out bytes.Buffer
@@ -82,99 +92,63 @@ func TestApproveFlagsParse(t *testing.T) {
 	cmd.SetErr(&out)
 	_ = cmd.Execute()
 	s := out.String()
-	if !strings.Contains(s, "--approve") || !strings.Contains(s, "--no-approve") {
-		t.Fatalf("help missing approve flags:\n%s", s)
+	for _, want := range []string{
+		"--approve", "--no-approve", "--tui-mode", "--no-sandbox",
+		"--theme", "--no-themes", "--use-theme",
+		"--session-dir", "--verbose", "PIGO_TELEMETRY", "PIGO_TELEMETRY_JSONL",
+		"OTEL_EXPORTER_OTLP_ENDPOINT", "PIGO_CODING_AGENT_SESSION_DIR",
+		"server", "client",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("help missing %s:\n%s", want, s)
+		}
 	}
-}
-
-func TestTuiModeFlagParse(t *testing.T) {
-	cmd := newRootCmd()
-	cmd.SetArgs([]string{"--help"})
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	_ = cmd.Execute()
-	s := out.String()
-	if !strings.Contains(s, "--tui-mode") {
-		t.Fatalf("help missing --tui-mode:\n%s", s)
-	}
-}
-
-func TestNoSandboxFlagParse(t *testing.T) {
-	cmd := newRootCmd()
-	cmd.SetArgs([]string{"--help"})
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	_ = cmd.Execute()
-	s := out.String()
-	if !strings.Contains(s, "--no-sandbox") {
-		t.Fatalf("help missing --no-sandbox:\n%s", s)
-	}
-}
-
-func TestThemeFlagsParse(t *testing.T) {
-	cmd := newRootCmd()
-	cmd.SetArgs([]string{"--help"})
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	_ = cmd.Execute()
-	s := out.String()
-	if !strings.Contains(s, "--theme") || !strings.Contains(s, "--no-themes") || !strings.Contains(s, "--use-theme") {
-		t.Fatalf("help missing theme flags:\n%s", s)
+	for _, drop := range []string{"PI_EXPERIMENTAL", "PI_TELEMETRY"} {
+		if strings.Contains(s, drop) {
+			t.Fatalf("help still mentions %s:\n%s", drop, s)
+		}
 	}
 }
 
 func TestListModelsFiltersByAuth(t *testing.T) {
-	clearCatalogEnvs(t)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	cmd := newRootCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--list-models", "--offline", "--config-dir", t.TempDir()})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name    string
+		env     map[string]string
+		want    []string
+		notWant []string
+	}{
+		{"openai", map[string]string{"OPENAI_API_KEY": "sk-test"}, []string{"openai/gpt-4o"}, []string{"anthropic/"}},
+		{"groq", map[string]string{"GROQ_API_KEY": "g"}, []string{"groq/", "openai-completions"}, []string{"openai/gpt-4o"}},
+		{"none", nil, nil, nil},
 	}
-	s := out.String()
-	if !strings.Contains(s, "openai/gpt-4o") {
-		t.Fatalf("missing openai: %s", s)
-	}
-	if strings.Contains(s, "anthropic/") {
-		t.Fatalf("unauthenticated anthropic leaked: %s", s)
-	}
-}
-
-func TestListModelsIncludesGroqWhenKeySet(t *testing.T) {
-	clearCatalogEnvs(t)
-	t.Setenv("GROQ_API_KEY", "g")
-	cmd := newRootCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--list-models", "--offline", "--config-dir", t.TempDir()})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	s := out.String()
-	if !strings.Contains(s, "groq/") || !strings.Contains(s, "openai-completions") {
-		t.Fatalf("missing groq: %s", s)
-	}
-	if strings.Contains(s, "openai/gpt-4o") {
-		t.Fatalf("unauthenticated openai leaked: %s", s)
-	}
-}
-
-func TestListModelsEmptyWithoutAuth(t *testing.T) {
-	clearCatalogEnvs(t)
-	cmd := newRootCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--list-models", "--offline", "--config-dir", t.TempDir()})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(out.String()) != "" {
-		t.Fatalf("want empty list, got %q", out.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearCatalogEnvs(t)
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			cmd := newRootCmd()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetArgs([]string{"--list-models", "--offline", "--config-dir", t.TempDir()})
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			s := out.String()
+			for _, w := range tt.want {
+				if !strings.Contains(s, w) {
+					t.Fatalf("missing %q: %s", w, s)
+				}
+			}
+			for _, w := range tt.notWant {
+				if strings.Contains(s, w) {
+					t.Fatalf("unauthenticated %q leaked: %s", w, s)
+				}
+			}
+			if tt.want == nil && strings.TrimSpace(s) != "" {
+				t.Fatalf("want empty list, got %q", s)
+			}
+		})
 	}
 }
 
@@ -236,26 +210,6 @@ func TestBuildInitialMessageJoinsStdin(t *testing.T) {
 	}
 	if len(rest) != 1 || rest[0] != "two" {
 		t.Fatalf("rest=%v", rest)
-	}
-}
-
-func TestSessionDirAndVerboseFlagsParse(t *testing.T) {
-	cmd := newRootCmd()
-	cmd.SetArgs([]string{"--help"})
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	_ = cmd.Execute()
-	s := out.String()
-	for _, want := range []string{"--session-dir", "--verbose", "PIGO_TELEMETRY", "PIGO_TELEMETRY_JSONL", "OTEL_EXPORTER_OTLP_ENDPOINT", "PIGO_CODING_AGENT_SESSION_DIR"} {
-		if !strings.Contains(s, want) {
-			t.Fatalf("help missing %s:\n%s", want, s)
-		}
-	}
-	for _, drop := range []string{"PI_EXPERIMENTAL", "PI_TELEMETRY"} {
-		if strings.Contains(s, drop) {
-			t.Fatalf("help still mentions %s:\n%s", drop, s)
-		}
 	}
 }
 

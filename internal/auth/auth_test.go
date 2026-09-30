@@ -293,12 +293,22 @@ func TestProcessAPIKeyIsInMemoryOnly(t *testing.T) {
 	}
 }
 
-func TestCheckAuthGoogleEnv(t *testing.T) {
-	t.Setenv("GEMINI_API_KEY", "g-key")
-	s := Open(t.TempDir())
-	chk := CheckAuth(s, "google")
-	if chk == nil || chk.Source != "GEMINI_API_KEY" {
-		t.Fatalf("check = %+v", chk)
+func TestCheckAuthSourceFromEnv(t *testing.T) {
+	tests := []struct{ provider, env string }{
+		{"google", "GEMINI_API_KEY"},
+		{"kimi-coding", "KIMI_API_KEY"},
+		{"github-copilot", "COPILOT_GITHUB_TOKEN"},
+		{"mistral", "MISTRAL_API_KEY"},
+		{"radius", "RADIUS_API_KEY"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			t.Setenv(tt.env, "secret")
+			chk := CheckAuth(Open(t.TempDir()), tt.provider)
+			if chk == nil || chk.Source != tt.env {
+				t.Fatalf("check = %+v", chk)
+			}
+		})
 	}
 }
 
@@ -321,24 +331,6 @@ func TestCheckAuthGroqFromEnv(t *testing.T) {
 	}
 }
 
-func TestCheckAuthKimiAPIKeyEnv(t *testing.T) {
-	t.Setenv("KIMI_API_KEY", "k")
-	s := Open(t.TempDir())
-	chk := CheckAuth(s, "kimi-coding")
-	if chk == nil || chk.Source != "KIMI_API_KEY" {
-		t.Fatalf("check = %+v", chk)
-	}
-}
-
-func TestCheckAuthCopilotTokenEnv(t *testing.T) {
-	t.Setenv("COPILOT_GITHUB_TOKEN", "t")
-	s := Open(t.TempDir())
-	chk := CheckAuth(s, "github-copilot")
-	if chk == nil || chk.Source != "COPILOT_GITHUB_TOKEN" {
-		t.Fatalf("check = %+v", chk)
-	}
-}
-
 func TestCheckAuthCloudflareWorkersNeedsAccount(t *testing.T) {
 	t.Setenv("CLOUDFLARE_API_KEY", "k")
 	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "")
@@ -350,24 +342,6 @@ func TestCheckAuthCloudflareWorkersNeedsAccount(t *testing.T) {
 	chk := CheckAuth(s, "cloudflare-workers-ai")
 	if chk == nil {
 		t.Fatal("expected workers-ai auth with key+account")
-	}
-}
-
-func TestCheckAuthMistralFromEnv(t *testing.T) {
-	t.Setenv("MISTRAL_API_KEY", "m")
-	s := Open(t.TempDir())
-	chk := CheckAuth(s, "mistral")
-	if chk == nil || chk.Source != "MISTRAL_API_KEY" {
-		t.Fatalf("check = %+v", chk)
-	}
-}
-
-func TestCheckAuthRadiusFromEnv(t *testing.T) {
-	t.Setenv("RADIUS_API_KEY", "r")
-	s := Open(t.TempDir())
-	chk := CheckAuth(s, "radius")
-	if chk == nil || chk.Source != "RADIUS_API_KEY" {
-		t.Fatalf("check = %+v", chk)
 	}
 }
 
