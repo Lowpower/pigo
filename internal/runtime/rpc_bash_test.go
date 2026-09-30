@@ -68,31 +68,14 @@ func TestRPCBashReturnsPiResultShape(t *testing.T) {
 	if data["exitCode"] != float64(0) {
 		t.Fatalf("exitCode = %#v", data["exitCode"])
 	}
-}
-
-func TestRPCBashStreamsExecutionUpdateWithCommandID(t *testing.T) {
-	e := &Engine{Opts: Options{Cwd: t.TempDir(), Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}}}
-	in := strings.NewReader(`{"id":"req-1","type":"bash","command":"printf hello"}
-{"type":"quit"}
-`)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	rows := decodeRPCRows(t, out.String())
-	updates := rpcRowsOfType(rows, "bash_execution_update")
-	if len(updates) == 0 {
-		t.Fatalf("missing bash_execution_update in %s", out.String())
-	}
-	var saw bool
-	for _, u := range updates {
-		if u["id"] == "req-1" && strings.Contains(fmtString(u["delta"]), "hello") {
-			saw = true
-			break
+	var sawUpdate bool
+	for _, u := range rpcRowsOfType(rows, "bash_execution_update") {
+		if u["id"] == "b1" && strings.Contains(fmtString(u["delta"]), "hello") {
+			sawUpdate = true
 		}
 	}
-	if !saw {
-		t.Fatalf("updates = %#v", updates)
+	if !sawUpdate {
+		t.Fatalf("missing bash_execution_update for b1 in %s", out.String())
 	}
 }
 

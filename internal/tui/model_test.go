@@ -30,26 +30,21 @@ func send(m tea.Model, msg tea.Msg) Model {
 	return next.(Model)
 }
 
-func TestCtrlCClearsEditorWhenIdle(t *testing.T) {
+func TestCtrlC(t *testing.T) {
 	m := New(testCfg())
 	m.editor.SetValue("hello")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	got := next.(Model)
-	if got.quitting {
-		t.Fatal("first Ctrl+C must not quit")
-	}
-	if cmd != nil {
+	if got.quitting || cmd != nil {
 		t.Fatal("first Ctrl+C must not quit")
 	}
 	if got.editor.Value() != "" {
 		t.Fatalf("editor = %q, want empty", got.editor.Value())
 	}
-}
 
-func TestCtrlCTwiceQuits(t *testing.T) {
-	m := New(testCfg())
+	m = New(testCfg())
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlC})
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if !next.(Model).quitting {
 		t.Fatal("second Ctrl+C within 500ms should quit")
 	}

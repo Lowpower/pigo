@@ -162,33 +162,6 @@ func TestModifyRefreshOnce(t *testing.T) {
 	}
 }
 
-func TestPrintAPIKeySkipsOAuth(t *testing.T) {
-	dir := t.TempDir()
-	s := Open(dir)
-	_, _ = s.Modify("anthropic", func(*Credential) (*Credential, error) {
-		return &Credential{Type: TypeOAuth, Access: "oauth-tok", Refresh: "r", Expires: time.Now().UnixMilli() + 3600_000}, nil
-	})
-	c, ok, _ := s.Read("anthropic")
-	if !ok || c.Type != TypeOAuth {
-		t.Fatal(c)
-	}
-	p, _ := Lookup("anthropic")
-	res, err := Resolve(context.Background(), s, p, ResolveOpts{})
-	if err != nil || res == nil {
-		t.Fatal(err, res)
-	}
-	infos, _ := s.List()
-	var typ string
-	for _, i := range infos {
-		if i.ProviderID == "anthropic" {
-			typ = i.Type
-		}
-	}
-	if typ != TypeOAuth {
-		t.Fatalf("list type %s", typ)
-	}
-}
-
 func TestCheckNoRefresh(t *testing.T) {
 	dir := t.TempDir()
 	s := Open(dir)

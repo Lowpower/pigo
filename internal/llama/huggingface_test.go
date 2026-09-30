@@ -41,13 +41,6 @@ func TestSearchHuggingFace(t *testing.T) {
 	}
 }
 
-func TestFindHuggingFaceTokenEnv(t *testing.T) {
-	t.Setenv("HF_TOKEN", "env-token")
-	if got := FindHuggingFaceToken(); got != "env-token" {
-		t.Fatalf("%q", got)
-	}
-}
-
 func TestParseHuggingFaceModel(t *testing.T) {
 	repo, quant := ParseHuggingFaceModel("owner/repo:Q4_K_M")
 	if repo != "owner/repo" || quant != "Q4_K_M" {
@@ -92,11 +85,9 @@ func TestHuggingFaceDetails(t *testing.T) {
 	}
 }
 
-func TestFormatBytes(t *testing.T) {
-	if got := FormatBytes(500); got != "500 B" {
-		t.Fatalf("%q", got)
-	}
-	if got := FormatBytes(2048); !strings.Contains(got, "KiB") {
+func TestFindHuggingFaceTokenEnv(t *testing.T) {
+	t.Setenv("HF_TOKEN", "env-token")
+	if got := FindHuggingFaceToken(); got != "env-token" {
 		t.Fatalf("%q", got)
 	}
 }

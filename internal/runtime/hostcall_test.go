@@ -58,20 +58,6 @@ func TestSendMessageSteerNotWhileIdleWithoutKick(t *testing.T) {
 	}
 }
 
-func TestSendMessageNextTurnQueue(t *testing.T) {
-	e := &Engine{}
-	e.HandleHostCall(nil, "sendMessage", map[string]any{
-		"customType": "x", "content": "later", "deliverAs": "nextTurn",
-	})
-	got := e.TakeNextTurn()
-	if len(got) != 1 || got[0].Content != "later" {
-		t.Fatalf("nextTurn=%v", got)
-	}
-	if extra := e.TakeNextTurn(); len(extra) != 0 {
-		t.Fatalf("queue should drain: %v", extra)
-	}
-}
-
 func TestAppendEntryAndLabel(t *testing.T) {
 	dir := t.TempDir()
 	sess := session.NewAt(dir, dir, dir)
@@ -172,6 +158,9 @@ func TestRunPromptIncludesNextTurn(t *testing.T) {
 	st.Collect()
 	if len(seen) < 2 || seen[0].Content != "queued-next" || seen[1].Content != "user-now" {
 		t.Fatalf("messages=%v", seen)
+	}
+	if extra := e.TakeNextTurn(); len(extra) != 0 {
+		t.Fatalf("queue should drain: %v", extra)
 	}
 }
 

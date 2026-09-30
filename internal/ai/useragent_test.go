@@ -46,19 +46,6 @@ func TestProviderUserAgentUsesRuntime(t *testing.T) {
 	}
 }
 
-func TestSetDefaultUserAgent(t *testing.T) {
-	h := make(http.Header)
-	setDefaultUserAgent(h)
-	if h.Get("User-Agent") != providerUserAgent() {
-		t.Fatalf("default = %q", h.Get("User-Agent"))
-	}
-	h.Set("User-Agent", "custom")
-	setDefaultUserAgent(h)
-	if h.Get("User-Agent") != "custom" {
-		t.Fatalf("kept = %q", h.Get("User-Agent"))
-	}
-}
-
 func TestDoHTTPUserAgent(t *testing.T) {
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

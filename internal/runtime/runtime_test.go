@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -820,23 +821,6 @@ func TestEnginePushSteerOneAtATime(t *testing.T) {
 	}
 }
 
-func TestTakeQueuesClearsSteerAndFollow(t *testing.T) {
-	e := &Engine{Opts: Options{Config: config.Config{}}}
-	e.PushSteer("s1")
-	e.PushFollow("f1")
-	e.PushFollow("f2")
-	steer, follow := e.TakeQueues()
-	if len(steer) != 1 || steer[0] != "s1" {
-		t.Fatalf("steer=%v", steer)
-	}
-	if len(follow) != 2 || follow[0] != "f1" || follow[1] != "f2" {
-		t.Fatalf("follow=%v", follow)
-	}
-	if n := e.pendingCount(); n != 0 {
-		t.Fatalf("pending=%d", n)
-	}
-}
-
 func TestNoBuiltinToolsLeavesRegistryEmptyWithoutExtensions(t *testing.T) {
 	ctx := context.Background()
 	e, err := New(ctx, Options{
@@ -1048,99 +1032,44 @@ func TestApplyModelDoesNotOverwriteSavedDefault(t *testing.T) {
 	}
 }
 
-func TestNewScopedFromSettingsWhenCLIEmpty(t *testing.T) {
+func TestNewResolvesScopedModels(t *testing.T) {
+	cfg := config.Config{
+		Provider: "anthropic", Model: "claude-sonnet-4",
+		EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
+	}
 	dir := t.TempDir()
-	e, err := New(context.Background(), Options{
-		AgentDir:     dir,
-		Cwd:          t.TempDir(),
-		Offline:      true,
-		NoTools:      true,
-		NoSkills:     true,
-		NoExtensions: true,
-		Config: config.Config{
-			Provider: "anthropic", Model: "claude-sonnet-4",
-			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name string
+		opts Options
+		want []string
+	}{
+		{"settings when CLI empty", Options{Config: cfg}, []string{"claude-sonnet-4", "claude-haiku-4"}},
+		{"CLI models replace settings", Options{Config: cfg, Models: []string{"openai/gpt-4o"}}, []string{"gpt-4o"}},
+		{"user config wins over overlay", Options{Config: cfg, UserConfig: &config.Config{EnabledModels: []string{"openai/gpt-4o"}}}, []string{"gpt-4o"}},
+		{"nil user enabledModels is implicit all", Options{Config: cfg, UserConfig: &config.Config{}}, nil},
 	}
-	defer e.Close()
-	if len(e.Scoped) != 2 || e.Scoped[0].ID != "claude-sonnet-4" || e.Scoped[1].ID != "claude-haiku-4" {
-		t.Fatalf("%+v", e.Scoped)
-	}
-}
-
-func TestNewPrefersUserConfigEnabledModels(t *testing.T) {
-	dir := t.TempDir()
-	e, err := New(context.Background(), Options{
-		AgentDir:     dir,
-		Cwd:          t.TempDir(),
-		Offline:      true,
-		NoTools:      true,
-		NoSkills:     true,
-		NoExtensions: true,
-		Config: config.Config{
-			Provider:      "anthropic",
-			Model:         "claude-sonnet-4",
-			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
-		},
-		UserConfig: &config.Config{
-			EnabledModels: []string{"openai/gpt-4o"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e.Close()
-	if len(e.Scoped) != 1 || e.Scoped[0].ID != "gpt-4o" {
-		t.Fatalf("user settings should win over overlay config, got %+v", e.Scoped)
-	}
-
-	e2, err := New(context.Background(), Options{
-		AgentDir:     dir,
-		Cwd:          t.TempDir(),
-		Offline:      true,
-		NoTools:      true,
-		NoSkills:     true,
-		NoExtensions: true,
-		Config: config.Config{
-			Provider:      "anthropic",
-			Model:         "claude-sonnet-4",
-			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
-		},
-		UserConfig: &config.Config{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e2.Close()
-	if len(e2.Scoped) != 0 {
-		t.Fatalf("nil user enabledModels is implicit-all, got %+v", e2.Scoped)
-	}
-}
-
-func TestNewCLIModelsReplaceSettings(t *testing.T) {
-	dir := t.TempDir()
-	e, err := New(context.Background(), Options{
-		AgentDir:     dir,
-		Cwd:          t.TempDir(),
-		Offline:      true,
-		NoTools:      true,
-		NoSkills:     true,
-		NoExtensions: true,
-		Models:       []string{"openai/gpt-4o"},
-		Config: config.Config{
-			Provider: "anthropic", Model: "claude-sonnet-4",
-			EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e.Close()
-	if len(e.Scoped) != 1 || e.Scoped[0].ID != "gpt-4o" {
-		t.Fatalf("%+v", e.Scoped)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := tt.opts
+			opts.AgentDir = dir
+			opts.Cwd = t.TempDir()
+			opts.Offline = true
+			opts.NoTools = true
+			opts.NoSkills = true
+			opts.NoExtensions = true
+			e, err := New(context.Background(), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer e.Close()
+			var got []string
+			for _, m := range e.Scoped {
+				got = append(got, m.ID)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("scoped = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1349,6 +1278,7 @@ func TestRPCClearQueue(t *testing.T) {
 	}
 	e.PushSteer("steer-me")
 	e.PushFollow("follow-me")
+	e.PushFollow("follow-2")
 	in := strings.NewReader(`{"id":"c1","type":"clear_queue"}
 {"type":"quit"}
 `)
@@ -1370,7 +1300,7 @@ func TestRPCClearQueue(t *testing.T) {
 	data, _ := got["data"].(map[string]any)
 	steer, _ := data["steering"].([]any)
 	follow, _ := data["followUp"].([]any)
-	if len(steer) != 1 || steer[0] != "steer-me" || len(follow) != 1 || follow[0] != "follow-me" {
+	if len(steer) != 1 || steer[0] != "steer-me" || len(follow) != 2 || follow[0] != "follow-me" || follow[1] != "follow-2" {
 		t.Fatalf("data=%v", data)
 	}
 	if n := e.pendingCount(); n != 0 {
