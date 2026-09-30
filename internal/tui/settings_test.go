@@ -13,8 +13,7 @@ import (
 
 func TestSlashSettingsOpensMenu(t *testing.T) {
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	if !m.settingsActive() {
 		t.Fatal("/settings should open the settings menu")
 	}
@@ -35,8 +34,7 @@ func TestSettingsEnterCyclesAndPersists(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("mermaid")})
 	view := m.View()
 	if !strings.Contains(view, "streaming") {
@@ -59,8 +57,7 @@ func TestSettingsCyclesDefaultProjectTrust(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("default project trust")})
 	if !strings.Contains(m.View(), "ask") {
 		t.Fatalf("expected default ask:\n%s", m.View())
@@ -92,8 +89,7 @@ func TestSettingsTogglesImages(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("PIGO_CODING_AGENT_DIR", dir)
 			m := New(testCfg())
-			m.editor.SetValue("/settings")
-			m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+			m = submit(m, "/settings")
 			m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.label)})
 			m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 			if tt.got(m) != tt.wantVal {
@@ -114,8 +110,7 @@ func TestSettingsTogglesChangelogAndTelemetry(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("collapse changelog")})
 	view := m.View()
 	if !strings.Contains(view, "Collapse changelog") {
@@ -127,8 +122,7 @@ func TestSettingsTogglesChangelogAndTelemetry(t *testing.T) {
 	}
 
 	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("install telemetry")})
 	if !strings.Contains(m.View(), "Install telemetry") {
 		t.Fatalf("menu missing install telemetry:\n%s", m.View())
@@ -154,8 +148,7 @@ func TestSettingsCyclesScrollbarAndAnthropicWarning(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("fullscreen scrollbar")})
 	if !strings.Contains(m.View(), "always") {
 		t.Fatalf("expected default always:\n%s", m.View())
@@ -166,8 +159,7 @@ func TestSettingsCyclesScrollbarAndAnthropicWarning(t *testing.T) {
 	}
 
 	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("anthropic extra-usage")})
 	if !strings.Contains(m.View(), "true") {
 		t.Fatalf("expected default true:\n%s", m.View())

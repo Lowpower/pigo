@@ -195,8 +195,7 @@ func TestSubmitExpandsPasteAndAttachesImages(t *testing.T) {
 
 func TestSubmitAddsPromptHistory(t *testing.T) {
 	m := editorModel()
-	m.editor.SetValue("remember me")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "remember me")
 	if m.editor.Value() != "" {
 		t.Fatal("editor should clear on submit")
 	}

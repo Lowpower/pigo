@@ -112,8 +112,7 @@ func TestSettingsTogglesFullscreenCopyOnSelect(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("copy on select")})
 	if !strings.Contains(m.View(), "Copy on select") {
 		t.Fatalf("menu missing copy on select:\n%s", m.View())
@@ -136,8 +135,7 @@ func TestSettingsTogglesFullscreenCopyOnSelect(t *testing.T) {
 
 func TestSettingsTuiModeTogglesMouseTracking(t *testing.T) {
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("tui-mode")})
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(Model)

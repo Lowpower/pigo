@@ -56,8 +56,7 @@ func TestPrintJSONOverflowCompactsAndRetriesOnce(t *testing.T) {
 					}
 				},
 			}
-			e.Steering = e.drainSteer
-			e.FollowUp = e.drainFollow
+			wireQueues(e)
 			var out bytes.Buffer
 			if err := e.PrintJSON(context.Background(), &out, compactableMsgs(), "next", nil); err != nil {
 				t.Fatal(err)
@@ -118,8 +117,7 @@ func TestPrintJSONOverflowDoesNotLoop(t *testing.T) {
 			return textReply("## Goal\nCompacted.")(ctx, req, opts)
 		},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	var out bytes.Buffer
 	err := e.PrintJSON(context.Background(), &out, compactableMsgs(), "next", nil)
 	if err == nil {

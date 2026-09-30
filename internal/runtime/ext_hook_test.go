@@ -22,6 +22,13 @@ import (
 	"github.com/Lowpower/pigo/internal/tools"
 )
 
+func newMockHostEngine(h *ext.Host) *Engine {
+	return &Engine{
+		Hosts: []*ext.Host{h},
+		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
+	}
+}
+
 func TestRuntimeHelperProcess(_ *testing.T) {
 	if os.Getenv("PIGO_RUNTIME_EXT") == "" {
 		return
@@ -346,8 +353,7 @@ func TestRunPromptTransformsInput(t *testing.T) {
 		},
 		Opts: Options{Config: config.Config{Model: "x", Provider: "mock"}},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	st := e.RunPrompt(context.Background(), nil, "original", nil)
 	_ = st.Collect()
 	if seen != "transformed" {
@@ -401,10 +407,7 @@ func TestContextHookRestoresPromptAndTools(t *testing.T) {
 		seen = req
 		return textReply("ok")(ctx, req, ai.Options{})
 	}
-	e := &Engine{
-		Hosts: []*ext.Host{h},
-		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
-	}
+	e := newMockHostEngine(h)
 	fn := e.gatedStream(inner)
 	_, err := fn(context.Background(), ai.Context{
 		System: "PROMPT",
@@ -449,10 +452,7 @@ func TestContextWithSystemSendsResultVerbatim(t *testing.T) {
 		seen = req
 		return textReply("ok")(ctx, req, ai.Options{})
 	}
-	e := &Engine{
-		Hosts: []*ext.Host{h},
-		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
-	}
+	e := newMockHostEngine(h)
 	_, err := e.gatedStream(inner)(context.Background(), ai.Context{
 		System:   "PROMPT",
 		Tools:    []ai.Tool{{Name: "read", Description: "read"}},
@@ -479,10 +479,7 @@ func TestContextWithSystemRejectsMissingHead(t *testing.T) {
 		calls++
 		return textReply("ok")(ctx, req, ai.Options{})
 	}
-	e := &Engine{
-		Hosts: []*ext.Host{h},
-		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
-	}
+	e := newMockHostEngine(h)
 	_, err := e.gatedStream(inner)(context.Background(), ai.Context{
 		System:   "PROMPT",
 		Messages: []ai.Message{{Role: ai.RoleUser, Content: "tail"}},
@@ -499,12 +496,8 @@ func TestGatedStreamContextReplacesMessages(t *testing.T) {
 		seen = append([]ai.Message(nil), req.Messages...)
 		return textReply("ok")(ctx, req, ai.Options{})
 	}
-	e := &Engine{
-		Hosts: []*ext.Host{h},
-		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newMockHostEngine(h)
+	wireQueues(e)
 	e.Stream = e.gatedStream(inner)
 	_ = e.RunPrompt(context.Background(), nil, "original", nil).Collect()
 	if len(seen) != 1 || seen[0].Content != "from-ext" {
@@ -534,12 +527,8 @@ func TestResourcesDiscoverInjectsSkills(t *testing.T) {
 func TestProviderStreamEventNotInstalledWithoutSubscriber(t *testing.T) {
 	h := spawnRuntimeExt(t, "messages", nil)
 	var installed bool
-	e := &Engine{
-		Hosts: []*ext.Host{h},
-		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newMockHostEngine(h)
+	wireQueues(e)
 	e.Stream = e.gatedStream(func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
 		installed = opts.OnProviderStreamEvent != nil
 		return textReply("ok")(ctx, req, ai.Options{})
@@ -571,8 +560,7 @@ func TestProviderStreamEventBeforeMessageUpdate(t *testing.T) {
 		Provider: "anthropic",
 		Opts:     Options{Config: config.Config{Model: "claude-test", Provider: "anthropic"}},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	e.Stream = e.gatedStream(client.StreamFn())
 	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
 
@@ -608,12 +596,8 @@ func TestGatedStreamBeforeProviderHeaders(t *testing.T) {
 		got = opts.ExtraHeaders
 		return textReply("ok")(ctx, req, ai.Options{})
 	}
-	e := &Engine{
-		Hosts: []*ext.Host{h},
-		Opts:  Options{Config: config.Config{Model: "x", Provider: "mock"}},
-	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	e := newMockHostEngine(h)
+	wireQueues(e)
 	e.Stream = e.gatedStream(inner)
 	_ = e.RunPrompt(context.Background(), nil, "hi", nil).Collect()
 	if got["X-Pigo-Test"] != "1" {
@@ -657,8 +641,7 @@ func TestMessageAndToolUpdateEvents(t *testing.T) {
 			return textReply("ok")(ctx, req, opts)
 		},
 	}
-	e.Steering = e.drainSteer
-	e.FollowUp = e.drainFollow
+	wireQueues(e)
 	events := e.RunPrompt(context.Background(), nil, "go", nil).Collect()
 	var end *ai.AssistantMessage
 	for _, ev := range events {

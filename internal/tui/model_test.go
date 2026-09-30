@@ -25,6 +25,12 @@ func testCfg() config.Config {
 	return config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Theme: "default", OutputPad: &z}
 }
 
+// submit types text into the editor and presses Enter.
+func submit(m Model, text string) Model {
+	m.editor.SetValue(text)
+	return send(m, tea.KeyMsg{Type: tea.KeyEnter})
+}
+
 func send(m tea.Model, msg tea.Msg) Model {
 	next, _ := m.Update(msg)
 	return next.(Model)
@@ -208,8 +214,7 @@ func TestCtrlLOpensModelPicker(t *testing.T) {
 
 func TestSlashModelOpensPicker(t *testing.T) {
 	m := New(testCfg())
-	m.editor.SetValue("/model")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/model")
 	if !m.modelPickerActive() {
 		t.Fatal("/model with no args should open the picker")
 	}
@@ -217,8 +222,7 @@ func TestSlashModelOpensPicker(t *testing.T) {
 
 func TestSlashModelExactMatchDoesNotOpenPicker(t *testing.T) {
 	m := New(testCfg())
-	m.editor.SetValue("/model anthropic/claude-haiku-4")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/model anthropic/claude-haiku-4")
 	if m.modelPickerActive() {
 		t.Fatal("exact spec should apply without a picker")
 	}
@@ -337,8 +341,7 @@ func TestHotkeysReflectsOverride(t *testing.T) {
 	}
 	m := New(testCfg())
 	m.keys = keys.NewManager(dir)
-	m.editor.SetValue("/hotkeys")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/hotkeys")
 	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "ctrl+k") {
 		t.Fatalf("hotkeys = %+v", m.transcript)
 	}
@@ -356,8 +359,7 @@ func treeModel(t *testing.T) Model {
 
 func TestSlashTreeOpensOverlay(t *testing.T) {
 	m := treeModel(t)
-	m.editor.SetValue("/tree")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/tree")
 	if m.overlay != overlayTree {
 		t.Fatalf("overlay = %d", m.overlay)
 	}
@@ -371,8 +373,7 @@ func TestSlashTreeOpensOverlay(t *testing.T) {
 
 func TestTreeCtrlDDoesNotQuit(t *testing.T) {
 	m := treeModel(t)
-	m.editor.SetValue("/tree")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/tree")
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	got := next.(Model)
 	if got.quitting {
@@ -386,8 +387,7 @@ func TestTreeCtrlDDoesNotQuit(t *testing.T) {
 func TestTreeEnterNavigatesUserIntoEditor(t *testing.T) {
 	m := treeModel(t)
 	m.cfg.BranchSummary.SkipPrompt = boolPtr(true)
-	m.editor.SetValue("/tree")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/tree")
 	// cursor on leaf (assistant). Move up to user.
 	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -418,8 +418,7 @@ func TestTreeConfirmAbortsThenNavigates(t *testing.T) {
 	close(ch)
 	m.agentEvents = ch
 	m.queued = []queuedPrompt{{text: "later"}}
-	m.editor.SetValue("/tree")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !cancelled {
@@ -472,8 +471,7 @@ func TestTreeSummarizeStartsAsync(t *testing.T) {
 
 func TestCtrlXCopiesTreeSelection(t *testing.T) {
 	m := treeModel(t)
-	m.editor.SetValue("/tree")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlX})
 	if m.clipOSC == "" || !strings.Contains(m.clipOSC, "\x1b]52;c;") {
@@ -502,8 +500,7 @@ func TestDoubleEscapeForkOpensPicker(t *testing.T) {
 
 func TestSlashForkOpensPickerAndConfirms(t *testing.T) {
 	m := treeModel(t)
-	m.editor.SetValue("/fork")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/fork")
 	if m.overlay != overlayFork {
 		t.Fatalf("overlay = %d", m.overlay)
 	}
@@ -535,8 +532,7 @@ func TestSlashThemeLoadsFromAgentDir(t *testing.T) {
 		Opts:       runtime.Options{AgentDir: agent, Cwd: t.TempDir()},
 		ThemeFiles: []string{path},
 	}
-	m.editor.SetValue("/theme disk")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/theme disk")
 	if m.theme.Name != "disk" {
 		t.Fatalf("theme=%s", m.theme.Name)
 	}
@@ -575,8 +571,7 @@ func TestSlashImageGenerates(t *testing.T) {
 		return []ai.ImageContent{{Type: "image", MimeType: "image/png", Data: "AAA"}}, nil
 	}
 	m := New(testCfg())
-	m.editor.SetValue("/image")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/image")
 	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "usage: /image") {
 		t.Fatalf("usage = %+v", m.transcript)
 	}
@@ -595,14 +590,12 @@ func TestSlashImageGenerates(t *testing.T) {
 
 func TestSlashChangelogAndShare(t *testing.T) {
 	m := New(testCfg())
-	m.editor.SetValue("/changelog")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/changelog")
 	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "0.0.1") {
 		t.Fatalf("changelog = %+v", m.transcript)
 	}
 
-	m.editor.SetValue("/share")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/share")
 	if len(m.transcript) == 0 || !strings.Contains(m.transcript[len(m.transcript)-1].rendered, "no session") {
 		t.Fatalf("share without session = %+v", m.transcript)
 	}
@@ -631,8 +624,7 @@ func TestSlashTrustWritesStore(t *testing.T) {
 	cwd := t.TempDir()
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{AgentDir: agent, Cwd: cwd}}
-	m.editor.SetValue("/trust")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/trust")
 	st := trust.Open(agent)
 	v, ok := st.Get(cwd)
 	if !ok || !v {
@@ -656,8 +648,7 @@ func TestSessionSlashShowsStats(t *testing.T) {
 	sess.SetName("demo")
 	m := New(testCfg())
 	m.engine = &runtime.Engine{Opts: runtime.Options{Session: sess, ContextWindow: 200}}
-	m.editor.SetValue("/session")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/session")
 	if len(m.transcript) == 0 {
 		t.Fatal("no transcript")
 	}
@@ -678,8 +669,7 @@ func TestSkillCommandsDisabled(t *testing.T) {
 		Opts:   runtime.Options{Config: cfg},
 		Skills: []skills.Skill{{Name: "demo", Body: "skill body"}},
 	}
-	m.editor.SetValue("/demo")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/demo")
 	if m.running {
 		t.Fatal("disabled skill commands should not start a turn")
 	}
@@ -702,8 +692,7 @@ func TestCopyDequeueAndThinkingPicker(t *testing.T) {
 		t.Fatalf("editor=%q", m.editor.Value())
 	}
 
-	m.editor.SetValue("/thinking")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/thinking")
 	if !m.thinkingPickerActive() {
 		t.Fatal("expected thinking picker")
 	}

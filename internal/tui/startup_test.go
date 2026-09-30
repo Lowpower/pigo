@@ -171,8 +171,7 @@ func TestStartupListingFollowsEngineReload(t *testing.T) {
 func TestClearKeepsStartupHeader(t *testing.T) {
 	m := New(testCfg())
 	m.transcript = []entry{{role: "meta", rendered: "gone-soon"}}
-	m.editor.SetValue("/clear")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/clear")
 	view := m.View()
 	if strings.Contains(view, "gone-soon") {
 		t.Fatalf("transcript should clear:\n%s", view)

@@ -68,8 +68,7 @@ func TestFullscreenExitText(t *testing.T) {
 
 func TestSettingsCyclesTuiMode(t *testing.T) {
 	m := New(testCfg())
-	m.editor.SetValue("/settings")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("tui-mode")})
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(Model)
