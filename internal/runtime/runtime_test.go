@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/tools"
@@ -312,6 +314,179 @@ func TestRPCPromptWhileStreamingRequiresBehavior(t *testing.T) {
 	if !sawReject {
 		t.Fatalf("missing rejected second prompt in %s", out.String())
 	}
+	reject := rpcResponse(rows, "prompt", "p2")
+	if _, ok := reject["data"]; ok {
+		t.Fatalf("rejected prompt has data: %v", reject)
+	}
+}
+
+func TestRPCPromptDisposition(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	e := &Engine{
+		Stream: func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+			startedOnce.Do(func() { close(started) })
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return textReply("aborted")(ctx, req, opts)
+			}
+			return textReply("pong")(ctx, req, opts)
+		},
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+
+	pr, pw := io.Pipe()
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- e.ServeRPC(context.Background(), pr, &out) }()
+
+	enc := json.NewEncoder(pw)
+	if err := enc.Encode(map[string]any{"type": "prompt", "message": "first", "id": "p1"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider was not called")
+	}
+	if err := enc.Encode(map[string]any{"type": "steer", "message": "nudge-steer", "id": "s1"}); err != nil {
+		t.Fatal(err)
+	}
+	waitQueueText(t, e, "nudge-steer", "")
+	if err := enc.Encode(map[string]any{"type": "follow_up", "message": "nudge-follow", "id": "f1"}); err != nil {
+		t.Fatal(err)
+	}
+	waitQueueText(t, e, "nudge-steer", "nudge-follow")
+	if err := enc.Encode(map[string]any{
+		"type": "prompt", "message": "via-steer", "id": "ps", "streamingBehavior": "steer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitQueueText(t, e, "via-steer", "nudge-follow")
+	if err := enc.Encode(map[string]any{
+		"type": "prompt", "message": "via-follow", "id": "pf", "streamingBehavior": "followUp",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitQueueText(t, e, "via-steer", "via-follow")
+
+	close(release)
+	if err := enc.Encode(map[string]any{"type": "quit"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = pw.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeRPC did not return")
+	}
+
+	rows := decodeRPCRows(t, out.String())
+	if got := responseDisposition(t, rows, "prompt", "p1"); got != "started" {
+		t.Fatalf("idle prompt disposition = %q, want started", got)
+	}
+	if got := responseDisposition(t, rows, "steer", "s1"); got != "queued" {
+		t.Fatalf("steer disposition = %q, want queued", got)
+	}
+	if got := responseDisposition(t, rows, "follow_up", "f1"); got != "queued" {
+		t.Fatalf("follow_up disposition = %q, want queued", got)
+	}
+	if got := responseDisposition(t, rows, "prompt", "ps"); got != "queued" {
+		t.Fatalf("streaming steer prompt disposition = %q, want queued", got)
+	}
+	if got := responseDisposition(t, rows, "prompt", "pf"); got != "queued" {
+		t.Fatalf("streaming followUp prompt disposition = %q, want queued", got)
+	}
+}
+
+func TestRPCHandledDisposition(t *testing.T) {
+	h := spawnRuntimeExt(t, "handled", nil)
+	var calls int32
+	e := &Engine{
+		Hosts: []*ext.Host{h},
+		Stream: func(ctx context.Context, req ai.Context, _ ai.Options) (*ai.EventStream, error) {
+			atomic.AddInt32(&calls, 1)
+			return textReply("pong")(ctx, req, ai.Options{})
+		},
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+	}
+	e.rebuildCommands()
+	e.Steering = e.drainSteer
+	e.FollowUp = e.drainFollow
+
+	in := strings.NewReader(`{"id":"p","type":"prompt","message":"/ping"}
+{"id":"s","type":"steer","message":"/ping"}
+{"id":"f","type":"follow_up","message":"/ping"}
+{"type":"quit"}
+`)
+	var out bytes.Buffer
+	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("handled input started a turn: calls=%d", calls)
+	}
+	if n := e.pendingCount(); n != 0 {
+		t.Fatalf("handled input queued: pending=%d", n)
+	}
+	rows := decodeRPCRows(t, out.String())
+	for _, spec := range []struct{ command, id string }{
+		{"prompt", "p"},
+		{"steer", "s"},
+		{"follow_up", "f"},
+	} {
+		if got := responseDisposition(t, rows, spec.command, spec.id); got != "handled" {
+			t.Fatalf("%s disposition = %q, want handled", spec.command, got)
+		}
+	}
+}
+
+func rpcResponse(rows []map[string]any, command, id string) map[string]any {
+	for _, r := range rows {
+		if r["type"] == "response" && r["command"] == command && r["id"] == id {
+			return r
+		}
+	}
+	return nil
+}
+
+func responseDisposition(t *testing.T, rows []map[string]any, command, id string) string {
+	t.Helper()
+	row := rpcResponse(rows, command, id)
+	if row == nil {
+		t.Fatalf("missing %s response id=%s", command, id)
+	}
+	if row["success"] != true {
+		t.Fatalf("%s success = %v, want true: %v", command, row["success"], row)
+	}
+	data, _ := row["data"].(map[string]any)
+	d, _ := data["disposition"].(string)
+	return d
+}
+
+func waitQueueText(t *testing.T, e *Engine, steer, follow string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		gotSteer, gotFollow := e.queueTexts()
+		if (steer == "" || containsString(gotSteer, steer)) && (follow == "" || containsString(gotFollow, follow)) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	gotSteer, gotFollow := e.queueTexts()
+	t.Fatalf("queue steer=%v follow=%v, want %q / %q", gotSteer, gotFollow, steer, follow)
 }
 
 func TestRPCSteerEmitsQueueUpdate(t *testing.T) {

@@ -37,7 +37,16 @@ Failures set `success` false and `error`. Unknown commands emit
 `set_auto_retry`, `abort_retry`.
 
 While a prompt is running, another `prompt` must set `streamingBehavior` or it
-fails. Compaction in progress rejects `prompt`.
+fails. Compaction in progress rejects `prompt`. Failures omit `data`.
+
+A successful `prompt` returns `data.disposition`:
+
+- `started` — the turn began immediately
+- `queued` — the message entered the queue named by `streamingBehavior`
+- `handled` — a slash command or input handler consumed it, so no turn starts
+
+A successful `steer` or `follow_up` returns `data.disposition` of `queued` or
+`handled`. `queued` means that command's queue. `clear_queue` is unchanged.
 
 Agent JSON events (same shapes as [json.md](json.md), including queue,
 compaction, and retry types) are mixed onto stdout during a run. Extension UI

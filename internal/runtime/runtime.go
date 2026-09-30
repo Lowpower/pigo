@@ -1001,15 +1001,19 @@ func (e *Engine) preparePrompt(ctx context.Context, user string, images []ai.Ima
 	return promptPrep{User: user, Images: images}, nil
 }
 
-func (e *Engine) queuePrepared(ctx context.Context, user string, images []ai.ImageContent, push func(string, []ai.ImageContent)) error {
+// queuePrepared runs prompt preflight and queues the message when it was not
+// consumed by a slash command or input handler. queued is false when the input
+// was handled or when preflight failed.
+func (e *Engine) queuePrepared(ctx context.Context, user string, images []ai.ImageContent, push func(string, []ai.ImageContent)) (queued bool, err error) {
 	prep, err := e.preparePrompt(ctx, user, images)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if !prep.Handled {
-		push(prep.User, prep.Images)
+	if prep.Handled {
+		return false, nil
 	}
-	return nil
+	push(prep.User, prep.Images)
+	return true, nil
 }
 
 // RunPrompt runs one user prompt through the agent loop (print/json/rpc/TUI).
