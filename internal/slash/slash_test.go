@@ -2,41 +2,25 @@ package slash
 
 import "testing"
 
-func TestParseQuit(t *testing.T) {
-	c, ok := Parse("/quit")
-	if !ok || c.Name != "quit" {
-		t.Fatalf("got %+v ok=%v", c, ok)
+func TestParse(t *testing.T) {
+	tests := []struct{ in, name, rest string }{
+		{"/quit", "quit", ""},
+		{"/exit", "quit", ""},
+		{"/model anthropic/claude-sonnet-4", "model", "anthropic/claude-sonnet-4"},
+		{"/clone", "clone", ""},
+		{"/tree", "tree", ""},
+		{"/image a red cube", "image", "a red cube"},
 	}
-	c, ok = Parse("/exit")
-	if !ok || c.Name != "quit" {
-		t.Fatalf("alias exit: %+v ok=%v", c, ok)
+	for _, tt := range tests {
+		c, ok := Parse(tt.in)
+		if !ok || c.Name != tt.name || c.Rest != tt.rest {
+			t.Fatalf("Parse(%q) = %+v ok=%v", tt.in, c, ok)
+		}
 	}
-}
-
-func TestParseArgs(t *testing.T) {
-	c, ok := Parse("/model anthropic/claude-sonnet-4")
-	if !ok || c.Name != "model" || c.Rest != "anthropic/claude-sonnet-4" {
-		t.Fatalf("got %+v ok=%v", c, ok)
-	}
-}
-
-func TestParseNonSlash(t *testing.T) {
-	if _, ok := Parse("hello"); ok {
-		t.Fatal("plain text should not parse as slash")
-	}
-	if _, ok := Parse("// comment"); ok {
-		t.Fatal("// should not parse as slash")
-	}
-}
-
-func TestParseCloneAndTree(t *testing.T) {
-	c, ok := Parse("/clone")
-	if !ok || c.Name != "clone" {
-		t.Fatalf("clone: %+v ok=%v", c, ok)
-	}
-	c, ok = Parse("/tree")
-	if !ok || c.Name != "tree" {
-		t.Fatalf("tree: %+v ok=%v", c, ok)
+	for _, in := range []string{"hello", "// comment"} {
+		if _, ok := Parse(in); ok {
+			t.Fatalf("%q should not parse as slash", in)
+		}
 	}
 }
 
@@ -83,13 +67,6 @@ func TestHelpListsShareAndChangelog(t *testing.T) {
 	}
 	if !contains(text, "/image") {
 		t.Fatalf("help missing /image:\n%s", text)
-	}
-}
-
-func TestParseImage(t *testing.T) {
-	c, ok := Parse("/image a red cube")
-	if !ok || c.Name != "image" || c.Rest != "a red cube" {
-		t.Fatalf("%+v ok=%v", c, ok)
 	}
 }
 

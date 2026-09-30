@@ -1378,59 +1378,35 @@ func TestRPCClearQueue(t *testing.T) {
 	}
 }
 
-func TestRPCPromptRejectedDuringCompaction(t *testing.T) {
-	e := &Engine{
-		Stream:   textReply("pong"),
-		Provider: "anthropic",
-		Tools:    tools.NewRegistry(),
-		Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+func TestRPCRejectedDuringCompaction(t *testing.T) {
+	tests := []struct {
+		name string
+		e    *Engine
+		in   string
+	}{
+		{"prompt", &Engine{
+			Stream:   textReply("pong"),
+			Provider: "anthropic",
+			Tools:    tools.NewRegistry(),
+			Opts:     Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}},
+		}, `{"type":"prompt","message":"hi"}`},
+		{"steer", &Engine{Opts: Options{Config: config.Config{SteeringMode: "one-at-a-time"}}}, `{"type":"steer","message":"nudge"}`},
+		{"follow_up", &Engine{Opts: Options{Config: config.Config{FollowUpMode: "one-at-a-time"}}}, `{"type":"follow_up","message":"later"}`},
 	}
-	e.setCompacting(true)
-	in := strings.NewReader(`{"type":"prompt","message":"hi"}
-{"type":"quit"}
-`)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), `"success":false`) {
-		t.Fatalf("expected failure: %s", out.String())
-	}
-	if !strings.Contains(out.String(), "compaction") {
-		t.Fatalf("missing compaction error: %s", out.String())
-	}
-}
-
-func TestRPCSteerRejectedDuringCompaction(t *testing.T) {
-	e := &Engine{Opts: Options{Config: config.Config{SteeringMode: "one-at-a-time"}}}
-	e.setCompacting(true)
-	in := strings.NewReader(`{"type":"steer","message":"nudge"}
-{"type":"quit"}
-`)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), `"success":false`) || !strings.Contains(out.String(), "compaction") {
-		t.Fatalf("expected steer failure: %s", out.String())
-	}
-	if n := e.pendingCount(); n != 0 {
-		t.Fatalf("queued during compact: %d", n)
-	}
-}
-
-func TestRPCFollowUpRejectedDuringCompaction(t *testing.T) {
-	e := &Engine{Opts: Options{Config: config.Config{FollowUpMode: "one-at-a-time"}}}
-	e.setCompacting(true)
-	in := strings.NewReader(`{"type":"follow_up","message":"later"}
-{"type":"quit"}
-`)
-	var out bytes.Buffer
-	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), `"success":false`) || !strings.Contains(out.String(), "compaction") {
-		t.Fatalf("expected follow_up failure: %s", out.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.e.setCompacting(true)
+			var out bytes.Buffer
+			if err := tt.e.ServeRPC(context.Background(), strings.NewReader(tt.in+"\n{\"type\":\"quit\"}\n"), &out); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), `"success":false`) || !strings.Contains(out.String(), "compaction") {
+				t.Fatalf("expected %s failure: %s", tt.name, out.String())
+			}
+			if n := tt.e.pendingCount(); n != 0 {
+				t.Fatalf("queued during compact: %d", n)
+			}
+		})
 	}
 }
 

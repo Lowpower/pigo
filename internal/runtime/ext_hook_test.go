@@ -733,30 +733,25 @@ func TestSpanEventDeniedSkipsExtension(t *testing.T) {
 	}
 }
 
-func TestUserBashResultReplacesLocal(t *testing.T) {
-	h := spawnRuntimeExt(t, "userbash", nil, "PIGO_USER_BASH=result")
-	e := &Engine{Hosts: []*ext.Host{h}, Opts: Options{Cwd: t.TempDir()}}
-	res := e.RunUserBash(context.Background(), "echo should-not-run", false, nil)
-	if res.Error != "" || res.Output != "from-ext" {
-		t.Fatalf("%+v", res)
+func TestRunUserBashExtensionModes(t *testing.T) {
+	tests := []struct {
+		mode, command string
+		check         func(BashResult) bool
+	}{
+		{"result", "echo should-not-run", func(r BashResult) bool { return r.Error == "" && r.Output == "from-ext" }},
+		{"invalid", "echo should-not-run", func(r BashResult) bool {
+			return r.Error != "" && !strings.Contains(r.Output, "should-not-run")
+		}},
+		{"empty", "printf pigo-local", func(r BashResult) bool { return r.Error == "" && strings.Contains(r.Output, "pigo-local") }},
 	}
-}
-
-func TestUserBashInvalidFailsClosed(t *testing.T) {
-	h := spawnRuntimeExt(t, "userbash", nil, "PIGO_USER_BASH=invalid")
-	e := &Engine{Hosts: []*ext.Host{h}, Opts: Options{Cwd: t.TempDir()}}
-	res := e.RunUserBash(context.Background(), "echo should-not-run", false, nil)
-	if res.Error == "" || strings.Contains(res.Output, "should-not-run") {
-		t.Fatalf("%+v", res)
-	}
-}
-
-func TestUserBashEmptyRunsLocal(t *testing.T) {
-	h := spawnRuntimeExt(t, "userbash", nil, "PIGO_USER_BASH=empty")
-	dir := t.TempDir()
-	e := &Engine{Hosts: []*ext.Host{h}, Opts: Options{Cwd: dir}}
-	res := e.RunUserBash(context.Background(), "printf pigo-local", false, nil)
-	if res.Error != "" || !strings.Contains(res.Output, "pigo-local") {
-		t.Fatalf("%+v", res)
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			h := spawnRuntimeExt(t, "userbash", nil, "PIGO_USER_BASH="+tt.mode)
+			e := &Engine{Hosts: []*ext.Host{h}, Opts: Options{Cwd: t.TempDir()}}
+			res := e.RunUserBash(context.Background(), tt.command, false, nil)
+			if !tt.check(res) {
+				t.Fatalf("%+v", res)
+			}
+		})
 	}
 }

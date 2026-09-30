@@ -95,15 +95,15 @@ func TestFullscreenViewFillsTerminal(t *testing.T) {
 	if !strings.Contains(viewHead(view, 6), "pigo") {
 		t.Fatalf("header should stay at the top:\n%s", viewHead(view, 6))
 	}
-}
 
-func TestFullscreenShortTranscriptStillFills(t *testing.T) {
-	m := New(fullscreenCfg())
-	m = send(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	if n := viewLineCount(m.present("overlay")); n != 24 {
+		t.Fatalf("overlay lines=%d, want 24", n)
+	}
+
 	m.transcript = []entry{{role: "meta", rendered: "short"}}
-	view := m.View()
+	view = m.View()
 	if got := viewLineCount(view); got != 24 {
-		t.Fatalf("lines=%d, want 24", got)
+		t.Fatalf("short transcript lines=%d, want 24", got)
 	}
 	assertDockAtBottom(t, view)
 }
@@ -163,14 +163,5 @@ func TestFullscreenEditorWidthFollowsTerminal(t *testing.T) {
 	}
 	if full.mermaidWidth() <= regular.mermaidWidth() {
 		t.Fatalf("fullscreen markdown wrap=%d, regular=%d", full.mermaidWidth(), regular.mermaidWidth())
-	}
-}
-
-func TestPresentFillsFullscreenViewport(t *testing.T) {
-	m := New(fullscreenCfg())
-	m = send(m, tea.WindowSizeMsg{Width: 120, Height: 24})
-	got := m.present("overlay")
-	if n := viewLineCount(got); n != 24 {
-		t.Fatalf("overlay lines=%d, want 24; view=%q", n, got)
 	}
 }

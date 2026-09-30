@@ -75,23 +75,24 @@ func TestMoveSwapsEnabled(t *testing.T) {
 	}
 }
 
-func TestSortedIDsEnabledFirst(t *testing.T) {
+func TestSortedIDs(t *testing.T) {
 	all := []string{"a/1", "b/2", "c/3"}
-	got := sortedIDs(enabledIDs{ids: []string{"c/3", "a/1"}}, all)
-	if !reflect.DeepEqual(got, []string{"c/3", "a/1", "b/2"}) {
-		t.Fatalf("%v", got)
+	tests := []struct {
+		name string
+		en   enabledIDs
+		all  []string
+		want []string
+	}{
+		{"enabled first", enabledIDs{ids: []string{"c/3", "a/1"}}, all, []string{"c/3", "a/1", "b/2"}},
+		{"all keeps order", enabledIDs{all: true}, all, all},
+		{"keeps unavailable", enabledIDs{ids: []string{"gone/x", "a/1"}}, []string{"a/1"}, []string{"gone/x", "a/1"}},
 	}
-	got = sortedIDs(enabledIDs{all: true}, all)
-	if !reflect.DeepEqual(got, all) {
-		t.Fatalf("all order: %v", got)
-	}
-}
-
-func TestSortedIDsKeepsUnavailable(t *testing.T) {
-	all := []string{"a/1"}
-	got := sortedIDs(enabledIDs{ids: []string{"gone/x", "a/1"}}, all)
-	if !reflect.DeepEqual(got, []string{"gone/x", "a/1"}) {
-		t.Fatalf("%v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sortedIDs(tt.en, tt.all); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("%v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
