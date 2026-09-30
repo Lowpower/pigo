@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"math"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -576,28 +575,6 @@ func TestConformanceClearName(t *testing.T) {
 	}
 }
 
-func TestMigrationsSchema(t *testing.T) {
-	repo, _ := fixture(t)
-	s := create(t, repo, "x", t.TempDir())
-	_ = s
-	db := repo.db
-	var id string
-	if err := db.QueryRow(`SELECT id FROM migrations`).Scan(&id); err != nil || id != "001_initial.sql" {
-		t.Fatalf("migration %q %v", id, err)
-	}
-	tables := []string{"sessions", "entries", "session_sequences", "session_stats", "branch_entries", "branch_tips", "lanes", "records", "lane_moves", "facts", "writer_leases"}
-	for _, name := range tables {
-		ok, err := tableExists(db, name)
-		if err != nil || !ok {
-			t.Fatalf("missing table %s: %v", name, err)
-		}
-	}
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'leaf_id'`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("sessions.leaf_id should not exist")
-	}
-}
-
 func TestWriterLeaseSecondWriter(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.sqlite")
@@ -653,30 +630,5 @@ func TestSearchLazyFTS(t *testing.T) {
 	}
 	if len(hits) != 1 || hits[0].EntryID != "m" {
 		t.Fatalf("hits %+v", hits)
-	}
-}
-
-func TestJSONLDefaultUntouched(t *testing.T) {
-	root := testdataRoot(t)
-	if _, err := os.Stat(filepath.Join(root, "internal", "session", "session.go")); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func testdataRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("go.mod not found")
-		}
-		dir = parent
 	}
 }

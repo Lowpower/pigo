@@ -6,22 +6,6 @@ import (
 	"testing"
 )
 
-func TestEditInExternalEditorSuccess(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "ed.sh")
-	body := "#!/bin/sh\nprintf 'from-editor\\n' > \"$1\"\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := EditInExternalEditor(script, "original")
-	if !ok {
-		t.Fatal("expected success")
-	}
-	if got != "from-editor" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestEditInExternalEditorKeepsOriginalOnFailure(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ed.sh")

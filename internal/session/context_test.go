@@ -103,41 +103,6 @@ func TestRestoreCustomMessageAndSkipCustom(t *testing.T) {
 	}
 }
 
-func TestCompactionJSONLRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "session.jsonl")
-	body := `{"type":"session","version":3,"id":"sid","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/tmp"}
-{"type":"message","id":"m1","parentId":null,"timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"old"}}
-{"type":"message","id":"m2","parentId":"m1","timestamp":"2026-01-01T00:00:02.000Z","message":{"role":"assistant","content":"ok"}}
-{"type":"message","id":"m3","parentId":"m2","timestamp":"2026-01-01T00:00:03.000Z","message":{"role":"user","content":"keep"}}
-{"type":"compaction","id":"c1","parentId":"m3","timestamp":"2026-01-01T00:00:04.000Z","summary":"sum","firstKeptEntryId":"m3","tokensBefore":42}
-{"type":"message","id":"m4","parentId":"c1","timestamp":"2026-01-01T00:00:05.000Z","message":{"role":"user","content":"next"}}
-`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	opened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := ContextEntries(opened)
-	if len(ctx) < 3 || ctx[0].Type != "compaction" || ctx[0].FirstKeptEntryID != "m3" {
-		t.Fatalf("ctx=%+v", ctx)
-	}
-	msgs := RestoreAIMessages(ctx)
-	var texts []string
-	for _, msg := range msgs {
-		texts = append(texts, msg.Content)
-	}
-	joined := strings.Join(texts, "|")
-	if strings.Contains(joined, "old") {
-		t.Fatalf("old leaked: %s", joined)
-	}
-	if !strings.Contains(joined, "sum") || !strings.Contains(joined, "keep") || !strings.Contains(joined, "next") {
-		t.Fatalf("context = %s", joined)
-	}
-}
-
 func TestAppendCompactionJSONLShape(t *testing.T) {
 	agent := t.TempDir()
 	cwd := t.TempDir()

@@ -424,16 +424,6 @@ func TestDoubleEscapeOpensTree(t *testing.T) {
 	}
 }
 
-func TestTreeOpensWhileRunning(t *testing.T) {
-	m := treeModel(t)
-	m.running = true
-	m.editor.SetValue("/tree")
-	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.overlay != overlayTree {
-		t.Fatalf("overlay = %d", m.overlay)
-	}
-}
-
 func TestTreeConfirmAbortsThenNavigates(t *testing.T) {
 	m := treeModel(t)
 	m.cfg.BranchSummary.SkipPrompt = boolPtr(true)

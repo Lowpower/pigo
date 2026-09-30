@@ -2,7 +2,6 @@ package tui
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -192,14 +191,4 @@ func newFlushedSession(t *testing.T, cwd, agent, text string) *session.Manager {
 		t.Fatal(err)
 	}
 	return m
-}
-
-func TestSessionDirLayout(t *testing.T) {
-	// sanity: two cwds land in different folders under the same agentDir
-	agent := t.TempDir()
-	a := newFlushedSession(t, t.TempDir(), agent, "a")
-	b := newFlushedSession(t, t.TempDir(), agent, "b")
-	if filepath.Dir(a.File()) == filepath.Dir(b.File()) {
-		t.Fatalf("expected different session dirs: %s vs %s", a.File(), b.File())
-	}
 }

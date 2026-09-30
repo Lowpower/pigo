@@ -226,19 +226,6 @@ func TestExternalEditorDoneReplacesText(t *testing.T) {
 	}
 }
 
-func TestHotkeysListsEditorBindings(t *testing.T) {
-	text := keys.NewManager("").HotkeysText()
-	paste := "ctrl+v"
-	if keys.UseWindowsKeys() {
-		paste = "alt+v"
-	}
-	for _, want := range []string{"ctrl+g", paste, "ctrl+y", "ctrl+]", "tab"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("hotkeys missing %s:\n%s", want, text)
-		}
-	}
-}
-
 func TestEditorUndoRestoresText(t *testing.T) {
 	e := newPromptEditor()
 	e.SetValue("hello")

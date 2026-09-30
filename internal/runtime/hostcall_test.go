@@ -141,18 +141,13 @@ func TestHostCallFromExtension(t *testing.T) {
 	}
 }
 
-func TestEventBusFanout(t *testing.T) {
+func TestHostCallEventsOnSubscribesBus(t *testing.T) {
 	e := &Engine{}
-	h1 := &ext.Host{}
-	h1.SubscribeBus("ping")
-	got := map[string]any{}
-	// SendHostEvent on a non-spawned Host just fails send; check HandleHostCall subscribe still records.
-	e.Hosts = []*ext.Host{h1}
-	e.HandleHostCall(h1, "events.on", map[string]any{"event": "ping"})
-	if !h1.WantsBus("ping") {
+	h := &ext.Host{}
+	e.HandleHostCall(h, "events.on", map[string]any{"event": "ping"})
+	if !h.WantsBus("ping") {
 		t.Fatal("expected bus subscription")
 	}
-	_ = got
 }
 
 func TestWantShutdown(t *testing.T) {

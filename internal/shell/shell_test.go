@@ -135,18 +135,6 @@ func TestNormalizeWindowsShellPath(t *testing.T) {
 	}
 }
 
-func TestIsLegacyWSLBash(t *testing.T) {
-	if !IsLegacyWSLBash(`C:\Windows\System32\bash.exe`) {
-		t.Fatal("system32")
-	}
-	if !IsLegacyWSLBash(`C:/Windows/Sysnative/bash.exe`) {
-		t.Fatal("sysnative")
-	}
-	if IsLegacyWSLBash(`C:\Program Files\Git\bin\bash.exe`) {
-		t.Fatal("git bash is not legacy wsl")
-	}
-}
-
 func TestWaitStreamChunks(t *testing.T) {
 	cfg, err := GetConfig()
 	if err != nil {

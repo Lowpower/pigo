@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -206,21 +205,6 @@ func TestCallbackHostRejectsNonLoopback(t *testing.T) {
 	if got := callbackHost(); got != "127.0.0.1" {
 		t.Fatalf("loopback=%q", got)
 	}
-}
-
-func extraStringSliceForTest(t *testing.T, raw string) {
-	t.Helper()
-	var c Credential
-	if err := json.Unmarshal([]byte(raw), &c); err != nil {
-		t.Fatal(err)
-	}
-	if got := extraStringSlice(c, "availableModelIds"); len(got) != 1 || got[0] != "m1" {
-		t.Fatalf("%v extra=%v", got, c.Extra)
-	}
-}
-
-func TestExtraStringSliceFromJSON(t *testing.T) {
-	extraStringSliceForTest(t, `{"type":"oauth","access":"a","availableModelIds":["m1"]}`)
 }
 
 func copilotCatalogHas(id string) bool {

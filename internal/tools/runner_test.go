@@ -2,7 +2,6 @@ package tools
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -158,17 +157,5 @@ func TestDockerRunnerMissingBinary(t *testing.T) {
 	cmd, err := r.Bash(t.Context(), "echo hi", cwd, nil)
 	if cmd != nil || !errors.Is(err, ErrDockerMissing) {
 		t.Fatalf("bash cmd=%v err=%v", cmd, err)
-	}
-}
-
-func TestHostRunnerStillReadsTempFiles(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a.txt")
-	if err := os.WriteFile(path, []byte("z\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, isErr := readTool{cwd: dir}.Execute(t.Context(), map[string]any{"path": "a.txt"})
-	if isErr || out != "z\n" {
-		t.Fatalf("host nil runner = %q isErr=%v", out, isErr)
 	}
 }

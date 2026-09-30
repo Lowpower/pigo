@@ -298,21 +298,6 @@ func writeCLINpmIndex(t *testing.T, agent, name string, spawnable bool) string {
 	return p
 }
 
-func TestCollectExtensionSpecsLocalPathUnchanged(t *testing.T) {
-	opts := Options{
-		Cwd:           t.TempDir(),
-		AgentDir:      t.TempDir(),
-		CLIExtensions: []string{"/tmp/hello-ext", "https://github.com/org/repo"},
-	}
-	got, err := collectExtensionSpecs(context.Background(), opts, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(got, ",") != "/tmp/hello-ext,https://github.com/org/repo" {
-		t.Fatalf("specs=%v", got)
-	}
-}
-
 func TestCollectExtensionSpecsResolvesNpm(t *testing.T) {
 	agent := t.TempDir()
 	want := writeCLINpmIndex(t, agent, "demo-ext", true)

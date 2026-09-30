@@ -467,29 +467,6 @@ func TestSchemasAndRegistry(t *testing.T) {
 	}
 }
 
-// TestToolsShowcase runs every tool against a temp workspace and logs the real
-// outputs (serves as living documentation and demo evidence under -v).
-func TestToolsShowcase(t *testing.T) {
-	dir := t.TempDir()
-	reg := Default()
-	show := func(name string, args map[string]any) {
-		out, isErr := reg.Execute(context.Background(), name, args)
-		t.Logf("\n$ tool %s %v  (isError=%v)\n%s", name, args, isErr, out)
-	}
-
-	show("write", map[string]any{"path": filepath.Join(dir, "greeting.txt"), "content": "hello\nworld\n"})
-	show("write", map[string]any{"path": filepath.Join(dir, "src/app.go"), "content": "package app\n\nfunc Greet() string { return \"hi\" }\n"})
-	show("ls", map[string]any{"path": dir})
-	show("find", map[string]any{"path": dir, "pattern": "**/*.go"})
-	show("grep", map[string]any{"path": dir, "pattern": "func", "context": 0})
-	show("read", map[string]any{"path": filepath.Join(dir, "greeting.txt")})
-	show("edit", map[string]any{
-		"path":  filepath.Join(dir, "greeting.txt"),
-		"edits": []any{map[string]any{"oldText": "world", "newText": "gophers"}},
-	})
-	show("bash", map[string]any{"command": "echo tools-work && uname -s"})
-}
-
 func TestBashRejectsHugeTimeout(t *testing.T) {
 	out, isErr := Default().Execute(context.Background(), "bash", map[string]any{
 		"command": "echo hi",

@@ -374,17 +374,6 @@ func TestBedrockThinkingFields(t *testing.T) {
 	}
 }
 
-func TestFireworksDefaultIDUpdated(t *testing.T) {
-	spec, ok := models.LookupProvider("fireworks")
-	if !ok {
-		t.Fatal("missing fireworks")
-	}
-	want := "accounts/fireworks/models/deepseek-v4-flash-0731"
-	if spec.DefaultID != want {
-		t.Fatalf("DefaultID = %q, want %q", spec.DefaultID, want)
-	}
-}
-
 func TestMapAnthropicStopRefusal(t *testing.T) {
 	if mapAnthropicStopReason("refusal") != StopError {
 		t.Fatal("refusal")

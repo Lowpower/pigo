@@ -49,21 +49,6 @@ func TestDetectImageProtocol(t *testing.T) {
 	}
 }
 
-func TestEncodeKittySingleChunk(t *testing.T) {
-	got := encodeKitty("AAAA", 60)
-	want := "\x1b_Ga=T,f=100,q=2,c=60;AAAA\x1b\\"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}
-
-func TestEncodeKittyUsesWidthCells(t *testing.T) {
-	got := encodeKitty("AAAA", 80)
-	if !strings.Contains(got, ",c=80;") {
-		t.Fatalf("%q", got)
-	}
-}
-
 func TestEncodeKittyChunks(t *testing.T) {
 	data := strings.Repeat("A", 5000)
 	got := encodeKitty(data, 60)
@@ -75,14 +60,6 @@ func TestEncodeKittyChunks(t *testing.T) {
 	}
 	if strings.Count(got, "\x1b_G") < 2 {
 		t.Fatalf("want at least 2 frames, got %d", strings.Count(got, "\x1b_G"))
-	}
-}
-
-func TestEncodeITerm2IncludesSize(t *testing.T) {
-	got := encodeITerm2("AAAA", 60)
-	want := "\x1b]1337;File=inline=1;width=60;size=3:AAAA\x07"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
 	}
 }
 

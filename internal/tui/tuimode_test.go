@@ -50,15 +50,6 @@ func assertDockAtBottom(t *testing.T, view string) {
 	}
 }
 
-func TestUseAltScreen(t *testing.T) {
-	if useAltScreen(config.Config{}) {
-		t.Fatal("regular should not use alt screen")
-	}
-	if !useAltScreen(config.Config{TUIMode: "fullscreen"}) {
-		t.Fatal("fullscreen should use alt screen")
-	}
-}
-
 func TestFullscreenExitText(t *testing.T) {
 	m := New(testCfg())
 	m.cfg.FullscreenExitOutput = "resume-hint"

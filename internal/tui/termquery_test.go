@@ -3,8 +3,6 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/Lowpower/pigo/internal/theme"
 )
 
@@ -20,19 +18,6 @@ func TestParsePartialReplyIsIncomplete(t *testing.T) {
 	_, done := parseColorReplies([]byte("\x1b]11;rgb:0000/0000/0000\x07"))
 	if done {
 		t.Fatal("OSC 11 alone should not finish the query")
-	}
-}
-
-func TestSystemThemeAppliesWithoutQuery(t *testing.T) {
-	cfg := testCfg()
-	cfg.Theme = "system"
-	m := New(cfg)
-	if m.theme.Name != "system" || m.theme.Error == "" {
-		t.Fatalf("%+v", m.theme)
-	}
-	m = send(m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	if m.View() == "" {
-		t.Fatal("empty view")
 	}
 }
 

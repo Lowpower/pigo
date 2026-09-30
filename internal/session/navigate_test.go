@@ -1,8 +1,6 @@
 package session
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -168,19 +166,4 @@ func TestSummariesAllListsOtherCwd(t *testing.T) {
 	if len(local) != 1 || local[0].ID != a.ID() {
 		t.Fatalf("local = %+v", local)
 	}
-}
-
-func TestDeleteSessionFile(t *testing.T) {
-	agent := t.TempDir()
-	cwd := t.TempDir()
-	m := New(cwd, agent)
-	_, _ = m.AppendMessage("user", map[string]any{"role": "user", "content": "x"})
-	_, _ = m.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "y"})
-	if err := os.Remove(m.File()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(m.File()); !os.IsNotExist(err) {
-		t.Fatal("expected missing file")
-	}
-	_ = filepath.Dir(m.File())
 }
