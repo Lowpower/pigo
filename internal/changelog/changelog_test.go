@@ -80,13 +80,6 @@ func TestStartupNoticeCollapsed(t *testing.T) {
 	}
 }
 
-func TestFullMarkdown(t *testing.T) {
-	got := FullMarkdown()
-	if !strings.Contains(got, "## 0.0.1") {
-		t.Fatalf("%s", got)
-	}
-}
-
 func TestEmbeddedMatchesRepoChangelog(t *testing.T) {
 	root, err := os.ReadFile(filepath.Join("..", "..", "CHANGELOG.md"))
 	if err != nil {

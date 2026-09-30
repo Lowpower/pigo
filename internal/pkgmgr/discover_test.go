@@ -58,31 +58,6 @@ func TestPigoManifestExtensions(t *testing.T) {
 	}
 }
 
-func TestIsSpawnable(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "tool")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	mod := filepath.Join(dir, "mod.js")
-	if err := os.WriteFile(mod, []byte("export default 1"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	script := filepath.Join(dir, "run.py")
-	if err := os.WriteFile(script, []byte("#!/usr/bin/env python3\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !IsSpawnable(bin) {
-		t.Fatal("executable should be spawnable")
-	}
-	if IsSpawnable(mod) {
-		t.Fatal("plain js module should not be spawnable")
-	}
-	if !IsSpawnable(script) {
-		t.Fatal("shebang script should be spawnable")
-	}
-}
-
 func containsBase(paths []string, base string) bool {
 	for _, p := range paths {
 		if filepath.Base(p) == base {

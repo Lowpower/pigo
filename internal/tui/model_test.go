@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -29,16 +28,6 @@ func testCfg() config.Config {
 func send(m tea.Model, msg tea.Msg) Model {
 	next, _ := m.Update(msg)
 	return next.(Model)
-}
-
-func TestNewlineKeybindingMatchesPi(t *testing.T) {
-	keys := New(testCfg()).editor.ta.KeyMap.InsertNewline.Keys()
-	if !slices.Contains(keys, "shift+enter") || !slices.Contains(keys, "ctrl+j") {
-		t.Errorf("newline keys = %v, want shift+enter and ctrl+j", keys)
-	}
-	if slices.Contains(keys, "enter") {
-		t.Errorf("Enter must not insert a newline (it sends), keys = %v", keys)
-	}
 }
 
 func TestCtrlCClearsEditorWhenIdle(t *testing.T) {

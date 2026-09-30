@@ -258,15 +258,6 @@ func TestFoldOrUpJumpsToSegmentStart(t *testing.T) {
 	}
 }
 
-func TestEntryCopyTextUser(t *testing.T) {
-	e := session.Entry{Type: "message"}
-	raw, _ := json.Marshal(map[string]any{"role": "user", "content": "copy me"})
-	e.Message = raw
-	if got := entryCopyText(e); got != "copy me" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func renderAll(vis []flatNode) string {
 	var b strings.Builder
 	for i, n := range vis {

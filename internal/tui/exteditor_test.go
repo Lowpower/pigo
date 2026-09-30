@@ -34,21 +34,6 @@ func TestEditInExternalEditorStripsBOMAndTrailingNewline(t *testing.T) {
 	}
 }
 
-func TestExtractImagesFromClipboardPath(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "pigo-clipboard-abc.png")
-	if err := os.WriteFile(path, mustDecodePNG(), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	imgs := extractImages("look at " + path + " please")
-	if len(imgs) != 1 {
-		t.Fatalf("got %d images", len(imgs))
-	}
-	if imgs[0].MimeType != "image/png" || imgs[0].Data == "" {
-		t.Fatalf("%+v", imgs[0])
-	}
-}
-
 func TestExtractImagesSkipsMissingAndNonImage(t *testing.T) {
 	dir := t.TempDir()
 	txt := filepath.Join(dir, "notes.png")

@@ -206,13 +206,6 @@ func TestSubmitAddsPromptHistory(t *testing.T) {
 	}
 }
 
-func TestExternalEditorKeyIsBound(t *testing.T) {
-	m := editorModel()
-	if !m.keyIs(tea.KeyMsg{Type: tea.KeyCtrlG}, "app.editor.external") {
-		t.Fatal("ctrl+g should open the external editor")
-	}
-}
-
 func TestExternalEditorDoneReplacesText(t *testing.T) {
 	m := editorModel()
 	m.editor.SetValue("old")

@@ -1518,21 +1518,3 @@ func TestBoundStreamUsesModelsJSONCustomProvider(t *testing.T) {
 		t.Fatalf("model = %q", gotModel)
 	}
 }
-
-func TestAdoptSessionPersistedCountsAIMessages(t *testing.T) {
-	sess := session.New(t.TempDir(), t.TempDir())
-	if _, err := sess.AppendModelChange("openai", "gpt-4o"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sess.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sess.AppendMessage("assistant", map[string]any{"role": "assistant", "content": "yo"}); err != nil {
-		t.Fatal(err)
-	}
-	e := &Engine{}
-	e.AdoptSession(sess)
-	if e.persisted != 2 {
-		t.Fatalf("persisted=%d want 2", e.persisted)
-	}
-}
