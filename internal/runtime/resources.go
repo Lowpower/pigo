@@ -78,7 +78,9 @@ func spawnPathKey(path string) string {
 
 func (e *Engine) applyResolved(rs []pkgmgr.Resource) {
 	e.Skills = loadSkills(e.Opts, rs)
-	e.Templates = loadTemplates(e.Opts, rs)
+	tpls, diags := loadTemplates(e.Opts, rs)
+	e.Templates = tpls
+	e.promptTemplateWarnings = prompt.FormatWarnings(diags)
 	e.ThemeFiles = loadThemeFiles(e.Opts, rs)
 }
 
@@ -91,7 +93,13 @@ func loadSkills(opts Options, rs []pkgmgr.Resource) []skills.Skill {
 	return sk
 }
 
-func loadTemplates(opts Options, rs []pkgmgr.Resource) []prompt.Template {
+// PromptTemplateWarnings returns the latest prompt-template load warnings.
+// Each line is a full "Warning: ..." sentence for startup stderr and /reload.
+func (e *Engine) PromptTemplateWarnings() []string {
+	return e.promptTemplateWarnings
+}
+
+func loadTemplates(opts Options, rs []pkgmgr.Resource) ([]prompt.Template, []prompt.Diagnostic) {
 	paths := append([]string{}, opts.PromptPaths...)
 	if !opts.NoPromptTpls {
 		paths = append(paths, enabledPaths(rs, pkgmgr.KindPrompts)...)
@@ -157,7 +165,9 @@ func (e *Engine) extendResourcesFromExtensions(ctx context.Context, reason strin
 	}
 	if paths := asStringSlice(res["promptPaths"]); len(paths) > 0 {
 		e.Opts.PromptPaths = append(e.Opts.PromptPaths, paths...)
-		e.Templates = append(e.Templates, prompt.DiscoverTemplates("", "", paths, false, false)...)
+		more, diags := prompt.DiscoverTemplates("", "", paths, false, false)
+		e.Templates = append(e.Templates, more...)
+		e.promptTemplateWarnings = append(e.promptTemplateWarnings, prompt.FormatWarnings(diags)...)
 	}
 	if paths := asStringSlice(res["themePaths"]); len(paths) > 0 {
 		e.ThemeFiles = append(e.ThemeFiles, paths...)

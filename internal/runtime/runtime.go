@@ -77,8 +77,10 @@ type Engine struct {
 	Skills     []skills.Skill
 	Templates  []prompt.Template
 	ThemeFiles []string // enabled theme files from pkgmgr.Resolve; CLI --theme stays on Opts.ThemePaths
-	Scoped     []models.Spec
-	System     string
+	// promptTemplateWarnings are the latest prompt-template load warnings.
+	promptTemplateWarnings []string
+	Scoped                 []models.Spec
+	System                 string
 
 	Steering  func() []ai.Message
 	FollowUp  func() []ai.Message
@@ -252,7 +254,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 
 	sk := loadSkills(opts, rs)
-	tpls := loadTemplates(opts, rs)
+	tpls, promptDiags := loadTemplates(opts, rs)
 	themeFiles := loadThemeFiles(opts, rs)
 
 	sys := prompt.Build(prompt.Options{
@@ -272,6 +274,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.setBugExtensions(hostPaths(hosts), extSpecs, rs)
 	e.Skills = sk
 	e.Templates = tpls
+	e.promptTemplateWarnings = prompt.FormatWarnings(promptDiags)
 	e.ThemeFiles = themeFiles
 	e.System = sys
 	e.Steering = e.drainSteer
