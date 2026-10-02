@@ -213,6 +213,9 @@ func modelFromMap(provider string, m map[string]any) models.Model {
 	if md.ID == "" {
 		md.ID = asString(m["name"])
 	}
+	if raw, ok := m["samplingParams"].(map[string]any); ok {
+		md.SamplingParams = models.MergeSamplingParams(nil, raw)
+	}
 	return md
 }
 

@@ -85,6 +85,24 @@ Unknown provider ids are registered, including API-key auth. `apiKey` in
 requests. Overlaying a custom gateway onto a builtin id such as `openai` still
 merges catalogs; prefer a distinct provider id. See [providers.md](providers.md).
 
+## samplingParams
+
+`samplingParams` is a free-form object of OpenAI-compatible request fields.
+Chat Completions and Responses (including Azure Responses) copy it onto the
+request body. Unknown keys are sent as-is. `0`, `false`, and `null` are kept.
+`{}` is the same as omitting the field.
+
+User and remote overlays merge per key. A later overlay wins on keys it sets
+and leaves the other keys in place. Per-request `samplingParams` then override
+the merged model values. Fields the request already set, such as `max_tokens`
+or `max_output_tokens`, stay as the caller set them.
+
+Other APIs ignore the field.
+
+```json
+{ "id": "local", "samplingParams": { "temperature": 0.7, "top_k": 0, "min_p": 0.05 } }
+```
+
 ## compat
 
 Per-model `compat` on a catalog entry:

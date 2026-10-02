@@ -75,9 +75,6 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 		if cacheOpts := promptCacheOptions(opts); cacheOpts != nil {
 			extra["prompt_cache_options"] = cacheOpts
 		}
-		if len(extra) > 0 {
-			params.SetExtraFields(extra)
-		}
 		if effort := reasoningEffort(opts); effort != "" {
 			params.Reasoning = shared.ReasoningParam{
 				Effort:  shared.ReasoningEffort(effort),
@@ -100,6 +97,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			}
 			params.Tools = tools
 		}
+		applyResponsesSampling(&params, extra, reqCtx, opts)
 
 		stream := client.Responses.NewStreaming(ctx, params)
 		s := NewEventStream(16)

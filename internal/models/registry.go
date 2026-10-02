@@ -300,10 +300,45 @@ func mergeOverlay(base, extra []Model) []Model {
 			if len(m.ThinkingLevelMap) > 0 {
 				out[i].ThinkingLevelMap = m.ThinkingLevelMap
 			}
+			if len(m.SamplingParams) > 0 {
+				out[i].SamplingParams = MergeSamplingParams(out[i].SamplingParams, m.SamplingParams)
+			}
 			continue
 		}
+		m.SamplingParams = MergeSamplingParams(nil, m.SamplingParams)
 		idx[m.ID] = len(out)
 		out = append(out, m)
+	}
+	return out
+}
+
+// MergeSamplingParams overlays extra onto base, one key at a time.
+// An empty extra leaves base unchanged. The result is nil when nothing is set.
+// Zero, false, and null values are kept.
+func MergeSamplingParams(base, extra map[string]any) map[string]any {
+	if len(extra) == 0 {
+		return cloneSamplingParams(base)
+	}
+	out := cloneSamplingParams(base)
+	if out == nil {
+		out = make(map[string]any, len(extra))
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func cloneSamplingParams(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
 	}
 	return out
 }
