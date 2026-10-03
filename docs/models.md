@@ -97,7 +97,9 @@ and leaves the other keys in place. Per-request `samplingParams` then override
 the merged model values. Fields the request already set, such as `max_tokens`
 or `max_output_tokens`, stay as the caller set them.
 
-Other APIs ignore the field.
+Other APIs ignore the field. Compaction, branch summaries, cache warming,
+and an extension `stream: true` handler receive the same resolved object.
+An extension sees it on `stream_start` as `options.samplingParams`.
 
 ```json
 { "id": "local", "samplingParams": { "temperature": 0.7, "top_k": 0, "min_p": 0.05 } }

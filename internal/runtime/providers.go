@@ -315,6 +315,16 @@ func credPayload(c auth.Credential) map[string]any {
 	}
 }
 
+// withSamplingOpts fills an empty provider from the session and attaches the
+// catalog samplingParams. Caller keys already on opts win per field.
+func (e *Engine) withSamplingOpts(opts ai.Options) ai.Options {
+	if opts.Provider == "" {
+		opts.Provider = e.activeProvider()
+	}
+	opts.SamplingParams = ai.ResolveSamplingParams(opts.Provider, opts.Model, opts.SamplingParams)
+	return opts
+}
+
 func (e *Engine) bindStream(provider string) ai.StreamFn {
 	e.mu.Lock()
 	fn := e.extStreams[provider]
@@ -333,6 +343,7 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 		return nil
 	}
 	return func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		opts = e.withSamplingOpts(opts)
 		if cachewarm.IsRefresh(ctx) {
 			opts.MaxTokens = 1
 			return fn(ctx, req, opts)

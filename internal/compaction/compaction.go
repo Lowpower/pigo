@@ -15,6 +15,8 @@ type Settings struct {
 	KeepRecentTokens int
 	// CustomInstructions is appended to the summarization prompt (RPC compact).
 	CustomInstructions string
+	// Provider selects the catalog entry whose samplingParams go out with the summary request.
+	Provider string
 }
 
 // DefaultSettings is the built-in compaction window.
@@ -114,9 +116,18 @@ const BranchSummarySuffix = `</summary>`
 // SummaryMarker prefixes the synthetic message that replaces compacted history.
 const SummaryMarker = SummaryPrefix
 
+func modelCallOptions(provider, model string) ai.Options {
+	return ai.Options{
+		Model:          model,
+		Provider:       provider,
+		SamplingParams: ai.ResolveSamplingParams(provider, model, nil),
+	}
+}
+
 // Summarize asks the model to summarize the given messages using StreamFn,
-// returning the assistant's text.
-func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra string) (string, error) {
+// returning the assistant's text. provider is the catalog id used to attach
+// samplingParams; an empty provider leaves those fields unset.
+func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra, provider string) (string, error) {
 	reqMsgs := make([]ai.Message, 0, len(toSummarize)+1)
 	reqMsgs = append(reqMsgs, toSummarize...)
 	prompt := SummarizationPrompt
@@ -125,7 +136,7 @@ func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []
 	}
 	reqMsgs = append(reqMsgs, ai.Message{Role: ai.RoleUser, Content: prompt})
 
-	stream, err := sf(ctx, ai.Context{Messages: reqMsgs}, ai.Options{Model: model})
+	stream, err := sf(ctx, ai.Context{Messages: reqMsgs}, modelCallOptions(provider, model))
 	if err != nil {
 		return "", err
 	}
@@ -154,7 +165,7 @@ func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Messag
 	if cut <= 0 {
 		return msgs, "", nil
 	}
-	summary, err := Summarize(ctx, sf, model, msgs[:cut], s.CustomInstructions)
+	summary, err := Summarize(ctx, sf, model, msgs[:cut], s.CustomInstructions, s.Provider)
 	if err != nil {
 		return msgs, "", err
 	}
