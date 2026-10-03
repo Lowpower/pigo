@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/cachewarm"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/models"
 )
@@ -127,5 +128,55 @@ func TestHostModelCompleteSendsSamplingParams(t *testing.T) {
 	}
 	if payload["top_k"] != float64(0) {
 		t.Fatalf("top_k = %#v", payload["top_k"])
+	}
+}
+
+func TestGatedStreamFillsSamplingParams(t *testing.T) {
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "samp-gate", DefaultAPI: "openai-completions", DefaultID: "m",
+		Models: []models.Model{{
+			Provider: "samp-gate", ID: "m", API: "openai-completions",
+			SamplingParams: map[string]any{"temperature": 1, "top_k": 0},
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("samp-gate") })
+
+	var got ai.Options
+	e := &Engine{
+		Provider: "samp-gate",
+		Opts:     Options{Config: config.Config{Provider: "samp-gate", Model: "m"}},
+	}
+	fn := e.gatedStream(func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		got = opts
+		return ai.ScriptedStreamFn("ok", 0)(ctx, req, opts)
+	})
+	stream, err := fn(context.Background(), ai.Context{}, ai.Options{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	if got.Provider != "samp-gate" || got.SamplingParams["temperature"] != 1 || got.SamplingParams["top_k"] != 0 {
+		t.Fatalf("filled = %+v params=%#v", got, got.SamplingParams)
+	}
+
+	stream, err = fn(context.Background(), ai.Context{}, ai.Options{
+		Model:          "m",
+		SamplingParams: map[string]any{"temperature": 0},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	if got.SamplingParams["temperature"] != 0 || got.SamplingParams["top_k"] != 0 {
+		t.Fatalf("caller override = %#v", got.SamplingParams)
+	}
+
+	stream, err = fn(cachewarm.WithRefresh(context.Background()), ai.Context{}, ai.Options{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	if got.MaxTokens != 1 || got.SamplingParams["top_k"] != 0 {
+		t.Fatalf("refresh opts = %+v params=%#v", got, got.SamplingParams)
 	}
 }

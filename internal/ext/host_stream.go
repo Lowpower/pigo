@@ -66,12 +66,7 @@ func (h *Host) Stream(provider string) ai.StreamFn {
 			"system":   req.System,
 			"messages": req.Messages,
 			"tools":    req.Tools,
-			"options": map[string]any{
-				"model":          opts.Model,
-				"maxTokens":      opts.MaxTokens,
-				"thinking":       opts.Thinking,
-				"thinkingBudget": opts.ThinkingBudget,
-			},
+			"options":  streamStartOptions(provider, opts),
 		}
 		if err := h.send(protocol.Message{Type: protocol.TypeStreamStart, ID: id, Payload: payload}); err != nil {
 			h.mu.Lock()
@@ -118,6 +113,23 @@ func (h *Host) Stream(provider string) ai.StreamFn {
 		}()
 		return s, nil
 	}
+}
+
+func streamStartOptions(provider string, opts ai.Options) map[string]any {
+	out := map[string]any{
+		"model":          opts.Model,
+		"maxTokens":      opts.MaxTokens,
+		"thinking":       opts.Thinking,
+		"thinkingBudget": opts.ThinkingBudget,
+	}
+	p := opts.Provider
+	if p == "" {
+		p = provider
+	}
+	if sp := ai.ResolveSamplingParams(p, opts.Model, opts.SamplingParams); len(sp) > 0 {
+		out["samplingParams"] = sp
+	}
+	return out
 }
 
 type streamAssembler struct {

@@ -544,14 +544,19 @@ func (e *Engine) CompactNowResult(ctx context.Context, msgs []ai.Message, custom
 
 func (e *Engine) compactionSettings() compaction.Settings {
 	s := compaction.DefaultSettings()
-	provider := e.Provider
-	if provider == "" {
-		provider = e.Opts.Config.ResolvedProvider()
-	}
+	provider := e.activeProvider()
 	model := e.Opts.Config.ResolvedModel()
 	s.ReserveTokens = e.Opts.Config.CompactionReserveTokens(provider, model)
 	s.KeepRecentTokens = e.Opts.Config.CompactionKeepRecentTokens(provider, model)
+	s.Provider = provider
 	return s
+}
+
+func (e *Engine) activeProvider() string {
+	if e.Provider != "" {
+		return e.Provider
+	}
+	return e.Opts.Config.ResolvedProvider()
 }
 
 func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Message, s compaction.Settings, willRetry bool) (CompactResult, error) {
@@ -559,6 +564,9 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	defer span.End()
 	span.SetAttribute("pigo.compaction.reason", reason)
 
+	if s.Provider == "" {
+		s.Provider = e.activeProvider()
+	}
 	cctx, cancel := context.WithCancel(ctx)
 	e.mu.Lock()
 	e.compactCancel = cancel
@@ -1237,6 +1245,7 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 				ReplaceInstructions: opts.ReplaceInstructions,
 				ReserveTokens:       e.Opts.Config.BranchSummaryReserveTokens(),
 				ContextWindow:       e.Opts.Config.ContextWindow,
+				Provider:            e.activeProvider(),
 			})
 			return serr
 		})
