@@ -49,6 +49,9 @@ type Model struct {
 	Compat           *Compat            `json:"compat,omitempty"`
 	PromptCache      *PromptCache       `json:"promptCache,omitempty"`
 	InputLimits      *InputLimits       `json:"inputLimits,omitempty"`
+	// SamplingParams are free-form OpenAI-compatible request fields
+	// (temperature, top_p, top_k, and unknown keys). An empty map is unset.
+	SamplingParams map[string]any `json:"samplingParams,omitempty"`
 }
 
 // InputLimits is per-model provider input metadata from the catalog overlay.

@@ -135,6 +135,7 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 		req["tools"] = tools
 	}
 	applyThinkingFormat(req, opts)
+	applySamplingParams(req, ResolveSamplingParams(opts.Provider, opts.Model, opts.SamplingParams))
 	return json.Marshal(req)
 }
 

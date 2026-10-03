@@ -87,6 +87,10 @@ type Options struct {
 	CacheRetention string // none|short|long; forwarded on pigo-messages
 	ToolChoice     string // auto|none|required; forwarded on pigo-messages
 	Provider       string // catalog provider id for model lookup
+	// SamplingParams are per-request OpenAI-compatible sampling fields.
+	// Keys override the catalog model's samplingParams. Keys the request
+	// builder already set stay as the caller left them.
+	SamplingParams map[string]any
 	// ExtraHeaders are applied on the outbound HTTP request after provider defaults.
 	ExtraHeaders map[string]string
 	// TransformBody rewrites the JSON request body (before compression).

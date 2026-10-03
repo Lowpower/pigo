@@ -277,6 +277,47 @@ func TestLoadUserJSONExposesAPIKey(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONSamplingParams(t *testing.T) {
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("samp-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "samp-json": {
+      "api": "openai-completions",
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "models": [
+        {"id": "local", "samplingParams": {"temperature": 1, "top_k": 0, "min_p": 0.05, "vendor_flag": false}},
+        {"id": "plain", "samplingParams": {}}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := Lookup("samp-json", "local")
+	if !ok {
+		t.Fatal("local missing")
+	}
+	if m.SamplingParams["temperature"] != float64(1) || m.SamplingParams["top_k"] != float64(0) {
+		t.Fatalf("params = %#v", m.SamplingParams)
+	}
+	if m.SamplingParams["min_p"] != 0.05 || m.SamplingParams["vendor_flag"] != false {
+		t.Fatalf("unknown/zero params = %#v", m.SamplingParams)
+	}
+	plain, ok := Lookup("samp-json", "plain")
+	if !ok || len(plain.SamplingParams) != 0 {
+		t.Fatalf("empty object = %#v ok=%v", plain.SamplingParams, ok)
+	}
+}
+
 func TestOpenAICatalogUsesResponsesAPI(t *testing.T) {
 	if APIFor("openai", "gpt-4o") != "openai-responses" {
 		t.Fatalf("openai gpt-4o api = %q", APIFor("openai", "gpt-4o"))

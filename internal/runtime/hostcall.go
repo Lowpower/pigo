@@ -618,11 +618,14 @@ func (e *Engine) doHostModelStream(h *ext.Host, name string, args map[string]any
 		b, _ := json.Marshal(raw)
 		_ = json.Unmarshal(b, &msgs)
 	}
+	provider, modelID, caller := hostSamplingArgs(e, args)
 	req := ai.Context{System: argString(args, "system"), Messages: msgs}
 	sf := e.Stream
 	es, err := sf(context.Background(), req, ai.Options{
-		Model:    e.Opts.Config.ResolvedModel(),
-		Thinking: e.Opts.Config.Thinking,
+		Model:          modelID,
+		Provider:       provider,
+		Thinking:       e.Opts.Config.Thinking,
+		SamplingParams: ai.ResolveSamplingParams(provider, modelID, caller),
 	})
 	if err != nil {
 		return map[string]any{"error": err.Error()}
@@ -639,6 +642,9 @@ func (e *Engine) doHostModelStream(h *ext.Host, name string, args map[string]any
 	}
 	go func() {
 		for ev := range es.Events() {
+			if h == nil {
+				continue
+			}
 			b, _ := json.Marshal(ev)
 			var payload map[string]any
 			_ = json.Unmarshal(b, &payload)
@@ -646,6 +652,57 @@ func (e *Engine) doHostModelStream(h *ext.Host, name string, args map[string]any
 		}
 	}()
 	return map[string]any{"ok": true}
+}
+
+func hostSamplingArgs(e *Engine, args map[string]any) (provider, modelID string, caller map[string]any) {
+	provider = argString(args, "provider")
+	switch m := args["model"].(type) {
+	case string:
+		modelID = m
+	case map[string]any:
+		if provider == "" {
+			provider = argString(m, "provider")
+		}
+		modelID = argString(m, "id")
+	}
+	if modelID == "" {
+		modelID = argString(args, "id")
+	}
+	caller = samplingArg(args["samplingParams"])
+	if opt := asStringMap(args["options"]); opt != nil {
+		if provider == "" {
+			provider = argString(opt, "provider")
+		}
+		if modelID == "" {
+			if s, ok := opt["model"].(string); ok {
+				modelID = s
+			}
+			if modelID == "" {
+				modelID = argString(opt, "id")
+			}
+		}
+		if len(caller) == 0 {
+			caller = samplingArg(opt["samplingParams"])
+		}
+	}
+	if provider == "" && e != nil {
+		provider = e.Provider
+	}
+	if provider == "" && e != nil {
+		provider = e.Opts.Config.ResolvedProvider()
+	}
+	if modelID == "" && e != nil {
+		modelID = e.Opts.Config.ResolvedModel()
+	}
+	return provider, modelID, caller
+}
+
+func samplingArg(v any) map[string]any {
+	raw, ok := v.(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	return models.MergeSamplingParams(nil, raw)
 }
 
 func (e *Engine) contextUsageMap() map[string]any {

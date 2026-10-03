@@ -269,3 +269,89 @@ func TestOverlayWithoutImageResizeKeepsExistingProfile(t *testing.T) {
 		t.Fatalf("compat = %+v", m.Compat)
 	}
 }
+
+func TestOverlayMergesSamplingParams(t *testing.T) {
+	RegisterProvider(ProviderSpec{
+		ID: "samp-merge", DefaultAPI: "openai-completions", DefaultID: "m",
+		Models: []Model{{
+			Provider: "samp-merge", ID: "m",
+			SamplingParams: map[string]any{
+				"temperature": 1,
+				"top_p":       0.95,
+				"top_k":       0,
+			},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("samp-merge")
+	})
+	SetRemoteOverlay("samp-merge", []Model{{
+		ID: "m",
+		SamplingParams: map[string]any{
+			"top_p":              0.8,
+			"repetition_penalty": 1.1,
+		},
+	}})
+	SetUserOverlay("samp-merge", []Model{
+		{
+			ID: "m",
+			SamplingParams: map[string]any{
+				"top_p": 0.9,
+			},
+		},
+		{
+			ID: "fresh",
+			SamplingParams: map[string]any{
+				"top_k":       0,
+				"min_p":       nil,
+				"dry_allowed": false,
+			},
+		},
+		{
+			ID:             "empty-only",
+			SamplingParams: map[string]any{},
+		},
+	})
+
+	m, ok := Lookup("samp-merge", "m")
+	if !ok {
+		t.Fatal("missing m")
+	}
+	if m.SamplingParams["temperature"] != 1 {
+		t.Fatalf("temperature = %#v", m.SamplingParams["temperature"])
+	}
+	if m.SamplingParams["top_p"] != 0.9 {
+		t.Fatalf("top_p = %#v, want user override 0.9", m.SamplingParams["top_p"])
+	}
+	if m.SamplingParams["top_k"] != 0 {
+		t.Fatalf("top_k = %#v, want 0", m.SamplingParams["top_k"])
+	}
+	if m.SamplingParams["repetition_penalty"] != 1.1 {
+		t.Fatalf("repetition_penalty = %#v", m.SamplingParams["repetition_penalty"])
+	}
+
+	fresh, ok := Lookup("samp-merge", "fresh")
+	if !ok || fresh.SamplingParams["top_k"] != 0 || fresh.SamplingParams["dry_allowed"] != false {
+		t.Fatalf("fresh = %#v ok=%v", fresh.SamplingParams, ok)
+	}
+	if _, present := fresh.SamplingParams["min_p"]; !present {
+		t.Fatal("null min_p was dropped")
+	}
+	empty, ok := Lookup("samp-merge", "empty-only")
+	if !ok {
+		t.Fatal("empty-only model missing")
+	}
+	if len(empty.SamplingParams) != 0 {
+		t.Fatalf("empty samplingParams = %#v", empty.SamplingParams)
+	}
+
+	SetUserOverlay("samp-merge", []Model{{
+		ID:             "m",
+		SamplingParams: map[string]any{},
+	}})
+	kept, ok := Lookup("samp-merge", "m")
+	if !ok || kept.SamplingParams["temperature"] != 1 || kept.SamplingParams["top_p"] != 0.8 || kept.SamplingParams["top_k"] != 0 {
+		t.Fatalf("empty object cleared params: %#v ok=%v", kept.SamplingParams, ok)
+	}
+}
