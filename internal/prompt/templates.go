@@ -1,11 +1,14 @@
 package prompt
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/Lowpower/pigo/internal/skills"
 )
@@ -20,14 +23,43 @@ type Template struct {
 	Source       string // user | project | extra
 }
 
+// Diagnostic is a prompt-template load warning. Path is the template file.
+type Diagnostic struct {
+	Path    string
+	Message string
+}
+
+// FormatWarning is the startup and /reload sentence for a bad prompt template.
+func FormatWarning(d Diagnostic) string {
+	return fmt.Sprintf("Warning: malformed prompt template frontmatter in %s: %s", d.Path, d.Message)
+}
+
+// FormatWarnings formats each diagnostic. An empty input returns nil.
+func FormatWarnings(ds []Diagnostic) []string {
+	if len(ds) == 0 {
+		return nil
+	}
+	out := make([]string, len(ds))
+	for i, d := range ds {
+		out[i] = FormatWarning(d)
+	}
+	return out
+}
+
 // DiscoverTemplates loads:
 //  1. agentDir/prompts/*.md
 //  2. cwd/.pigo/prompts/*.md
 //  3. extra files or directories
-func DiscoverTemplates(cwd, agentDir string, extra []string, includeDefaults, includeProject bool) []Template {
+//
+// Diagnostics are closed frontmatter blocks that YAML cannot parse. Those files
+// are not returned as templates. Files with no frontmatter, and files whose
+// opening --- is not closed, still load.
+func DiscoverTemplates(cwd, agentDir string, extra []string, includeDefaults, includeProject bool) ([]Template, []Diagnostic) {
 	var out []Template
+	var diags []Diagnostic
 	seen := map[string]bool{}
-	add := func(list []Template) {
+	add := func(list []Template, more []Diagnostic) {
+		diags = append(diags, more...)
 		for _, t := range list {
 			key := strings.ToLower(t.Name)
 			if seen[key] {
@@ -38,9 +70,11 @@ func DiscoverTemplates(cwd, agentDir string, extra []string, includeDefaults, in
 		}
 	}
 	if includeDefaults {
-		add(loadDir(filepath.Join(agentDir, "prompts"), "user"))
+		list, more := loadDir(filepath.Join(agentDir, "prompts"), "user")
+		add(list, more)
 		if includeProject && cwd != "" {
-			add(loadDir(filepath.Join(cwd, ".pigo", "prompts"), "project"))
+			list, more = loadDir(filepath.Join(cwd, ".pigo", "prompts"), "project")
+			add(list, more)
 		}
 	}
 	for _, p := range extra {
@@ -49,39 +83,49 @@ func DiscoverTemplates(cwd, agentDir string, extra []string, includeDefaults, in
 			continue
 		}
 		if info.IsDir() {
-			add(loadDir(p, "extra"))
+			list, more := loadDir(p, "extra")
+			add(list, more)
 			continue
 		}
-		if t, ok := loadFile(p, "extra"); ok {
-			add([]Template{t})
+		if t, more := loadFile(p, "extra"); t.FilePath != "" {
+			add([]Template{t}, more)
+		} else {
+			add(nil, more)
 		}
 	}
-	return out
+	return out, diags
 }
 
-func loadDir(dir, source string) []Template {
+func loadDir(dir, source string) ([]Template, []Diagnostic) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	var out []Template
+	var diags []Diagnostic
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
 			continue
 		}
-		if t, ok := loadFile(filepath.Join(dir, e.Name()), source); ok {
+		t, more := loadFile(filepath.Join(dir, e.Name()), source)
+		diags = append(diags, more...)
+		if t.FilePath != "" {
 			out = append(out, t)
 		}
 	}
-	return out
+	return out, diags
 }
 
-func loadFile(path, source string) (Template, bool) {
+func loadFile(path, source string) (Template, []Diagnostic) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return Template{}, false
+		return Template{}, nil
 	}
-	fm, body := skills.ParseFrontmatter(string(b))
+	text := string(b)
+	if err := validateClosedFrontmatter(text); err != nil {
+		return Template{}, []Diagnostic{{Path: path, Message: err.Error()}}
+	}
+	fm, body := skills.ParseFrontmatter(text)
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	desc := fm["description"]
 	if desc == "" {
@@ -102,7 +146,23 @@ func loadFile(path, source string) (Template, bool) {
 		Content:      body,
 		FilePath:     path,
 		Source:       source,
-	}, true
+	}, nil
+}
+
+// validateClosedFrontmatter rejects YAML that skills.ParseFrontmatter would
+// otherwise accept. An unclosed opening fence is not a closed block.
+func validateClosedFrontmatter(s string) error {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	if !strings.HasPrefix(s, "---\n") {
+		return nil
+	}
+	rest := s[4:]
+	end := strings.Index(rest, "\n---\n")
+	if end < 0 {
+		return nil
+	}
+	var v any
+	return yaml.Unmarshal([]byte(rest[:end]), &v)
 }
 
 // ParseCommandArgs splits a rest string with bash-style quotes.

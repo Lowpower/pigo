@@ -140,7 +140,10 @@ func TestDiscoverTemplates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "review.md"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := DiscoverTemplates(cwd, agent, nil, true, true)
+	got, diags := DiscoverTemplates(cwd, agent, nil, true, true)
+	if len(diags) != 0 {
+		t.Fatalf("diagnostics = %+v", diags)
+	}
 	if len(got) != 1 || got[0].Name != "review" {
 		t.Fatalf("%+v", got)
 	}
@@ -156,11 +159,11 @@ func TestDiscoverTemplates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(proj, "secret.md"), []byte("---\ndescription: Secret\n---\n\nhidden\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	skipped := DiscoverTemplates(cwd, agent, nil, true, false)
+	skipped, _ := DiscoverTemplates(cwd, agent, nil, true, false)
 	if len(skipped) != 1 || skipped[0].Name != "review" {
 		t.Fatalf("untrusted templates = %+v", skipped)
 	}
-	withProj := DiscoverTemplates(cwd, agent, nil, true, true)
+	withProj, _ := DiscoverTemplates(cwd, agent, nil, true, true)
 	if len(withProj) != 2 {
 		t.Fatalf("trusted templates = %+v", withProj)
 	}

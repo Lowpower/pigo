@@ -27,5 +27,9 @@ $1
 - `description` — `/help` text (defaults to the first non-empty line)
 - `argument-hint` — shown in the TUI
 
+A closed frontmatter block that YAML cannot parse is skipped. Startup and
+`/reload` warn with the file path. Files with no frontmatter are still
+registered by file name.
+
 Body substitutions: `$1`…, `$@` / `$ARGUMENTS`, `${1:-default}`, `${@:N}`,
 `${@:N:L}`.

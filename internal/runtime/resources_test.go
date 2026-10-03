@@ -233,6 +233,44 @@ func TestNewHonorsDisabledPromptAndTheme(t *testing.T) {
 	}
 }
 
+func TestNewWarnsOnMalformedPromptFrontmatter(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(agent, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	invalid := filepath.Join(agent, "prompts", "invalid.md")
+	body := "---\ndescription: Broken: unquoted colon\n---\nDo something.\n"
+	if err := os.WriteFile(invalid, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agent, "prompts", "valid.md"), []byte("Valid prompt content.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e, err := New(context.Background(), testEngineOpts(agent, cwd))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if names := templateNames(e.Templates); len(names) != 1 || names[0] != "valid" {
+		t.Fatalf("templates = %v", names)
+	}
+	warnings := e.PromptTemplateWarnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], invalid) || !strings.HasPrefix(warnings[0], "Warning: malformed prompt template frontmatter in ") {
+		t.Fatalf("warnings = %v", warnings)
+	}
+
+	e.Reload()
+	if names := templateNames(e.Templates); len(names) != 1 || names[0] != "valid" {
+		t.Fatalf("templates after reload = %v", names)
+	}
+	warnings = e.PromptTemplateWarnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], invalid) {
+		t.Fatalf("warnings after reload = %v", warnings)
+	}
+}
+
 func TestNoPromptTplsAndNoThemesKeepCLIExtra(t *testing.T) {
 	agent := t.TempDir()
 	cwd := t.TempDir()

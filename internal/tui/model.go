@@ -1027,7 +1027,11 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		m.attachExtensions()
 		m.applyTheme(theme.LoadWith(m.themeOpts(m.cfg.Theme)))
-		return note("reloaded keybindings, skills, settings, and context files")
+		msg := "reloaded keybindings, skills, settings, and context files"
+		if lines := m.engine.PromptTemplateWarnings(); len(lines) > 0 {
+			msg += "\n" + strings.Join(lines, "\n")
+		}
+		return note(msg)
 	case "copy":
 		text := lastAssistant(m.history)
 		if text == "" {
