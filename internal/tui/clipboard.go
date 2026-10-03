@@ -90,28 +90,18 @@ func readWlPasteImage() *clipImage {
 
 func readXclipImage() *clipImage {
 	targets, ok := runClip("xclip", clipListTimeout, "-selection", "clipboard", "-t", "TARGETS", "-o")
-	var types []string
-	if ok {
-		types = strings.Split(string(targets), "\n")
+	if !ok {
+		return nil
 	}
-	preferred := selectImageMIME(types)
-	try := append([]string(nil), imageMIMEPref...)
-	if preferred != "" {
-		try = append([]string{preferred}, try...)
+	mime := baseMIME(selectImageMIME(strings.Split(string(targets), "\n")))
+	if mime == "" {
+		return nil
 	}
-	seen := map[string]bool{}
-	for _, mime := range try {
-		mime = baseMIME(mime)
-		if mime == "" || seen[mime] {
-			continue
-		}
-		seen[mime] = true
-		data, ok := runClip("xclip", clipReadTimeout, "-selection", "clipboard", "-t", mime, "-o")
-		if ok {
-			return supportedClipImage(data, mime)
-		}
+	data, ok := runClip("xclip", clipReadTimeout, "-selection", "clipboard", "-t", mime, "-o")
+	if !ok {
+		return nil
 	}
-	return nil
+	return supportedClipImage(data, mime)
 }
 
 func readDarwinClipboardImage() *clipImage {
@@ -266,7 +256,8 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-func runClip(name string, timeout time.Duration, args ...string) ([]byte, bool) {
+// runClip runs a clipboard helper. Tests replace it.
+var runClip = func(name string, timeout time.Duration, args ...string) ([]byte, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
