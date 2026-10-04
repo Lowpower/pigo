@@ -73,6 +73,8 @@ type BranchSummaryOpts struct {
 	ReplaceInstructions bool
 	ReserveTokens       int
 	ContextWindow       int
+	// Provider selects the catalog entry whose samplingParams go out with the summary request.
+	Provider string
 }
 
 // GenerateBranchSummary asks the model to summarize abandoned-branch entries.
@@ -126,7 +128,7 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 	}
 	prompt := "# Conversation\n" + conv.String() + "\n# Instructions\n" + instructions
 
-	stream, err := sf(ctx, ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: prompt}}}, ai.Options{Model: model})
+	stream, err := sf(ctx, ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: prompt}}}, modelCallOptions(opts.Provider, model))
 	if err != nil {
 		return "", err
 	}
