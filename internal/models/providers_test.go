@@ -107,6 +107,36 @@ func TestMixedProvidersAreRegistered(t *testing.T) {
 	if copilot.FilterModels == nil {
 		t.Fatal("github-copilot missing FilterModels")
 	}
+	xai, _ := LookupProvider("xai")
+	if xai.DefaultID != "grok-4.7" || DefaultID("xai") != "grok-4.7" {
+		t.Fatalf("xai DefaultID = %q func = %q", xai.DefaultID, DefaultID("xai"))
+	}
+	offline, ok := Lookup("xai", "grok-4.7")
+	if !ok || offline.API != "openai-responses" {
+		t.Fatalf("xai offline model = %+v ok=%v", offline, ok)
+	}
+}
+
+func TestXAIDefaultDoesNotOverrideExplicitModel(t *testing.T) {
+	ClearOverlays()
+	t.Cleanup(ClearOverlays)
+	SetRemoteOverlay("xai", []Model{{ID: "grok-remote", API: "openai-responses"}})
+	SetUserOverlay("xai", []Model{{ID: "grok-user", API: "openai-responses"}})
+	if DefaultID("xai") != "grok-4.7" {
+		t.Fatalf("DefaultID = %q", DefaultID("xai"))
+	}
+	cli := PickInitial(PickOpts{CLIProvider: "xai", CLIModel: "grok-user"})
+	if cli.Provider != "xai" || cli.ID != "grok-user" {
+		t.Fatalf("cli = %+v", cli)
+	}
+	saved := PickInitial(PickOpts{
+		SavedProvider: "xai",
+		SavedModel:    "grok-remote",
+		Authenticated: []string{"xai"},
+	})
+	if saved.Provider != "xai" || saved.ID != "grok-remote" {
+		t.Fatalf("saved = %+v", saved)
+	}
 }
 
 func TestFilterByAvailableIDs(t *testing.T) {
