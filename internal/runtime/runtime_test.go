@@ -1159,6 +1159,28 @@ func TestPrintJSONWritesSessionHeader(t *testing.T) {
 	}
 }
 
+func TestPrintJSONLinesAreJSON(t *testing.T) {
+	dir := t.TempDir()
+	cwd := t.TempDir()
+	sess := session.New(cwd, dir)
+	e := newPongEngine(Options{Config: config.Config{Model: "x"}, Session: sess})
+	wireQueues(e)
+	var out bytes.Buffer
+	if err := e.PrintJSON(context.Background(), &out, nil, "hi", nil); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.TrimSpace(out.String())
+	if raw == "" {
+		t.Fatal("no output")
+	}
+	for i, line := range strings.Split(raw, "\n") {
+		var v map[string]any
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
+			t.Fatalf("line %d: %v\n%s", i+1, err, line)
+		}
+	}
+}
+
 func TestRPCClearQueue(t *testing.T) {
 	e := newPongEngine(Options{Config: config.Config{Provider: "anthropic", Model: "claude-sonnet-4"}})
 	e.PushSteer("steer-me")
