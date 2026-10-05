@@ -1669,7 +1669,15 @@ func (e *Engine) printJSON(ctx context.Context, out io.Writer, history []ai.Mess
 	enc := json.NewEncoder(out)
 	write := e.onSessionEvent
 	if write == nil {
-		write = func(v any) { _ = enc.Encode(v) }
+		// The agent loop emits session entries from its own goroutine while
+		// this loop encodes events. Encoder.Encode is not concurrency-safe,
+		// and a torn Write splits a JSONL line.
+		var mu sync.Mutex
+		write = func(v any) {
+			mu.Lock()
+			defer mu.Unlock()
+			_ = enc.Encode(v)
+		}
 		prev := e.onSessionEvent
 		e.onSessionEvent = write
 		defer func() { e.onSessionEvent = prev }()
