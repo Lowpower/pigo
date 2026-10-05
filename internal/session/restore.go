@@ -248,7 +248,7 @@ func FindByIDAt(cwd, agentDir, id, sessionDir string) (*Manager, error) {
 		return nil, err
 	}
 	for _, pth := range paths {
-		h, _, err := Load(pth)
+		h, err := readHeader(pth)
 		if err != nil {
 			continue
 		}
@@ -269,7 +269,7 @@ func FindExactIDAt(cwd, agentDir, id, sessionDir string) (*Manager, error) {
 		return nil, err
 	}
 	for _, pth := range paths {
-		h, _, err := Load(pth)
+		h, err := readHeader(pth)
 		if err != nil {
 			continue
 		}

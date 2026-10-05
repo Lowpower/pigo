@@ -96,7 +96,7 @@ func listSessionFilesAt(cwd, agentDir, sessionDir string) ([]string, error) {
 			continue
 		}
 		if filterCwd {
-			h, _, err := Load(p)
+			h, err := readHeader(p)
 			if err != nil {
 				continue
 			}

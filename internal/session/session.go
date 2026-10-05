@@ -2,9 +2,11 @@ package session
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,6 +300,63 @@ func (m *Manager) persistEntry(e *Entry) error {
 	_ = f.Chmod(0o600)
 	defer func() { _ = f.Close() }()
 	return writeLine(f, e)
+}
+
+// maxHeaderBytes is the maximum prefix read from a session file while
+// identifying it. A longer first line is treated as a damaged header.
+const maxHeaderBytes = 1 << 20
+
+// readHeader reads the first non-empty line of a session file and decodes it
+// as a Header. It does not read or parse later entries.
+func readHeader(path string) (Header, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Header{}, err
+	}
+	defer func() { _ = f.Close() }()
+
+	// Read one byte at a time so identification stops at the newline and does
+	// not consume later entries (including a body that never arrives).
+	buf := make([]byte, 0, 256)
+	var b [1]byte
+	for {
+		n, readErr := f.Read(b[:])
+		if n == 0 {
+			if readErr == nil {
+				return Header{}, fmt.Errorf("empty session header")
+			}
+			if len(bytes.TrimSpace(buf)) == 0 {
+				if readErr == io.EOF {
+					return Header{}, fmt.Errorf("empty session header")
+				}
+				return Header{}, readErr
+			}
+			break
+		}
+		if len(buf) == maxHeaderBytes {
+			return Header{}, fmt.Errorf("session header exceeds %d bytes", maxHeaderBytes)
+		}
+		buf = append(buf, b[0])
+		if b[0] != '\n' {
+			if readErr == nil {
+				continue
+			}
+			if readErr != io.EOF {
+				return Header{}, readErr
+			}
+			break
+		}
+		if len(bytes.TrimSpace(buf)) == 0 {
+			buf = buf[:0]
+			continue
+		}
+		break
+	}
+	var h Header
+	if err := json.Unmarshal(bytes.TrimSpace(buf), &h); err != nil {
+		return Header{}, err
+	}
+	return h, nil
 }
 
 // Load reads a session file into its header and entries.
