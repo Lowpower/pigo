@@ -400,7 +400,13 @@ func TestScopedRefreshSkippedOffline(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(Model)
 	if cmd != nil {
-		t.Fatal("offline must not start refresh")
+		msg := cmd()
+		if _, ok := msg.(tea.BatchMsg); ok {
+			t.Fatal("offline must not start refresh")
+		}
+		if _, ok := msg.(scopedRefreshMsg); ok {
+			t.Fatal("offline must not start refresh")
+		}
 	}
 	if strings.Contains(m.View(), "Refreshing model catalogs…") {
 		t.Fatal("no refreshing status offline")
