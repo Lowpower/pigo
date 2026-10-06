@@ -15,6 +15,37 @@ func costUsage(tokens int, total float64) ai.Usage {
 	}
 }
 
+func TestCollectStatsSumsBothCacheWritePrices(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	write := func(cacheWrite, cache1h int, writeCost float64) {
+		t.Helper()
+		if _, err := m.AppendMessage("assistant", &ai.AssistantMessage{
+			Role:     ai.RoleAssistant,
+			Provider: "anthropic",
+			Model:    "claude-sonnet-4",
+			Usage: ai.Usage{
+				CacheWrite:   cacheWrite,
+				CacheWrite1h: cache1h,
+				Cost:         ai.UsageCost{CacheWrite: writeCost, Total: writeCost},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(600_000, 0, 2.25)
+	write(400_000, 400_000, 2.4)
+	got := CollectStats(m, nil, 0)
+	if got.Tokens.CacheWrite != 1_000_000 || got.Tokens.CacheWrite1h != 400_000 {
+		t.Fatalf("tokens=%+v", got.Tokens)
+	}
+	if got.Tokens.Total != 1_000_000 {
+		t.Fatalf("total=%d, 1h writes are already inside cacheWrite", got.Tokens.Total)
+	}
+	if got.Cost != 4.65 {
+		t.Fatalf("cost=%v, want 4.65", got.Cost)
+	}
+}
+
 func TestCollectStatsSumsAssistantCost(t *testing.T) {
 	m := New(t.TempDir(), t.TempDir())
 	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {

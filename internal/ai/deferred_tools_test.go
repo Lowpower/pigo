@@ -195,7 +195,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"outpu
 event: message_stop
 data: {"type":"message_stop"}
 `
-	stream := StreamAnthropicReader(context.Background(), strings.NewReader(fixture), "fw-test")
+	stream := StreamAnthropicReader(context.Background(), strings.NewReader(fixture), "fw-test", nil)
 	_, final := stream.Collect()
 	if final == nil {
 		t.Fatal("no final message")

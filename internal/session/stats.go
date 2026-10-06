@@ -42,11 +42,12 @@ type CacheWaste struct {
 
 // TokenTotals aggregates billed token counts across the session.
 type TokenTotals struct {
-	Input      int `json:"input"`
-	Output     int `json:"output"`
-	CacheRead  int `json:"cacheRead"`
-	CacheWrite int `json:"cacheWrite"`
-	Total      int `json:"total"`
+	Input        int `json:"input"`
+	Output       int `json:"output"`
+	CacheRead    int `json:"cacheRead"`
+	CacheWrite   int `json:"cacheWrite"`
+	CacheWrite1h int `json:"cacheWrite1h,omitempty"`
+	Total        int `json:"total"`
 }
 
 // ContextUsage is current-window token usage.
@@ -201,5 +202,6 @@ func addUsage(s *Stats, u ai.Usage) {
 	s.Tokens.Output += u.Output
 	s.Tokens.CacheRead += u.CacheRead
 	s.Tokens.CacheWrite += u.CacheWrite
+	s.Tokens.CacheWrite1h += u.CacheWrite1h
 	s.Cost += u.Cost.Total
 }

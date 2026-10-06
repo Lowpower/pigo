@@ -94,7 +94,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamAnthropicSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent)
+			streamAnthropicSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, catalogCost(opts))
 		}()
 		return s, nil
 	}
@@ -102,12 +102,13 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 
 // StreamAnthropicReader runs the SSE→event core against an already-open reader
 // (used for offline fixture tests, and reusable by the HTTP client).
-func StreamAnthropicReader(ctx context.Context, r io.Reader, model string) *EventStream {
+// cost prices the completed usage; nil leaves dollar fields unchanged.
+func StreamAnthropicReader(ctx context.Context, r io.Reader, model string, cost *models.Cost) *EventStream {
 	s := NewEventStream(16)
 	out := newOutputMessage(model)
 	go func() {
 		defer s.end()
-		streamAnthropicSSE(ctx, r, out, s, nil)
+		streamAnthropicSSE(ctx, r, out, s, nil, cost)
 	}()
 	return s
 }
@@ -316,11 +317,16 @@ func applyAnthropicCacheControl(msgs []map[string]any, opts Options) {
 
 // --- SSE core ---
 
+type anthropicCacheCreation struct {
+	Ephemeral1hInputTokens *int `json:"ephemeral_1h_input_tokens"`
+}
+
 type anthropicUsage struct {
-	InputTokens              *int `json:"input_tokens"`
-	OutputTokens             *int `json:"output_tokens"`
-	CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+	InputTokens              *int                    `json:"input_tokens"`
+	OutputTokens             *int                    `json:"output_tokens"`
+	CacheReadInputTokens     *int                    `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens *int                    `json:"cache_creation_input_tokens"`
+	CacheCreation            *anthropicCacheCreation `json:"cache_creation"`
 }
 
 type anthropicSSE struct {
@@ -358,7 +364,7 @@ type anthropicSSE struct {
 
 // streamAnthropicSSE reads Anthropic SSE from r and pushes AssistantMessageEvents
 // onto s, building out in place. It does not close s (the caller does).
-func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
+func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), cost *models.Cost) {
 	if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 		return
 	}
@@ -375,7 +381,7 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 		}
 		payload := data.String()
 		data.Reset()
-		return handleAnthropicEvent(ctx, payload, out, pos, s, observe)
+		return handleAnthropicEvent(ctx, payload, out, pos, s, observe, cost)
 	}
 
 	for scanner.Scan() {
@@ -408,7 +414,7 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 	}
 }
 
-func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, s *EventStream, observe func([]byte)) bool {
+func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, s *EventStream, observe func([]byte), cost *models.Cost) bool {
 	var ev anthropicSSE
 	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 		return true // ignore unparseable keepalive/comment payloads
@@ -429,7 +435,8 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 			out.Usage.Output = deref(u.OutputTokens)
 			out.Usage.CacheRead = deref(u.CacheReadInputTokens)
 			out.Usage.CacheWrite = deref(u.CacheCreationInputTokens)
-			out.Usage.TotalTokens = out.Usage.Input + out.Usage.Output + out.Usage.CacheRead + out.Usage.CacheWrite
+			out.Usage.CacheWrite1h = deref(anthropicCacheWrite1h(u))
+			finishAnthropicUsage(&out.Usage, cost)
 		}
 
 	case "content_block_start":
@@ -532,7 +539,10 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 			if u.CacheCreationInputTokens != nil {
 				out.Usage.CacheWrite = *u.CacheCreationInputTokens
 			}
-			out.Usage.TotalTokens = out.Usage.Input + out.Usage.Output + out.Usage.CacheRead + out.Usage.CacheWrite
+			if n := anthropicCacheWrite1h(*u); n != nil {
+				out.Usage.CacheWrite1h = *n
+			}
+			finishAnthropicUsage(&out.Usage, cost)
 		}
 
 	case "error":
@@ -580,6 +590,18 @@ func mapAnthropicStopReason(raw string) StopReason {
 	default:
 		return StopStop
 	}
+}
+
+func anthropicCacheWrite1h(u anthropicUsage) *int {
+	if u.CacheCreation == nil {
+		return nil
+	}
+	return u.CacheCreation.Ephemeral1hInputTokens
+}
+
+func finishAnthropicUsage(u *Usage, cost *models.Cost) {
+	u.TotalTokens = u.Input + u.Output + u.CacheRead + u.CacheWrite
+	calculateCost(cost, u)
 }
 
 func deref(p *int) int {

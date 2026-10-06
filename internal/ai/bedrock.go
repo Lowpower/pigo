@@ -133,7 +133,7 @@ func (c *BedrockClient) StreamFn() StreamFn {
 				finishError(ctx, out, s, err.Error())
 				return
 			}
-			processBedrockStream(ctx, resp.GetStream(), out, s, opts.OnProviderStreamEvent)
+			processBedrockStream(ctx, resp.GetStream(), out, s, opts.OnProviderStreamEvent, catalogCost(opts))
 		}()
 		return s, nil
 	}
@@ -251,7 +251,34 @@ func bedrockImageBlock(img ImageContent) *types.ContentBlockMemberImage {
 	}}
 }
 
-func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseStreamEventStream, out *AssistantMessage, s *EventStream, observe func([]byte)) {
+func applyBedrockUsage(dst *Usage, u *types.TokenUsage, cost *models.Cost) {
+	if dst == nil || u == nil {
+		return
+	}
+	if u.InputTokens != nil {
+		dst.Input = int(*u.InputTokens)
+	}
+	if u.OutputTokens != nil {
+		dst.Output = int(*u.OutputTokens)
+	}
+	if u.CacheReadInputTokens != nil {
+		dst.CacheRead = int(*u.CacheReadInputTokens)
+	}
+	if u.CacheWriteInputTokens != nil {
+		dst.CacheWrite = int(*u.CacheWriteInputTokens)
+	}
+	long := 0
+	for _, detail := range u.CacheDetails {
+		if detail.Ttl == types.CacheTTLOneHour && detail.InputTokens != nil {
+			long += int(*detail.InputTokens)
+		}
+	}
+	dst.CacheWrite1h = long
+	dst.TotalTokens = dst.Input + dst.Output + dst.CacheRead + dst.CacheWrite
+	calculateCost(cost, dst)
+}
+
+func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseStreamEventStream, out *AssistantMessage, s *EventStream, observe func([]byte), cost *models.Cost) {
 	defer func() { _ = stream.Close() }()
 	textIdx := map[int32]int{}
 	thinkIdx := map[int32]int{}
@@ -344,15 +371,7 @@ func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseSt
 				out.StopReason = StopStop
 			}
 		case *types.ConverseStreamOutputMemberMetadata:
-			if v.Value.Usage != nil {
-				if v.Value.Usage.InputTokens != nil {
-					out.Usage.Input = int(*v.Value.Usage.InputTokens)
-				}
-				if v.Value.Usage.OutputTokens != nil {
-					out.Usage.Output = int(*v.Value.Usage.OutputTokens)
-				}
-				out.Usage.TotalTokens = out.Usage.Input + out.Usage.Output
-			}
+			applyBedrockUsage(&out.Usage, v.Value.Usage, cost)
 		}
 	}
 	if err := stream.Err(); err != nil && out.StopReason != StopError {
