@@ -24,6 +24,8 @@ func TestIsRetryableAssistantError(t *testing.T) {
 		"429 too many requests",
 		"network_error",
 		"Provider finish_reason: network_error",
+		"520 status code (no body)",
+		"The system is currently experiencing high demand and cannot process your request. Your request exceeds the maximum usage size allowed during peak load...",
 	}
 	for _, msg := range retryable {
 		if !IsRetryableAssistantError(errorAssistant(msg)) {
@@ -38,6 +40,7 @@ func TestIsRetryableAssistantError(t *testing.T) {
 		"Monthly usage limit reached",
 		"out of budget",
 		"GoUsageLimitError",
+		"billing: currently experiencing high demand",
 	}
 	for _, msg := range non {
 		if IsRetryableAssistantError(errorAssistant(msg)) {
