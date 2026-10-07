@@ -147,7 +147,7 @@ func TestBuildResponsesInputToolPair(t *testing.T) {
 			{Type: KindToolCall, ToolID: "c1", ToolName: "read", Arguments: map[string]any{"path": "a"}},
 		}}},
 		{Role: RoleToolResult, ToolCallID: "c1", Content: "ok"},
-	}})
+	}}, replayTarget{})
 	if len(items) < 3 {
 		t.Fatalf("items = %d", len(items))
 	}

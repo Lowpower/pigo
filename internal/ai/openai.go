@@ -102,7 +102,12 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 	if reqCtx.System != "" {
 		msgs = append(msgs, map[string]any{"role": "system", "content": reqCtx.System})
 	}
-	msgs = append(msgs, OpenAIWireMessages(reqCtx.Messages)...)
+	replayed := transformMessages(reqCtx.Messages, replayTarget{
+		Provider: chatProvider(opts),
+		API:      "openai-completions",
+		Model:    opts.Model,
+	}, normalizeOpenAIChatToolCallID(chatProvider(opts)))
+	msgs = append(msgs, OpenAIWireMessages(replayed)...)
 
 	req := map[string]any{
 		"model":          opts.Model,
@@ -351,10 +356,7 @@ func mapOpenAIFinishReason(reason string) (StopReason, string) {
 }
 
 func chatProvider(opts Options) string {
-	if p := strings.TrimSpace(opts.Provider); p != "" {
-		return p
-	}
-	return "openai"
+	return recordedProvider(opts, "openai")
 }
 
 func openAIHTTPError(status int, body string, cerebras bool) string {

@@ -306,7 +306,7 @@ func TestGoogleContentsReplayThoughtSignaturesAndImages(t *testing.T) {
 			{Type: KindText, Text: "yo", TextSignature: "xsig"},
 			{Type: KindToolCall, ToolID: "1", ToolName: "read", Arguments: map[string]any{"p": "a"}, ThinkingSignature: "csig"},
 		}}},
-	}})
+	}}, replayTarget{})
 	if len(got) != 2 {
 		t.Fatalf("len=%d", len(got))
 	}
@@ -348,7 +348,7 @@ func TestBedrockMessagesReplayReasoningAndImages(t *testing.T) {
 			{Type: KindThinking, Thinking: "plan", ThinkingSignature: "sig"},
 			{Type: KindText, Text: "yo"},
 		}}},
-	}})
+	}}, replayTarget{})
 	if len(got) != 2 {
 		t.Fatalf("len=%d", len(got))
 	}

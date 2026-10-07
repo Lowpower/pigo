@@ -83,14 +83,15 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		}
 
 		model := opts.Model
+		provider := recordedProvider(opts, "anthropic")
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			msg, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			return errorStream(model, fmt.Sprintf("anthropic API error %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))), nil
+			return errorStream(model, provider, fmt.Sprintf("anthropic API error %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))), nil
 		}
 
 		s := NewEventStream(16)
-		out := newOutputMessage(model)
+		out := newOutputMessage(model, provider)
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
@@ -104,7 +105,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 // (used for offline fixture tests, and reusable by the HTTP client).
 func StreamAnthropicReader(ctx context.Context, r io.Reader, model string) *EventStream {
 	s := NewEventStream(16)
-	out := newOutputMessage(model)
+	out := newOutputMessage(model, "anthropic")
 	go func() {
 		defer s.end()
 		streamAnthropicSSE(ctx, r, out, s, nil)
@@ -156,20 +157,20 @@ func isAnthropicOAuthToken(key string) bool {
 	return strings.Contains(key, "sk-ant-oat")
 }
 
-func newOutputMessage(model string) *AssistantMessage {
+func newOutputMessage(model, provider string) *AssistantMessage {
 	return &AssistantMessage{
 		Role:       RoleAssistant,
 		Content:    []*Content{},
 		API:        "anthropic-messages",
-		Provider:   "anthropic",
+		Provider:   provider,
 		Model:      model,
 		StopReason: StopPending,
 	}
 }
 
-func errorStream(model, msg string) *EventStream {
+func errorStream(model, provider, msg string) *EventStream {
 	s := NewEventStream(1)
-	out := newOutputMessage(model)
+	out := newOutputMessage(model, provider)
 	out.StopReason = StopError
 	out.ErrorMessage = msg
 	s.ch <- Event{Type: EventError, Reason: StopError, Message: out}
@@ -185,11 +186,16 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 
 	enabled := supportsToolReferences(opts)
 	immediate, deferred := splitDeferredTools(reqCtx.Messages, reqCtx.Tools, enabled)
+	replayed := transformMessages(reqCtx.Messages, replayTarget{
+		Provider: recordedProvider(opts, "anthropic"),
+		API:      "anthropic-messages",
+		Model:    opts.Model,
+	}, normalizeSanitizedToolCallID)
 	var msgs []map[string]any
 	if enabled {
-		msgs = anthropicWireMessages(reqCtx.Messages, true, deferredNameSet(deferred))
+		msgs = anthropicWireMessages(replayed, true, deferredNameSet(deferred))
 	} else {
-		msgs = AnthropicWireMessages(reqCtx.Messages)
+		msgs = AnthropicWireMessages(replayed)
 	}
 	applyAnthropicCacheControl(msgs, opts)
 

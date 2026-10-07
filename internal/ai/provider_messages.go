@@ -1,6 +1,9 @@
 package ai
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // AnthropicWireMessages maps pigo messages onto the Anthropic Messages API
 // shape. Assistant tool calls become tool_use blocks; toolResult becomes a user
@@ -15,9 +18,13 @@ func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]st
 	for i := 0; i < len(msgs); i++ {
 		m := msgs[i]
 		if m.Assistant != nil {
+			blocks := anthropicContent(m.Assistant)
+			if len(blocks) == 0 {
+				continue
+			}
 			out = append(out, map[string]any{
 				"role":    "assistant",
-				"content": anthropicContent(m.Assistant),
+				"content": blocks,
 			})
 			continue
 		}
@@ -160,6 +167,9 @@ func anthropicContent(msg *AssistantMessage) []map[string]any {
 	for _, c := range msg.Content {
 		switch c.Type {
 		case KindText:
+			if strings.TrimSpace(c.Text) == "" {
+				continue
+			}
 			blocks = append(blocks, map[string]any{"type": "text", "text": c.Text})
 		case KindThinking:
 			if c.Redacted {
@@ -167,14 +177,25 @@ func anthropicContent(msg *AssistantMessage) []map[string]any {
 				if data == "" {
 					data = c.Thinking
 				}
+				if strings.TrimSpace(data) == "" {
+					continue
+				}
 				blocks = append(blocks, map[string]any{"type": "redacted_thinking", "data": data})
 				continue
 			}
-			b := map[string]any{"type": "thinking", "thinking": c.Thinking}
-			if c.ThinkingSignature != "" {
-				b["signature"] = c.ThinkingSignature
+			hasSig := strings.TrimSpace(c.ThinkingSignature) != ""
+			if strings.TrimSpace(c.Thinking) == "" && !hasSig {
+				continue
 			}
-			blocks = append(blocks, b)
+			if !hasSig {
+				blocks = append(blocks, map[string]any{"type": "text", "text": c.Thinking})
+				continue
+			}
+			blocks = append(blocks, map[string]any{
+				"type":      "thinking",
+				"thinking":  c.Thinking,
+				"signature": c.ThinkingSignature,
+			})
 		case KindToolCall:
 			input := any(c.Arguments)
 			if input == nil {
@@ -188,7 +209,7 @@ func anthropicContent(msg *AssistantMessage) []map[string]any {
 			})
 		}
 	}
-	if len(blocks) == 0 && msg.Text() != "" {
+	if len(blocks) == 0 && strings.TrimSpace(msg.Text()) != "" {
 		blocks = append(blocks, map[string]any{"type": "text", "text": msg.Text()})
 	}
 	return blocks

@@ -95,7 +95,12 @@ func (c *GoogleClient) StreamFn() StreamFn {
 		if err != nil {
 			return errorStreamProvider(opts.Model, c.apiID(), err.Error()), nil
 		}
-		contents := googleContents(reqCtx)
+		target := replayTarget{
+			Provider: recordedProvider(opts, c.providerID()),
+			API:      c.apiID(),
+			Model:    opts.Model,
+		}
+		contents := googleContents(reqCtx, target)
 		gcfg := &genai.GenerateContentConfig{}
 		if reqCtx.System != "" {
 			gcfg.SystemInstruction = genai.NewContentFromText(reqCtx.System, genai.RoleUser)
@@ -118,7 +123,7 @@ func (c *GoogleClient) StreamFn() StreamFn {
 		s := NewEventStream(16)
 		out := &AssistantMessage{
 			Role: RoleAssistant, Content: []*Content{}, API: c.apiID(),
-			Provider: c.providerID(), Model: opts.Model, StopReason: StopPending,
+			Provider: target.Provider, Model: opts.Model, StopReason: StopPending,
 		}
 		go func() {
 			defer s.end()
@@ -262,9 +267,12 @@ func mapGoogleFinishReason(reason genai.FinishReason, toolUse bool) StopReason {
 	}
 }
 
-func googleContents(reqCtx Context) []*genai.Content {
+func googleContents(reqCtx Context, target replayTarget) []*genai.Content {
 	var out []*genai.Content
-	for _, m := range reqCtx.Messages {
+	msgs := transformMessages(reqCtx.Messages, target, func(id string, _ *AssistantMessage) string {
+		return normalizeGoogleToolCallID(id, target.Model)
+	})
+	for _, m := range msgs {
 		if m.Assistant != nil {
 			var parts []*genai.Part
 			for _, c := range m.Assistant.Content {

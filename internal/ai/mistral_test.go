@@ -87,21 +87,24 @@ func TestMistralToolCallIDLength(t *testing.T) {
 }
 
 func TestMistralWireMessagesNormalizesToolIDs(t *testing.T) {
-	ids := map[string]string{}
-	got := mistralWireMessages([]Message{
+	msgs := transformMessages([]Message{
 		{Assistant: &AssistantMessage{Content: []*Content{
 			{Type: KindThinking, Thinking: "plan"},
 			{Type: KindText, Text: "hi"},
 			{Type: KindToolCall, ToolID: "toolu_long_identifier_12345", ToolName: "read", Arguments: map[string]any{"p": "a"}},
 		}}},
 		{Role: RoleToolResult, ToolCallID: "toolu_long_identifier_12345", Content: "ok"},
-	}, ids)
+	}, replayTarget{Provider: "mistral", API: "mistral-conversations", Model: "codestral"}, normalizeMistralToolCallID)
+	got := mistralWireMessages(msgs)
 	if len(got) != 2 {
 		t.Fatalf("len = %d", len(got))
 	}
 	raw, _ := json.Marshal(got)
-	if !strings.Contains(string(raw), `"type":"thinking"`) {
-		t.Fatalf("missing thinking chunk: %s", raw)
+	if strings.Contains(string(raw), `"type":"thinking"`) {
+		t.Fatalf("cross-model thinking must be plain text: %s", raw)
+	}
+	if !strings.Contains(string(raw), "plan") {
+		t.Fatalf("thinking text missing: %s", raw)
 	}
 	tcs, _ := got[0]["tool_calls"].([]map[string]any)
 	id, _ := tcs[0]["id"].(string)
