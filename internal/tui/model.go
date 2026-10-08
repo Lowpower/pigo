@@ -341,17 +341,55 @@ func (m Model) Init() tea.Cmd {
 	return textarea.Blink
 }
 
+// overlayVisible reports whether a fullscreen layer is covering the editor.
+func (m Model) overlayVisible() bool {
+	if m.sessionPickerActive() || m.settingsActive() || m.llamaActive() || m.scopedModelsActive() ||
+		m.modelPickerActive() || m.thinkingPickerActive() || m.loginActive() || m.extUI.active {
+		return true
+	}
+	if m.extCustom != nil && m.extCustom.overlay && !m.extCustom.hidden {
+		return true
+	}
+	return m.overlay != overlayNone
+}
+
+// hardwareCursorCmd is the cursor command for the current overlay state.
+// After quit, the shell owns the cursor and this returns nil.
+func hardwareCursorCmd(visible, hardware, quitting bool) tea.Cmd {
+	if quitting {
+		return nil
+	}
+	if visible || !hardware {
+		return tea.HideCursor
+	}
+	return tea.ShowCursor
+}
+
+func withHardwareCursor(out tea.Model, wasOverlay bool, cmd tea.Cmd) tea.Cmd {
+	next, ok := out.(Model)
+	if !ok || next.overlayVisible() == wasOverlay {
+		return cmd
+	}
+	c := hardwareCursorCmd(next.overlayVisible(), next.cfg.HardwareCursor(), next.quitting)
+	if c == nil {
+		return cmd
+	}
+	return tea.Batch(cmd, c)
+}
+
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
+	wasOverlay := m.overlayVisible()
 	defer func() {
 		rec := recover()
-		if rec == nil {
+		if rec != nil {
+			recordTUIPanic(m.engine, rec)
+			m.quitting = true
+			out = m
+			nextCmd = tea.Quit
 			return
 		}
-		recordTUIPanic(m.engine, rec)
-		m.quitting = true
-		out = m
-		nextCmd = tea.Quit
+		nextCmd = withHardwareCursor(out, wasOverlay, nextCmd)
 	}()
 	if next, ok := m.handleExtMsg(msg); ok {
 		return next, nil
