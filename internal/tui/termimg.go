@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Lowpower/pigo/internal/ai"
@@ -73,11 +74,19 @@ func chooseLessDistortedCellCount(upper int, ideal float64) int {
 }
 
 // kittyPlacement sizes a Kitty image in cells. Columns stay within maxCols.
-// Rows are chosen against a 9×18 px cell so extreme aspects are not squared.
-func kittyPlacement(imgW, imgH, maxCols int) (int, int) {
+// Height is capped at a square pixel box of that width. The limiting side is
+// then nudged by one cell when that preserves the aspect ratio better.
+// cellW and cellH are terminal cell pixels; non-positive values use 9×18.
+func kittyPlacement(imgW, imgH, maxCols, cellW, cellH int) (int, int) {
 	maxWidth := maxCols
 	if maxWidth < 1 {
 		maxWidth = 1
+	}
+	if cellW < 1 {
+		cellW = kittyCellWidthPx
+	}
+	if cellH < 1 {
+		cellH = kittyCellHeightPx
 	}
 	if imgW < 1 {
 		imgW = 1
@@ -85,24 +94,56 @@ func kittyPlacement(imgW, imgH, maxCols int) (int, int) {
 	if imgH < 1 {
 		imgH = 1
 	}
-	cellW := float64(kittyCellWidthPx)
-	cellH := float64(kittyCellHeightPx)
-	widthScale := (float64(maxWidth) * cellW) / float64(imgW)
-	scaledWidthPx := float64(imgW) * widthScale
-	scaledHeightPx := float64(imgH) * widthScale
-	columns := int(math.Ceil(scaledWidthPx / cellW))
+	maxHeight := int(math.Ceil(float64(maxWidth) * float64(cellW) / float64(cellH)))
+	if maxHeight < 1 {
+		maxHeight = 1
+	}
+	fw := float64(cellW)
+	fh := float64(cellH)
+	widthScale := (float64(maxWidth) * fw) / float64(imgW)
+	heightScale := (float64(maxHeight) * fh) / float64(imgH)
+	scale := math.Min(widthScale, heightScale)
+	columns := int(math.Ceil(float64(imgW) * scale / fw))
 	if columns < 1 {
 		columns = 1
 	}
 	if columns > maxWidth {
 		columns = maxWidth
 	}
-	rows := int(math.Ceil(scaledHeightPx / cellH))
+	rows := int(math.Ceil(float64(imgH) * scale / fh))
 	if rows < 1 {
 		rows = 1
 	}
-	idealRows := (float64(columns) * cellW * float64(imgH)) / (float64(imgW) * cellH)
-	return columns, chooseLessDistortedCellCount(rows, idealRows)
+	if rows > maxHeight {
+		rows = maxHeight
+	}
+	if widthScale <= heightScale {
+		idealRows := (float64(columns) * fw * float64(imgH)) / (float64(imgW) * fh)
+		rows = chooseLessDistortedCellCount(rows, idealRows)
+	} else {
+		idealCols := (float64(rows) * fh * float64(imgW)) / (float64(imgH) * fw)
+		columns = chooseLessDistortedCellCount(columns, idealCols)
+	}
+	return columns, rows
+}
+
+var (
+	cellSizeResponseRe = regexp.MustCompile(`\x1b\[6;(\d+);(\d+)t`)
+	cellSizeLeakRe     = regexp.MustCompile(`(?:\x1b)?\[6;\d+;\d+t`)
+)
+
+// parseCellSizeResponse reads a CSI 16 t reply: CSI 6 ; height ; width t.
+func parseCellSizeResponse(data []byte) (widthPx, heightPx int, ok bool) {
+	m := cellSizeResponseRe.FindSubmatch(data)
+	if m == nil {
+		return 0, 0, false
+	}
+	h, errH := strconv.Atoi(string(m[1]))
+	w, errW := strconv.Atoi(string(m[2]))
+	if errH != nil || errW != nil || w <= 0 || h <= 0 {
+		return 0, 0, false
+	}
+	return w, h, true
 }
 
 func encodeKitty(b64 string, cells, rows int) string {
@@ -113,7 +154,8 @@ func encodeKitty(b64 string, cells, rows int) string {
 	}
 	params := fmt.Sprintf("a=T,f=100,q=2,c=%d", cells)
 	if rows >= 1 {
-		params += fmt.Sprintf(",r=%d", rows)
+		// C=1 keeps the cursor put; the caller pads rows-1 blank lines.
+		params = fmt.Sprintf("a=T,f=100,q=2,C=1,c=%d,r=%d", cells, rows)
 	}
 	if len(b64) <= kittyChunk {
 		return prefix + params + ";" + b64 + suffix
@@ -399,6 +441,19 @@ func kittyCanInline(img ai.ImageContent) bool {
 	return err == nil && sniffImageMIME(b) == "image/png"
 }
 
+// kittyMaxCols is imageWidthCells, narrowed to the terminal width minus two
+// once a window size is known. That width is also the square-pixel height cap.
+func (m Model) kittyMaxCols() int {
+	cols := m.cfg.ImageWidthCells()
+	if m.width > 2 && m.width-2 < cols {
+		cols = m.width - 2
+	}
+	if cols < 1 {
+		return 1
+	}
+	return cols
+}
+
 func (m Model) renderInlineImage(img ai.ImageContent) string {
 	if !m.cfg.ShowImages() || m.imgProto == "" {
 		return imageFallback(img)
@@ -409,13 +464,18 @@ func (m Model) renderInlineImage(img ai.ImageContent) string {
 		if !kittyCanInline(img) {
 			return imageFallback(img)
 		}
+		cells = m.kittyMaxCols()
 		rows := 0
 		if b, err := decodeImageData(img.Data); err == nil {
 			if w, h, ok := pngSize(b); ok {
-				cells, rows = kittyPlacement(w, h, cells)
+				cells, rows = kittyPlacement(w, h, cells, m.cellWidthPx, m.cellHeightPx)
 			}
 		}
-		return encodeKitty(img.Data, cells, rows)
+		seq := encodeKitty(img.Data, cells, rows)
+		if rows > 1 {
+			seq += strings.Repeat("\n", rows-1)
+		}
+		return seq
 	case protoITerm:
 		return encodeITerm2(img.Data, cells)
 	default:

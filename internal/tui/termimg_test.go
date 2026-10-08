@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/config"
@@ -60,19 +62,21 @@ func pngHeader(w, h int) string {
 
 func TestKittyPlacementAspect(t *testing.T) {
 	cases := []struct {
-		name          string
-		w, h, maxCols int
-		wantCols      int
-		wantRows      int
+		name                        string
+		w, h, maxCols, cellW, cellH int
+		wantCols                    int
+		wantRows                    int
 	}{
-		{name: "wide", w: 615, h: 86, maxCols: 60, wantCols: 60, wantRows: 4},
-		{name: "tall", w: 400, h: 900, maxCols: 60, wantCols: 60, wantRows: 68},
-		{name: "wide capped", w: 615, h: 86, maxCols: 30, wantCols: 30, wantRows: 2},
-		{name: "square pixel", w: 1, h: 1, maxCols: 60, wantCols: 60, wantRows: 30},
+		{name: "wide", w: 615, h: 86, maxCols: 60, cellW: 9, cellH: 18, wantCols: 60, wantRows: 4},
+		{name: "tall", w: 400, h: 900, maxCols: 60, cellW: 9, cellH: 18, wantCols: 27, wantRows: 30},
+		{name: "wide capped", w: 615, h: 86, maxCols: 30, cellW: 9, cellH: 18, wantCols: 30, wantRows: 2},
+		{name: "square pixel", w: 1, h: 1, maxCols: 60, cellW: 9, cellH: 18, wantCols: 60, wantRows: 30},
+		{name: "tall kitty cells", w: 400, h: 900, maxCols: 60, cellW: 15, cellH: 28, wantCols: 27, wantRows: 33},
+		{name: "tall narrow cells", w: 400, h: 900, maxCols: 30, cellW: 14, cellH: 28, wantCols: 13, wantRows: 15},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cols, rows := kittyPlacement(tc.w, tc.h, tc.maxCols)
+			cols, rows := kittyPlacement(tc.w, tc.h, tc.maxCols, tc.cellW, tc.cellH)
 			if cols != tc.wantCols || rows != tc.wantRows {
 				t.Fatalf("got %dx%d want %dx%d", cols, rows, tc.wantCols, tc.wantRows)
 			}
@@ -82,7 +86,7 @@ func TestKittyPlacementAspect(t *testing.T) {
 
 func TestEncodeKittyWritesRows(t *testing.T) {
 	got := encodeKitty("AAAA", 60, 4)
-	if !strings.Contains(got, "a=T,f=100,q=2,c=60,r=4;") {
+	if !strings.Contains(got, "a=T,f=100,q=2,C=1,c=60,r=4;") {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -166,7 +170,7 @@ func TestViewInlinesKittyImage(t *testing.T) {
 	if strings.Contains(view, `"content"`) {
 		t.Fatalf("raw JSON leaked:\n%s", view)
 	}
-	if !strings.Contains(view, "\x1b_Ga=T,f=100,q=2,c=60,r=30;") {
+	if !strings.Contains(view, "\x1b_Ga=T,f=100,q=2,C=1,c=60,r=30;") {
 		t.Fatalf("missing kitty sequence:\n%s", view)
 	}
 	if !strings.Contains(view, png1x1) {
@@ -211,9 +215,9 @@ func TestViewKittySizesWideAndTall(t *testing.T) {
 		width int
 		want  string
 	}{
-		{name: "wide", w: 615, h: 86, want: "c=60,r=4;"},
-		{name: "tall", w: 400, h: 900, want: "c=60,r=68;"},
-		{name: "wide capped", w: 615, h: 86, width: 30, want: "c=30,r=2;"},
+		{name: "wide", w: 615, h: 86, want: "C=1,c=60,r=4;"},
+		{name: "tall", w: 400, h: 900, want: "C=1,c=27,r=30;"},
+		{name: "wide capped", w: 615, h: 86, width: 30, want: "C=1,c=30,r=2;"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -232,6 +236,83 @@ func TestViewKittySizesWideAndTall(t *testing.T) {
 				t.Fatalf("missing %s:\n%s", tc.want, view)
 			}
 		})
+	}
+}
+
+func TestRenderInlineImageReservesKittyRows(t *testing.T) {
+	m := New(testCfg())
+	m.imgProto = protoKitty
+	wide := m.renderInlineImage(ai.ImageContent{Type: "image", Data: pngHeader(615, 86), MimeType: "image/png"})
+	if !strings.Contains(wide, "C=1,c=60,r=4;") {
+		t.Fatalf("wide sequence: %q", wide)
+	}
+	if strings.Count(wide, "\n") != 3 {
+		t.Fatalf("wide newlines=%d", strings.Count(wide, "\n"))
+	}
+	tall := m.renderInlineImage(ai.ImageContent{Type: "image", Data: pngHeader(400, 900), MimeType: "image/png"})
+	if !strings.Contains(tall, "C=1,c=27,r=30;") {
+		t.Fatalf("tall sequence: %q", tall)
+	}
+	if strings.Count(tall, "\n") != 29 {
+		t.Fatalf("tall newlines=%d", strings.Count(tall, "\n"))
+	}
+}
+
+func TestRenderInlineImageUsesTerminalCellSize(t *testing.T) {
+	m := New(testCfg())
+	m.imgProto = protoKitty
+	m.cellWidthPx, m.cellHeightPx = 15, 28
+	got := m.renderInlineImage(ai.ImageContent{Type: "image", Data: pngHeader(400, 900), MimeType: "image/png"})
+	if !strings.Contains(got, "C=1,c=27,r=33;") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRenderInlineImageCapsWidthToTerminal(t *testing.T) {
+	m := New(testCfg())
+	m.imgProto = protoKitty
+	m.width = 32
+	got := m.renderInlineImage(ai.ImageContent{Type: "image", Data: pngHeader(400, 900), MimeType: "image/png"})
+	if !strings.Contains(got, "C=1,c=13,r=15;") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRenderInlineImageITermKeepsSingleLine(t *testing.T) {
+	m := New(testCfg())
+	m.imgProto = protoITerm
+	got := m.renderInlineImage(ai.ImageContent{Type: "image", Data: png1x1, MimeType: "image/png"})
+	if strings.Contains(got, "C=1") || strings.Contains(got, "\n") || strings.Contains(got, "r=") {
+		t.Fatalf("iterm changed: %q", got)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(png1x1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("\x1b]1337;File=inline=1;width=60;size=%d:%s\x07", len(decoded), png1x1)
+	if got != want {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestParseCellSizeResponse(t *testing.T) {
+	w, h, ok := parseCellSizeResponse([]byte("junk\x1b[6;28;14t"))
+	if !ok || w != 14 || h != 28 {
+		t.Fatalf("got %d×%d ok=%v", w, h, ok)
+	}
+	if _, _, ok := parseCellSizeResponse([]byte("\x1b[6;0;10t")); ok {
+		t.Fatal("non-positive size should be ignored")
+	}
+	if _, _, ok := parseCellSizeResponse([]byte("nope")); ok {
+		t.Fatal("garbage should not parse")
+	}
+}
+
+func TestCellSizeReplyDoesNotReachEditor(t *testing.T) {
+	m := New(testCfg())
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[6;28;14t")})
+	if m.editor.Value() != "" {
+		t.Fatalf("cell size reply leaked into editor: %q", m.editor.Value())
 	}
 }
 
