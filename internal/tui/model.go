@@ -160,6 +160,8 @@ type Model struct {
 	anthropicWarn bool
 	clipOSC       string
 	imgProto      string
+	cellWidthPx   int
+	cellHeightPx  int
 	altScreen     bool
 	lastWidth     int
 	lastHeight    int
@@ -197,6 +199,8 @@ func New(cfg config.Config) Model {
 		editor:       newPromptEditor(),
 		keys:         keys.NewManager(config.DefaultConfigDir()),
 		imgProto:     cfg.ImageProtocol(detectImageProtocol(os.Getenv)),
+		cellWidthPx:  kittyCellWidthPx,
+		cellHeightPx: kittyCellHeightPx,
 		altScreen:    useAltScreen(cfg),
 		hideThinking: cfg.HideThinking(),
 		complete:     completer{maxVisible: cfg.AutocompleteVisible()},
@@ -316,6 +320,9 @@ func isTermQueryLeak(msg tea.KeyMsg) bool {
 	}
 	s := string(msg.Runes)
 	if strings.Contains(s, "]11;") || strings.Contains(s, "rgb:0000/") {
+		return true
+	}
+	if cellSizeLeakRe.MatchString(s) {
 		return true
 	}
 	return strings.Contains(s, "[1;1R")
@@ -1786,6 +1793,11 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 		m.termColors = readTerminalColors(os.Stdin, os.Stdout, terminalColorQueryTimeout)
 		m.termColorsOK = true
 		m.applyTheme(theme.LoadWith(m.themeOpts(cfg.Theme)))
+	}
+	if m.imgProto == protoKitty && m.cfg.ShowImages() {
+		if w, h, ok := readTerminalCellSize(os.Stdin, os.Stdout, terminalColorQueryTimeout); ok {
+			m.cellWidthPx, m.cellHeightPx = w, h
+		}
 	}
 	if eng != nil {
 		m.provider = eng.Provider
