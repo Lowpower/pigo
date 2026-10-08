@@ -17,7 +17,7 @@ on-disk shape. Keep that format stable.
 | Action | How |
 | --- | --- |
 | Continue latest for this cwd | `--continue` / `-c` |
-| Pick or load a session | `--resume` / `-r`, `--session <path\|id>`, `/resume`, `/import` |
+| Pick or load a session | `--resume` / `-r`, `--session <path\|id>`, `/resume`, `/import` (copies into the session directory, then opens the copy) |
 | Fork into a new file | `--fork`, `/fork`, `/clone` (header `parentSession`) |
 | Name | `--name` / `-n`, `/name` |
 | Tree navigation | `/tree`, double-Escape (see `doubleEscapeAction`) |
