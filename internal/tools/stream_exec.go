@@ -13,7 +13,32 @@ import (
 
 const shellUpdateThrottle = 100 * time.Millisecond
 
+// formatDuration matches the shell-tool footer used by bash and powershell.
+// Under a minute it keeps one decimal second. At a minute it switches to
+// minutes and seconds, and at an hour it includes hours.
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	seconds := float64(d) / float64(time.Second)
+	if seconds < 60 {
+		return fmt.Sprintf("%.1fs", seconds)
+	}
+	total := int(seconds)
+	minutes := total / 60
+	remainder := total % 60
+	if minutes < 60 {
+		return fmt.Sprintf("%dm %ds", minutes, remainder)
+	}
+	return fmt.Sprintf("%dh %dm %ds", minutes/60, minutes%60, remainder)
+}
+
+func appendDuration(result string, d time.Duration) string {
+	return result + "\nTook " + formatDuration(d)
+}
+
 func runStreamed(ctx context.Context, cmd *exec.Cmd, timeoutSec int, tempPrefix string) (string, bool) {
+	started := time.Now()
 	onUpdate := OutputUpdate(ctx)
 	var mu sync.Mutex
 	acc := ""
@@ -43,14 +68,14 @@ func runStreamed(ctx context.Context, cmd *exec.Cmd, timeoutSec int, tempPrefix 
 	emit(true)
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return result + fmt.Sprintf("\n[timed out after %ds]", timeoutSec), true
+		return appendDuration(result+fmt.Sprintf("\n[timed out after %ds]", timeoutSec), time.Since(started)), true
 	}
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return result + fmt.Sprintf("\n[exit code %d]", exitErr.ExitCode()), true
+			return appendDuration(result+fmt.Sprintf("\n[exit code %d]", exitErr.ExitCode()), time.Since(started)), true
 		}
-		return result + "\n" + err.Error(), true
+		return appendDuration(result+"\n"+err.Error(), time.Since(started)), true
 	}
-	return result, false
+	return appendDuration(result, time.Since(started)), false
 }

@@ -69,6 +69,28 @@ func TestCtrlTHidesThinking(t *testing.T) {
 	}
 }
 
+func TestCollapsedToolResultKeepsTook(t *testing.T) {
+	raw := "line-one\nline-two\nTook 1m 5s"
+	got := toolResultBody(raw, false)
+	if !strings.Contains(got, "line-one") || !strings.Contains(got, "Took 1m 5s") {
+		t.Fatalf("collapsed = %q", got)
+	}
+	if strings.Contains(got, "line-two") {
+		t.Fatalf("collapsed should hide body lines: %q", got)
+	}
+	expanded := toolResultBody(raw, true)
+	if !strings.Contains(expanded, "line-two") || !strings.Contains(expanded, "Took 1m 5s") {
+		t.Fatalf("expanded = %q", expanded)
+	}
+
+	m := New(testCfg())
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventToolEnd, ToolName: "bash", Result: "hello-bash\nTook 0.1s"}})
+	view := m.View()
+	if !strings.Contains(view, "hello-bash") || !strings.Contains(view, "Took 0.1s") {
+		t.Fatalf("collapsed view missing duration:\n%s", view)
+	}
+}
+
 func TestCtrlOExpandsToolOutput(t *testing.T) {
 	m := New(testCfg())
 	body := "line-one\nline-two\nline-three"
