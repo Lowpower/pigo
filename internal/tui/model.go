@@ -1000,7 +1000,11 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if cmd.Rest == "" {
 			return note("usage: /import <path.jsonl>")
 		}
-		opened, err := session.Open(cmd.Rest)
+		sessionDir := ""
+		if m.engine != nil {
+			sessionDir = m.engine.Opts.SessionDir
+		}
+		opened, err := session.Import(cmd.Rest, m.sessionCwd(), configDir(m), sessionDir)
 		if err != nil {
 			return note("import error: " + err.Error())
 		}
