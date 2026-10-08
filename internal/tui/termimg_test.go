@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"testing"
@@ -49,9 +50,56 @@ func TestDetectImageProtocol(t *testing.T) {
 	}
 }
 
+func pngHeader(w, h int) string {
+	b := make([]byte, 24)
+	copy(b, []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
+	binary.BigEndian.PutUint32(b[16:20], uint32(w))
+	binary.BigEndian.PutUint32(b[20:24], uint32(h))
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+func TestKittyPlacementAspect(t *testing.T) {
+	cases := []struct {
+		name          string
+		w, h, maxCols int
+		wantCols      int
+		wantRows      int
+	}{
+		{name: "wide", w: 615, h: 86, maxCols: 60, wantCols: 60, wantRows: 4},
+		{name: "tall", w: 400, h: 900, maxCols: 60, wantCols: 60, wantRows: 68},
+		{name: "wide capped", w: 615, h: 86, maxCols: 30, wantCols: 30, wantRows: 2},
+		{name: "square pixel", w: 1, h: 1, maxCols: 60, wantCols: 60, wantRows: 30},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cols, rows := kittyPlacement(tc.w, tc.h, tc.maxCols)
+			if cols != tc.wantCols || rows != tc.wantRows {
+				t.Fatalf("got %dx%d want %dx%d", cols, rows, tc.wantCols, tc.wantRows)
+			}
+		})
+	}
+}
+
+func TestEncodeKittyWritesRows(t *testing.T) {
+	got := encodeKitty("AAAA", 60, 4)
+	if !strings.Contains(got, "a=T,f=100,q=2,c=60,r=4;") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestEncodeKittyOmitsUnknownRows(t *testing.T) {
+	got := encodeKitty("AAAA", 60, 0)
+	if strings.Contains(got, "r=") {
+		t.Fatalf("rows should be omitted: %q", got)
+	}
+	if !strings.Contains(got, "a=T,f=100,q=2,c=60;") {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestEncodeKittyChunks(t *testing.T) {
 	data := strings.Repeat("A", 5000)
-	got := encodeKitty(data, 60)
+	got := encodeKitty(data, 60, 0)
 	if !strings.Contains(got, ",m=1;") {
 		t.Fatalf("missing first chunk: %q", got[:80])
 	}
@@ -118,7 +166,7 @@ func TestViewInlinesKittyImage(t *testing.T) {
 	if strings.Contains(view, `"content"`) {
 		t.Fatalf("raw JSON leaked:\n%s", view)
 	}
-	if !strings.Contains(view, "\x1b_Ga=T,f=100,q=2,c=60;") {
+	if !strings.Contains(view, "\x1b_Ga=T,f=100,q=2,c=60,r=30;") {
 		t.Fatalf("missing kitty sequence:\n%s", view)
 	}
 	if !strings.Contains(view, png1x1) {
@@ -153,6 +201,51 @@ func TestViewFallsBackWithoutProtocol(t *testing.T) {
 	}
 	if !strings.Contains(view, "[Image: [image/png] 1x1]") {
 		t.Fatalf("missing fallback:\n%s", view)
+	}
+}
+
+func TestViewKittySizesWideAndTall(t *testing.T) {
+	cases := []struct {
+		name  string
+		w, h  int
+		width int
+		want  string
+	}{
+		{name: "wide", w: 615, h: 86, want: "c=60,r=4;"},
+		{name: "tall", w: 400, h: 900, want: "c=60,r=68;"},
+		{name: "wide capped", w: 615, h: 86, width: 30, want: "c=30,r=2;"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testCfg()
+			if tc.width > 0 {
+				w := tc.width
+				cfg.Terminal.ImageWidthCells = &w
+			}
+			m := New(cfg)
+			m.imgProto = protoKitty
+			data := pngHeader(tc.w, tc.h)
+			raw := `{"content":[{"type":"image","data":"` + data + `","mimeType":"image/png"}]}`
+			m = send(m, agentEventMsg{agent.Event{Type: agent.EventToolEnd, ToolName: "read", Result: raw}})
+			view := m.View()
+			if !strings.Contains(view, "\x1b_Ga=T,f=100,q=2,"+tc.want) {
+				t.Fatalf("missing %s:\n%s", tc.want, view)
+			}
+		})
+	}
+}
+
+func TestViewKittyOmitsRowsWhenPNGSizeUnknown(t *testing.T) {
+	m := New(testCfg())
+	m.imgProto = protoKitty
+	raw := `{"content":[{"type":"image","data":"AAAA","mimeType":"image/png"}]}`
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventToolEnd, ToolName: "read", Result: raw}})
+	view := m.View()
+	if strings.Contains(view, "r=") {
+		t.Fatalf("rows should be omitted:\n%s", view)
+	}
+	if !strings.Contains(view, "\x1b_Ga=T,f=100,q=2,c=60;") {
+		t.Fatalf("missing kitty sequence:\n%s", view)
 	}
 }
 
