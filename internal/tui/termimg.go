@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -13,9 +14,11 @@ import (
 )
 
 const (
-	protoKitty = "kitty"
-	protoITerm = "iterm2"
-	kittyChunk = 4096
+	protoKitty        = "kitty"
+	protoITerm        = "iterm2"
+	kittyChunk        = 4096
+	kittyCellWidthPx  = 9
+	kittyCellHeightPx = 18
 )
 
 var dataURLRe = regexp.MustCompile(`data:(image/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)`)
@@ -54,13 +57,64 @@ func detectImageProtocol(getenv func(string) string) string {
 	return ""
 }
 
-func encodeKitty(b64 string, cells int) string {
+// chooseLessDistortedCellCount picks ceil or ceil-1, whichever changes the
+// image aspect ratio less. Equal distortion keeps the ceiling.
+func chooseLessDistortedCellCount(upper int, ideal float64) int {
+	if upper <= 1 || ideal <= 0 {
+		return upper
+	}
+	lower := upper - 1
+	upperDist := math.Max(float64(upper)/ideal, ideal/float64(upper))
+	lowerDist := math.Max(float64(lower)/ideal, ideal/float64(lower))
+	if lowerDist < upperDist {
+		return lower
+	}
+	return upper
+}
+
+// kittyPlacement sizes a Kitty image in cells. Columns stay within maxCols.
+// Rows are chosen against a 9×18 px cell so extreme aspects are not squared.
+func kittyPlacement(imgW, imgH, maxCols int) (int, int) {
+	maxWidth := maxCols
+	if maxWidth < 1 {
+		maxWidth = 1
+	}
+	if imgW < 1 {
+		imgW = 1
+	}
+	if imgH < 1 {
+		imgH = 1
+	}
+	cellW := float64(kittyCellWidthPx)
+	cellH := float64(kittyCellHeightPx)
+	widthScale := (float64(maxWidth) * cellW) / float64(imgW)
+	scaledWidthPx := float64(imgW) * widthScale
+	scaledHeightPx := float64(imgH) * widthScale
+	columns := int(math.Ceil(scaledWidthPx / cellW))
+	if columns < 1 {
+		columns = 1
+	}
+	if columns > maxWidth {
+		columns = maxWidth
+	}
+	rows := int(math.Ceil(scaledHeightPx / cellH))
+	if rows < 1 {
+		rows = 1
+	}
+	idealRows := (float64(columns) * cellW * float64(imgH)) / (float64(imgW) * cellH)
+	return columns, chooseLessDistortedCellCount(rows, idealRows)
+}
+
+func encodeKitty(b64 string, cells, rows int) string {
 	const prefix = "\x1b_G"
 	const suffix = "\x1b\\"
 	if cells < 1 {
 		cells = 60
 	}
 	params := fmt.Sprintf("a=T,f=100,q=2,c=%d", cells)
+	if rows >= 1 {
+		params += fmt.Sprintf(",r=%d", rows)
+	}
 	if len(b64) <= kittyChunk {
 		return prefix + params + ";" + b64 + suffix
 	}
@@ -355,7 +409,13 @@ func (m Model) renderInlineImage(img ai.ImageContent) string {
 		if !kittyCanInline(img) {
 			return imageFallback(img)
 		}
-		return encodeKitty(img.Data, cells)
+		rows := 0
+		if b, err := decodeImageData(img.Data); err == nil {
+			if w, h, ok := pngSize(b); ok {
+				cells, rows = kittyPlacement(w, h, cells)
+			}
+		}
+		return encodeKitty(img.Data, cells, rows)
 	case protoITerm:
 		return encodeITerm2(img.Data, cells)
 	default:
