@@ -91,7 +91,35 @@ func toolResultBody(raw string, expanded bool) string {
 	if expanded {
 		return expandTool(raw)
 	}
-	return firstLine(raw)
+	body, took := splitTrailingTook(raw)
+	if took == "" {
+		return firstLine(raw)
+	}
+	if strings.TrimSpace(body) == "" {
+		return took
+	}
+	return firstLine(body) + "  " + took
+}
+
+// splitTrailingTook lifts a final "Took …" line off a shell tool result so the
+// collapsed view can keep the duration after the first line of output.
+func splitTrailingTook(raw string) (body, took string) {
+	trimmed := strings.TrimRight(raw, "\n")
+	if trimmed == "" {
+		return raw, ""
+	}
+	idx := strings.LastIndex(trimmed, "\n")
+	last := trimmed
+	if idx >= 0 {
+		last = trimmed[idx+1:]
+	}
+	if !strings.HasPrefix(last, "Took ") {
+		return raw, ""
+	}
+	if idx < 0 {
+		return "", last
+	}
+	return strings.TrimRight(trimmed[:idx], "\n"), last
 }
 
 func (m *Model) refreshGit() {
