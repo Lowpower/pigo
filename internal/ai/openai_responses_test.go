@@ -3,7 +3,9 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -289,6 +291,75 @@ func TestOpenAIResponsesMaxOutputTokensCompat(t *testing.T) {
 			n, _ := got.(float64)
 			if int(n) != tc.want {
 				t.Fatalf("max_output_tokens = %#v, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func responsesTierFixture(tier string, include bool) string {
+	field := ""
+	if include {
+		field = fmt.Sprintf(`,"service_tier":%q`, tier)
+	}
+	return fmt.Sprintf(`event: response.completed
+data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_tier","status":"completed"%s,"usage":{"input_tokens":1000000,"output_tokens":500000,"total_tokens":1500000}}}
+
+`, field)
+}
+
+func TestOpenAIResponsesServiceTierPricing(t *testing.T) {
+	const provider = "tier-price"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: provider, DefaultAPI: "openai-responses", DefaultID: "priced",
+		Models: []models.Model{{
+			Provider: provider, ID: "priced", API: "openai-responses",
+			Cost: &models.Cost{Input: 2, Output: 4, CacheRead: 0.5, CacheWrite: 2},
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(provider) })
+
+	// 1_000_000 input @ $2/M and 500_000 output @ $4/M.
+	standard := UsageCost{Input: 2, Output: 2, Total: 4}
+	priority := UsageCost{Input: 4, Output: 4, Total: 8}
+	cases := []struct {
+		name    string
+		tier    string
+		include bool
+		want    UsageCost
+	}{
+		{name: "fast", tier: "fast", include: true, want: priority},
+		{name: "priority", tier: "priority", include: true, want: priority},
+		{name: "default", tier: "default", include: true, want: standard},
+		{name: "missing", want: standard},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var payload map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &payload)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, responsesTierFixture(tc.tier, tc.include))
+			}))
+			defer srv.Close()
+
+			client := &OpenAIResponsesClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+			stream, err := client.StreamFn()(context.Background(), Context{
+				Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			}, Options{Provider: provider, Model: "priced"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, final := stream.Collect()
+			if final == nil {
+				t.Fatal("missing final message")
+			}
+			if _, ok := payload["service_tier"]; ok {
+				t.Fatalf("request sent service_tier: %#v", payload["service_tier"])
+			}
+			got := final.Usage.Cost
+			if math.Abs(got.Input-tc.want.Input) > 1e-9 || math.Abs(got.Output-tc.want.Output) > 1e-9 || math.Abs(got.Total-tc.want.Total) > 1e-9 {
+				t.Fatalf("cost = %+v, want %+v", got, tc.want)
 			}
 		})
 	}

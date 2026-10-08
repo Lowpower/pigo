@@ -19,6 +19,8 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/openai/openai-go/packages/ssestream"
 	"github.com/openai/openai-go/responses"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 const (
@@ -312,7 +314,7 @@ func (c *OpenAICodexClient) wsEventStream(ctx context.Context, acq wsAcquire, fi
 		}()
 		fake := &http.Response{StatusCode: http.StatusOK, Body: pr}
 		stream := ssestream.NewStream[responses.ResponseStreamEventUnion](ssestream.NewDecoder(fake), nil)
-		c.finishResponses(ctx, stream, out, s)
+		c.finishResponses(ctx, stream, out, s, catalogCost(opts))
 		if out.StopReason != StopError && out.StopReason != StopAborted && opts.SessionID != "" && acq.entry != nil && out.ResponseID != "" {
 			acq.entry.continuation = &cachedWSContinuation{
 				lastRequestBody:   jsonCloneMap(bodyMap),
@@ -373,13 +375,13 @@ func (c *OpenAICodexClient) sseEventStream(ctx context.Context, body []byte, opt
 		}
 		resp.Body = observeSSEBody(resp.Body, opts.OnProviderStreamEvent)
 		stream := ssestream.NewStream[responses.ResponseStreamEventUnion](ssestream.NewDecoder(resp), nil)
-		c.finishResponses(ctx, stream, out, s)
+		c.finishResponses(ctx, stream, out, s, catalogCost(opts))
 	}()
 	return s, nil
 }
 
-func (c *OpenAICodexClient) finishResponses(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], out *AssistantMessage, s *EventStream) {
-	if err := processResponsesStream(ctx, stream, out, s); err != nil && out.StopReason != StopError {
+func (c *OpenAICodexClient) finishResponses(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], out *AssistantMessage, s *EventStream, cost *models.Cost) {
+	if err := processResponsesStream(ctx, stream, out, s, cost); err != nil && out.StopReason != StopError {
 		finishError(ctx, out, s, err.Error())
 		return
 	}

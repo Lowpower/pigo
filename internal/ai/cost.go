@@ -23,6 +23,23 @@ func tokenPrice(tokens int, perMillion float64) float64 {
 	return float64(tokens) * perMillion / 1_000_000
 }
 
+// applyServiceTierCost multiplies a catalog cost when OpenAI served the
+// request on the fast or priority tier. Missing, default, and auto stay at
+// the catalog rate. Fast uses the same markup as priority.
+func applyServiceTierCost(usage *Usage, tier string) {
+	if usage == nil {
+		return
+	}
+	switch tier {
+	case "fast", "priority":
+		usage.Cost.Input *= 2
+		usage.Cost.Output *= 2
+		usage.Cost.CacheRead *= 2
+		usage.Cost.CacheWrite *= 2
+		usage.Cost.Total = usage.Cost.Input + usage.Cost.Output + usage.Cost.CacheRead + usage.Cost.CacheWrite
+	}
+}
+
 func catalogCost(opts Options) *models.Cost {
 	m, ok := models.Lookup(opts.Provider, opts.Model)
 	if !ok {
