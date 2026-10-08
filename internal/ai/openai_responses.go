@@ -13,6 +13,8 @@ import (
 	"github.com/openai/openai-go/packages/ssestream"
 	"github.com/openai/openai-go/responses"
 	"github.com/openai/openai-go/shared"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // OpenAIResponsesClient talks to the OpenAI Responses API.
@@ -119,7 +121,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 				return
 			}
-			if err := processResponsesStream(ctx, stream, out, s); err != nil && out.StopReason != StopError {
+			if err := processResponsesStream(ctx, stream, out, s, catalogCost(opts)); err != nil && out.StopReason != StopError {
 				finishError(ctx, out, s, err.Error())
 				return
 			}
@@ -206,7 +208,7 @@ func responsesUserImageMessage(text string, imgs []ImageContent) responses.Respo
 	return responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser)
 }
 
-func processResponsesStream(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], out *AssistantMessage, s *EventStream) error {
+func processResponsesStream(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], out *AssistantMessage, s *EventStream, cost *models.Cost) error {
 	textIdx := map[string]int{}
 	toolIdx := map[string]int{}
 	for stream.Next() {
@@ -280,6 +282,8 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 				out.Usage.Output = int(v.Response.Usage.OutputTokens)
 				out.Usage.TotalTokens = int(v.Response.Usage.TotalTokens)
 			}
+			calculateCost(cost, &out.Usage)
+			applyServiceTierCost(&out.Usage, string(v.Response.ServiceTier))
 			out.ResponseID = v.Response.ID
 			switch v.Response.Status {
 			case "incomplete":
