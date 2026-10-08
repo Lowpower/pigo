@@ -164,13 +164,6 @@ func (m Model) startupResources() string {
 			}
 			sections = append(sections, m.loadedSection("Extensions", joinCompact(names, true), joinExpanded(disp)))
 		}
-		if names, paths := themeListing(m); len(names) > 0 {
-			disp := make([]string, len(paths))
-			for i, p := range paths {
-				disp[i] = formatDisplayPath(p, home)
-			}
-			sections = append(sections, m.loadedSection("Themes", joinCompact(names, true), joinExpanded(disp)))
-		}
 	}
 	return strings.Join(sections, "\n\n")
 }
@@ -225,40 +218,6 @@ func extensionListing(m Model) (names, paths []string) {
 	}
 	for _, spec := range m.engine.Opts.Extensions {
 		add(spec, spec)
-	}
-	return names, paths
-}
-
-func themeListing(m Model) (names, paths []string) {
-	seen := map[string]bool{}
-	add := func(p string) {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			return
-		}
-		key := p
-		if abs, err := filepath.Abs(p); err == nil {
-			key = abs
-		}
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
-		if base == "" {
-			base = p
-		}
-		names = append(names, base)
-		paths = append(paths, p)
-	}
-	for _, p := range m.engine.Opts.ThemePaths {
-		add(p)
-	}
-	if m.engine.Opts.NoThemes {
-		return names, paths
-	}
-	for _, p := range m.engine.ThemeFiles {
-		add(p)
 	}
 	return names, paths
 }
