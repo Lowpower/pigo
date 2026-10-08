@@ -150,6 +150,36 @@ func TestStartupResourcesCompactAndExpanded(t *testing.T) {
 	}
 }
 
+func TestStartupOmitsThemesSection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	themePath := filepath.Join(home, "themes", "aurora.json")
+	m := New(testCfg())
+	m.engine = &runtime.Engine{
+		Opts: runtime.Options{
+			ThemePaths: []string{themePath},
+		},
+		ThemeFiles: []string{filepath.Join(home, ".pigo", "agent", "themes", "nord.json")},
+		Skills:     []skills.Skill{{Name: "commit", FilePath: filepath.Join(home, "skills", "commit", "SKILL.md")}},
+	}
+	view := m.View()
+	if strings.Contains(view, "[Themes]") || strings.Contains(view, "aurora") || strings.Contains(view, "nord") {
+		t.Fatalf("startup banner still lists themes:\n%s", view)
+	}
+	if !strings.Contains(view, "[Skills]") || !strings.Contains(view, "commit") {
+		t.Fatalf("skills section should remain:\n%s", view)
+	}
+
+	m.toolsExpanded = true
+	view = m.View()
+	if strings.Contains(view, "[Themes]") || strings.Contains(view, "aurora.json") || strings.Contains(view, "nord.json") {
+		t.Fatalf("expanded startup still lists themes:\n%s", view)
+	}
+	if !strings.Contains(view, "SKILL.md") {
+		t.Fatalf("expanded skills should still list paths:\n%s", view)
+	}
+}
+
 func TestStartupListingFollowsEngineReload(t *testing.T) {
 	m := New(testCfg())
 	m.engine = &runtime.Engine{
