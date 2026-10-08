@@ -104,3 +104,15 @@ func TestFooterAccumulatesUsage(t *testing.T) {
 		t.Fatalf("missing cost:\n%s", view)
 	}
 }
+
+func TestAddUsageKeepsCacheWrite1h(t *testing.T) {
+	var dst ai.Usage
+	addUsage(&dst, ai.Usage{CacheWrite: 10, CacheWrite1h: 4, Cost: ai.UsageCost{CacheWrite: 1, Total: 1}})
+	addUsage(&dst, ai.Usage{CacheWrite: 3, CacheWrite1h: 1, Cost: ai.UsageCost{CacheWrite: 2, Total: 2}})
+	if dst.CacheWrite != 13 || dst.CacheWrite1h != 5 {
+		t.Fatalf("tokens write=%d 1h=%d", dst.CacheWrite, dst.CacheWrite1h)
+	}
+	if dst.Cost.CacheWrite != 3 || dst.Cost.Total != 3 {
+		t.Fatalf("cost=%+v", dst.Cost)
+	}
+}

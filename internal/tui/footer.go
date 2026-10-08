@@ -64,6 +64,7 @@ func addUsage(dst *ai.Usage, src ai.Usage) {
 	dst.Output += src.Output
 	dst.CacheRead += src.CacheRead
 	dst.CacheWrite += src.CacheWrite
+	dst.CacheWrite1h += src.CacheWrite1h
 	dst.TotalTokens += src.TotalTokens
 	dst.Cost.Input += src.Cost.Input
 	dst.Cost.Output += src.Cost.Output

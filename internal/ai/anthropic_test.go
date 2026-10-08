@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -50,7 +51,7 @@ data: {"type":"message_stop"}
 `
 
 func TestStreamAnthropicReaderFixture(t *testing.T) {
-	stream := StreamAnthropicReader(context.Background(), strings.NewReader(anthropicFixture), "claude-test")
+	stream := StreamAnthropicReader(context.Background(), strings.NewReader(anthropicFixture), "claude-test", nil)
 	events, final := stream.Collect()
 
 	var types []EventType
@@ -272,6 +273,115 @@ func TestAnthropicSessionAffinityHeaders(t *testing.T) {
 			stream.Collect()
 			if got.Get("x-session-affinity") != tc.want {
 				t.Fatalf("x-session-affinity = %q, want %q", got.Get("x-session-affinity"), tc.want)
+			}
+		})
+	}
+}
+
+func anthropicCacheFixture(startUsage, deltaUsage string) string {
+	return fmt.Sprintf("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet-4\",\"usage\":%s}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":%s}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n", startUsage, deltaUsage)
+}
+
+func TestAnthropicStreamPricesCatalogCost(t *testing.T) {
+	body := anthropicCacheFixture(
+		`{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":1000000}`,
+		`{"output_tokens":0,"cache_creation_input_tokens":1000000,"cache_creation":{"ephemeral_1h_input_tokens":400000}}`,
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	client := &AnthropicClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Provider: "anthropic", Model: "claude-sonnet-4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	if final == nil {
+		t.Fatal("no final message")
+	}
+	if final.Usage.CacheWrite != 1_000_000 || final.Usage.CacheWrite1h != 400_000 {
+		t.Fatalf("usage=%+v", final.Usage)
+	}
+	if math.Abs(final.Usage.Cost.CacheWrite-4.65) > 1e-9 || math.Abs(final.Usage.Cost.Total-4.65) > 1e-9 {
+		t.Fatalf("cost=%+v, want cache write 4.65", final.Usage.Cost)
+	}
+}
+
+func TestAnthropicCacheWriteTTLSplit(t *testing.T) {
+	sonnet := &models.Cost{Input: 3, Output: 15, CacheRead: 0.30, CacheWrite: 3.75}
+	cases := []struct {
+		name       string
+		start      string
+		delta      string
+		cacheWrite int
+		cache1h    int
+		writeCost  float64
+	}{
+		{
+			name:       "five minutes only",
+			start:      `{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":1000000,"cache_creation":{"ephemeral_5m_input_tokens":1000000,"ephemeral_1h_input_tokens":0}}`,
+			delta:      `{"output_tokens":1}`,
+			cacheWrite: 1_000_000,
+			cache1h:    0,
+			writeCost:  3.75,
+		},
+		{
+			name:       "one hour only",
+			start:      `{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":400000,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":400000}}`,
+			delta:      `{"output_tokens":1}`,
+			cacheWrite: 400_000,
+			cache1h:    400_000,
+			writeCost:  2.4,
+		},
+		{
+			name:       "both ttls",
+			start:      `{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":1000000,"cache_creation":{"ephemeral_5m_input_tokens":600000,"ephemeral_1h_input_tokens":400000}}`,
+			delta:      `{"output_tokens":1}`,
+			cacheWrite: 1_000_000,
+			cache1h:    400_000,
+			writeCost:  4.65,
+		},
+		{
+			name:       "no ttl breakdown",
+			start:      `{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":1000000}`,
+			delta:      `{"output_tokens":1}`,
+			cacheWrite: 1_000_000,
+			cache1h:    0,
+			writeCost:  3.75,
+		},
+		{
+			name:       "vercel delta breakdown",
+			start:      `{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":1000000}`,
+			delta:      `{"output_tokens":1,"cache_creation_input_tokens":1000000,"cache_creation":{"ephemeral_5m_input_tokens":600000,"ephemeral_1h_input_tokens":400000}}`,
+			cacheWrite: 1_000_000,
+			cache1h:    400_000,
+			writeCost:  4.65,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stream := StreamAnthropicReader(context.Background(), strings.NewReader(anthropicCacheFixture(tc.start, tc.delta)), "claude-sonnet-4", sonnet)
+			_, final := stream.Collect()
+			if final == nil {
+				t.Fatal("no final message")
+			}
+			u := final.Usage
+			if u.CacheWrite != tc.cacheWrite || u.CacheWrite1h != tc.cache1h {
+				t.Fatalf("cache write=%d 1h=%d, want %d and %d", u.CacheWrite, u.CacheWrite1h, tc.cacheWrite, tc.cache1h)
+			}
+			if u.TotalTokens != tc.cacheWrite+1 {
+				t.Fatalf("total=%d, want %d (1h is a subset)", u.TotalTokens, tc.cacheWrite+1)
+			}
+			if math.Abs(u.Cost.CacheWrite-tc.writeCost) > 1e-9 {
+				t.Fatalf("cache write cost=%v, want %v", u.Cost.CacheWrite, tc.writeCost)
+			}
+			if math.Abs(u.Cost.Total-tc.writeCost-sonnet.Output/1_000_000) > 1e-9 {
+				t.Fatalf("total cost=%v", u.Cost.Total)
 			}
 		})
 	}
