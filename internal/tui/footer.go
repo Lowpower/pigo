@@ -88,10 +88,17 @@ func expandTool(s string) string {
 }
 
 func toolResultBody(raw string, expanded bool) string {
-	if expanded {
-		return expandTool(raw)
-	}
 	body, took := splitTrailingTook(raw)
+	if expanded {
+		shown := expandTool(body)
+		if took == "" {
+			return shown
+		}
+		if strings.TrimSpace(shown) == "" {
+			return took
+		}
+		return shown + "\n" + took
+	}
 	if took == "" {
 		return firstLine(raw)
 	}
