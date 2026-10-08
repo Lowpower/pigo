@@ -90,8 +90,12 @@ func (c *BedrockClient) StreamFn() StreamFn {
 		}
 		client := bedrockruntime.NewFromConfig(awsCfg)
 		input := &bedrockruntime.ConverseStreamInput{
-			ModelId:  aws.String(opts.Model),
-			Messages: bedrockMessages(reqCtx),
+			ModelId: aws.String(opts.Model),
+			Messages: bedrockMessages(reqCtx, replayTarget{
+				Provider: recordedProvider(opts, "amazon-bedrock"),
+				API:      "bedrock-converse-stream",
+				Model:    opts.Model,
+			}),
 		}
 		if reqCtx.System != "" {
 			input.System = []types.SystemContentBlock{
@@ -121,7 +125,7 @@ func (c *BedrockClient) StreamFn() StreamFn {
 		s := NewEventStream(16)
 		out := &AssistantMessage{
 			Role: RoleAssistant, Content: []*Content{}, API: "bedrock-converse-stream",
-			Provider: "amazon-bedrock", Model: opts.Model, StopReason: StopPending,
+			Provider: recordedProvider(opts, "amazon-bedrock"), Model: opts.Model, StopReason: StopPending,
 		}
 		go func() {
 			defer s.end()
@@ -153,14 +157,17 @@ func bedrockThinkingFields(opts Options) map[string]any {
 	return map[string]any{"thinking": map[string]any{"type": "adaptive"}}
 }
 
-func bedrockMessages(reqCtx Context) []types.Message {
+func bedrockMessages(reqCtx Context, target replayTarget) []types.Message {
 	var out []types.Message
-	for _, m := range reqCtx.Messages {
+	for _, m := range transformMessages(reqCtx.Messages, target, normalizeSanitizedToolCallID) {
 		if m.Assistant != nil {
 			var blocks []types.ContentBlock
 			for _, c := range m.Assistant.Content {
 				switch c.Type {
 				case KindText:
+					if strings.TrimSpace(c.Text) == "" {
+						continue
+					}
 					blocks = append(blocks, &types.ContentBlockMemberText{Value: c.Text})
 				case KindThinking:
 					blocks = append(blocks, bedrockReasoningBlock(c))
@@ -171,6 +178,9 @@ func bedrockMessages(reqCtx Context) []types.Message {
 						Input:     document.NewLazyDocument(c.Arguments),
 					}})
 				}
+			}
+			if len(blocks) == 0 {
+				continue
 			}
 			out = append(out, types.Message{Role: types.ConversationRoleAssistant, Content: blocks})
 			continue

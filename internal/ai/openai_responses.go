@@ -48,10 +48,19 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 		}
 		client := openai.NewClient(optsList...)
 
+		apiID := c.API
+		if apiID == "" {
+			apiID = "openai-responses"
+		}
+		provider := recordedProvider(opts, "openai")
 		params := responses.ResponseNewParams{
 			Model: shared.ResponsesModel(opts.Model),
 			Input: responses.ResponseNewParamsInputUnion{
-				OfInputItemList: buildResponsesInput(reqCtx),
+				OfInputItemList: buildResponsesInput(reqCtx, replayTarget{
+					Provider: provider,
+					API:      apiID,
+					Model:    opts.Model,
+				}),
 			},
 			Store: param.NewOpt(false),
 		}
@@ -101,13 +110,9 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 
 		stream := client.Responses.NewStreaming(ctx, params)
 		s := NewEventStream(16)
-		apiID := c.API
-		if apiID == "" {
-			apiID = "openai-responses"
-		}
 		out := &AssistantMessage{
 			Role: RoleAssistant, Content: []*Content{}, API: apiID,
-			Provider: "openai", Model: opts.Model, StopReason: StopPending,
+			Provider: provider, Model: opts.Model, StopReason: StopPending,
 		}
 		go func() {
 			defer s.end()
@@ -135,14 +140,14 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 	}
 }
 
-func buildResponsesInput(reqCtx Context) responses.ResponseInputParam {
+func buildResponsesInput(reqCtx Context, target replayTarget) responses.ResponseInputParam {
 	var items responses.ResponseInputParam
-	for _, m := range reqCtx.Messages {
+	for _, m := range transformMessages(reqCtx.Messages, target, normalizeResponsesToolCallID) {
 		if m.Assistant != nil {
 			for _, c := range m.Assistant.Content {
 				switch c.Type {
 				case KindText:
-					if c.Text != "" {
+					if strings.TrimSpace(c.Text) != "" {
 						items = append(items, responses.ResponseInputItemParamOfMessage(c.Text, responses.EasyInputMessageRoleAssistant))
 					}
 				case KindThinking:

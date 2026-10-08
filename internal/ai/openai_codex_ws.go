@@ -373,5 +373,9 @@ func continuationItems(out *AssistantMessage) []any {
 	if out == nil {
 		return nil
 	}
-	return anySlice(buildResponsesInput(Context{Messages: []Message{{Role: RoleAssistant, Assistant: out}}}))
+	return anySlice(buildResponsesInput(Context{Messages: []Message{{Role: RoleAssistant, Assistant: out}}}, replayTarget{
+		Provider: out.Provider,
+		API:      out.API,
+		Model:    out.Model,
+	}))
 }

@@ -71,7 +71,7 @@ func (c *PigoMessagesClient) StreamFn() StreamFn {
 		s := NewEventStream(16)
 		out := &AssistantMessage{
 			Role: RoleAssistant, Content: []*Content{}, API: "pigo-messages",
-			Provider: "radius", Model: opts.Model, StopReason: StopPending,
+			Provider: recordedProvider(opts, "radius"), Model: opts.Model, StopReason: StopPending,
 		}
 		go func() {
 			defer s.end()

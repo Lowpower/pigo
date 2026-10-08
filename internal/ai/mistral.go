@@ -62,7 +62,7 @@ func (c *MistralClient) StreamFn() StreamFn {
 		s := NewEventStream(16)
 		out := &AssistantMessage{
 			Role: RoleAssistant, Content: []*Content{}, API: "mistral-conversations",
-			Provider: "mistral", Model: opts.Model, StopReason: StopPending,
+			Provider: recordedProvider(opts, "mistral"), Model: opts.Model, StopReason: StopPending,
 		}
 		go func() {
 			defer s.end()
@@ -74,8 +74,12 @@ func (c *MistralClient) StreamFn() StreamFn {
 }
 
 func buildMistralRequest(reqCtx Context, opts Options) ([]byte, error) {
-	ids := map[string]string{}
-	msgs := mistralWireMessages(reqCtx.Messages, ids)
+	replayed := transformMessages(reqCtx.Messages, replayTarget{
+		Provider: recordedProvider(opts, "mistral"),
+		API:      "mistral-conversations",
+		Model:    opts.Model,
+	}, normalizeMistralToolCallID)
+	msgs := mistralWireMessages(replayed)
 	if reqCtx.System != "" {
 		msgs = append([]map[string]any{{"role": "system", "content": reqCtx.System}}, msgs...)
 	}
@@ -112,18 +116,7 @@ func buildMistralRequest(reqCtx Context, opts Options) ([]byte, error) {
 	return json.Marshal(req)
 }
 
-func mistralWireMessages(msgs []Message, ids map[string]string) []map[string]any {
-	norm := func(id string) string {
-		if id == "" {
-			return id
-		}
-		if v, ok := ids[id]; ok {
-			return v
-		}
-		v := mistralToolCallID(id)
-		ids[id] = v
-		return v
-	}
+func mistralWireMessages(msgs []Message) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
 		if m.Assistant != nil {
@@ -148,7 +141,7 @@ func mistralWireMessages(msgs []Message, ids map[string]string) []map[string]any
 						args = []byte("{}")
 					}
 					toolCalls = append(toolCalls, map[string]any{
-						"id":   norm(c.ToolID),
+						"id":   c.ToolID,
 						"type": "function",
 						"function": map[string]any{
 							"name":      c.ToolName,
@@ -178,7 +171,7 @@ func mistralWireMessages(msgs []Message, ids map[string]string) []map[string]any
 			}
 			msg := map[string]any{
 				"role":         "tool",
-				"tool_call_id": norm(m.ToolCallID),
+				"tool_call_id": m.ToolCallID,
 			}
 			if len(imgs) == 0 {
 				msg["content"] = text

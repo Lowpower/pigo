@@ -17,7 +17,7 @@ func TestBedrockMessagesToolPair(t *testing.T) {
 			{Type: KindToolCall, ToolID: "1", ToolName: "read", Arguments: map[string]any{"path": "a"}},
 		}}},
 		{Role: RoleToolResult, ToolCallID: "1", ToolName: "read", Content: "ok"},
-	}})
+	}}, replayTarget{})
 	if len(got) != 3 {
 		t.Fatalf("len = %d", len(got))
 	}

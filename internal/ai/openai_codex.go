@@ -108,11 +108,15 @@ func (c *OpenAICodexClient) buildRequestBody(reqCtx Context, opts Options) (map[
 		instructions = "You are a helpful assistant."
 	}
 	bodyMap := map[string]any{
-		"model":               opts.Model,
-		"store":               false,
-		"stream":              true,
-		"instructions":        instructions,
-		"input":               buildResponsesInput(reqCtx),
+		"model":        opts.Model,
+		"store":        false,
+		"stream":       true,
+		"instructions": instructions,
+		"input": buildResponsesInput(reqCtx, replayTarget{
+			Provider: recordedProvider(opts, "openai-codex"),
+			API:      "openai-codex-responses",
+			Model:    opts.Model,
+		}),
 		"text":                map[string]any{"verbosity": "low"},
 		"include":             []string{"reasoning.encrypted_content"},
 		"tool_choice":         "auto",
@@ -261,7 +265,7 @@ func (c *OpenAICodexClient) wsEventStream(ctx context.Context, acq wsAcquire, fi
 	s := NewEventStream(16)
 	out := &AssistantMessage{
 		Role: RoleAssistant, Content: []*Content{}, API: "openai-codex-responses",
-		Provider: "openai-codex", Model: opts.Model, StopReason: StopPending,
+		Provider: recordedProvider(opts, "openai-codex"), Model: opts.Model, StopReason: StopPending,
 	}
 	go func() {
 		keep := false
@@ -359,7 +363,7 @@ func (c *OpenAICodexClient) sseEventStream(ctx context.Context, body []byte, opt
 	s := NewEventStream(16)
 	out := &AssistantMessage{
 		Role: RoleAssistant, Content: []*Content{}, API: "openai-codex-responses",
-		Provider: "openai-codex", Model: opts.Model, StopReason: StopPending,
+		Provider: recordedProvider(opts, "openai-codex"), Model: opts.Model, StopReason: StopPending,
 	}
 	go func() {
 		defer s.end()
