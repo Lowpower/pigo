@@ -93,6 +93,40 @@ func (m Model) ThinkingLevelsFor() []string {
 	return out
 }
 
+// RequestThinkingLevel is the canonical level for one request.
+// off and an empty level stay put, including when the map marks off
+// unsupported, so callers omit the reasoning field instead of enabling
+// a nearby level. Any other level is ClampThinking.
+func (m Model) RequestThinkingLevel(level string) string {
+	level = strings.ToLower(strings.TrimSpace(level))
+	if level == "" || level == "off" {
+		return level
+	}
+	return ClampThinking(level, m)
+}
+
+// ProviderThinkingValue is the effort string to send for a canonical level.
+// An explicit map entry wins. A null or blank entry is unsupported and is
+// not sent. A missing entry uses the level itself, except off and empty,
+// which are omitted.
+func (m Model) ProviderThinkingValue(level string) (string, bool) {
+	level = strings.ToLower(strings.TrimSpace(level))
+	if mapped, ok := m.ThinkingLevelMap[level]; ok {
+		if mapped == nil {
+			return "", false
+		}
+		v := strings.TrimSpace(*mapped)
+		if v == "" {
+			return "", false
+		}
+		return v, true
+	}
+	if level == "" || level == "off" {
+		return "", false
+	}
+	return level, true
+}
+
 // ClampThinking maps level onto the nearest supported value for m.
 func ClampThinking(level string, m Model) string {
 	level = strings.ToLower(strings.TrimSpace(level))
