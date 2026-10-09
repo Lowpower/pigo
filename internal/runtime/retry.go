@@ -34,12 +34,12 @@ func (e *Engine) willRetryAfterAgentEnd(ev agent.Event) bool {
 	if !e.Opts.Config.RetryEnabled() || e.retryAttempt >= e.Opts.Config.RetryMaxRetries() {
 		return false
 	}
-	return ai.IsRetryableError(lastAssistantMsg(ev.Messages), e.contextWindow())
+	return ai.IsRetryableError(lastAssistantMsg(ev.Messages), e.ContextWindow())
 }
 
 func (e *Engine) prepareRetry(ctx context.Context, last []agent.Msg) bool {
 	msg := lastAssistantMsg(last)
-	if !ai.IsRetryableError(msg, e.contextWindow()) {
+	if !ai.IsRetryableError(msg, e.ContextWindow()) {
 		e.emitRetryFailure(msg)
 		return false
 	}

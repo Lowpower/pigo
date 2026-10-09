@@ -436,7 +436,6 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		CLIExtensions:  exts,
 		NoExtensions:   f.noExtensions,
 		ProjectTrusted: trusted,
-		ContextWindow:  cfg.ContextWindow,
 		NoPromptTpls:   f.noPromptTpls,
 		PromptPaths:    f.promptTemplates,
 		ThemePaths:     f.themePaths,

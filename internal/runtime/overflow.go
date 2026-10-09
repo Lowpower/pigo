@@ -22,7 +22,7 @@ func (e *Engine) overflowShouldHandle(msg *ai.AssistantMessage) bool {
 	if msg == nil || !e.Opts.Config.CompactionEnabled() {
 		return false
 	}
-	if ai.IsContextOverflow(msg, e.contextWindow()) {
+	if ai.IsContextOverflow(msg, e.ContextWindow()) {
 		return true
 	}
 	return ai.IsRecoverableLength(msg, e.maxTokens())
@@ -40,7 +40,7 @@ func (e *Engine) prepareOverflow(ctx context.Context, last []agent.Msg) bool {
 	}
 	if e.overflowAttempted {
 		errMsg := "Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model."
-		if !ai.IsContextOverflow(msg, e.contextWindow()) {
+		if !ai.IsContextOverflow(msg, e.ContextWindow()) {
 			errMsg = "Truncated response recovery failed after one compact-and-retry attempt."
 		}
 		e.emitSession(map[string]any{

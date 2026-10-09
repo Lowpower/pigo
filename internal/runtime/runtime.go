@@ -501,15 +501,20 @@ func (e *Engine) pendingCount() int {
 	return len(e.steer) + len(e.follow)
 }
 
-func (e *Engine) contextWindow() int {
-	window := e.Opts.ContextWindow
-	if window <= 0 {
-		window = e.Opts.Config.ContextWindow
+// ContextWindow is the effective window for the selected model.
+// An explicit Options or settings value wins, then the catalog value, then
+// config.DefaultContextWindow.
+func (e *Engine) ContextWindow() int {
+	if e.Opts.ContextWindow > 0 {
+		return e.Opts.ContextWindow
 	}
-	if window <= 0 {
-		window = 200000
+	if e.Opts.Config.ContextWindow > 0 {
+		return e.Opts.Config.ContextWindow
 	}
-	return window
+	if m, ok := models.Lookup(e.activeProvider(), e.Opts.Config.ResolvedModel()); ok && m.ContextWindow > 0 {
+		return m.ContextWindow
+	}
+	return config.DefaultContextWindow
 }
 
 func (e *Engine) maxTokens() int {
@@ -953,13 +958,7 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 	if !e.Opts.Config.CompactionEnabled() {
 		return msgs, "", nil
 	}
-	window := e.Opts.ContextWindow
-	if window <= 0 {
-		window = e.Opts.Config.ContextWindow
-	}
-	if window <= 0 {
-		window = 200000
-	}
+	window := e.ContextWindow()
 	s := e.compactionSettings()
 	if !compaction.ShouldCompact(compaction.EstimateContextTokens(msgs), window, s) {
 		return msgs, "", nil
@@ -1244,7 +1243,7 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 				CustomInstructions:  opts.CustomInstructions,
 				ReplaceInstructions: opts.ReplaceInstructions,
 				ReserveTokens:       e.Opts.Config.BranchSummaryReserveTokens(),
-				ContextWindow:       e.Opts.Config.ContextWindow,
+				ContextWindow:       e.ContextWindow(),
 				Provider:            e.activeProvider(),
 			})
 			return serr
