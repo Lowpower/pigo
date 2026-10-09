@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -209,5 +211,134 @@ func TestExtraSlashCommandsOmitSkillsWhenDisabled(t *testing.T) {
 	m.refreshComplete(false)
 	if !m.complete.active || len(m.complete.items) == 0 || m.complete.items[0].Value != "commit" {
 		t.Fatalf("template completion %+v active=%v", m.complete.items, m.complete.active)
+	}
+}
+
+func TestFileSuggestionsPathBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	writeCompleteFile(t, dir, "readme.md", "r")
+	writeCompleteFile(t, dir, "src/main.go", "p")
+	writeCompleteFile(t, dir, "app/(group)/page.tsx", "p")
+	writeCompleteFile(t, dir, "(group)/page.tsx", "p")
+	writeCompleteFile(t, dir, "文档/说明.md", "t")
+	writeCompleteFile(t, dir, "我的，文档/说明.md", "t")
+	writeCompleteFile(t, dir, "my file.txt", "t")
+
+	tests := []struct {
+		before string
+		prefix string
+		value  string
+		dir    bool
+	}{
+		{before: "(src/m", prefix: "src/m", value: "src/main.go"},
+		{before: "`src/m", prefix: "src/m", value: "src/main.go"},
+		{before: "<src/m", prefix: "src/m", value: "src/main.go"},
+		{before: "(@src/m", prefix: "@src/m", value: "@src/main.go"},
+		{before: "(@\"src/m", prefix: "@\"src/m", value: "@\"src/main.go\""},
+		{before: "app/(group)/pa", prefix: "app/(group)/pa", value: "app/(group)/page.tsx"},
+		{before: "(group)/pa", prefix: "(group)/pa", value: "(group)/page.tsx"},
+		{before: "查看，@rea", prefix: "@rea", value: "@readme.md"},
+		{before: "查看。@rea", prefix: "@rea", value: "@readme.md"},
+		{before: "\u3000@rea", prefix: "@rea", value: "@readme.md"},
+		{before: "edit @rea", prefix: "@rea", value: "@readme.md"},
+		{before: "open \"src/m", prefix: "\"src/m", value: "\"src/main.go\""},
+		{before: "@src/m", prefix: "@src/m", value: "@src/main.go"},
+		{before: "file=src/m", prefix: "src/m", value: "src/main.go"},
+		{before: "文档/说", prefix: "文档/说", value: "文档/说明.md"},
+		{before: "@my", prefix: "@my", value: "@\"my file.txt\""},
+		{before: "@我的", prefix: "@我的", value: "@\"我的，文档/\"", dir: true},
+		{before: "@我的，文档/说", prefix: "文档/说", value: "文档/说明.md"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.before, func(t *testing.T) {
+			items, prefix, ok := fileSuggestions(tt.before, dir, false)
+			if !ok {
+				t.Fatalf("fileSuggestions(%q) missed", tt.before)
+			}
+			if prefix != tt.prefix {
+				t.Fatalf("prefix=%q want %q", prefix, tt.prefix)
+			}
+			if len(items) != 1 || items[0].Value != tt.value || items[0].Dir != tt.dir {
+				t.Fatalf("items=%+v", items)
+			}
+		})
+	}
+}
+
+func TestFileSuggestionsCJKQuoteDoesNotSwallowPunct(t *testing.T) {
+	dir := t.TempDir()
+	writeCompleteFile(t, dir, "我的，文档/说明.md", "t")
+
+	line := "查看：@\"我的，文档/说\"后文"
+	before := "查看：@\"我的，文档/说"
+	items, prefix, ok := fileSuggestions(before, dir, false)
+	if !ok {
+		t.Fatal("quoted CJK path missed")
+	}
+	if prefix != "@\"我的，文档/说" {
+		t.Fatalf("prefix=%q", prefix)
+	}
+	if len(items) != 1 || items[0].Value != "@\"我的，文档/说明.md\"" {
+		t.Fatalf("items=%+v", items)
+	}
+	got, _ := applyComplete(line, prefix, len([]rune(before)), items[0])
+	if got != "查看：@\"我的，文档/说明.md\" 后文" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFileSuggestionsApplyKeepsCJKPunctuation(t *testing.T) {
+	dir := t.TempDir()
+	writeCompleteFile(t, dir, "readme.md", "r")
+
+	line := "查看，@rea"
+	items, prefix, ok := fileSuggestions(line, dir, false)
+	if !ok || prefix != "@rea" || len(items) != 1 {
+		t.Fatalf("ok=%v prefix=%q items=%+v", ok, prefix, items)
+	}
+	got, _ := applyComplete(line, prefix, len([]rune(line)), items[0])
+	if got != "查看，@readme.md " {
+		t.Fatalf("got %q", got)
+	}
+
+	writeCompleteFile(t, dir, "我的，文档/说明.md", "t")
+	line = "查看，@我的"
+	items, prefix, ok = fileSuggestions(line, dir, false)
+	if !ok || prefix != "@我的" || len(items) != 1 {
+		t.Fatalf("ok=%v prefix=%q items=%+v", ok, prefix, items)
+	}
+	got, _ = applyComplete(line, prefix, len([]rune(line)), items[0])
+	if got != "查看，@\"我的，文档/\"" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFileSuggestionsRejectsAtInsideWords(t *testing.T) {
+	dir := t.TempDir()
+	writeCompleteFile(t, dir, "readme.md", "r")
+	for _, before := range []string{"查看@rea", "user@host", "user@readme.md"} {
+		if _, _, ok := fileSuggestions(before, dir, false); ok {
+			t.Fatalf("fileSuggestions(%q) should not complete", before)
+		}
+	}
+}
+
+func TestLastPathTokenStaysASCIIForExtensions(t *testing.T) {
+	if got := lastPathToken("查看，@file"); got != "查看，@file" {
+		t.Fatalf("extension token=%q", got)
+	}
+	if got := lastPathToken("(@src"); got != "(@src" {
+		t.Fatalf("extension token=%q", got)
+	}
+}
+
+func writeCompleteFile(t *testing.T, dir, rel, body string) {
+	t.Helper()
+	path := filepath.Join(dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
