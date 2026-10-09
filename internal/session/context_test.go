@@ -178,7 +178,7 @@ func TestAppendBranchSummaryFromHookIsTopLevel(t *testing.T) {
 	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.AppendBranchSummary("from-1", "branch-sum", true); err != nil {
+	if _, err := m.AppendBranchSummary("from-1", "branch-sum", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	last := lastJSONLObject(t, m.File())

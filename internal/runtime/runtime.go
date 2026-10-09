@@ -588,12 +588,27 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 
 	e.setCompacting(true)
 	defer e.setCompacting(false)
-	cut := compaction.FindCutIndex(msgs, s.KeepRecentTokens)
+	var path []session.Entry
+	if e.Opts.Session != nil {
+		path = e.Opts.Session.GetBranch("")
+	}
+	body, base := compactionBody(msgs, path)
+	if lists, ok := priorCompactionFiles(base); ok {
+		s.PriorRead = lists.ReadFiles
+		s.PriorModified = lists.ModifiedFiles
+		s.UsePriorFiles = true
+	}
+	s.PreviousSummary = base.Summary
+	cut := compaction.FindCutIndex(body, s.KeepRecentTokens)
 	tokensBefore := compaction.EstimateContextTokens(msgs)
 	span.SetAttribute("pigo.compaction.tokens_before", tokensBefore)
 	keep := ""
 	if e.Opts.Session != nil {
-		keep = session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, cut)
+		if base.Found {
+			keep = session.FirstKeptEntryID(base.Entries, nil, cut)
+		} else {
+			keep = session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, cut)
+		}
 	}
 	resultOf := func(messages []ai.Message, summary string) CompactResult {
 		return CompactResult{
@@ -616,6 +631,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 		if e.Opts.Session != nil {
 			if entry, err := e.Opts.Session.AppendCompaction(replacement, keep, tokensBefore, session.CompactionMeta{
 				SystemMessage: e.currentSystemCheckpoint(),
+				FromHook:      true,
 			}); err == nil && entry != nil {
 				e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 			}
@@ -635,7 +651,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	var summary string
 	err := e.withSummarizationRetry(cctx, map[string]any{"source": "compaction", "reason": reason}, func() error {
 		var cerr error
-		compacted, summary, cerr = compaction.Compact(cctx, e.Stream, e.Opts.Config.ResolvedModel(), msgs, s)
+		compacted, summary, cerr = compaction.Compact(cctx, e.Stream, e.Opts.Config.ResolvedModel(), body, s)
 		return cerr
 	})
 	if err != nil {
@@ -651,14 +667,16 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 		})
 		return resultOf(msgs, ""), err
 	}
-	if compacted == nil {
+	if summary == "" || compacted == nil {
 		compacted = msgs
 	}
 	out := resultOf(compacted, summary)
 	span.SetAttribute("pigo.compaction.tokens_after", out.EstimatedTokensAfter)
 	if summary != "" && e.Opts.Session != nil {
+		files := compaction.CollectFileLists(body[:cut], s.PriorRead, s.PriorModified, s.UsePriorFiles)
 		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokensBefore, session.CompactionMeta{
 			SystemMessage: e.currentSystemCheckpoint(),
+			Details:       files,
 		}); err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 		}
@@ -1240,15 +1258,19 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 		}
 	}
 	if opts.Summarize && opts.Summary == "" && len(abandoned) > 0 {
+		priorRead, priorModified := branchPriorFiles(abandoned)
 		var summary string
+		var files compaction.FileLists
 		err := e.withSummarizationRetry(ctx, map[string]any{"source": "branchSummary"}, func() error {
 			var serr error
-			summary, serr = compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.ModelMessages(abandoned), compaction.BranchSummaryOpts{
+			summary, files, serr = compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.ModelMessages(abandoned), compaction.BranchSummaryOpts{
 				CustomInstructions:  opts.CustomInstructions,
 				ReplaceInstructions: opts.ReplaceInstructions,
 				ReserveTokens:       e.Opts.Config.BranchSummaryReserveTokens(),
 				ContextWindow:       e.ContextWindow(),
 				Provider:            e.activeProvider(),
+				PriorRead:           priorRead,
+				PriorModified:       priorModified,
 			})
 			return serr
 		})
@@ -1259,6 +1281,7 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 			return session.NavigateResult{}, err
 		}
 		opts.Summary = summary
+		opts.Details = files.Stored()
 	}
 	res, err := sess.Navigate(targetID, opts)
 	if err != nil {

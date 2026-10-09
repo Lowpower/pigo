@@ -42,6 +42,14 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				Description: "consumed by the extension",
 			}},
 		})
+	case "compact":
+		_ = ext.Serve(ext.Handler{
+			Name:   "compact-ext",
+			Events: []string{"session_before_compact"},
+			OnEvent: func(string, map[string]any) map[string]any {
+				return map[string]any{"compaction": "HOOK SUMMARY"}
+			},
+		})
 	case "block":
 		_ = ext.Serve(ext.Handler{
 			Name:   "block-ext",

@@ -88,6 +88,140 @@ func TestCompactPassesCustomInstructions(t *testing.T) {
 		t.Fatalf("summarization prompt missing custom instructions:\n%s", prompt)
 	}
 }
+func TestSummarizeUpdatePromptIncludesPreviousSummary(t *testing.T) {
+	msgs := []ai.Message{{Role: ai.RoleUser, Content: "new work"}}
+	var prompt string
+	var prior []ai.Message
+	sf := func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		if len(req.Messages) == 0 {
+			t.Fatal("no messages")
+		}
+		prompt = req.Messages[len(req.Messages)-1].Content
+		prior = append([]ai.Message(nil), req.Messages[:len(req.Messages)-1]...)
+		return ai.ScriptedStreamFn("## Goal\nUpdated.", 0)(ctx, req, opts)
+	}
+	summary, err := Summarize(context.Background(), sf, "test", msgs, "Keep the API", "prov", "OLD GOAL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "Goal") || !strings.Contains(summary, "Updated") {
+		t.Fatalf("summary = %q", summary)
+	}
+	if len(prior) != 1 || prior[0].Content != "new work" {
+		t.Fatalf("conversation = %+v", prior)
+	}
+	if !strings.Contains(prompt, "<previous-summary>\nOLD GOAL\n</previous-summary>") {
+		t.Fatalf("prompt missing previous summary:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "PRESERVE all existing information from the previous summary") {
+		t.Fatalf("prompt missing update instructions:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "The messages above are a conversation to summarize.") {
+		t.Fatalf("update request used the initial prompt:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Additional focus: Keep the API") {
+		t.Fatalf("prompt missing custom instructions:\n%s", prompt)
+	}
+	if strings.Index(prompt, "</previous-summary>") > strings.Index(prompt, "PRESERVE all existing information") {
+		t.Fatalf("previous summary should precede the update prompt:\n%s", prompt)
+	}
+}
+
+func TestSummarizeWithoutPreviousUsesInitialPrompt(t *testing.T) {
+	var prompt string
+	sf := func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		prompt = req.Messages[len(req.Messages)-1].Content
+		return ai.ScriptedStreamFn("## Goal\nFirst.", 0)(ctx, req, opts)
+	}
+	msgs := []ai.Message{{Role: ai.RoleUser, Content: "hello"}}
+	if _, err := Summarize(context.Background(), sf, "test", msgs, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(prompt, "<previous-summary>") || strings.Contains(prompt, "PRESERVE all existing information") {
+		t.Fatalf("initial prompt included an update:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "The messages above are a conversation to summarize.") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
+func TestCollectFileLists(t *testing.T) {
+	msgs := []ai.Message{assistantTools(
+		toolCall("read", "a.go"),
+		toolCall("read", "b.go"),
+		toolCall("edit", "b.go"),
+		toolCall("write", "c.go"),
+		toolCall("grep", "d.go"),
+		toolCall("bash", "e.go"),
+		toolCall("read", ""),
+		toolCall("read", 12),
+	)}
+	got := CollectFileLists(msgs, []string{"z.go", "c.go"}, []string{"m.go"}, true)
+	if strings.Join(got.ReadFiles, ",") != "a.go,z.go" {
+		t.Fatalf("readFiles = %v", got.ReadFiles)
+	}
+	if strings.Join(got.ModifiedFiles, ",") != "b.go,c.go,m.go" {
+		t.Fatalf("modifiedFiles = %v", got.ModifiedFiles)
+	}
+
+	skipped := CollectFileLists(msgs, []string{"secret.go"}, []string{"hidden.go"}, false)
+	if strings.Join(skipped.ReadFiles, ",") != "a.go" {
+		t.Fatalf("readFiles without prior = %v", skipped.ReadFiles)
+	}
+	if strings.Join(skipped.ModifiedFiles, ",") != "b.go,c.go" {
+		t.Fatalf("modifiedFiles without prior = %v", skipped.ModifiedFiles)
+	}
+}
+
+func TestAppendFileSectionsOmitsEmpty(t *testing.T) {
+	if got := AppendFileSections("summary", FileLists{}); got != "summary" {
+		t.Fatalf("empty lists = %q", got)
+	}
+	got := AppendFileSections("summary", FileLists{ReadFiles: []string{"a.go"}, ModifiedFiles: []string{"b.go"}})
+	want := "summary\n\n<read-files>\na.go\n</read-files>\n\n<modified-files>\nb.go\n</modified-files>"
+	if got != want {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestCompactAppendsFileSections(t *testing.T) {
+	msgs := []ai.Message{
+		assistantTools(toolCall("read", "only.go")),
+		{Role: ai.RoleUser, Content: strings.Repeat("z", 80)},
+	}
+	s := Settings{KeepRecentTokens: 20, PreviousSummary: "OLD"}
+	compacted, summary, err := Compact(context.Background(), ai.ScriptedStreamFn("## Goal\nNext.", 0), "test", msgs, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "Goal") || !strings.Contains(summary, "<read-files>\nonly.go\n</read-files>") {
+		t.Fatalf("summary = %q", summary)
+	}
+	if !strings.Contains(compacted[0].Content, "<read-files>\nonly.go\n</read-files>") {
+		t.Fatalf("context summary = %q", compacted[0].Content)
+	}
+}
+
+func assistantTools(calls ...*ai.Content) ai.Message {
+	blocks := append([]*ai.Content{{Type: ai.KindText, Text: "did"}}, calls...)
+	return ai.Message{
+		Role:    ai.RoleAssistant,
+		Content: "did",
+		Assistant: &ai.AssistantMessage{
+			Role:    ai.RoleAssistant,
+			Content: blocks,
+		},
+	}
+}
+
+func toolCall(name string, path any) *ai.Content {
+	args := map[string]any{}
+	if path != nil {
+		args["path"] = path
+	}
+	return &ai.Content{Type: ai.KindToolCall, ToolID: name, ToolName: name, Arguments: args}
+}
+
 func TestCompactNoopWhenSmall(t *testing.T) {
 	msgs := makeMessages(3, 100)
 	compacted, summary, err := Compact(context.Background(), ai.ScriptedStreamFn("x", 0), "test", msgs, DefaultSettings())
@@ -116,7 +250,7 @@ func TestGenerateBranchSummaryPrependsPreamble(t *testing.T) {
 		{Role: ai.RoleUser, Content: "try something"},
 		{Role: ai.RoleAssistant, Content: "did it"},
 	}
-	got, err := GenerateBranchSummary(context.Background(), ai.ScriptedStreamFn("## Goal\nExplore.", 0), "test", msgs, BranchSummaryOpts{})
+	got, _, err := GenerateBranchSummary(context.Background(), ai.ScriptedStreamFn("## Goal\nExplore.", 0), "test", msgs, BranchSummaryOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +334,7 @@ func captureBranchSummaryPrompt(t *testing.T, msgs []ai.Message, opts BranchSumm
 		prompt = req.Messages[0].Content
 		return ai.ScriptedStreamFn("## Goal\nExplore.", 0)(ctx, req, streamOpts)
 	}
-	if _, err := GenerateBranchSummary(context.Background(), sf, "test", msgs, opts); err != nil {
+	if _, _, err := GenerateBranchSummary(context.Background(), sf, "test", msgs, opts); err != nil {
 		t.Fatal(err)
 	}
 	if prompt == "" {
@@ -209,11 +343,42 @@ func captureBranchSummaryPrompt(t *testing.T, msgs []ai.Message, opts BranchSumm
 	return prompt
 }
 
+func TestGenerateBranchSummaryFiles(t *testing.T) {
+	msgs := []ai.Message{
+		assistantTools(toolCall("read", "too-big.go")),
+		{Role: ai.RoleUser, Content: "new"},
+	}
+	msgs[0].Content = strings.Repeat("q", 400)
+	msgs[0].Assistant.Content[0].Text = msgs[0].Content
+	opts := BranchSummaryOpts{
+		ContextWindow: 20,
+		ReserveTokens: 10,
+		PriorRead:     []string{"kept.go"},
+		PriorModified: []string{"old.go"},
+	}
+	got, files, err := GenerateBranchSummary(context.Background(), ai.ScriptedStreamFn("## Goal\nExplore.", 0), "test", msgs, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(files.ReadFiles, ",") != "kept.go" {
+		t.Fatalf("readFiles = %v", files.ReadFiles)
+	}
+	if strings.Join(files.ModifiedFiles, ",") != "old.go" {
+		t.Fatalf("modifiedFiles = %v", files.ModifiedFiles)
+	}
+	if !strings.HasPrefix(got, BranchSummaryPreamble) || !strings.Contains(got, "<read-files>\nkept.go\n</read-files>") {
+		t.Fatalf("summary = %q", got)
+	}
+	if strings.Contains(got, "too-big.go") {
+		t.Fatalf("summary included a file from a message outside the budget: %q", got)
+	}
+}
+
 func TestGenerateBranchSummaryAbort(t *testing.T) {
 	sf := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
 		return ai.EmitMessage(ctx, &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopAborted}), nil
 	}
-	_, err := GenerateBranchSummary(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "x"}}, BranchSummaryOpts{})
+	_, _, err := GenerateBranchSummary(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "x"}}, BranchSummaryOpts{})
 	if !errors.Is(err, ErrSummaryAborted) {
 		t.Fatalf("err = %v", err)
 	}

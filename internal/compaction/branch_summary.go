@@ -75,10 +75,17 @@ type BranchSummaryOpts struct {
 	ContextWindow       int
 	// Provider selects the catalog entry whose samplingParams go out with the summary request.
 	Provider string
+	// PriorRead and PriorModified come from earlier branch summaries that were
+	// not produced by an extension. They are merged even when those entries do
+	// not fit in the token budget.
+	PriorRead     []string
+	PriorModified []string
 }
 
 // GenerateBranchSummary asks the model to summarize abandoned-branch entries.
-func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, opts BranchSummaryOpts) (string, error) {
+// The returned lists include prior branch-summary files plus tool calls from
+// the messages that fit in the token budget.
+func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, opts BranchSummaryOpts) (string, FileLists, error) {
 	reserve := opts.ReserveTokens
 	if reserve <= 0 {
 		reserve = 16384
@@ -109,7 +116,7 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 		kept[i], kept[j] = kept[j], kept[i]
 	}
 	if len(kept) == 0 {
-		return "No content to summarize", nil
+		return "No content to summarize", FileLists{}, nil
 	}
 
 	var conv strings.Builder
@@ -130,24 +137,26 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 
 	stream, err := sf(ctx, ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: prompt}}}, modelCallOptions(opts.Provider, model))
 	if err != nil {
-		return "", err
+		return "", FileLists{}, err
 	}
 	_, final := stream.Collect()
 	if final == nil {
-		return "", errors.New("branch summary produced no message")
+		return "", FileLists{}, errors.New("branch summary produced no message")
 	}
 	if final.StopReason == ai.StopAborted {
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return "", FileLists{}, err
 		}
-		return "", ErrSummaryAborted
+		return "", FileLists{}, ErrSummaryAborted
 	}
 	if final.StopReason == ai.StopError {
-		return "", &SummarizeError{Cause: final.ErrorMessage}
+		return "", FileLists{}, &SummarizeError{Cause: final.ErrorMessage}
 	}
 	text := strings.TrimSpace(final.Text())
 	if text == "" {
 		text = "No summary generated"
 	}
-	return BranchSummaryPreamble + text, nil
+	files := CollectFileLists(kept, opts.PriorRead, opts.PriorModified, true)
+	text = AppendFileSections(BranchSummaryPreamble+text, files)
+	return text, files, nil
 }

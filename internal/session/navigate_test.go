@@ -142,6 +142,57 @@ func TestContextEntriesFollowsLeafNotSiblings(t *testing.T) {
 	}
 }
 
+func TestCompactionBaseFromStartsAtKeptBoundary(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	before, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "kept"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendCompaction("PREV", kept.ID, 1, CompactionMeta{
+		Details: map[string]any{"readFiles": []string{"a.go"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "after"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := CompactionBaseFrom(m.GetBranch(""))
+	if !base.Found || base.Summary != "PREV" || base.FromHook {
+		t.Fatalf("base = %+v", base)
+	}
+	if string(base.Details) == "" || !strings.Contains(string(base.Details), "a.go") {
+		t.Fatalf("details = %s", base.Details)
+	}
+	ids := entryIDs(base.Entries)
+	if strings.Join(ids, ",") != kept.ID+","+after.ID {
+		t.Fatalf("entries = %v, included %s", ids, before.ID)
+	}
+}
+
+func TestCompactionBaseFromMissingKeptStartsAfterCompaction(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "before"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppendCompaction("PREV", "missing-id", 1); err != nil {
+		t.Fatal(err)
+	}
+	after, err := m.AppendMessage("user", map[string]any{"role": "user", "content": "after"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := CompactionBaseFrom(m.GetBranch(""))
+	ids := entryIDs(base.Entries)
+	if strings.Join(ids, ",") != after.ID {
+		t.Fatalf("entries = %v", ids)
+	}
+}
+
 func TestSummariesAllListsOtherCwd(t *testing.T) {
 	agent := t.TempDir()
 	cwd1 := t.TempDir()
