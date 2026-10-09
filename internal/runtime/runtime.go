@@ -600,7 +600,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	}
 	s.PreviousSummary = base.Summary
 	cut := compaction.FindCutIndex(body, s.KeepRecentTokens)
-	tokensBefore := compaction.EstimateContextTokens(msgs)
+	tokensBefore := e.ContextTokens(msgs)
 	span.SetAttribute("pigo.compaction.tokens_before", tokensBefore)
 	keep := ""
 	if e.Opts.Session != nil {
@@ -616,7 +616,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 			Summary:              summary,
 			FirstKeptEntryID:     keep,
 			TokensBefore:         tokensBefore,
-			EstimatedTokensAfter: compaction.EstimateContextTokens(messages),
+			EstimatedTokensAfter: e.ContextTokens(messages),
 		}
 	}
 
@@ -974,6 +974,24 @@ func (e *Engine) Executor() agent.ToolExecutor {
 	})
 }
 
+// PromptTools is the tool declaration that the next request would send.
+func (e *Engine) PromptTools() []ai.Tool {
+	if e == nil {
+		return nil
+	}
+	tools, _ := e.requestTools()
+	return tools
+}
+
+// ContextTokens is the current context occupancy for msgs, including the
+// system prompt and tool definitions when no assistant usage is available.
+func (e *Engine) ContextTokens(msgs []ai.Message) int {
+	if e == nil {
+		return compaction.ContextTokens(msgs, "", nil)
+	}
+	return compaction.ContextTokens(msgs, e.System, e.PromptTools())
+}
+
 // MaybeCompact runs compaction when the estimate exceeds the window.
 func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Message, string, error) {
 	if !e.Opts.Config.CompactionEnabled() {
@@ -981,7 +999,7 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 	}
 	window := e.ContextWindow()
 	s := e.compactionSettings()
-	if !compaction.ShouldCompact(compaction.EstimateContextTokens(msgs), window, s) {
+	if !compaction.ShouldCompact(e.ContextTokens(msgs), window, s) {
 		return msgs, "", nil
 	}
 	r, err := e.runCompaction(ctx, "threshold", msgs, s, false)

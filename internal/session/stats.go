@@ -59,7 +59,9 @@ type ContextUsage struct {
 
 // CollectStats walks session entries. contextMsgs is the live branch used for
 // contextUsage (typically RestoreAIMessages). contextWindow 0 omits contextUsage.
-func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats {
+// system and tools are counted only when the transcript has no valid assistant
+// usage; pass them from the engine. Callers without a prompt pass "" and nil.
+func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int, system string, tools []ai.Tool) Stats {
 	s := Stats{}
 	if m != nil {
 		s.SessionFile = m.File()
@@ -113,7 +115,7 @@ func CollectStats(m *Manager, contextMsgs []ai.Message, contextWindow int) Stats
 		}
 	}
 	if contextWindow > 0 {
-		tok := compaction.EstimateContextTokens(contextMsgs)
+		tok := compaction.ContextTokens(contextMsgs, system, tools)
 		pct := 0.0
 		if contextWindow > 0 {
 			pct = float64(tok) / float64(contextWindow) * 100

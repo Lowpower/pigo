@@ -53,9 +53,44 @@ func DefaultSettings() Settings {
 	return Settings{ReserveTokens: 16384, KeepRecentTokens: 20000}
 }
 
+// estimatedImageChars is the fixed per-image stand-in used before dividing by 4
+// (1200 tokens). It matches pi's ESTIMATED_IMAGE_CHARS.
+const estimatedImageChars = 4800
+
 // EstimateTokens approximates a message's token count as ceil(chars/4).
+// Assistant messages include thinking and tool-call arguments. Each image adds
+// estimatedImageChars. Display text (Message.Text) stays text-only.
 func EstimateTokens(m ai.Message) int {
-	return ceilDiv(len(m.Text()), 4)
+	chars := estimateChars(m)
+	return ceilDiv(chars, 4)
+}
+
+func estimateChars(m ai.Message) int {
+	chars := 0
+	if m.Assistant != nil {
+		for _, block := range m.Assistant.Content {
+			if block == nil {
+				continue
+			}
+			switch block.Type {
+			case ai.KindText:
+				chars += len(block.Text)
+			case ai.KindThinking:
+				chars += len(block.Thinking)
+			case ai.KindToolCall:
+				chars += len(block.ToolName)
+				if block.Arguments != nil {
+					if raw, err := json.Marshal(block.Arguments); err == nil {
+						chars += len(raw)
+					}
+				}
+			}
+		}
+	} else {
+		chars += len(m.Content)
+	}
+	chars += len(m.Images) * estimatedImageChars
+	return chars
 }
 
 // EstimateContextTokens sums the estimate over all messages.
@@ -65,6 +100,56 @@ func EstimateContextTokens(msgs []ai.Message) int {
 		total += EstimateTokens(m)
 	}
 	return total
+}
+
+// ContextTokens is the current context occupancy. A valid assistant usage
+// (non-aborted, non-error, non-zero) is the baseline; messages after it are
+// estimated. System prompt and tool definitions are included only when no
+// usage is available, because a real usage already counted them.
+func ContextTokens(msgs []ai.Message, system string, tools []ai.Tool) int {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		usage, ok := validUsage(msgs[i])
+		if !ok {
+			continue
+		}
+		total := usageTokens(usage)
+		for _, m := range msgs[i+1:] {
+			total += EstimateTokens(m)
+		}
+		return total
+	}
+	return EstimateContextTokens(msgs) + estimateOverhead(system, tools)
+}
+
+func validUsage(m ai.Message) (ai.Usage, bool) {
+	a := m.Assistant
+	if a == nil {
+		return ai.Usage{}, false
+	}
+	if a.StopReason == ai.StopAborted || a.StopReason == ai.StopError {
+		return ai.Usage{}, false
+	}
+	if usageTokens(a.Usage) <= 0 {
+		return ai.Usage{}, false
+	}
+	return a.Usage, true
+}
+
+func usageTokens(u ai.Usage) int {
+	if u.TotalTokens > 0 {
+		return u.TotalTokens
+	}
+	return u.Input + u.Output + u.CacheRead + u.CacheWrite
+}
+
+func estimateOverhead(system string, tools []ai.Tool) int {
+	chars := len(system)
+	if len(tools) > 0 {
+		if raw, err := json.Marshal(tools); err == nil {
+			chars += len(raw)
+		}
+	}
+	return ceilDiv(chars, 4)
 }
 
 // ShouldCompact reports whether the context should be compacted:

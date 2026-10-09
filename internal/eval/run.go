@@ -254,7 +254,7 @@ func runOne(ctx context.Context, sc Scenario, opts Options, provider, variant st
 		return res
 	}
 	res.Output = lastAssistantText(last)
-	stats := session.CollectStats(sess, nil, 0)
+	stats := session.CollectStats(sess, nil, 0, "", nil)
 	res.Tokens = stats.Tokens.Total
 	res.Cost = stats.Cost
 	copySession(opts.OutDir, sc.Name, variant, repeat, runs, sess, &res)

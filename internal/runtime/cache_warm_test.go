@@ -26,7 +26,7 @@ func TestCacheWarmUsageStaysOutOfContext(t *testing.T) {
 		t.Fatalf("status=%s", got)
 	}
 	e.recordCacheWarm(ai.Usage{Input: 5, Output: 1, Cost: ai.UsageCost{Total: 0.2}}, "anthropic", "claude-sonnet-4", "")
-	stats := session.CollectStats(sess, nil, 0)
+	stats := session.CollectStats(sess, nil, 0, "", nil)
 	if stats.Cost != 0.2 || stats.TotalMessages != 1 {
 		t.Fatalf("stats=%+v", stats)
 	}
