@@ -2,6 +2,7 @@ package ai
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -416,9 +417,145 @@ func TestBuildAnthropicMidConvoEffort(t *testing.T) {
 	}
 	_ = json.Unmarshal(body, &req)
 	oc, _ = req["output_config"].(map[string]any)
-	if oc["effort"] != "low" {
-		t.Fatalf("mid-convo low effort = %#v", oc)
+	if oc["effort"] != "high" {
+		t.Fatalf("top-level effort = %#v", oc)
 	}
+	msgs, _ := req["messages"].([]any)
+	if len(msgs) == 0 || !reflect.DeepEqual(msgs[len(msgs)-1], effortMarker("low")) {
+		t.Fatalf("low marker = %#v", msgs)
+	}
+}
+
+func TestBuildAnthropicMidConvoEffortLevelSwitch(t *testing.T) {
+	registerMidConvoModel(t)
+	firstBody, err := buildAnthropicRequest(Context{Messages: []Message{{Role: RoleUser, Content: "one"}}},
+		Options{Provider: "ant-mid", Model: "claude", Thinking: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBody, err := buildAnthropicRequest(Context{Messages: []Message{
+		{Role: RoleUser, Content: "one"},
+		{Assistant: midConvoAssistant("ant-mid", "low")},
+		{Role: RoleUser, Content: "two"},
+	}}, Options{Provider: "ant-mid", Model: "claude", Thinking: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := decodeAnthropicRequest(t, firstBody)
+	second := decodeAnthropicRequest(t, secondBody)
+	if first["output_config"].(map[string]any)["effort"] != "high" || second["output_config"].(map[string]any)["effort"] != "high" {
+		t.Fatalf("top-level effort = %#v %#v", first["output_config"], second["output_config"])
+	}
+	firstMsgs := first["messages"].([]any)
+	secondMsgs := second["messages"].([]any)
+	if roles := messageRoles(firstMsgs); !reflect.DeepEqual(roles, []string{"user", "system"}) {
+		t.Fatalf("first roles = %#v", roles)
+	}
+	if userText(firstMsgs[0]) != "one" || !reflect.DeepEqual(firstMsgs[1], effortMarker("low")) {
+		t.Fatalf("first messages = %#v", firstMsgs)
+	}
+	if roles := messageRoles(secondMsgs); !reflect.DeepEqual(roles, []string{"user", "system", "assistant", "user", "system"}) {
+		t.Fatalf("second roles = %#v", roles)
+	}
+	if userText(secondMsgs[0]) != "one" || !reflect.DeepEqual(secondMsgs[1], effortMarker("low")) {
+		t.Fatalf("historical prefix = %#v", secondMsgs[:2])
+	}
+	if userText(secondMsgs[3]) != "two" || !reflect.DeepEqual(secondMsgs[len(secondMsgs)-1], effortMarker("high")) {
+		t.Fatalf("current tail = %#v", secondMsgs[3:])
+	}
+}
+
+func messageRoles(msgs []any) []string {
+	out := make([]string, len(msgs))
+	for i, msg := range msgs {
+		m, _ := msg.(map[string]any)
+		out[i], _ = m["role"].(string)
+	}
+	return out
+}
+
+func userText(msg any) string {
+	m, _ := msg.(map[string]any)
+	switch content := m["content"].(type) {
+	case string:
+		return content
+	case []any:
+		if len(content) == 0 {
+			return ""
+		}
+		block, _ := content[0].(map[string]any)
+		text, _ := block["text"].(string)
+		return text
+	default:
+		return ""
+	}
+}
+
+func TestBuildAnthropicMidConvoEffortSkipsLegacyAndOtherProvider(t *testing.T) {
+	registerMidConvoModel(t)
+	body, err := buildAnthropicRequest(Context{Messages: []Message{
+		{Role: RoleUser, Content: "one"},
+		{Assistant: midConvoAssistant("ant-mid", "")},
+		{Role: RoleUser, Content: "two"},
+		{Assistant: midConvoAssistant("other-provider", "low")},
+		{Role: RoleUser, Content: "three"},
+	}}, Options{Provider: "ant-mid", Model: "claude", Thinking: "medium"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := decodeAnthropicRequest(t, body)
+	var markers []any
+	for _, msg := range req["messages"].([]any) {
+		m, _ := msg.(map[string]any)
+		if m["role"] == "system" {
+			markers = append(markers, msg)
+		}
+	}
+	if len(markers) != 1 || !reflect.DeepEqual(markers[0], effortMarker("medium")) {
+		t.Fatalf("markers = %#v", markers)
+	}
+}
+
+func registerMidConvoModel(t *testing.T) {
+	t.Helper()
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "ant-mid", DefaultAPI: "anthropic-messages", DefaultID: "claude",
+		Models: []models.Model{{Provider: "ant-mid", ID: "claude", Compat: &models.Compat{SupportsMidConvoEffort: true}}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("ant-mid") })
+}
+
+func midConvoAssistant(provider, level string) *AssistantMessage {
+	msg := &AssistantMessage{
+		Role:     RoleAssistant,
+		API:      "anthropic-messages",
+		Provider: provider,
+		Model:    "claude",
+		Content: []*Content{
+			{Type: KindThinking, Thinking: "reasoning", ThinkingSignature: "signature"},
+			{Type: KindText, Text: "answer"},
+		},
+	}
+	msg.ProviderThinkingLevel = level
+	return msg
+}
+
+func effortMarker(effort string) map[string]any {
+	return map[string]any{
+		"role":          "system",
+		"content":       []any{},
+		"output_config": map[string]any{"effort": effort},
+	}
+}
+
+func decodeAnthropicRequest(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	return req
 }
 
 func TestGoogleContentsReplayThoughtSignaturesAndImages(t *testing.T) {

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -174,22 +175,23 @@ type Model struct {
 	sel           textSel
 	blockOpen     map[string]bool
 
-	extHub          *extUIHub
-	extStatus       map[string]string
-	extWidgets      []extWidget
-	extTitle        string
-	extUI           extUIState
-	extFooterSet    bool
-	extFooter       []string
-	extHeader       []string
-	workingMessage  string
-	workingVisible  *bool
-	workingFrames   []string
-	workingInterval int
-	thinkingLabel   string
-	extCustom       *extCustomState
-	termHosts       []*ext.Host
-	bugHintShown    bool
+	extHub            *extUIHub
+	extStatus         map[string]string
+	extWidgets        []extWidget
+	extTitle          string
+	extUI             extUIState
+	extFooterSet      bool
+	extFooter         []string
+	extHeader         []string
+	workingMessage    string
+	workingVisible    *bool
+	workingFrames     []string
+	workingInterval   int
+	thinkingLabel     string
+	extCustom         *extCustomState
+	termHosts         []*ext.Host
+	bugHintShown      bool
+	prevDropAssistant *ai.AssistantMessage
 }
 
 // New builds the interactive model from the resolved config.
@@ -1287,6 +1289,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 				m.history = append(m.history, ai.Message{Role: ai.RoleAssistant, Content: text})
 			}
 			m.noteBugHint(ev.Assistant)
+			m.noteThinkingDrop(ev.Assistant)
 		}
 
 	case agent.EventToolStart:
@@ -1432,6 +1435,42 @@ func (m Model) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, fe)
 	}
 	return note("compacted history")
+}
+
+func (m *Model) noteThinkingDrop(msg *ai.AssistantMessage) {
+	if msg == nil || !m.cfg.CacheMissNotices() {
+		return
+	}
+	if msg.StopReason == ai.StopError || msg.StopReason == ai.StopAborted {
+		return
+	}
+	prev := m.prevDropAssistant
+	if prev == nil {
+		prev = lastBranchAssistant(m)
+	}
+	if note := ai.ThinkingDropNotice(msg, prev); note != "" {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(note)})
+	}
+	m.prevDropAssistant = msg
+}
+
+func lastBranchAssistant(m *Model) *ai.AssistantMessage {
+	if m.engine == nil || m.engine.Opts.Session == nil {
+		return nil
+	}
+	entries := session.ContextEntries(m.engine.Opts.Session)
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.Type != "message" && e.Type != "" {
+			continue
+		}
+		var am ai.AssistantMessage
+		if json.Unmarshal(e.Message, &am) != nil || am.Role != ai.RoleAssistant {
+			continue
+		}
+		return &am
+	}
+	return nil
 }
 
 func (m *Model) appendCacheMissNotice() {

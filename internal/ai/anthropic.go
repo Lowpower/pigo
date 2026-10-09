@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Lowpower/pigo/internal/models"
 )
@@ -92,6 +93,9 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 
 		s := NewEventStream(16)
 		out := newOutputMessage(model, provider)
+		if midConvoEffortTurn(opts) {
+			out.ProviderThinkingLevel = activeMidConvoEffort(opts)
+		}
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
@@ -187,16 +191,24 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 
 	enabled := supportsToolReferences(opts)
 	immediate, deferred := splitDeferredTools(reqCtx.Messages, reqCtx.Tools, enabled)
+	provider := recordedProvider(opts, "anthropic")
 	replayed := transformMessages(reqCtx.Messages, replayTarget{
-		Provider: recordedProvider(opts, "anthropic"),
+		Provider: provider,
 		API:      "anthropic-messages",
 		Model:    opts.Model,
 	}, normalizeSanitizedToolCallID)
+	var levels map[int]string
+	if midConvoEffortTurn(opts) {
+		levels = map[int]string{}
+	}
 	var msgs []map[string]any
 	if enabled {
-		msgs = anthropicWireMessages(replayed, true, deferredNameSet(deferred))
+		msgs = anthropicWireMessages(replayed, true, deferredNameSet(deferred), levels, provider)
 	} else {
-		msgs = AnthropicWireMessages(replayed)
+		msgs = anthropicWireMessages(replayed, false, nil, levels, provider)
+	}
+	if midConvoEffortTurn(opts) {
+		msgs = insertThinkingLevelMessages(msgs, levels, activeMidConvoEffort(opts))
 	}
 	applyAnthropicCacheControl(msgs, opts)
 
@@ -254,7 +266,13 @@ func applyAnthropicThinking(req map[string]any, opts Options, maxTokens int) {
 			}
 		}
 		req["thinking"] = thinking
-		req["output_config"] = map[string]any{"effort": anthropicEffort(opts)}
+		effort := anthropicEffort(opts)
+		if midConvoEffort(opts) {
+			// Per-turn effort lives on the trailing system marker so this field
+			// stays stable and the cached prefix survives a level change.
+			effort = "high"
+		}
+		req["output_config"] = map[string]any{"effort": effort}
 		return
 	}
 	budget := opts.ThinkingBudget
@@ -361,6 +379,25 @@ func anthropicCacheControl(opts Options) map[string]any {
 	return cc
 }
 
+func effortSystemMessage(effort string) map[string]any {
+	return map[string]any{
+		"role":          "system",
+		"content":       []any{},
+		"output_config": map[string]any{"effort": effort},
+	}
+}
+
+func insertThinkingLevelMessages(msgs []map[string]any, levels map[int]string, active string) []map[string]any {
+	out := make([]map[string]any, 0, len(msgs)+len(levels)+1)
+	for i, msg := range msgs {
+		if effort, ok := levels[i]; ok {
+			out = append(out, effortSystemMessage(effort))
+		}
+		out = append(out, msg)
+	}
+	return append(out, effortSystemMessage(active))
+}
+
 func applyAnthropicCacheControl(msgs []map[string]any, opts Options) {
 	cc := anthropicCacheControl(opts)
 	for i := len(msgs) - 1; i >= 0; i-- {
@@ -404,9 +441,10 @@ type anthropicSSE struct {
 	Type    string `json:"type"`
 	Index   int    `json:"index"`
 	Message *struct {
-		ID    string         `json:"id"`
-		Model string         `json:"model"`
-		Usage anthropicUsage `json:"usage"`
+		ID                   string                `json:"id"`
+		Model                string                `json:"model"`
+		Usage                anthropicUsage        `json:"usage"`
+		InputTransformations []InputTransformation `json:"input_transformations"`
 	} `json:"message"`
 	ContentBlock *struct {
 		Type      string         `json:"type"`
@@ -426,8 +464,9 @@ type anthropicSSE struct {
 		Signature   string `json:"signature"`
 		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
-	Usage *anthropicUsage `json:"usage"`
-	Error *struct {
+	Usage                *anthropicUsage       `json:"usage"`
+	InputTransformations []InputTransformation `json:"input_transformations"`
+	Error                *struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"error"`
@@ -441,6 +480,7 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 	}
 
 	pos := map[int]int{} // anthropic block index -> position in out.Content
+	var transformations []InputTransformation
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
@@ -452,7 +492,7 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 		}
 		payload := data.String()
 		data.Reset()
-		return handleAnthropicEvent(ctx, payload, out, pos, s, observe, cost)
+		return handleAnthropicEvent(ctx, payload, out, pos, &transformations, s, observe, cost)
 	}
 
 	for scanner.Scan() {
@@ -481,11 +521,18 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 	case StopError, StopAborted:
 		finishError(ctx, out, s, out.ErrorMessage)
 	default:
+		if len(transformations) > 0 {
+			out.Diagnostics = append(out.Diagnostics, AssistantDiagnostic{
+				Type:      "anthropic_input_transformations",
+				Timestamp: time.Now().UnixMilli(),
+				Details:   &DiagnosticDetails{Transformations: transformations},
+			})
+		}
 		s.push(ctx, Event{Type: EventDone, Reason: out.StopReason, Message: out})
 	}
 }
 
-func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, s *EventStream, observe func([]byte), cost *models.Cost) bool {
+func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, transformations *[]InputTransformation, s *EventStream, observe func([]byte), cost *models.Cost) bool {
 	var ev anthropicSSE
 	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 		return true // ignore unparseable keepalive/comment payloads
@@ -508,6 +555,9 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 			out.Usage.CacheWrite = deref(u.CacheCreationInputTokens)
 			out.Usage.CacheWrite1h = deref(anthropicCacheWrite1h(u))
 			finishAnthropicUsage(&out.Usage, cost)
+			if ev.Message.InputTransformations != nil {
+				*transformations = ev.Message.InputTransformations
+			}
 		}
 
 	case "content_block_start":
@@ -592,6 +642,9 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 		}
 
 	case "message_delta":
+		if ev.InputTransformations != nil {
+			*transformations = ev.InputTransformations
+		}
 		if ev.Delta != nil && ev.Delta.StopReason != "" {
 			out.RawStopReason = ev.Delta.StopReason
 			out.StopReason = mapAnthropicStopReason(ev.Delta.StopReason)

@@ -705,6 +705,61 @@ func TestCopyDequeueAndThinkingPicker(t *testing.T) {
 	}
 }
 
+func TestThinkingDropNoticeDedup(t *testing.T) {
+	on := true
+	cfg := testCfg()
+	cfg.ShowCacheMissNotices = &on
+	m := New(cfg)
+	sess := session.New(t.TempDir(), t.TempDir())
+	if _, err := sess.AppendMessage("user", map[string]any{"role": "user", "content": "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.AppendMessage("assistant", droppedAssistant(2)); err != nil {
+		t.Fatal(err)
+	}
+	m.engine = &runtime.Engine{Opts: runtime.Options{Session: sess}}
+
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventMessageEnd, Assistant: droppedAssistant(2)}})
+	if notices := thinkingDropLines(m); len(notices) != 0 {
+		t.Fatalf("same batch notified: %#v", notices)
+	}
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventMessageEnd, Assistant: droppedAssistant(3)}})
+	notices := thinkingDropLines(m)
+	if len(notices) != 1 || !strings.Contains(notices[0], "Anthropic dropped 3 thinking blocks") {
+		t.Fatalf("growth notices = %#v", notices)
+	}
+	m = send(m, agentEventMsg{agent.Event{Type: agent.EventMessageEnd, Assistant: droppedAssistant(3)}})
+	if notices = thinkingDropLines(m); len(notices) != 1 {
+		t.Fatalf("repeat notices = %#v", notices)
+	}
+}
+
+func droppedAssistant(n int) *ai.AssistantMessage {
+	transformations := make([]ai.InputTransformation, n)
+	for i := range transformations {
+		transformations[i] = ai.InputTransformation{Type: "thinking_dropped", Path: "messages.0.content.0", Reason: "prefix_binding_mismatch"}
+	}
+	return &ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		StopReason: ai.StopStop,
+		Content:    []*ai.Content{{Type: ai.KindText, Text: "ok"}},
+		Diagnostics: []ai.AssistantDiagnostic{{
+			Type:    "anthropic_input_transformations",
+			Details: &ai.DiagnosticDetails{Transformations: transformations},
+		}},
+	}
+}
+
+func thinkingDropLines(m Model) []string {
+	var out []string
+	for _, e := range m.transcript {
+		if strings.Contains(e.rendered, "Anthropic dropped") {
+			out = append(out, e.rendered)
+		}
+	}
+	return out
+}
+
 func TestAltScreenWheelScroll(t *testing.T) {
 	m := New(testCfg())
 	m.altScreen = true

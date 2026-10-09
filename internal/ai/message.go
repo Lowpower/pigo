@@ -6,6 +6,8 @@
 // separate chunk.
 package ai
 
+import "fmt"
+
 // StopReason is why a stream ended.
 type StopReason string
 
@@ -92,6 +94,65 @@ type AssistantMessage struct {
 	StopReason    StopReason `json:"stopReason"`
 	ErrorMessage  string     `json:"errorMessage,omitempty"`
 	RawStopReason string     `json:"rawStopReason,omitempty"`
+
+	// ProviderThinkingLevel is the effort actually sent on a
+	// supportsMidConvoEffort turn. Empty on older sessions and other transports.
+	ProviderThinkingLevel string `json:"providerThinkingLevel,omitempty"`
+
+	// Diagnostics holds provider recovery details, including dropped thinking blocks.
+	Diagnostics []AssistantDiagnostic `json:"diagnostics,omitempty"`
+}
+
+// InputTransformation is one Anthropic input_transformations entry.
+type InputTransformation struct {
+	Type   string `json:"type,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// DiagnosticDetails is the payload of an assistant diagnostic.
+type DiagnosticDetails struct {
+	Transformations []InputTransformation `json:"transformations,omitempty"`
+}
+
+// AssistantDiagnostic is one persisted provider diagnostic on an assistant message.
+type AssistantDiagnostic struct {
+	Type      string             `json:"type"`
+	Timestamp int64              `json:"timestamp"`
+	Details   *DiagnosticDetails `json:"details,omitempty"`
+}
+
+// droppedThinkingCount is the number of thinking_dropped transformations on msg.
+func droppedThinkingCount(msg *AssistantMessage) int {
+	if msg == nil {
+		return 0
+	}
+	n := 0
+	for _, d := range msg.Diagnostics {
+		if d.Type != "anthropic_input_transformations" || d.Details == nil {
+			continue
+		}
+		for _, tr := range d.Details.Transformations {
+			if tr.Type == "thinking_dropped" {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// ThinkingDropNotice is the transcript line when current dropped more thinking
+// blocks than previous. The same count stays quiet.
+func ThinkingDropNotice(current, previous *AssistantMessage) string {
+	dropped := droppedThinkingCount(current)
+	if dropped == 0 || dropped <= droppedThinkingCount(previous) {
+		return ""
+	}
+	noun := "thinking blocks"
+	if dropped == 1 {
+		noun = "thinking block"
+	}
+	return fmt.Sprintf("Anthropic dropped %d %s (details in session)", dropped, noun)
 }
 
 // Text returns the concatenated text of all text blocks.

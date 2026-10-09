@@ -122,6 +122,38 @@ func midConvoEffort(opts Options) bool {
 	return c != nil && c.SupportsMidConvoEffort
 }
 
+// midConvoEffortTurn is a managed-effort request that actually sends adaptive thinking.
+func midConvoEffortTurn(opts Options) bool {
+	if !midConvoEffort(opts) {
+		return false
+	}
+	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	return level != "" && level != "off"
+}
+
+// activeMidConvoEffort is the effort written on this turn's message marker.
+func activeMidConvoEffort(opts Options) string {
+	effort := strings.ToLower(strings.TrimSpace(anthropicEffort(opts)))
+	switch effort {
+	case "low", "medium", "high", "xhigh", "max":
+		return effort
+	default:
+		return "high"
+	}
+}
+
+func replayMidConvoEffort(msg *AssistantMessage, provider string) (string, bool) {
+	if msg == nil || msg.API != "anthropic-messages" || msg.Provider != provider {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(msg.ProviderThinkingLevel)) {
+	case "low", "medium", "high", "xhigh", "max":
+		return strings.ToLower(strings.TrimSpace(msg.ProviderThinkingLevel)), true
+	default:
+		return "", false
+	}
+}
+
 func midConvoBetas(opts Options) []string {
 	if !midConvoEffort(opts) {
 		return nil
