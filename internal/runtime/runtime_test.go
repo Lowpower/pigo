@@ -92,7 +92,7 @@ func TestRunPromptPersistsUserBeforeProvider(t *testing.T) {
 
 func countSessionRole(t *testing.T, path, role string) int {
 	t.Helper()
-	_, entries, err := session.Load(path)
+	_, entries, _, err := session.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}

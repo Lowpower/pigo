@@ -56,7 +56,7 @@ func TestAgentToolsSessionEndToEnd(t *testing.T) {
 		}
 	}
 
-	header, entries, err := session.Load(mgr.File())
+	header, entries, _, err := session.Load(mgr.File())
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

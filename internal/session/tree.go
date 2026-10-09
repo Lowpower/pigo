@@ -373,7 +373,7 @@ func Summaries(cwd, agentDir string) ([]Summary, error) {
 func summariesFrom(paths []string) ([]Summary, error) {
 	out := make([]Summary, 0, len(paths))
 	for _, p := range paths {
-		h, entries, err := Load(p)
+		h, entries, _, err := Load(p)
 		if err != nil {
 			continue
 		}

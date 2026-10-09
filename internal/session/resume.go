@@ -13,7 +13,7 @@ import (
 
 // Open loads an existing session file and continues appending to it.
 func Open(path string) (*Manager, error) {
-	header, entries, err := Load(path)
+	header, entries, skips, err := Load(path)
 	if err != nil {
 		return nil, err
 	}
@@ -37,6 +37,7 @@ func Open(path string) (*Manager, error) {
 		flushed:  true,
 		persist:  true,
 		leafID:   leaf,
+		skips:    skips,
 	}, nil
 }
 
