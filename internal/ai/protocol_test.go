@@ -307,7 +307,7 @@ func TestGoogleContentsReplayThoughtSignaturesAndImages(t *testing.T) {
 			{Type: KindToolCall, ToolID: "1", ToolName: "read", Arguments: map[string]any{"p": "a"}, ThinkingSignature: "csig"},
 		}}},
 	}}, replayTarget{})
-	if len(got) != 2 {
+	if len(got) != 3 {
 		t.Fatalf("len=%d", len(got))
 	}
 	if got[0].Parts[0].Text != "look" {
@@ -324,6 +324,10 @@ func TestGoogleContentsReplayThoughtSignaturesAndImages(t *testing.T) {
 	}
 	if got[1].Parts[2].FunctionCall == nil || string(got[1].Parts[2].ThoughtSignature) != "csig" {
 		t.Fatalf("tool part = %#v", got[1].Parts[2])
+	}
+	fr := got[2].Parts[0].FunctionResponse
+	if fr == nil || fr.ID != "1" || fr.Response["output"] != "No result provided" {
+		t.Fatalf("orphan result = %#v", got[2].Parts[0])
 	}
 }
 

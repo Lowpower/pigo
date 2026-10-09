@@ -30,6 +30,7 @@ func (c *PigoMessagesClient) StreamFn() StreamFn {
 		if base == "" {
 			return errorStreamProvider(opts.Model, "pigo-messages", "pigo-messages requires a base URL"), nil
 		}
+		reqCtx.Messages = sanitizeProviderMessages(reqCtx.Messages, modelSupportsImages(opts.Provider, opts.Model))
 		payload := map[string]any{
 			"model": opts.Model,
 			"context": map[string]any{
