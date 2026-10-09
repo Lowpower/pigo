@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
-
 	"github.com/Lowpower/pigo/internal/skills"
 )
 
@@ -51,9 +49,9 @@ func FormatWarnings(ds []Diagnostic) []string {
 //  2. cwd/.pigo/prompts/*.md
 //  3. extra files or directories
 //
-// Diagnostics are closed frontmatter blocks that YAML cannot parse. Those files
-// are not returned as templates. Files with no frontmatter, and files whose
-// opening --- is not closed, still load.
+// Diagnostics are closed frontmatter blocks that YAML cannot parse, or that
+// are not a mapping. Those files are not returned as templates. Files with no
+// frontmatter, and files whose opening --- is not closed, still load.
 func DiscoverTemplates(cwd, agentDir string, extra []string, includeDefaults, includeProject bool) ([]Template, []Diagnostic) {
 	var out []Template
 	var diags []Diagnostic
@@ -122,10 +120,10 @@ func loadFile(path, source string) (Template, []Diagnostic) {
 		return Template{}, nil
 	}
 	text := string(b)
-	if err := validateClosedFrontmatter(text); err != nil {
+	fm, body, err := skills.ParseFrontmatter(text)
+	if err != nil {
 		return Template{}, []Diagnostic{{Path: path, Message: err.Error()}}
 	}
-	fm, body := skills.ParseFrontmatter(text)
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	desc := fm["description"]
 	if desc == "" {
@@ -147,22 +145,6 @@ func loadFile(path, source string) (Template, []Diagnostic) {
 		FilePath:     path,
 		Source:       source,
 	}, nil
-}
-
-// validateClosedFrontmatter rejects YAML that skills.ParseFrontmatter would
-// otherwise accept. An unclosed opening fence is not a closed block.
-func validateClosedFrontmatter(s string) error {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	if !strings.HasPrefix(s, "---\n") {
-		return nil
-	}
-	rest := s[4:]
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
-		return nil
-	}
-	var v any
-	return yaml.Unmarshal([]byte(rest[:end]), &v)
 }
 
 // ParseCommandArgs splits a rest string with bash-style quotes.

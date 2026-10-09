@@ -198,6 +198,174 @@ func TestDiscoverNameMismatchIsSilent(t *testing.T) {
 	}
 }
 
+func TestParseFrontmatter(t *testing.T) {
+	folded := "---\nname: review\ndescription: >\n  Review a change\n  for tests.\n---\n\nDo the review.\n"
+	literal := "---\nname: review\ndescription: |\n  line one\n  line two\n---\n\nbody\n"
+	noNL := "---\nname: demo\ndescription: hi\n---"
+	bom := "\uFEFF---\nname: demo\ndescription: hi\n---\n\nbody\n"
+	quoted := "---\ndescription: \"hello: world\"\ndisable-model-invocation: true\n---\n\nbody\n"
+	trueSpelling := "---\ndisable-model-invocation: True\ndescription: still on\n---\n\nbody\n"
+	structured := "---\nname: demo\ndescription: uses structure\nallowed-tools:\n  - read\n  - bash\nmetadata:\n  author: ada\n  license: mit\n---\n\nbody\n"
+	dashedLine := "---\ndescription: see\n--- below\n---\nbody\n"
+	embedded := "---\ndescription: |\n  keep\n  ---\n  this\n---\nafter\n"
+	crlf := "---\r\nname: demo\r\ndescription: hi\r\n---\r\n\r\nbody\r\n"
+	emptyFM := "---\n---\nbody\n"
+	plain := "Just a body.\n"
+	unclosed := "---\nname: open\ndescription: never closed\n\nbody\n"
+	syntax := "---\nname: broken\ndescription: Broken: unquoted colon\n---\n\nbody\n"
+	seq := "---\n- item\n---\nbody\n"
+
+	tests := []struct {
+		name    string
+		in      string
+		want    map[string]string
+		body    string
+		wantErr bool
+	}{
+		{
+			name: "folded block",
+			in:   folded,
+			want: map[string]string{"name": "review", "description": "Review a change for tests.\n"},
+			body: "Do the review.",
+		},
+		{
+			name: "literal block",
+			in:   literal,
+			want: map[string]string{"name": "review", "description": "line one\nline two\n"},
+			body: "body",
+		},
+		{
+			name: "closing fence without trailing newline",
+			in:   noNL,
+			want: map[string]string{"name": "demo", "description": "hi"},
+		},
+		{
+			name: "bom",
+			in:   bom,
+			want: map[string]string{"name": "demo", "description": "hi"},
+			body: "body",
+		},
+		{
+			name: "quotes and bool",
+			in:   quoted,
+			want: map[string]string{"description": "hello: world", "disable-model-invocation": "true"},
+			body: "body",
+		},
+		{
+			name: "bool keeps source spelling",
+			in:   trueSpelling,
+			want: map[string]string{"disable-model-invocation": "True", "description": "still on"},
+			body: "body",
+		},
+		{
+			name: "list and nested map",
+			in:   structured,
+			want: map[string]string{
+				"name":          "demo",
+				"description":   "uses structure",
+				"allowed-tools": "- read\n- bash",
+				"metadata":      "author: ada\nlicense: mit",
+			},
+			body: "body",
+		},
+		{
+			name: "dashed line is not a fence",
+			in:   dashedLine,
+			want: map[string]string{"description": "see"},
+			body: "body",
+		},
+		{
+			name: "literal keeps dashed line",
+			in:   embedded,
+			want: map[string]string{"description": "keep\n---\nthis\n"},
+			body: "after",
+		},
+		{
+			name: "crlf",
+			in:   crlf,
+			want: map[string]string{"name": "demo", "description": "hi"},
+			body: "body",
+		},
+		{
+			name: "empty frontmatter",
+			in:   emptyFM,
+			want: map[string]string{},
+			body: "body",
+		},
+		{
+			name: "no frontmatter",
+			in:   plain,
+			want: map[string]string{},
+			body: plain,
+		},
+		{
+			name: "unclosed fence",
+			in:   unclosed,
+			want: map[string]string{},
+			body: unclosed,
+		},
+		{name: "syntax error", in: syntax, wantErr: true},
+		{name: "root sequence", in: seq, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fm, body, err := ParseFrontmatter(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if body != tt.body {
+				t.Fatalf("body = %q want %q", body, tt.body)
+			}
+			if len(fm) != len(tt.want) {
+				t.Fatalf("frontmatter = %#v want %#v", fm, tt.want)
+			}
+			for k, v := range tt.want {
+				if fm[k] != v {
+					t.Errorf("%s = %q want %q", k, fm[k], v)
+				}
+			}
+		})
+	}
+}
+
+func TestDiscoverFoldedDescriptionAndDisableFlag(t *testing.T) {
+	agent := t.TempDir()
+	path := filepath.Join(agent, "skills", "review", "SKILL.md")
+	writeSkillFile(t, path, "---\nname: review\ndescription: >\n  Review a change\n  for tests.\ndisable-model-invocation: true\n---\n\nbody\n")
+	got, diags := Discover("", agent, nil, true, false)
+	if len(diags) != 0 || len(got) != 1 {
+		t.Fatalf("skills = %+v diagnostics = %+v", got, diags)
+	}
+	if got[0].Description != "Review a change for tests." || !got[0].DisableLLM {
+		t.Fatalf("skill = %+v", got[0])
+	}
+	if strings.Contains(FormatForPrompt(got), "review") {
+		t.Fatal("disabled skill was included in the prompt catalog")
+	}
+}
+
+func TestDiscoverMalformedFrontmatterLeavesOtherSkills(t *testing.T) {
+	agent := t.TempDir()
+	bad := filepath.Join(agent, "skills", "broken", "SKILL.md")
+	good := filepath.Join(agent, "skills", "ok", "SKILL.md")
+	writeSkillFile(t, bad, "---\nname: broken\ndescription: Broken: unquoted colon\n---\n\nbody\n")
+	writeSkillFile(t, good, "---\nname: ok\ndescription: Still loads\n---\n\nbody\n")
+	got, diags := Discover("", agent, nil, true, false)
+	if len(got) != 1 || got[0].Name != "ok" || got[0].Description != "Still loads" {
+		t.Fatalf("skills = %+v", got)
+	}
+	if len(diags) != 1 || !strings.HasPrefix(diags[0].Message, "Warning: malformed skill frontmatter in "+bad+": ") {
+		t.Fatalf("diagnostics = %+v", diags)
+	}
+}
+
 func TestDiscoverPlainMarkdownWithoutDescriptionIsSilent(t *testing.T) {
 	agent := t.TempDir()
 	writeSkillFile(t, filepath.Join(agent, "skills", "notes.md"), "Just notes, no frontmatter.\n")
