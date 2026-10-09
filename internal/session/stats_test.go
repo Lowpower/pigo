@@ -34,7 +34,7 @@ func TestCollectStatsSumsBothCacheWritePrices(t *testing.T) {
 	}
 	write(600_000, 0, 2.25)
 	write(400_000, 400_000, 2.4)
-	got := CollectStats(m, nil, 0)
+	got := CollectStats(m, nil, 0, "", nil)
 	if got.Tokens.CacheWrite != 1_000_000 || got.Tokens.CacheWrite1h != 400_000 {
 		t.Fatalf("tokens=%+v", got.Tokens)
 	}
@@ -59,7 +59,7 @@ func TestCollectStatsSumsAssistantCost(t *testing.T) {
 	if _, err := m.AppendMessage("assistant", asst); err != nil {
 		t.Fatal(err)
 	}
-	got := CollectStats(m, nil, 0)
+	got := CollectStats(m, nil, 0, "", nil)
 	if got.Cost != 1.5 {
 		t.Fatalf("cost=%v want 1.5", got.Cost)
 	}
@@ -78,7 +78,7 @@ func TestCollectStatsIncludesToolResultUsage(t *testing.T) {
 	if _, err := m.AppendMessage("toolResult", tr); err != nil {
 		t.Fatal(err)
 	}
-	got := CollectStats(m, nil, 0)
+	got := CollectStats(m, nil, 0, "", nil)
 	if got.Cost != 1 || got.Tokens.Input != 100 {
 		t.Fatalf("got cost=%v tokens=%+v", got.Cost, got.Tokens)
 	}
@@ -93,7 +93,7 @@ func TestCollectStatsIncludesCacheWarmUsage(t *testing.T) {
 	if _, err := m.AppendUsage("cache_warm", "anthropic", "claude-sonnet-4", u, ""); err != nil {
 		t.Fatal(err)
 	}
-	got := CollectStats(m, nil, 0)
+	got := CollectStats(m, nil, 0, "", nil)
 	if got.Cost != 0.2 || got.Tokens.Input != 20 {
 		t.Fatalf("got cost=%v tokens=%+v", got.Cost, got.Tokens)
 	}
@@ -126,7 +126,7 @@ func TestCollectStatsIncludesCompactionUsage(t *testing.T) {
 	}
 	u := costUsage(40, 1)
 	e.Usage = &u
-	got := CollectStats(m, nil, 0)
+	got := CollectStats(m, nil, 0, "", nil)
 	if got.Cost != 1 || got.Tokens.Input != 40 {
 		t.Fatalf("got cost=%v tokens=%+v", got.Cost, got.Tokens)
 	}
@@ -139,7 +139,7 @@ func TestCollectStatsIncludesBranchSummaryUsage(t *testing.T) {
 	m := New(t.TempDir(), t.TempDir())
 	u := costUsage(40, 1)
 	m.entries = append(m.entries, &Entry{Type: "branch_summary", Usage: &u})
-	got := CollectStats(m, nil, 0)
+	got := CollectStats(m, nil, 0, "", nil)
 	if got.Cost != 1 || got.Tokens.Input != 40 {
 		t.Fatalf("got cost=%v tokens=%+v", got.Cost, got.Tokens)
 	}
@@ -185,7 +185,7 @@ func TestCollectStatsCostBreakdownByModel(t *testing.T) {
 	if _, err := m.AppendCompaction("sum", "", 0, CompactionMeta{Usage: &u}); err != nil {
 		t.Fatal(err)
 	}
-	got := CollectStats(m, nil, 0)
+	got := CollectStats(m, nil, 0, "", nil)
 	if len(got.CostBreakdown) != 3 {
 		t.Fatalf("breakdown=%+v", got.CostBreakdown)
 	}
@@ -221,7 +221,7 @@ func TestCollectStatsCacheWasteOnFullMiss(t *testing.T) {
 	if err := write(110_000, 0.4125); err != nil {
 		t.Fatal(err)
 	}
-	got := CollectStats(m, nil, 0)
+	got := CollectStats(m, nil, 0, "", nil)
 	if got.CacheWaste == nil || got.CacheWaste.MissCount != 1 || got.CacheWaste.MissedTokens != 100_000 {
 		t.Fatalf("waste=%+v", got.CacheWaste)
 	}
@@ -252,9 +252,35 @@ func TestCollectStatsCacheWasteUsesCatalogPrice(t *testing.T) {
 	if err := write(110_000, 0.4125); err != nil {
 		t.Fatal(err)
 	}
-	got := CollectStats(m, nil, 0)
+	got := CollectStats(m, nil, 0, "", nil)
 	if got.CacheWaste == nil || got.CacheWaste.MissedCost <= 0 {
 		t.Fatalf("catalog fallback should price the miss: %+v", got.CacheWaste)
+	}
+}
+
+func TestCollectStatsContextUsesUsage(t *testing.T) {
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: strings.Repeat("a", 400)},
+		{
+			Role: ai.RoleAssistant,
+			Assistant: &ai.AssistantMessage{
+				Role:       ai.RoleAssistant,
+				StopReason: ai.StopStop,
+				Usage:      ai.Usage{TotalTokens: 40},
+				Content:    []*ai.Content{{Type: ai.KindText, Text: "hi"}},
+			},
+		},
+		{Role: ai.RoleToolResult, Content: "abcdefgh"},
+	}
+	got := CollectStats(nil, msgs, 200, strings.Repeat("s", 400), nil)
+	if got.ContextUsage == nil || got.ContextUsage.Tokens == nil || *got.ContextUsage.Tokens != 42 {
+		t.Fatalf("context = %+v", got.ContextUsage)
+	}
+
+	plain := []ai.Message{{Role: ai.RoleUser, Content: "abcd"}}
+	noUsage := CollectStats(nil, plain, 200, "abcd", nil)
+	if noUsage.ContextUsage == nil || noUsage.ContextUsage.Tokens == nil || *noUsage.ContextUsage.Tokens != 2 {
+		t.Fatalf("no usage = %+v", noUsage.ContextUsage)
 	}
 }
 

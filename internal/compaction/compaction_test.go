@@ -21,6 +21,149 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
+func TestEstimateTokensIncludesThinkingToolArgsAndImages(t *testing.T) {
+	thinking := ai.Message{
+		Role: ai.RoleAssistant,
+		Assistant: &ai.AssistantMessage{
+			Content: []*ai.Content{
+				{Type: ai.KindThinking, Thinking: "abcd"},
+				{Type: ai.KindText, Text: "abcd"},
+			},
+		},
+	}
+	if got := EstimateTokens(thinking); got != 2 {
+		t.Fatalf("thinking+text = %d, want 2", got)
+	}
+
+	wide := strings.Repeat("x", 4000)
+	tool := ai.Message{
+		Role: ai.RoleAssistant,
+		Assistant: &ai.AssistantMessage{
+			Content: []*ai.Content{{
+				Type:      ai.KindToolCall,
+				ToolName:  "write",
+				Arguments: map[string]any{"content": wide},
+			}},
+		},
+	}
+	if tool.Text() != "" {
+		t.Fatalf("Text() = %q, want empty", tool.Text())
+	}
+	// "write" + {"content":"<4000 x>"} = 5 + 4013 = 4018 chars → 1005 tokens.
+	if got := EstimateTokens(tool); got != 1005 {
+		t.Fatalf("tool args = %d, want 1005", got)
+	}
+
+	img := ai.Message{
+		Content: "ab",
+		Images:  []ai.ImageContent{{Type: "image", Data: "xx", MimeType: "image/png"}},
+	}
+	// 2 chars + 4800 image chars → 1201 tokens.
+	if got := EstimateTokens(img); got != 1201 {
+		t.Fatalf("image = %d, want 1201", got)
+	}
+	two := ai.Message{Images: []ai.ImageContent{{}, {}}}
+	if got := EstimateTokens(two); got != 2400 {
+		t.Fatalf("two images = %d, want 2400", got)
+	}
+}
+
+func TestContextTokensUsesLastUsagePlusTrailing(t *testing.T) {
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: strings.Repeat("a", 400)},
+		usageMessage(ai.Usage{Input: 10, Output: 5, CacheRead: 3, CacheWrite: 2, TotalTokens: 20}, "hi"),
+		{Role: ai.RoleToolResult, Content: "abcdefgh"},
+	}
+	tools := []ai.Tool{{Name: "read", Description: "desc", Parameters: map[string]any{}}}
+	if got := ContextTokens(msgs, strings.Repeat("s", 4000), tools); got != 22 {
+		t.Fatalf("ContextTokens = %d, want 22 (usage 20 + trailing 2, system/tools excluded)", got)
+	}
+
+	msgs[1] = usageMessage(ai.Usage{Input: 10, Output: 5, CacheRead: 3, CacheWrite: 2}, "hi")
+	if got := ContextTokens(msgs, "", nil); got != 22 {
+		t.Fatalf("summed usage = %d, want 22", got)
+	}
+
+	later := append(append([]ai.Message{}, msgs...), usageMessage(ai.Usage{TotalTokens: 30}, "next"))
+	if got := ContextTokens(later, "", nil); got != 30 {
+		t.Fatalf("later usage = %d, want 30", got)
+	}
+}
+
+func TestContextTokensNoUsageIncludesPrompt(t *testing.T) {
+	msgs := []ai.Message{
+		{
+			Role: ai.RoleAssistant,
+			Assistant: &ai.AssistantMessage{
+				Content: []*ai.Content{{Type: ai.KindThinking, Thinking: "abcd"}},
+			},
+		},
+		{
+			Role:    ai.RoleUser,
+			Content: "ab",
+			Images:  []ai.ImageContent{{Type: "image", Data: "xx", MimeType: "image/png"}},
+		},
+	}
+	tools := []ai.Tool{{Name: "read", Description: "desc", Parameters: map[string]any{}}}
+	// thinking 1 + image message 1201 + ceil((4 + 54 tool JSON) / 4) = 1217.
+	if got := ContextTokens(msgs, "abcd", tools); got != 1217 {
+		t.Fatalf("ContextTokens = %d, want 1217", got)
+	}
+}
+
+func TestContextTokensRejectsInvalidUsage(t *testing.T) {
+	text := ai.Message{Role: ai.RoleUser, Content: "abcdefgh"}
+	zero := usageMessage(ai.Usage{}, "abcdefgh")
+	if got := ContextTokens([]ai.Message{text, zero}, "abcd", nil); got != 5 {
+		t.Fatalf("zero usage = %d, want 5", got)
+	}
+	aborted := usageMessage(ai.Usage{TotalTokens: 99999}, "abcdefgh")
+	aborted.Assistant.StopReason = ai.StopAborted
+	if got := ContextTokens([]ai.Message{aborted}, "", nil); got != 2 {
+		t.Fatalf("aborted usage = %d, want 2", got)
+	}
+	errored := usageMessage(ai.Usage{TotalTokens: 99999}, "abcdefgh")
+	errored.Assistant.StopReason = ai.StopError
+	if got := ContextTokens([]ai.Message{errored}, "", nil); got != 2 {
+		t.Fatalf("error usage = %d, want 2", got)
+	}
+
+	valid := usageMessage(ai.Usage{TotalTokens: 50}, "hi")
+	zeroAfter := usageMessage(ai.Usage{}, "abcdefgh")
+	trail := ai.Message{Role: ai.RoleToolResult, Content: "abcdefgh"}
+	if got := ContextTokens([]ai.Message{valid, trail, zeroAfter}, strings.Repeat("s", 400), nil); got != 54 {
+		t.Fatalf("usage then invalid = %d, want 54", got)
+	}
+}
+
+func TestShouldCompactCountsToolResultAfterUsage(t *testing.T) {
+	s := Settings{ReserveTokens: 16384}
+	msgs := []ai.Message{
+		usageMessage(ai.Usage{TotalTokens: 1000}, "ok"),
+		{Role: ai.RoleToolResult, Content: strings.Repeat("x", 40000)},
+	}
+	tokens := ContextTokens(msgs, "", nil)
+	if !ShouldCompact(tokens, 20000, s) {
+		t.Fatalf("tokens %d should compact in a 20000 window", tokens)
+	}
+	if ShouldCompact(ContextTokens(msgs[:1], "", nil), 20000, s) {
+		t.Fatal("usage alone should stay under the threshold")
+	}
+}
+
+func usageMessage(usage ai.Usage, text string) ai.Message {
+	return ai.Message{
+		Role:    ai.RoleAssistant,
+		Content: text,
+		Assistant: &ai.AssistantMessage{
+			Role:       ai.RoleAssistant,
+			StopReason: ai.StopStop,
+			Usage:      usage,
+			Content:    []*ai.Content{{Type: ai.KindText, Text: text}},
+		},
+	}
+}
+
 func TestShouldCompact(t *testing.T) {
 	s := DefaultSettings() // reserve 16384
 	if !ShouldCompact(90000, 100000, s) {

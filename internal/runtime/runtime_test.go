@@ -1346,3 +1346,39 @@ func TestBoundStreamUsesModelsJSONCustomProvider(t *testing.T) {
 		t.Fatalf("model = %q", gotModel)
 	}
 }
+
+func TestMaybeCompactCountsToolResultAfterUsage(t *testing.T) {
+	e := &Engine{
+		Stream: ai.ScriptedStreamFn("## Goal\nDone.", 0),
+		Opts: Options{
+			ContextWindow: 20000,
+			Config:        config.Config{KeepRecentTokens: 100, ReserveTokens: 16384},
+		},
+	}
+	msgs := []ai.Message{
+		{
+			Role: ai.RoleAssistant,
+			Assistant: &ai.AssistantMessage{
+				Role:       ai.RoleAssistant,
+				StopReason: ai.StopStop,
+				Usage:      ai.Usage{TotalTokens: 1000},
+				Content:    []*ai.Content{{Type: ai.KindText, Text: "ok"}},
+			},
+		},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("x", 40000)},
+	}
+	_, summary, err := e.MaybeCompact(context.Background(), msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary == "" {
+		t.Fatal("expected compaction after the tool result")
+	}
+	_, alone, err := e.MaybeCompact(context.Background(), msgs[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alone != "" {
+		t.Fatalf("usage alone compacted: %q", alone)
+	}
+}
