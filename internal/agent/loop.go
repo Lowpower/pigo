@@ -51,10 +51,11 @@ func (f ToolFunc) Execute(ctx context.Context, call ToolCall) (string, bool) {
 
 // Config controls the loop.
 type Config struct {
-	Model         string
-	ToolExecution string // Sequential | Parallel (default Parallel)
-	MaxTurns      int    // safety cap (default 16)
-	Thinking      string // thinking level; forwarded to the provider
+	Model           string
+	ToolExecution   string // Sequential | Parallel (default Parallel)
+	MaxTurns        int    // safety cap (default 16)
+	Thinking        string // thinking level; forwarded to the provider
+	ThinkingDisplay string // summarized|omitted; empty uses summarized
 	// Steering is polled after every turn. Returned user messages are injected
 	// before the next LLM call.
 	Steering func() []ai.Message
@@ -275,11 +276,12 @@ func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg 
 		span.SetAttribute("gen_ai.request.model", cfg.Model)
 	}
 	stream, err := sf(ctx, aiCtx, ai.Options{
-		Model:          cfg.Model,
-		Thinking:       cfg.Thinking,
-		SessionID:      cfg.SessionID,
-		Provider:       cfg.Provider,
-		CacheRetention: cfg.CacheRetention,
+		Model:           cfg.Model,
+		Thinking:        cfg.Thinking,
+		ThinkingDisplay: cfg.ThinkingDisplay,
+		SessionID:       cfg.SessionID,
+		Provider:        cfg.Provider,
+		CacheRetention:  cfg.CacheRetention,
 	})
 	if err != nil {
 		span.RecordError(err)

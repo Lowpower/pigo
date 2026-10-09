@@ -36,6 +36,7 @@ type Config struct {
 	Theme                     string                `mapstructure:"theme"`
 	Thinking                  string                `mapstructure:"thinking"`
 	DefaultThinkingLevel      string                `mapstructure:"defaultThinkingLevel"`
+	ThinkingDisplay           string                `mapstructure:"thinkingDisplay"`
 	ContextWindow             int                   `mapstructure:"contextWindow"`
 	CompactionOn              *bool                 `mapstructure:"compactionEnabled"`
 	ReserveTokens             int                   `mapstructure:"compactionReserveTokens"`
@@ -841,6 +842,9 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	}
 	if cfg.DefaultThinkingLevel != "" {
 		existing["defaultThinkingLevel"] = cfg.DefaultThinkingLevel
+	}
+	if cfg.ThinkingDisplay != "" {
+		existing["thinkingDisplay"] = cfg.ThinkingDisplay
 	}
 	if cfg.ExternalEditor != "" {
 		existing["externalEditor"] = cfg.ExternalEditor

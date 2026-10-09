@@ -14,6 +14,7 @@ type projectOverlay struct {
 	Theme                     string                 `json:"theme"`
 	Thinking                  string                 `json:"thinking"`
 	DefaultThinkingLevel      string                 `json:"defaultThinkingLevel"`
+	ThinkingDisplay           string                 `json:"thinkingDisplay"`
 	ContextWindow             int                    `json:"contextWindow"`
 	CompactionOn              *bool                  `json:"compactionEnabled"`
 	ReserveTokens             int                    `json:"compactionReserveTokens"`
@@ -99,6 +100,9 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	}
 	if over.DefaultThinkingLevel != "" {
 		out.DefaultThinkingLevel = over.DefaultThinkingLevel
+	}
+	if over.ThinkingDisplay != "" {
+		out.ThinkingDisplay = over.ThinkingDisplay
 	}
 	if n := explicitContextWindow(over.ContextWindow); n > 0 {
 		out.ContextWindow = n

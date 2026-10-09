@@ -139,6 +139,43 @@ func TestLoadThinkingAndIdleTimeout(t *testing.T) {
 	}
 }
 
+func TestThinkingDisplayLoadSaveAndProjectOverlay(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"thinkingDisplay":"omitted"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ThinkingDisplay != "omitted" {
+		t.Fatalf("display=%q", cfg.ThinkingDisplay)
+	}
+	cfg.ThinkingDisplay = "summarized"
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ThinkingDisplay != "summarized" {
+		t.Fatalf("saved display=%q", cfg.ThinkingDisplay)
+	}
+
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"thinkingDisplay":"omitted"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ApplyProject(cfg, cwd, true)
+	if got.ThinkingDisplay != "omitted" {
+		t.Fatalf("project display=%q", got.ThinkingDisplay)
+	}
+}
+
 func TestLoadTreeSettings(t *testing.T) {
 	cfg, err := Load(t.TempDir())
 	if err != nil {
