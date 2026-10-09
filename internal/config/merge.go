@@ -100,8 +100,8 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	if over.DefaultThinkingLevel != "" {
 		out.DefaultThinkingLevel = over.DefaultThinkingLevel
 	}
-	if over.ContextWindow > 0 {
-		out.ContextWindow = over.ContextWindow
+	if n := explicitContextWindow(over.ContextWindow); n > 0 {
+		out.ContextWindow = n
 	}
 	if over.CompactionOn != nil {
 		out.CompactionOn = over.CompactionOn

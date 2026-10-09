@@ -40,7 +40,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.1
+          version: v2.14.0
           # Repo still has pre-existing revive/staticcheck findings; fail only on new ones.
           only-new-issues: true
 

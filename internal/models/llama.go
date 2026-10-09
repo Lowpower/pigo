@@ -1,6 +1,7 @@
 package models
 
 import (
+	"math"
 	"os"
 	"time"
 
@@ -34,11 +35,16 @@ func ApplyLlamaCatalog(c *llama.Client, store CatalogStore) error {
 		if !llama.Selectable(m, props.ModelsAutoload) {
 			continue
 		}
+		cw := 0
+		if n := llama.ContextSize(m); n > 0 && n <= int64(math.MaxInt) {
+			cw = int(n)
+		}
 		out = append(out, Model{
-			Provider: llama.ProviderID,
-			ID:       m.ID,
-			API:      "openai-completions",
-			BaseURL:  llama.InferenceURL(c.ServerURL),
+			Provider:      llama.ProviderID,
+			ID:            m.ID,
+			API:           "openai-completions",
+			BaseURL:       llama.InferenceURL(c.ServerURL),
+			ContextWindow: cw,
 		})
 	}
 	SetRemoteOverlay(llama.ProviderID, out)

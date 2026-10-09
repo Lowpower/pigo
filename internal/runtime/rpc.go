@@ -273,6 +273,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				"autoCompactionEnabled": e.Opts.Config.CompactionEnabled(),
 				"messageCount":          nmsg,
 				"pendingMessageCount":   e.pendingCount(),
+				"contextWindow":         e.ContextWindow(),
 			}, "")
 		case "set_model":
 			provider, _ := raw["provider"].(string)
@@ -605,7 +606,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			stateMu.Lock()
 			hist := history
 			stateMu.Unlock()
-			stats := session.CollectStats(e.Opts.Session, hist, e.contextWindow())
+			stats := session.CollectStats(e.Opts.Session, hist, e.ContextWindow())
 			stats.CacheWarming = e.CacheWarmingStatus()
 			reply(id, "get_session_stats", true, stats, "")
 		case "abort_bash":

@@ -180,8 +180,8 @@ func (m Model) footerText() string {
 		stats = append(stats, "$"+strconv.FormatFloat(m.usage.Cost.Total, 'f', 3, 64))
 	}
 	win := 0
-	if m.engine != nil && m.engine.Opts.ContextWindow > 0 {
-		win = m.engine.Opts.ContextWindow
+	if m.engine != nil {
+		win = m.engine.ContextWindow()
 	} else if m.cfg.ContextWindow > 0 {
 		win = m.cfg.ContextWindow
 	}

@@ -706,7 +706,7 @@ func samplingArg(v any) map[string]any {
 }
 
 func (e *Engine) contextUsageMap() map[string]any {
-	window := e.contextWindow()
+	window := e.ContextWindow()
 	var tokens int
 	for _, m := range e.History() {
 		if m.Assistant != nil {

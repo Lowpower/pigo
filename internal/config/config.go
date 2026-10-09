@@ -12,6 +12,20 @@ import (
 	"github.com/spf13/viper"
 )
 
+// DefaultContextWindow is the effective window when the user did not set
+// contextWindow and the selected model has no catalog value.
+const DefaultContextWindow = 200000
+
+// explicitContextWindow drops non-positive values and the historical
+// auto-persisted default. 200000 was written by Save for every install and
+// is not a user choice; any other positive value is an override.
+func explicitContextWindow(n int) int {
+	if n <= 0 || n == DefaultContextWindow {
+		return 0
+	}
+	return n
+}
+
 // Config holds the resolved pigo settings. Keys are defaultProvider /
 // defaultModel / theme, with aliases (provider / model) for the earlier scaffold.
 type Config struct {
@@ -527,7 +541,7 @@ func Load(configDir string) (Config, error) {
 	v.SetDefault("model", "claude-sonnet-4")
 	v.SetDefault("theme", "system")
 	v.SetDefault("thinking", "medium")
-	v.SetDefault("contextWindow", 200000)
+	v.SetDefault("contextWindow", 0)
 	v.SetDefault("compactionReserveTokens", 16384)
 	v.SetDefault("compactionKeepRecentTokens", 20000)
 	v.SetDefault("steeringMode", "one-at-a-time")
@@ -551,9 +565,7 @@ func Load(configDir string) (Config, error) {
 	if cfg.Theme == "" {
 		cfg.Theme = "system"
 	}
-	if cfg.ContextWindow <= 0 {
-		cfg.ContextWindow = 200000
-	}
+	cfg.ContextWindow = explicitContextWindow(cfg.ContextWindow)
 	if cfg.Thinking == "" && cfg.DefaultThinkingLevel != "" {
 		cfg.Thinking = cfg.DefaultThinkingLevel
 	}
@@ -704,7 +716,11 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	existing["defaultModel"] = dm
 	existing["theme"] = cfg.Theme
 	existing["thinking"] = cfg.Thinking
-	existing["contextWindow"] = cfg.ContextWindow
+	if n := explicitContextWindow(cfg.ContextWindow); n > 0 {
+		existing["contextWindow"] = n
+	} else {
+		delete(existing, "contextWindow")
+	}
 	existing["compaction"] = map[string]any{
 		"enabled":          cfg.CompactionEnabled(),
 		"reserveTokens":    cfg.ReserveTokens,
