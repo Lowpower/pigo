@@ -89,7 +89,7 @@ func TestListAllAndDeleteAndRename(t *testing.T) {
 	if err := UpdateHeader(a.File(), func(h *Header) { h.Name = "named-a" }); err != nil {
 		t.Fatal(err)
 	}
-	h, _, err := Load(a.File())
+	h, _, _, err := Load(a.File())
 	if err != nil || h.Name != "named-a" {
 		t.Fatalf("name=%q err=%v", h.Name, err)
 	}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,6 +89,7 @@ type Manager struct {
 	flushed  bool
 	persist  bool
 	leafID   string
+	skips    []Skip
 }
 
 // DefaultAgentDir returns the config root: ~/.pigo/agent (override-free).
@@ -174,6 +176,25 @@ func (m *Manager) Header() Header { return m.header }
 
 // File returns the session file path.
 func (m *Manager) File() string { return m.file }
+
+// LoadWarnings returns lines Load skipped while opening this session.
+func (m *Manager) LoadWarnings() []Skip {
+	if m == nil || len(m.skips) == 0 {
+		return nil
+	}
+	out := make([]Skip, len(m.skips))
+	copy(out, m.skips)
+	return out
+}
+
+// LoadWarningText is the single warning shown after a session opens.
+// It is empty when every line loaded.
+func (m *Manager) LoadWarningText() string {
+	if m == nil {
+		return ""
+	}
+	return formatSkipWarning(m.file, m.skips)
+}
 
 // Name is the display name (latest session_info, else header).
 func (m *Manager) Name() string {
@@ -293,13 +314,17 @@ func (m *Manager) persistEntry(e *Entry) error {
 		return nil
 	}
 
+	leadingNL, err := repairSessionTail(m.file)
+	if err != nil {
+		return err
+	}
 	f, err := os.OpenFile(m.file, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
 	_ = f.Chmod(0o600)
 	defer func() { _ = f.Close() }()
-	return writeLine(f, e)
+	return writeJSONLine(f, e, leadingNL)
 }
 
 // maxHeaderBytes is the maximum prefix read from a session file while
@@ -359,39 +384,110 @@ func readHeader(path string) (Header, error) {
 	return h, nil
 }
 
-// Load reads a session file into its header and entries.
-func Load(path string) (Header, []Entry, error) {
+// Skip is one session line Load ignored. Line is the 1-based physical line number.
+type Skip struct {
+	Line   int
+	Reason string
+}
+
+// maxEntryLineBytes is the largest body line Load will keep. A longer line is
+// skipped so one oversized record cannot make the rest of the file unreadable.
+const maxEntryLineBytes = 64 << 20
+
+// Load reads a session file into its header and entries. A damaged header fails
+// the load. Later lines that are not valid JSON, or that exceed maxEntryLineBytes,
+// are returned in skips and do not fail the load.
+func Load(path string) (Header, []Entry, []Skip, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return Header{}, nil, err
+		return Header{}, nil, nil, err
 	}
 	defer func() { _ = f.Close() }()
 	_ = os.Chmod(path, 0o600)
 
+	r := bufio.NewReaderSize(f, 64*1024)
 	var header Header
 	var entries []Entry
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	first := true
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+	var skips []Skip
+	haveHeader := false
+	for lineNo := 1; ; lineNo++ {
+		limit := maxEntryLineBytes
+		if !haveHeader {
+			limit = maxHeaderBytes
+		}
+		line, tooLong, err := readLimitedLine(r, limit)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return Header{}, nil, nil, err
+		}
+		if tooLong {
+			if !haveHeader {
+				return Header{}, nil, nil, fmt.Errorf("session header exceeds %d bytes", maxHeaderBytes)
+			}
+			skips = append(skips, Skip{Line: lineNo, Reason: fmt.Sprintf("line exceeds %d MiB", maxEntryLineBytes>>20)})
 			continue
 		}
-		if first {
-			if err := json.Unmarshal([]byte(line), &header); err != nil {
-				return Header{}, nil, err
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !haveHeader {
+			if err := json.Unmarshal([]byte(trimmed), &header); err != nil {
+				return Header{}, nil, nil, err
 			}
-			first = false
+			haveHeader = true
 			continue
 		}
 		var e Entry
-		if err := json.Unmarshal([]byte(line), &e); err != nil {
-			return Header{}, nil, err
+		if err := json.Unmarshal([]byte(trimmed), &e); err != nil {
+			skips = append(skips, Skip{Line: lineNo, Reason: err.Error()})
+			continue
 		}
 		entries = append(entries, e)
 	}
-	return header, entries, scanner.Err()
+	return header, entries, skips, nil
+}
+
+// readLimitedLine reads one physical line without its trailing newline.
+// tooLong is set when the line content exceeds limit; the rest of that line
+// is discarded so the next line can still be read. io.EOF is returned only
+// when no bytes remain.
+func readLimitedLine(r *bufio.Reader, limit int) (string, bool, error) {
+	var buf bytes.Buffer
+	tooLong := false
+	sawByte := false
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if len(chunk) > 0 {
+			sawByte = true
+		}
+		if !tooLong && len(chunk) > 0 {
+			content := chunk
+			if nl := bytes.IndexByte(chunk, '\n'); nl >= 0 {
+				content = chunk[:nl]
+			}
+			if buf.Len()+len(content) > limit {
+				tooLong = true
+			} else if _, err := buf.Write(content); err != nil {
+				return "", false, err
+			}
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err != nil && err != io.EOF {
+			return "", tooLong, err
+		}
+		if tooLong {
+			return "", true, nil
+		}
+		if err == io.EOF && !sawByte {
+			return "", false, io.EOF
+		}
+		return buf.String(), false, nil
+	}
 }
 
 // sessionDir encodes cwd into a directory name under agentDir/sessions/:
@@ -414,14 +510,160 @@ func fileTimestamp(ts string) string {
 }
 
 func writeLine(f *os.File, v any) error {
+	return writeJSONLine(f, v, false)
+}
+
+func writeJSONLine(f *os.File, v any, leadingNL bool) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(append(b, '\n')); err != nil {
+	buf := make([]byte, 0, len(b)+2)
+	if leadingNL {
+		buf = append(buf, '\n')
+	}
+	buf = append(buf, b...)
+	buf = append(buf, '\n')
+	_, err = f.Write(buf)
+	return err
+}
+
+// repairSessionTail prepares an append. A partial trailing value is removed
+// by rewriting the prefix to a temp file in the same directory and renaming
+// it over path. A complete trailing JSON value, including one with extra
+// bytes after it, is left in place; leadingNL tells the caller to write a
+// newline before the new record. A partial header is left untouched.
+func repairSessionTail(path string) (leadingNL bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+
+	st, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if st.Size() == 0 {
+		return false, nil
+	}
+	var last [1]byte
+	if _, err := f.ReadAt(last[:], st.Size()-1); err != nil {
+		return false, err
+	}
+	if last[0] == '\n' {
+		return false, nil
+	}
+	nlAt, found, err := lastNewline(f, st.Size())
+	if err != nil {
+		return false, err
+	}
+	tailStart := int64(0)
+	if found {
+		tailStart = nlAt + 1
+	}
+	if _, err := f.Seek(tailStart, io.SeekStart); err != nil {
+		return false, err
+	}
+	var raw json.RawMessage
+	decErr := json.NewDecoder(f).Decode(&raw)
+	if err := f.Close(); err != nil {
+		return false, err
+	}
+	if decErr == nil {
+		return true, nil
+	}
+	if !found {
+		return false, fmt.Errorf("session file %s ends with a partial header", path)
+	}
+	return false, replaceWithPrefix(path, tailStart)
+}
+
+func lastNewline(f *os.File, size int64) (int64, bool, error) {
+	const chunk = 64 * 1024
+	buf := make([]byte, chunk)
+	for end := size; end > 0; {
+		n := end
+		if n > chunk {
+			n = chunk
+		}
+		start := end - n
+		if _, err := f.ReadAt(buf[:n], start); err != nil {
+			return 0, false, err
+		}
+		for i := n - 1; i >= 0; i-- {
+			if buf[i] == '\n' {
+				return start + i, true, nil
+			}
+		}
+		end = start
+	}
+	return 0, false, nil
+}
+
+func replaceWithPrefix(path string, keep int64) error {
+	src, err := os.Open(path)
+	if err != nil {
 		return err
 	}
+	defer func() { _ = src.Close() }()
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".pigo-session-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	done := false
+	defer func() {
+		if !done {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := io.Copy(tmp, io.LimitReader(src, keep)); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := src.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	done = true
 	return nil
+}
+
+func formatSkipWarning(path string, skips []Skip) string {
+	if len(skips) == 0 {
+		return ""
+	}
+	parts := make([]string, len(skips))
+	for i, s := range skips {
+		if s.Reason != "" {
+			parts[i] = fmt.Sprintf("%d (%s)", s.Line, s.Reason)
+		} else {
+			parts[i] = strconv.Itoa(s.Line)
+		}
+	}
+	noun := "line"
+	if len(skips) != 1 {
+		noun = "lines"
+	}
+	return fmt.Sprintf("Warning: session %s: skipped %d unreadable %s: %s", path, len(skips), noun, strings.Join(parts, ", "))
 }
 
 // newUUID returns a random UUIDv4 string.

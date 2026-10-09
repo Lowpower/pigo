@@ -367,6 +367,9 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		if err2 != nil {
 			return fmt.Errorf("fork: %w", err2)
 		}
+		if w := src.LoadWarningText(); w != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s\n", w)
+		}
 		sess, err = src.Fork(cwd, agentDir)
 		if err != nil {
 			return fmt.Errorf("fork session: %w", err)
@@ -404,6 +407,11 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 	if f.name != "" && sess != nil {
 		sess.SetName(f.name)
+	}
+	if sess != nil {
+		if w := sess.LoadWarningText(); w != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s\n", w)
+		}
 	}
 
 	exts := f.extension
