@@ -817,3 +817,96 @@ func TestLoadFullscreenScrollbarModes(t *testing.T) {
 		t.Fatalf("loaded mode=%s", cfg.ScrollbarMode())
 	}
 }
+
+func TestLoadContextWindowUnsetAndLegacyDefault(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ContextWindow != 0 {
+		t.Fatalf("missing contextWindow = %d, want 0", cfg.ContextWindow)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"contextWindow":200000}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ContextWindow != 0 {
+		t.Fatalf("legacy 200000 = %d, want unset", cfg.ContextWindow)
+	}
+}
+
+func TestLoadContextWindowExplicit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"contextWindow":32768}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ContextWindow != 32768 {
+		t.Fatalf("contextWindow = %d, want 32768", cfg.ContextWindow)
+	}
+}
+
+func TestLoadContextWindowFromEnv(t *testing.T) {
+	t.Setenv("PIGO_CONTEXTWINDOW", "32768")
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ContextWindow != 32768 {
+		t.Fatalf("env contextWindow = %d, want 32768", cfg.ContextWindow)
+	}
+
+	t.Setenv("PIGO_CONTEXTWINDOW", "200000")
+	cfg, err = Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ContextWindow != 0 {
+		t.Fatalf("env legacy default = %d, want unset", cfg.ContextWindow)
+	}
+}
+
+func TestSaveContextWindowOmitAndWrite(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"contextWindow":200000,"keepMe":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if strings.Contains(s, "contextWindow") {
+		t.Fatalf("unset contextWindow should be removed: %s", s)
+	}
+	if !strings.Contains(s, `"keepMe"`) {
+		t.Fatalf("lost extra key: %s", s)
+	}
+
+	cfg.ContextWindow = 32768
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"contextWindow": 32768`) {
+		t.Fatalf("explicit contextWindow missing: %s", b)
+	}
+}

@@ -18,7 +18,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `thinking` / `defaultThinkingLevel` | `off` … `max` |
 | `thinkingBudgets` | Map of thinking level → token budget |
 | `modelThinkingLevels` | Per-model default thinking level |
-| `contextWindow` | Override catalog context window |
+| `contextWindow` | Optional override. Effective window is this value when set, otherwise the selected model's catalog `contextWindow`, otherwise `200000`. Omit the key (or the historical default `200000`) to follow the model. `200000` itself is not stored as an override |
 | `compactionEnabled` / `compaction.{enabled,reserveTokens,keepRecentTokens,modelOverrides}` | [compaction.md](compaction.md) |
 | `steeringMode` / `followUpMode` | Queue behaviour while streaming |
 | `retry.{enabled,maxRetries,baseDelayMs,maxAgentDelayMs}` and `retry.provider.{timeoutMs,maxRetries,maxRetryDelayMs}` | Agent retry (maxAgentDelayMs default 60000) |

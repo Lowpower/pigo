@@ -194,3 +194,25 @@ func TestApplyProjectOverlaysContainer(t *testing.T) {
 		t.Fatalf("untrusted image=%q", untrusted.ContainerImage())
 	}
 }
+
+func TestApplyProjectContextWindow(t *testing.T) {
+	user := Config{ContextWindow: 8192}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"contextWindow":200000}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ApplyProject(user, cwd, true)
+	if got.ContextWindow != 8192 {
+		t.Fatalf("legacy project default overrode user window: %d", got.ContextWindow)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"contextWindow":32768}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = ApplyProject(user, cwd, true)
+	if got.ContextWindow != 32768 {
+		t.Fatalf("project contextWindow = %d, want 32768", got.ContextWindow)
+	}
+}

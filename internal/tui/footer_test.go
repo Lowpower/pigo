@@ -91,6 +91,36 @@ func TestCollapsedToolResultKeepsTook(t *testing.T) {
 	}
 }
 
+func TestExpandedToolResultKeepsTookPastPreviewCap(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 50; i++ {
+		b.WriteString("row\n")
+	}
+	b.WriteString("Took 1h 2m 0s")
+	got := toolResultBody(b.String(), true)
+	if !strings.Contains(got, "Took 1h 2m 0s") {
+		t.Fatalf("expanded dropped duration:\n%s", got)
+	}
+}
+
+func TestReloadedTranscriptKeepsTook(t *testing.T) {
+	m := New(testCfg())
+	entries := transcriptFromMessages(m, []ai.Message{{
+		Role:     ai.RoleToolResult,
+		ToolName: "bash",
+		Content:  "line-one\nline-two\nTook 1m 5s",
+	}})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d", len(entries))
+	}
+	if !strings.Contains(entries[0].rendered, "line-one") || !strings.Contains(entries[0].rendered, "Took 1m 5s") {
+		t.Fatalf("reloaded = %q", entries[0].rendered)
+	}
+	if strings.Contains(entries[0].rendered, "line-two") {
+		t.Fatalf("reloaded should stay collapsed: %q", entries[0].rendered)
+	}
+}
+
 func TestCtrlOExpandsToolOutput(t *testing.T) {
 	m := New(testCfg())
 	body := "line-one\nline-two\nline-three"

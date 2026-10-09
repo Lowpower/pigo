@@ -88,10 +88,17 @@ func expandTool(s string) string {
 }
 
 func toolResultBody(raw string, expanded bool) string {
-	if expanded {
-		return expandTool(raw)
-	}
 	body, took := splitTrailingTook(raw)
+	if expanded {
+		shown := expandTool(body)
+		if took == "" {
+			return shown
+		}
+		if strings.TrimSpace(shown) == "" {
+			return took
+		}
+		return shown + "\n" + took
+	}
 	if took == "" {
 		return firstLine(raw)
 	}
@@ -173,8 +180,8 @@ func (m Model) footerText() string {
 		stats = append(stats, "$"+strconv.FormatFloat(m.usage.Cost.Total, 'f', 3, 64))
 	}
 	win := 0
-	if m.engine != nil && m.engine.Opts.ContextWindow > 0 {
-		win = m.engine.Opts.ContextWindow
+	if m.engine != nil {
+		win = m.engine.ContextWindow()
 	} else if m.cfg.ContextWindow > 0 {
 		win = m.cfg.ContextWindow
 	}

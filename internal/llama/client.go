@@ -370,8 +370,8 @@ func ModelIsLoaded(m ModelInfo) bool {
 	return m.Status.Value == "loaded" || m.Status.Value == "sleeping"
 }
 
-// ContextLabel is a short n_ctx / --ctx-size label.
-func ContextLabel(m ModelInfo) string {
+// ContextSize is n_ctx, otherwise n_ctx_train, otherwise --ctx-size / -c / -ctx.
+func ContextSize(m ModelInfo) int64 {
 	ctx := int64(0)
 	if m.Meta != nil {
 		ctx = m.Meta.NCtx
@@ -391,6 +391,15 @@ func ContextLabel(m ModelInfo) string {
 			}
 		}
 	}
+	if ctx < 0 {
+		return 0
+	}
+	return ctx
+}
+
+// ContextLabel is a short n_ctx / --ctx-size label.
+func ContextLabel(m ModelInfo) string {
+	ctx := ContextSize(m)
 	if ctx <= 0 {
 		return ""
 	}
