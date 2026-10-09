@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,10 +9,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/skills"
+	"github.com/Lowpower/pigo/internal/slash"
 	"github.com/Lowpower/pigo/internal/version"
 )
 
@@ -57,6 +60,63 @@ func TestQuietStartupHidesHeaderAndResources(t *testing.T) {
 	}
 	if strings.Contains(view, "[Skills]") || strings.Contains(view, "demo") {
 		t.Fatalf("quiet startup still showed skills:\n%s", view)
+	}
+}
+
+func TestStartupShowsSkillWarningEvenWhenQuiet(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	path := filepath.Join(agent, "skills", "blank", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("---\nname: blank\n---\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := runtime.New(context.Background(), runtime.Options{
+		AgentDir:     agent,
+		Cwd:          cwd,
+		Offline:      true,
+		NoTools:      true,
+		NoExtensions: true,
+		Config:       config.Config{Provider: "anthropic", Model: "claude-sonnet-4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	m := New(testCfg())
+	m.engine = eng
+	view := m.View()
+	flat := strings.ReplaceAll(view, "\n", "")
+	if !strings.Contains(flat, "has no description") || !strings.Contains(flat, path) {
+		t.Fatalf("startup missing skill warning:\n%s", view)
+	}
+	if !strings.Contains(view, "look up its docs") {
+		t.Fatalf("startup header missing:\n%s", view)
+	}
+
+	on := true
+	m.cfg.QuietStartupFlag = &on
+	quiet := m.View()
+	quietFlat := strings.ReplaceAll(quiet, "\n", "")
+	if !strings.Contains(quietFlat, "has no description") || !strings.Contains(quietFlat, path) {
+		t.Fatalf("quiet startup hid skill warning:\n%s", quiet)
+	}
+	if strings.Contains(quiet, "look up its docs") || strings.Contains(quiet, "[Skills]") {
+		t.Fatalf("quiet startup still showed the listing:\n%s", quiet)
+	}
+
+	next, _ := m.handleSlash(slash.Command{Name: "reload"})
+	reloaded := next.(Model)
+	var note string
+	for _, ent := range reloaded.transcript {
+		note += ent.rendered
+	}
+	if !strings.Contains(note, "reloaded") || !strings.Contains(note, "has no description") || !strings.Contains(note, path) {
+		t.Fatalf("reload note = %q", note)
 	}
 }
 
