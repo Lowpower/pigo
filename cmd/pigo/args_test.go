@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/version"
@@ -75,13 +79,125 @@ func TestInlineFiles(t *testing.T) {
 	if err := os.WriteFile(p, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := inlineFiles(dir, []string{"a.txt"})
+	got, images, err := inlineFiles(dir, []string{"a.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(got, "<file name=") || !strings.Contains(got, "hello") {
 		t.Fatalf("%s", got)
 	}
+	if len(images) != 0 {
+		t.Fatalf("images = %+v", images)
+	}
+}
+
+func TestInlineFilesImageTextEmptyAndBinary(t *testing.T) {
+	dir := t.TempDir()
+	pngPath := filepath.Join(dir, "t.png")
+	pngBytes := onePixelPNG(t)
+	if err := os.WriteFile(pngPath, pngBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	textPath := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(textPath, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	emptyPath := filepath.Join(dir, "empty.txt")
+	if err := os.WriteFile(emptyPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bmpPath := filepath.Join(dir, "t.bmp")
+	if err := os.WriteFile(bmpPath, []byte{'B', 'M', 0, 1}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, images, err := inlineFiles(dir, []string{"t.png", "a.txt", "empty.txt", "t.bmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "t.png") || strings.Contains(got, "t.bmp") || strings.Contains(got, "empty.txt") {
+		t.Fatalf("non-text leaked into prompt: %s", got)
+	}
+	if !strings.Contains(got, "<file name=") || !strings.Contains(got, "hello") {
+		t.Fatalf("text = %s", got)
+	}
+	if len(images) != 2 {
+		t.Fatalf("images = %+v", images)
+	}
+	if images[0].Type != "image" || images[0].MimeType != "image/png" || images[0].Data != base64.StdEncoding.EncodeToString(pngBytes) {
+		t.Fatalf("png = %+v", images[0])
+	}
+	if images[1].Type != "image" || images[1].MimeType != "image/bmp" {
+		t.Fatalf("bmp = %+v", images[1])
+	}
+
+	binPath := filepath.Join(dir, "blob.bin")
+	if err := os.WriteFile(binPath, []byte{'B', 0, 'Z'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, images, err = inlineFiles(dir, []string{"blob.bin"})
+	if err == nil || !strings.Contains(err.Error(), "binary file not supported") {
+		t.Fatalf("err = %v", err)
+	}
+	if got != "" || len(images) != 0 || strings.Contains(got, "BZ") {
+		t.Fatalf("binary leaked: %q %+v", got, images)
+	}
+}
+
+func TestInlineFilesKeepsNonUTF8Text(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte{0xd6, 0xd0, 'A'}
+	if err := os.WriteFile(filepath.Join(dir, "g.txt"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, images, err := inlineFiles(dir, []string{"g.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, string(body)) || len(images) != 0 {
+		t.Fatalf("got %q images %+v", got, images)
+	}
+}
+
+func TestRejectRPCAtFiles(t *testing.T) {
+	if err := rejectRPCAtFiles("rpc", []string{"a.png"}); err == nil || !strings.Contains(err.Error(), "not supported in RPC mode") {
+		t.Fatalf("err = %v", err)
+	}
+	if err := rejectRPCAtFiles("RPC", []string{"a.png"}); err == nil {
+		t.Fatal("expected case-insensitive rejection")
+	}
+	if err := rejectRPCAtFiles("text", []string{"a.png"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectRPCAtFiles("rpc", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrintPromptsIncludesImageOnly(t *testing.T) {
+	got := printPrompts("", []string{"next"}, true)
+	if len(got) != 2 || got[0] != "" || got[1] != "next" {
+		t.Fatalf("%q", got)
+	}
+	imgs := []ai.ImageContent{{Type: "image"}}
+	if attached := promptImagesFor(0, imgs); len(attached) != 1 {
+		t.Fatalf("first = %+v", attached)
+	}
+	if attached := promptImagesFor(1, imgs); attached != nil {
+		t.Fatalf("later = %+v", attached)
+	}
+	if only := printPrompts("hi", nil, false); len(only) != 1 || only[0] != "hi" {
+		t.Fatalf("%q", only)
+	}
+}
+
+func onePixelPNG(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewNRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 func TestRootHelpDocumentsFlags(t *testing.T) {

@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/models"
+	"github.com/Lowpower/pigo/internal/tools"
 )
 
 // expandShortFlags rewrites two-letter flags before cobra sees them.
@@ -62,8 +66,16 @@ func splitPromptArgs(args []string) (messages []string, files []string) {
 	return messages, files
 }
 
-func inlineFiles(cwd string, files []string) (string, error) {
+func rejectRPCAtFiles(mode string, files []string) error {
+	if strings.EqualFold(strings.TrimSpace(mode), "rpc") && len(files) > 0 {
+		return fmt.Errorf("@file arguments are not supported in RPC mode")
+	}
+	return nil
+}
+
+func inlineFiles(cwd string, files []string) (string, []ai.ImageContent, error) {
 	var b strings.Builder
+	var images []ai.ImageContent
 	for _, f := range files {
 		p := f
 		if !filepath.IsAbs(p) {
@@ -71,18 +83,29 @@ func inlineFiles(cwd string, files []string) (string, error) {
 		}
 		info, err := os.Stat(p)
 		if err != nil {
-			return "", fmt.Errorf("file not found: %s", p)
+			return "", nil, fmt.Errorf("file not found: %s", p)
 		}
 		if info.Size() == 0 {
 			continue
 		}
 		body, err := os.ReadFile(p)
 		if err != nil {
-			return "", err
+			return "", nil, err
+		}
+		if mime := tools.SniffImageMIME(body); mime != "" {
+			images = append(images, ai.ImageContent{
+				Type:     "image",
+				Data:     base64.StdEncoding.EncodeToString(body),
+				MimeType: mime,
+			})
+			continue
+		}
+		if bytes.IndexByte(body, 0) >= 0 {
+			return "", nil, fmt.Errorf("binary file not supported: %s", p)
 		}
 		fmt.Fprintf(&b, "<file name=\"%s\">\n%s\n</file>\n", p, string(body))
 	}
-	return b.String(), nil
+	return b.String(), images, nil
 }
 
 func resolvePromptInput(input string) string {
@@ -99,6 +122,15 @@ func resolvePromptInput(input string) string {
 		return input
 	}
 	return string(body)
+}
+
+func printPrompts(initial string, rest []string, hasImages bool) []string {
+	var out []string
+	if initial != "" || hasImages {
+		out = append(out, initial)
+	}
+	out = append(out, rest...)
+	return out
 }
 
 func buildInitialMessage(stdin, fileText string, messages []string) (string, []string) {
