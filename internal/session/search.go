@@ -1,7 +1,6 @@
 package session
 
 import (
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -258,12 +257,12 @@ func BuildThread(sessions []Summary) []ThreadedRow {
 	nodes := make([]node, len(sessions))
 	for i, s := range sessions {
 		nodes[i] = node{s: s, latest: s.Modified}
-		byPath[filepath.Clean(s.Path)] = i
+		byPath[pathKey(s.Path)] = i
 	}
 	var roots []int
 	childOf := map[int]bool{}
 	for i, s := range sessions {
-		parent := filepath.Clean(s.ParentSession)
+		parent := pathKey(s.ParentSession)
 		if parent != "" && parent != "." {
 			if parentIdx, ok := byPath[parent]; ok && parentIdx != i {
 				nodes[parentIdx].children = append(nodes[parentIdx].children, i)
