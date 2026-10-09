@@ -1,7 +1,7 @@
 package skills
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -136,7 +136,8 @@ func loadFile(path, source string) (Skill, []Diagnostic) {
 	}
 	text := string(b)
 	declared := strings.EqualFold(filepath.Base(path), "SKILL.md")
-	if err := validateClosedFrontmatter(text); err != nil {
+	fm, body, err := ParseFrontmatter(text)
+	if err != nil {
 		if !declared {
 			return Skill{}, nil
 		}
@@ -145,7 +146,6 @@ func loadFile(path, source string) (Skill, []Diagnostic) {
 			Message: fmt.Sprintf("Warning: malformed skill frontmatter in %s: %s", path, err.Error()),
 		}}
 	}
-	fm, body := ParseFrontmatter(text)
 	desc := strings.TrimSpace(fm["description"])
 	if desc == "" {
 		if !declared {
@@ -187,22 +187,6 @@ func loadFile(path, source string) (Skill, []Diagnostic) {
 	}, diags
 }
 
-// validateClosedFrontmatter rejects YAML that ParseFrontmatter would otherwise
-// accept. An unclosed opening fence is not a closed block.
-func validateClosedFrontmatter(s string) error {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	if !strings.HasPrefix(s, "---\n") {
-		return nil
-	}
-	rest := s[4:]
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
-		return nil
-	}
-	var v any
-	return yaml.Unmarshal([]byte(rest[:end]), &v)
-}
-
 func canonicalPath(p string) string {
 	if resolved, err := filepath.EvalSymlinks(p); err == nil {
 		return resolved
@@ -230,38 +214,110 @@ func validName(name string) bool {
 }
 
 // ParseFrontmatter splits optional YAML --- frontmatter from a markdown body.
-func ParseFrontmatter(s string) (map[string]string, string) {
+// A leading UTF-8 BOM is ignored. A missing or unclosed fence is not an error.
+// Closed YAML that cannot be parsed, or that is not a mapping, returns an error.
+func ParseFrontmatter(s string) (map[string]string, string, error) {
+	s = strings.TrimPrefix(s, "\uFEFF")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
-	if !strings.HasPrefix(s, "---\n") {
-		return map[string]string{}, s
+	yamlSrc, body, closed := splitFrontmatter(s)
+	if !closed {
+		return map[string]string{}, s, nil
 	}
-	rest := s[4:]
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
-		return map[string]string{}, s
+	fm, err := frontmatterMap(yamlSrc)
+	if err != nil {
+		return nil, body, err
 	}
-	fm := parseYAMLMap(rest[:end])
-	body := rest[end+5:]
-	return fm, strings.TrimSpace(body)
+	return fm, body, nil
 }
 
-func parseYAMLMap(s string) map[string]string {
-	out := map[string]string{}
-	sc := bufio.NewScanner(strings.NewReader(s))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		v = strings.TrimSpace(v)
-		v = strings.Trim(v, `"'`)
-		out[strings.TrimSpace(k)] = v
+// splitFrontmatter finds a closing fence that is a line whose text is exactly "---".
+// The closing line may be the last line of the file.
+func splitFrontmatter(s string) (yamlSrc, body string, closed bool) {
+	const open = "---\n"
+	if !strings.HasPrefix(s, open) {
+		return "", s, false
 	}
-	return out
+	rest := s[len(open):]
+	lineStart := 0
+	for {
+		nl := strings.IndexByte(rest[lineStart:], '\n')
+		var line string
+		next := len(rest)
+		if nl >= 0 {
+			line = rest[lineStart : lineStart+nl]
+			next = lineStart + nl + 1
+		} else {
+			line = rest[lineStart:]
+		}
+		if line == "---" {
+			return rest[:lineStart], strings.TrimSpace(rest[next:]), true
+		}
+		if nl < 0 {
+			return "", s, false
+		}
+		lineStart = next
+	}
+}
+
+func frontmatterMap(src string) (map[string]string, error) {
+	if strings.TrimSpace(src) == "" {
+		return map[string]string{}, nil
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(src), &doc); err != nil {
+		return nil, err
+	}
+	if doc.IsZero() || len(doc.Content) == 0 {
+		return map[string]string{}, nil
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 {
+		return nil, errNotMapping
+	}
+	root := doc.Content[0]
+	if root.Kind == yaml.ScalarNode && root.Tag == "!!null" {
+		return map[string]string{}, nil
+	}
+	if root.Kind != yaml.MappingNode {
+		return nil, errNotMapping
+	}
+	if len(root.Content)%2 != 0 {
+		return nil, errNotMapping
+	}
+	out := make(map[string]string, len(root.Content)/2)
+	for i := 0; i < len(root.Content); i += 2 {
+		key := root.Content[i]
+		if key.Kind != yaml.ScalarNode {
+			return nil, errNotMapping
+		}
+		val, err := frontmatterValue(root.Content[i+1])
+		if err != nil {
+			return nil, err
+		}
+		out[key.Value] = val
+	}
+	return out, nil
+}
+
+var errNotMapping = errors.New("frontmatter is not a mapping")
+
+func frontmatterValue(n *yaml.Node) (string, error) {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.Value, nil
+	case yaml.AliasNode:
+		if n.Alias == nil {
+			return "", errors.New("frontmatter alias is unresolved")
+		}
+		return frontmatterValue(n.Alias)
+	case yaml.SequenceNode, yaml.MappingNode:
+		b, err := yaml.Marshal(n)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(b)), nil
+	default:
+		return "", errNotMapping
+	}
 }
 
 // FormatForPrompt renders the <available_skills> XML block.

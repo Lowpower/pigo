@@ -100,6 +100,21 @@ func TestDiscoverTemplatesValidFrontmatterFields(t *testing.T) {
 	}
 }
 
+func TestDiscoverTemplatesBlockScalarWithoutTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	body := "---\ndescription: >\n  Review a change\n  for tests.\nargument-hint: <path>\n---"
+	if err := os.WriteFile(filepath.Join(dir, "review.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, diags := DiscoverTemplates("", "", []string{dir}, false, false)
+	if len(diags) != 0 || len(got) != 1 {
+		t.Fatalf("templates = %+v diagnostics = %+v", got, diags)
+	}
+	if got[0].Description != "Review a change for tests.\n" || got[0].ArgumentHint != "<path>" || got[0].Content != "" {
+		t.Fatalf("%+v", got[0])
+	}
+}
+
 func TestDiscoverTemplatesUnclosedFrontmatterStillLoads(t *testing.T) {
 	dir := t.TempDir()
 	body := "---\ndescription: not closed\nDo the thing.\n"
