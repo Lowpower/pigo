@@ -373,7 +373,7 @@ func (c *OpenAICodexClient) sseEventStream(ctx context.Context, body []byte, opt
 		if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 			return
 		}
-		resp.Body = observeSSEBody(resp.Body, opts.OnProviderStreamEvent)
+		resp.Body = frameSSEBody(resp.Body, opts.OnProviderStreamEvent)
 		stream := ssestream.NewStream[responses.ResponseStreamEventUnion](ssestream.NewDecoder(resp), nil)
 		c.finishResponses(ctx, stream, out, s, catalogCost(opts))
 	}()

@@ -39,9 +39,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			option.WithAPIKey(c.APIKey),
 			option.WithBaseURL(base + "/"),
 		}
-		if httpClient := withSSEObserve(c.HTTPClient, opts.OnProviderStreamEvent); httpClient != nil {
-			optsList = append(optsList, option.WithHTTPClient(httpClient))
-		}
+		optsList = append(optsList, option.WithHTTPClient(frameSSEClient(c.HTTPClient, opts.OnProviderStreamEvent)))
 		for k, v := range c.Headers {
 			optsList = append(optsList, option.WithHeader(k, v))
 		}
@@ -208,9 +206,24 @@ func responsesUserImageMessage(text string, imgs []ImageContent) responses.Respo
 	return responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser)
 }
 
+// responsesIndex keys a streamed output item. Events that omit output_index
+// share one sentinel so they cannot collide with a real index of 0.
+type responsesIndex struct {
+	missing bool
+	index   int64
+}
+
+func responsesOutputKey(valid bool, index int64) responsesIndex {
+	if !valid {
+		return responsesIndex{missing: true}
+	}
+	return responsesIndex{index: index}
+}
+
 func processResponsesStream(ctx context.Context, stream *ssestream.Stream[responses.ResponseStreamEventUnion], out *AssistantMessage, s *EventStream, cost *models.Cost) error {
 	textIdx := map[string]int{}
-	toolIdx := map[string]int{}
+	toolSlots := map[responsesIndex]int{}
+	sawTerminal := false
 	for stream.Next() {
 		ev := stream.Current()
 		switch v := ev.AsAny().(type) {
@@ -232,10 +245,7 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 			if v.Item.Type == "function_call" {
 				out.Content = append(out.Content, &Content{Type: KindToolCall, ToolID: firstNonEmpty(v.Item.CallID, v.Item.ID), ToolName: v.Item.Name})
 				idx := len(out.Content) - 1
-				toolIdx[v.Item.ID] = idx
-				if v.Item.CallID != "" {
-					toolIdx[v.Item.CallID] = idx
-				}
+				toolSlots[responsesOutputKey(v.JSON.OutputIndex.Valid(), v.OutputIndex)] = idx
 				if !s.push(ctx, Event{Type: EventToolCallStart, ContentIndex: idx, Partial: out}) {
 					return ctx.Err()
 				}
@@ -255,8 +265,23 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 					out.Content[idx].ThinkingSignature = v.Item.EncryptedContent
 				}
 			}
+			if v.Item.Type == "function_call" {
+				key := responsesOutputKey(v.JSON.OutputIndex.Valid(), v.OutputIndex)
+				idx, ok := toolSlots[key]
+				if !ok {
+					break
+				}
+				block := out.Content[idx]
+				if v.Item.Arguments != "" {
+					block.partialJSON = v.Item.Arguments
+					block.Arguments = parseStreamingJSON(block.partialJSON)
+				}
+				block.partialJSON = ""
+				block.toolDone = true
+				delete(toolSlots, key)
+			}
 		case responses.ResponseFunctionCallArgumentsDeltaEvent:
-			idx, ok := toolIdx[v.ItemID]
+			idx, ok := toolSlots[responsesOutputKey(v.JSON.OutputIndex.Valid(), v.OutputIndex)]
 			if !ok {
 				continue
 			}
@@ -265,6 +290,22 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 			block.Arguments = parseStreamingJSON(block.partialJSON)
 			if !s.push(ctx, Event{Type: EventToolCallDelta, ContentIndex: idx, Delta: v.Delta, Partial: out}) {
 				return ctx.Err()
+			}
+		case responses.ResponseFunctionCallArgumentsDoneEvent:
+			idx, ok := toolSlots[responsesOutputKey(v.JSON.OutputIndex.Valid(), v.OutputIndex)]
+			if !ok {
+				continue
+			}
+			block := out.Content[idx]
+			prev := block.partialJSON
+			block.partialJSON = v.Arguments
+			block.Arguments = parseStreamingJSON(block.partialJSON)
+			if strings.HasPrefix(v.Arguments, prev) {
+				if delta := v.Arguments[len(prev):]; delta != "" {
+					if !s.push(ctx, Event{Type: EventToolCallDelta, ContentIndex: idx, Delta: delta, Partial: out}) {
+						return ctx.Err()
+					}
+				}
 			}
 		case responses.ResponseReasoningSummaryTextDeltaEvent:
 			key := "reasoning:" + v.ItemID
@@ -277,21 +318,14 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 				return ctx.Err()
 			}
 		case responses.ResponseCompletedEvent:
-			if v.Response.Usage.InputTokens != 0 || v.Response.Usage.OutputTokens != 0 {
-				out.Usage.Input = int(v.Response.Usage.InputTokens)
-				out.Usage.Output = int(v.Response.Usage.OutputTokens)
-				out.Usage.TotalTokens = int(v.Response.Usage.TotalTokens)
-			}
-			calculateCost(cost, &out.Usage)
-			applyServiceTierCost(&out.Usage, string(v.Response.ServiceTier))
-			out.ResponseID = v.Response.ID
-			switch v.Response.Status {
-			case "incomplete":
-				out.StopReason = StopLength
-			case "failed":
-				out.StopReason = StopError
-				out.ErrorMessage = "openai responses failed"
-			}
+			sawTerminal = true
+			finalizeResponsesTerminal(out, v.Response, cost)
+		case responses.ResponseIncompleteEvent:
+			sawTerminal = true
+			finalizeResponsesTerminal(out, v.Response, cost)
+		case responses.ResponseFailedEvent:
+			sawTerminal = true
+			finalizeResponsesTerminal(out, v.Response, cost)
 		case responses.ResponseErrorEvent:
 			out.StopReason = StopError
 			out.ErrorMessage = v.Message
@@ -300,6 +334,19 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 	}
 	if err := stream.Err(); err != nil {
 		return err
+	}
+	if !sawTerminal {
+		return fmt.Errorf("OpenAI Responses stream ended before a terminal response event")
+	}
+	if out.StopReason == StopPending {
+		for _, c := range out.Content {
+			if c.Type == KindToolCall && !c.toolDone {
+				msg := fmt.Sprintf("OpenAI Responses stream completed with an unfinished tool call: %s (%s)", c.ToolName, c.ToolID)
+				out.StopReason = StopError
+				out.ErrorMessage = msg
+				return fmt.Errorf("%s", msg)
+			}
+		}
 	}
 	for i, c := range out.Content {
 		switch c.Type {
@@ -312,9 +359,8 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 				return ctx.Err()
 			}
 		case KindToolCall:
-			if c.partialJSON != "" {
-				c.Arguments = parseStreamingJSON(c.partialJSON)
-				c.partialJSON = ""
+			if !c.toolDone {
+				continue
 			}
 			if !s.push(ctx, Event{Type: EventToolCallEnd, ContentIndex: i, ToolCall: c, Partial: out}) {
 				return ctx.Err()
@@ -322,6 +368,54 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 		}
 	}
 	return nil
+}
+
+func finalizeResponsesTerminal(out *AssistantMessage, resp responses.Response, cost *models.Cost) {
+	if resp.Usage.InputTokens != 0 || resp.Usage.OutputTokens != 0 {
+		out.Usage.Input = int(resp.Usage.InputTokens)
+		out.Usage.Output = int(resp.Usage.OutputTokens)
+		out.Usage.TotalTokens = int(resp.Usage.TotalTokens)
+	}
+	calculateCost(cost, &out.Usage)
+	applyServiceTierCost(&out.Usage, string(resp.ServiceTier))
+	if resp.ID != "" {
+		out.ResponseID = resp.ID
+	}
+	switch string(resp.Status) {
+	case "incomplete":
+		reason := ""
+		if resp.IncompleteDetails.JSON.Reason.Valid() {
+			reason = resp.IncompleteDetails.Reason
+		}
+		if reason == "max_output_tokens" {
+			out.StopReason = StopLength
+			return
+		}
+		out.StopReason = StopError
+		if reason == "" {
+			out.ErrorMessage = "Response incomplete without a provider reason"
+			return
+		}
+		out.ErrorMessage = "Response incomplete: " + reason
+	case "failed":
+		out.StopReason = StopError
+		out.ErrorMessage = responsesFailedMessage(resp)
+	}
+}
+
+func responsesFailedMessage(resp responses.Response) string {
+	code := string(resp.Error.Code)
+	msg := resp.Error.Message
+	if resp.Error.JSON.Code.Valid() && resp.Error.JSON.Message.Valid() && code != "" && msg != "" {
+		return code + ": " + msg
+	}
+	if resp.Error.JSON.Message.Valid() && msg != "" {
+		return msg
+	}
+	if resp.Error.JSON.Code.Valid() && code != "" {
+		return code
+	}
+	return "openai responses failed"
 }
 
 func firstNonEmpty(a, b string) string {

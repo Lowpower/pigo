@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // emitProviderStreamEvent delivers one parsed JSON event. A nil fn returns
@@ -35,44 +36,120 @@ func observeSDKEvent(fn func([]byte), v any) {
 	fn(raw)
 }
 
-func withSSEObserve(base *http.Client, observe func([]byte)) *http.Client {
-	if observe == nil {
-		return base
-	}
+// frameSSEClient wraps a successful event-stream body so the last event is
+// still delivered when the server closes without a trailing blank line.
+// observe receives each complete JSON event, including that last one.
+func frameSSEClient(base *http.Client, observe func([]byte)) *http.Client {
 	c := &http.Client{}
 	if base != nil {
 		*c = *base
 	}
-	c.Transport = sseObserveTransport{base: c.Transport, observe: observe}
+	c.Transport = sseFrameTransport{base: c.Transport, observe: observe}
 	return c
 }
 
-func observeSSEBody(rc io.ReadCloser, observe func([]byte)) io.ReadCloser {
-	if observe == nil || rc == nil {
-		return rc
+func frameSSEBody(rc io.ReadCloser, observe func([]byte)) io.ReadCloser {
+	if rc == nil {
+		return nil
 	}
-	return &sseObserveReadCloser{rc: rc, observe: observe}
+	rc = &sseFlushReadCloser{rc: rc}
+	if observe != nil {
+		rc = &sseObserveReadCloser{rc: rc, observe: observe}
+	}
+	return rc
 }
 
-type sseObserveTransport struct {
+type sseFrameTransport struct {
 	base    http.RoundTripper
 	observe func([]byte)
 }
 
-func (t sseObserveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t sseFrameTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.base
 	if base == nil {
 		base = http.DefaultTransport
 	}
 	resp, err := base.RoundTrip(req)
-	if err != nil || resp == nil || resp.Body == nil || t.observe == nil {
+	if err != nil || resp == nil || resp.Body == nil {
 		return resp, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return resp, err
 	}
-	resp.Body = &sseObserveReadCloser{rc: resp.Body, observe: t.observe}
-	return resp, nil
+	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		return resp, err
+	}
+	resp.Body = frameSSEBody(resp.Body, t.observe)
+	return resp, err
+}
+
+// sseFlushReadCloser finishes a residual SSE frame at EOF. openai-go only
+// dispatches an event when it sees a blank line, so a terminal event that is
+// not followed by one would otherwise be dropped with a nil stream error.
+type sseFlushReadCloser struct {
+	rc    io.ReadCloser
+	tail  []byte
+	extra []byte
+	eof   bool
+}
+
+func (b *sseFlushReadCloser) Read(p []byte) (int, error) {
+	if len(b.extra) > 0 {
+		n := copy(p, b.extra)
+		b.extra = b.extra[n:]
+		return n, nil
+	}
+	if b.eof {
+		return 0, io.EOF
+	}
+	n, err := b.rc.Read(p)
+	if n > 0 {
+		b.note(p[:n])
+	}
+	if err != io.EOF {
+		return n, err
+	}
+	b.eof = true
+	pad := sseFlushPad(b.tail)
+	if len(pad) == 0 {
+		return n, io.EOF
+	}
+	if n > 0 {
+		b.extra = pad
+		return n, nil
+	}
+	n = copy(p, pad)
+	b.extra = pad[n:]
+	if n == 0 {
+		return 0, io.EOF
+	}
+	return n, nil
+}
+
+func (b *sseFlushReadCloser) Close() error { return b.rc.Close() }
+
+func (b *sseFlushReadCloser) note(chunk []byte) {
+	if len(chunk) >= 4 {
+		b.tail = append([]byte(nil), chunk[len(chunk)-4:]...)
+		return
+	}
+	b.tail = append(b.tail, chunk...)
+	if len(b.tail) > 4 {
+		b.tail = append([]byte(nil), b.tail[len(b.tail)-4:]...)
+	}
+}
+
+func sseFlushPad(tail []byte) []byte {
+	if len(tail) == 0 {
+		return nil
+	}
+	if bytes.HasSuffix(tail, []byte("\n\n")) || bytes.HasSuffix(tail, []byte("\r\n\r\n")) {
+		return nil
+	}
+	if bytes.HasSuffix(tail, []byte("\n")) {
+		return []byte("\n")
+	}
+	return []byte("\n\n")
 }
 
 type sseObserveReadCloser struct {

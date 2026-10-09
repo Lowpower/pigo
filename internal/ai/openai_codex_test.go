@@ -470,3 +470,107 @@ func TestDialWebSocketConnectTimeout(t *testing.T) {
 		t.Fatalf("message = %q", msg)
 	}
 }
+
+func collectCodexSSE(t *testing.T, body string) *AssistantMessage {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			http.Error(w, "sse only", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	client := &OpenAICodexClient{
+		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "sse",
+	}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "gpt-5.3-codex-spark"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	return final
+}
+
+func collectCodexWS(t *testing.T, events []string) *AssistantMessage {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		for _, ev := range events {
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(ev)); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(resetCodexWebSocketCache)
+	client := &OpenAICodexClient{
+		BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(), Transport: "websocket",
+	}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "gpt-5.3-codex-spark"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	return final
+}
+
+func TestCodexSSEAndWebSocketShareTerminalHandling(t *testing.T) {
+	incomplete := `{"type":"response.incomplete","response":{"id":"resp_cf","status":"incomplete","incomplete_details":{"reason":"content_filter"},"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`
+	early := `{"type":"response.output_text.delta","item_id":"msg_1","delta":"partial","output_index":0}`
+
+	sseIncomplete := collectCodexSSE(t, sseData(incomplete))
+	wsIncomplete := collectCodexWS(t, []string{incomplete})
+	if sseIncomplete == nil || wsIncomplete == nil {
+		t.Fatalf("sse=%v ws=%v", sseIncomplete, wsIncomplete)
+	}
+	if sseIncomplete.StopReason != StopError || wsIncomplete.StopReason != StopError {
+		t.Fatalf("sse stop=%s ws stop=%s", sseIncomplete.StopReason, wsIncomplete.StopReason)
+	}
+	if sseIncomplete.ErrorMessage != wsIncomplete.ErrorMessage || sseIncomplete.ErrorMessage != "Response incomplete: content_filter" {
+		t.Fatalf("sse error=%q ws error=%q", sseIncomplete.ErrorMessage, wsIncomplete.ErrorMessage)
+	}
+
+	sseEarly := collectCodexSSE(t, sseData(early))
+	wsEarly := collectCodexWS(t, []string{early})
+	if sseEarly == nil || wsEarly == nil {
+		t.Fatalf("sse=%v ws=%v", sseEarly, wsEarly)
+	}
+	if sseEarly.StopReason != StopError || wsEarly.StopReason != StopError {
+		t.Fatalf("early sse=%s ws=%s", sseEarly.StopReason, wsEarly.StopReason)
+	}
+	if !strings.Contains(sseEarly.ErrorMessage, "stream ended before a terminal response event") || sseEarly.ErrorMessage != wsEarly.ErrorMessage {
+		t.Fatalf("early sse=%q ws=%q", sseEarly.ErrorMessage, wsEarly.ErrorMessage)
+	}
+}
+
+func TestCodexSSETerminalEventWithoutTrailingBlank(t *testing.T) {
+	body := strings.TrimSuffix(sseData(
+		`{"type":"response.output_text.delta","item_id":"msg_1","delta":"Hi","output_index":0}`,
+		`{"type":"response.completed","response":{"id":"resp_eof","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+	), "\n")
+	final := collectCodexSSE(t, body)
+	if final == nil || final.StopReason != StopStop {
+		t.Fatalf("stop = %v", final)
+	}
+	if final.Text() != "Hi" {
+		t.Fatalf("text = %q", final.Text())
+	}
+	if final.Usage.Input != 1 || final.Usage.Output != 1 {
+		t.Fatalf("usage = %+v", final.Usage)
+	}
+}

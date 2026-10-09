@@ -53,6 +53,10 @@ type Content struct {
 	// partialJSON is a streaming scratch buffer for tool-call argument deltas.
 	// It is never serialized.
 	partialJSON string
+
+	// toolDone is set when a Responses function call receives output_item.done.
+	// It is never serialized.
+	toolDone bool
 }
 
 // UsageCost is the dollar breakdown on Usage.
