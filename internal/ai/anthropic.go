@@ -225,33 +225,98 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		req["tools"] = tools
 		req["tool_choice"] = map[string]any{"type": "auto"}
 	}
-	if midConvoEffort(opts) {
-		req["thinking"] = map[string]any{
-			"type":    "adaptive",
-			"display": "summarized",
-			"block_binding": map[string]any{
-				"prefix_mismatch_behavior": "drop_block",
-			},
-		}
-		req["output_config"] = map[string]any{"effort": "high"}
-	} else {
-		budget := opts.ThinkingBudget
-		if budget == 0 {
-			budget = models.BudgetTokens(opts.Thinking)
-		}
-		if budget > 0 {
-			req["thinking"] = map[string]any{"type": "enabled", "budget_tokens": budget}
-			if supportsMaxOutputTokens(opts) && maxTokens <= budget {
-				req["max_tokens"] = budget + 4096
-			}
-		} else if reasoningEffort(opts) != "" {
-			req["thinking"] = map[string]any{"type": "adaptive"}
-		}
-	}
+	applyAnthropicThinking(req, opts, maxTokens)
 	if fb := anthropicFallbacks(opts); len(fb) > 0 {
 		req["fallbacks"] = fb
 	}
 	return json.Marshal(req)
+}
+
+func applyAnthropicThinking(req map[string]any, opts Options, maxTokens int) {
+	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	if level == "" {
+		return
+	}
+	if level == "off" {
+		if anthropicDisabledThinking(opts) {
+			req["thinking"] = map[string]any{"type": "disabled"}
+		}
+		return
+	}
+	if forceAdaptiveThinking(opts) || midConvoEffort(opts) {
+		thinking := map[string]any{
+			"type":    "adaptive",
+			"display": anthropicThinkingDisplay(opts),
+		}
+		if midConvoEffort(opts) {
+			thinking["block_binding"] = map[string]any{
+				"prefix_mismatch_behavior": "drop_block",
+			}
+		}
+		req["thinking"] = thinking
+		req["output_config"] = map[string]any{"effort": anthropicEffort(opts)}
+		return
+	}
+	budget := opts.ThinkingBudget
+	if budget == 0 {
+		budget = models.BudgetTokens(opts.Thinking)
+	}
+	if budget > 0 {
+		req["thinking"] = map[string]any{
+			"type":          "enabled",
+			"budget_tokens": budget,
+			"display":       anthropicThinkingDisplay(opts),
+		}
+		if supportsMaxOutputTokens(opts) && maxTokens <= budget {
+			req["max_tokens"] = budget + 4096
+		}
+		return
+	}
+	if reasoningEffort(opts) != "" {
+		req["thinking"] = map[string]any{"type": "adaptive"}
+	}
+}
+
+func forceAdaptiveThinking(opts Options) bool {
+	c := lookupCompat(opts)
+	return c != nil && c.ForceAdaptiveThinking != nil && *c.ForceAdaptiveThinking
+}
+
+func anthropicDisabledThinking(opts Options) bool {
+	m, ok := models.Lookup(opts.Provider, opts.Model)
+	if !ok || !m.SupportsReasoning() {
+		return false
+	}
+	if mapped, present := m.ThinkingLevelMap["off"]; present && mapped == nil {
+		return false
+	}
+	return true
+}
+
+func anthropicEffort(opts Options) string {
+	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	if m, ok := models.Lookup(opts.Provider, opts.Model); ok {
+		if mapped, present := m.ThinkingLevelMap[level]; present && mapped != nil {
+			if effort := strings.TrimSpace(*mapped); effort != "" {
+				return effort
+			}
+		}
+	}
+	switch level {
+	case "minimal", "low":
+		return "low"
+	case "medium":
+		return "medium"
+	default:
+		return "high"
+	}
+}
+
+func anthropicThinkingDisplay(opts Options) string {
+	if strings.EqualFold(strings.TrimSpace(opts.ThinkingDisplay), "omitted") {
+		return "omitted"
+	}
+	return "summarized"
 }
 
 func anthropicFallbacks(opts Options) []map[string]any {

@@ -83,10 +83,12 @@ type Options struct {
 	MaxTokens      int
 	Thinking       string // off|minimal|low|medium|high|xhigh|max
 	ThinkingBudget int    // token budget resolved from thinkingBudgets
-	SessionID      string // coding session id; Codex reuses a WebSocket per session
-	CacheRetention string // none|short|long; forwarded on pigo-messages
-	ToolChoice     string // auto|none|required; forwarded on pigo-messages
-	Provider       string // catalog provider id for model lookup
+	// ThinkingDisplay is summarized or omitted. Empty and unknown values use summarized.
+	ThinkingDisplay string
+	SessionID       string // coding session id; Codex reuses a WebSocket per session
+	CacheRetention  string // none|short|long; forwarded on pigo-messages
+	ToolChoice      string // auto|none|required; forwarded on pigo-messages
+	Provider        string // catalog provider id for model lookup
 	// SamplingParams are per-request OpenAI-compatible sampling fields.
 	// Keys override the catalog model's samplingParams. Keys the request
 	// builder already set stay as the caller left them.

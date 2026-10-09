@@ -129,6 +129,33 @@ func TestOverlayMergesPromptCache(t *testing.T) {
 	}
 }
 
+func TestOverlayForceAdaptiveThinkingFalse(t *testing.T) {
+	on := true
+	off := false
+	RegisterProvider(ProviderSpec{
+		ID: "adapt-merge", DefaultAPI: "anthropic-messages", DefaultID: "m",
+		Models: []Model{{
+			Provider: "adapt-merge", ID: "m",
+			Compat: &Compat{ForceAdaptiveThinking: &on, ThinkingFormat: "keep"},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("adapt-merge")
+	})
+	SetUserOverlay("adapt-merge", []Model{{
+		ID:     "m",
+		Compat: &Compat{ForceAdaptiveThinking: &off},
+	}})
+	m, ok := Lookup("adapt-merge", "m")
+	if !ok || m.Compat == nil || m.Compat.ForceAdaptiveThinking == nil || *m.Compat.ForceAdaptiveThinking {
+		t.Fatalf("forceAdaptiveThinking = %+v ok=%v", m.Compat, ok)
+	}
+	if m.Compat.ThinkingFormat != "keep" {
+		t.Fatalf("thinking format lost: %+v", m.Compat)
+	}
+}
+
 func TestOverlayMergesFallbackAndStrict(t *testing.T) {
 	on := true
 	RegisterProvider(ProviderSpec{

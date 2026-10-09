@@ -271,6 +271,118 @@ func TestBuildOpenAIRequestThinkingFormats(t *testing.T) {
 	}
 }
 
+func TestAnthropicThinkingShapes(t *testing.T) {
+	on := true
+	off := false
+	low := "low"
+	mapped := "max"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "think-ant", DefaultAPI: "anthropic-messages", DefaultID: "budget",
+		Models: []models.Model{
+			{Provider: "think-ant", ID: "budget"},
+			{Provider: "think-ant", ID: "adaptive", Compat: &models.Compat{ForceAdaptiveThinking: &on}},
+			{Provider: "think-ant", ID: "mapped", Compat: &models.Compat{ForceAdaptiveThinking: &on}, ThinkingLevelMap: map[string]*string{"high": &mapped, "minimal": &low}},
+			{Provider: "think-ant", ID: "forced-off", Compat: &models.Compat{ForceAdaptiveThinking: &off}},
+			{Provider: "think-ant", ID: "reason-off", Reasoning: &on},
+			{Provider: "think-ant", ID: "off-null", Reasoning: &on, ThinkingLevelMap: map[string]*string{"off": nil}},
+			{Provider: "think-ant", ID: "plain", Reasoning: &off},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("think-ant") })
+
+	body := func(id, level, display string) map[string]any {
+		t.Helper()
+		raw, err := buildAnthropicRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
+			Options{Provider: "think-ant", Model: id, Thinking: level, ThinkingDisplay: display})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var req map[string]any
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	thinking := func(req map[string]any) map[string]any {
+		t.Helper()
+		th, _ := req["thinking"].(map[string]any)
+		return th
+	}
+
+	adaptive := body("adaptive", "high", "")
+	th := thinking(adaptive)
+	if th["type"] != "adaptive" || th["display"] != "summarized" {
+		t.Fatalf("adaptive = %#v", th)
+	}
+	if _, ok := th["budget_tokens"]; ok {
+		t.Fatalf("adaptive budget = %#v", th)
+	}
+	if _, ok := th["block_binding"]; ok {
+		t.Fatalf("adaptive binding = %#v", th)
+	}
+	oc, _ := adaptive["output_config"].(map[string]any)
+	if oc["effort"] != "high" {
+		t.Fatalf("unmapped high effort = %#v", oc)
+	}
+
+	minimal := body("adaptive", "minimal", "")
+	oc, _ = minimal["output_config"].(map[string]any)
+	if oc["effort"] != "low" {
+		t.Fatalf("unmapped minimal effort = %#v", oc)
+	}
+	medium := body("adaptive", "medium", "")
+	oc, _ = medium["output_config"].(map[string]any)
+	if oc["effort"] != "medium" {
+		t.Fatalf("unmapped medium effort = %#v", oc)
+	}
+	mappedReq := body("mapped", "high", "")
+	oc, _ = mappedReq["output_config"].(map[string]any)
+	if oc["effort"] != "max" {
+		t.Fatalf("mapped effort = %#v", oc)
+	}
+
+	budget := body("budget", "high", "")
+	th = thinking(budget)
+	if th["type"] != "enabled" || th["budget_tokens"] != float64(10000) || th["display"] != "summarized" {
+		t.Fatalf("budget = %#v", th)
+	}
+	if _, ok := budget["output_config"]; ok {
+		t.Fatalf("budget output_config = %#v", budget["output_config"])
+	}
+
+	disabled := thinking(body("reason-off", "off", ""))
+	if disabled["type"] != "disabled" || len(disabled) != 1 {
+		t.Fatalf("disabled = %#v", disabled)
+	}
+	if _, ok := body("off-null", "off", "")["thinking"]; ok {
+		t.Fatal("off:null should omit thinking")
+	}
+	if _, ok := body("plain", "off", "")["thinking"]; ok {
+		t.Fatal("non-reasoning off should omit thinking")
+	}
+	if _, ok := body("reason-off", "", "")["thinking"]; ok {
+		t.Fatal("empty thinking should omit thinking")
+	}
+
+	omitted := thinking(body("adaptive", "low", "omitted"))
+	if omitted["display"] != "omitted" {
+		t.Fatalf("display override = %#v", omitted)
+	}
+	oc, _ = body("adaptive", "low", "omitted")["output_config"].(map[string]any)
+	if oc["effort"] != "low" {
+		t.Fatalf("low effort = %#v", oc)
+	}
+	ignored := thinking(body("budget", "high", "nope"))
+	if ignored["display"] != "summarized" {
+		t.Fatalf("invalid display = %#v", ignored)
+	}
+
+	forcedOff := thinking(body("forced-off", "high", ""))
+	if forcedOff["type"] != "enabled" || forcedOff["display"] != "summarized" {
+		t.Fatalf("explicit false = %#v", forcedOff)
+	}
+}
+
 func TestBuildAnthropicMidConvoEffort(t *testing.T) {
 	models.RegisterProvider(models.ProviderSpec{
 		ID: "ant-mid", DefaultAPI: "anthropic-messages", DefaultID: "claude",
@@ -295,6 +407,17 @@ func TestBuildAnthropicMidConvoEffort(t *testing.T) {
 	oc, _ := req["output_config"].(map[string]any)
 	if oc["effort"] != "high" {
 		t.Fatalf("output_config = %#v", oc)
+	}
+
+	body, err = buildAnthropicRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
+		Options{Provider: "ant-mid", Model: "claude", Thinking: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.Unmarshal(body, &req)
+	oc, _ = req["output_config"].(map[string]any)
+	if oc["effort"] != "low" {
+		t.Fatalf("mid-convo low effort = %#v", oc)
 	}
 }
 

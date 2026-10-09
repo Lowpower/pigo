@@ -622,10 +622,11 @@ func (e *Engine) doHostModelStream(h *ext.Host, name string, args map[string]any
 	req := ai.Context{System: argString(args, "system"), Messages: msgs}
 	sf := e.Stream
 	es, err := sf(context.Background(), req, ai.Options{
-		Model:          modelID,
-		Provider:       provider,
-		Thinking:       e.Opts.Config.Thinking,
-		SamplingParams: ai.ResolveSamplingParams(provider, modelID, caller),
+		Model:           modelID,
+		Provider:        provider,
+		Thinking:        e.Opts.Config.Thinking,
+		ThinkingDisplay: e.Opts.Config.ThinkingDisplay,
+		SamplingParams:  ai.ResolveSamplingParams(provider, modelID, caller),
 	})
 	if err != nil {
 		return map[string]any{"error": err.Error()}

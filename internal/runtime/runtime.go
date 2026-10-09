@@ -1094,6 +1094,7 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 	return agent.Run(ctx, sf, req, e.Executor(), agent.Config{
 		Model:           e.Opts.Config.ResolvedModel(),
 		Thinking:        e.Opts.Config.Thinking,
+		ThinkingDisplay: e.Opts.Config.ThinkingDisplay,
 		Steering:        e.Steering,
 		FollowUp:        e.FollowUp,
 		NewUserMessages: newUsers,

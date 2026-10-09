@@ -90,8 +90,11 @@ type PromptCache struct {
 
 // Compat is optional per-model wire-protocol knobs from the catalog overlay.
 type Compat struct {
-	ThinkingFormat                  string `json:"thinkingFormat,omitempty"`
-	SupportsMidConvoEffort          bool   `json:"supportsMidConvoEffort,omitempty"`
+	ThinkingFormat         string `json:"thinkingFormat,omitempty"`
+	SupportsMidConvoEffort bool   `json:"supportsMidConvoEffort,omitempty"`
+	// ForceAdaptiveThinking requires Anthropic adaptive thinking.
+	// Nil leaves the model on budget thinking. False overrides a builtin true.
+	ForceAdaptiveThinking           *bool  `json:"forceAdaptiveThinking,omitempty"`
 	SupportsReasoningEffort         bool   `json:"supportsReasoningEffort,omitempty"`
 	SupportsExplicitPromptCacheMode bool   `json:"supportsExplicitPromptCacheMode,omitempty"`
 	VLLMPriority                    any    `json:"vllmPriority,omitempty"`

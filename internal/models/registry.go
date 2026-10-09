@@ -350,12 +350,16 @@ func mergeCompat(base, extra *Compat) *Compat {
 	if base == nil {
 		c := *extra
 		c.SupportsStrictMode = cloneBool(extra.SupportsStrictMode)
+		c.ForceAdaptiveThinking = cloneBool(extra.ForceAdaptiveThinking)
 		c.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
 		return &c
 	}
 	out := *base
 	if extra.SupportsStrictMode != nil {
 		out.SupportsStrictMode = cloneBool(extra.SupportsStrictMode)
+	}
+	if extra.ForceAdaptiveThinking != nil {
+		out.ForceAdaptiveThinking = cloneBool(extra.ForceAdaptiveThinking)
 	}
 	if extra.AllowedFallbackModels != nil {
 		out.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)

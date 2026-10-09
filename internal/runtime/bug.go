@@ -182,12 +182,13 @@ func (e *Engine) SummarizeBugReport(ctx context.Context, fallback []ai.Message, 
 			Content: bugreport.SummaryUserPrompt(selected, hint, len(msgs)),
 		}},
 	}, ai.Options{
-		Model:      e.Opts.Config.ResolvedModel(),
-		MaxTokens:  4096,
-		Thinking:   e.Opts.Config.Thinking,
-		SessionID:  e.sessionID(),
-		Provider:   e.Provider,
-		ToolChoice: "none",
+		Model:           e.Opts.Config.ResolvedModel(),
+		MaxTokens:       4096,
+		Thinking:        e.Opts.Config.Thinking,
+		ThinkingDisplay: e.Opts.Config.ThinkingDisplay,
+		SessionID:       e.sessionID(),
+		Provider:        e.Provider,
+		ToolChoice:      "none",
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
