@@ -25,7 +25,7 @@ Common fields: `type`, `id`, `parentId` (null on the first entry), `timestamp`.
 | `message` | `message`, `usage?`, `provider?`, `modelId?`, `thinkingLevel?` |
 | `compaction` | `summary`, `firstKeptEntryId`, `tokensBefore?`, `fromHook?`, `details?`, `usage?`, `systemMessage?` |
 | `context_edit` | `targetId`, `replacement` (`null` omits the target from later model context) |
-| `branch_summary` | `fromId`, `summary`, `fromHook?` |
+| `branch_summary` | `fromId`, `summary`, `fromHook?`, `details?` |
 | `label` | `targetId`, `label` |
 | `session_info` | `name` |
 | `usage` | `kind` (e.g. `cache_warm`), `provider`, `model`, `usage`, `note?`. Counted in session totals. Not sent to the model |
@@ -67,6 +67,11 @@ request. The session version stays `3`.
 `firstKeptEntryId` is the first entry kept from before the compaction. A
 retain-none compaction stores its own id there, so nothing before it stays in
 model context. The field is always a string; JSON `null` is not written.
+
+Generated compaction and branch summaries store `details` as
+`{ "readFiles": [...], "modifiedFiles": [...] }`. How those lists are built is
+described in [compaction](compaction.md). Extension summaries may omit
+`details` or use their own shape.
 
 ## Context edits
 

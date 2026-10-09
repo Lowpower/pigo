@@ -2,7 +2,10 @@ package compaction
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"sort"
+	"strings"
 
 	"github.com/Lowpower/pigo/internal/ai"
 )
@@ -17,6 +20,32 @@ type Settings struct {
 	CustomInstructions string
 	// Provider selects the catalog entry whose samplingParams go out with the summary request.
 	Provider string
+	// PreviousSummary is the last compaction summary. When set, the summarizer
+	// updates it instead of writing a new checkpoint from scratch.
+	PreviousSummary string
+	// PriorRead and PriorModified are file lists from the previous compaction.
+	// They are merged only when UsePriorFiles is set.
+	PriorRead     []string
+	PriorModified []string
+	UsePriorFiles bool
+}
+
+// FileLists is the readFiles / modifiedFiles payload stored on compaction and
+// branch-summary entries.
+type FileLists struct {
+	ReadFiles     []string `json:"readFiles"`
+	ModifiedFiles []string `json:"modifiedFiles"`
+}
+
+// Stored returns lists safe to marshal: empty slices stay empty arrays.
+func (f FileLists) Stored() FileLists {
+	if f.ReadFiles == nil {
+		f.ReadFiles = []string{}
+	}
+	if f.ModifiedFiles == nil {
+		f.ModifiedFiles = []string{}
+	}
+	return f
 }
 
 // DefaultSettings is the built-in compaction window.
@@ -94,6 +123,46 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`
 
+// UpdateSummarizationPrompt merges new messages into an existing summary.
+const UpdateSummarizationPrompt = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
+
+Update the existing structured summary with new information. RULES:
+- PRESERVE all existing information from the previous summary
+- ADD new progress, decisions, and context from the new messages
+- UPDATE the Progress section: move items from "In Progress" to "Done" when completed
+- UPDATE "Next Steps" based on what was accomplished
+- PRESERVE exact file paths, function names, and error messages
+- If something is no longer relevant, you may remove it
+
+Use this EXACT format:
+
+## Goal
+[Preserve existing goals, add new ones if the task expanded]
+
+## Constraints & Preferences
+- [Preserve existing, add new ones discovered]
+
+## Progress
+### Done
+- [x] [Include previously done items AND newly completed items]
+
+### In Progress
+- [ ] [Current work - update based on progress]
+
+### Blocked
+- [Current blockers - remove if resolved]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale] (preserve all previous, add new)
+
+## Next Steps
+1. [Update based on current state]
+
+## Critical Context
+- [Preserve important context, add new if needed]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages.`
+
 // SummaryPrefix / SummarySuffix wrap a compaction summary for the LLM.
 const SummaryPrefix = `The conversation history before this point was compacted into the following summary:
 
@@ -126,14 +195,12 @@ func modelCallOptions(provider, model string) ai.Options {
 
 // Summarize asks the model to summarize the given messages using StreamFn,
 // returning the assistant's text. provider is the catalog id used to attach
-// samplingParams; an empty provider leaves those fields unset.
-func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra, provider string) (string, error) {
+// samplingParams; an empty provider leaves those fields unset. previousSummary
+// selects the update prompt and is sent in a <previous-summary> block.
+func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra, provider, previousSummary string) (string, error) {
 	reqMsgs := make([]ai.Message, 0, len(toSummarize)+1)
 	reqMsgs = append(reqMsgs, toSummarize...)
-	prompt := SummarizationPrompt
-	if extra != "" {
-		prompt = prompt + "\n\nAdditional focus: " + extra
-	}
+	prompt := summaryPrompt(previousSummary, extra)
 	reqMsgs = append(reqMsgs, ai.Message{Role: ai.RoleUser, Content: prompt})
 
 	stream, err := sf(ctx, ai.Context{Messages: reqMsgs}, modelCallOptions(provider, model))
@@ -165,14 +232,106 @@ func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Messag
 	if cut <= 0 {
 		return msgs, "", nil
 	}
-	summary, err := Summarize(ctx, sf, model, msgs[:cut], s.CustomInstructions, s.Provider)
+	summary, err := Summarize(ctx, sf, model, msgs[:cut], s.CustomInstructions, s.Provider, s.PreviousSummary)
 	if err != nil {
 		return msgs, "", err
 	}
+	files := CollectFileLists(msgs[:cut], s.PriorRead, s.PriorModified, s.UsePriorFiles)
+	summary = AppendFileSections(summary, files)
 	compacted := make([]ai.Message, 0, len(msgs)-cut+1)
 	compacted = append(compacted, ai.Message{Role: ai.RoleUser, Content: SummaryPrefix + summary + SummarySuffix})
 	compacted = append(compacted, msgs[cut:]...)
 	return compacted, summary, nil
+}
+
+func summaryPrompt(previous, extra string) string {
+	prompt := SummarizationPrompt
+	if previous != "" {
+		prompt = "<previous-summary>\n" + previous + "\n</previous-summary>\n\n" + UpdateSummarizationPrompt
+	}
+	if extra != "" {
+		prompt += "\n\nAdditional focus: " + extra
+	}
+	return prompt
+}
+
+// CollectFileLists extracts read, write, and edit paths from assistant tool
+// calls. usePrior merges an earlier compaction's lists. A file that was both
+// read and modified is only listed as modified. Both slices are sorted and
+// non-nil.
+func CollectFileLists(msgs []ai.Message, priorRead, priorModified []string, usePrior bool) FileLists {
+	read := map[string]struct{}{}
+	modified := map[string]struct{}{}
+	add := func(set map[string]struct{}, path string) {
+		if path != "" {
+			set[path] = struct{}{}
+		}
+	}
+	if usePrior {
+		for _, path := range priorRead {
+			add(read, path)
+		}
+		for _, path := range priorModified {
+			add(modified, path)
+		}
+	}
+	for _, msg := range msgs {
+		if msg.Assistant == nil {
+			continue
+		}
+		for _, call := range msg.Assistant.ToolCalls() {
+			path, _ := call.Arguments["path"].(string)
+			switch call.ToolName {
+			case "read":
+				add(read, path)
+			case "write", "edit":
+				add(modified, path)
+			}
+		}
+	}
+	readFiles := make([]string, 0)
+	for path := range read {
+		if _, ok := modified[path]; ok {
+			continue
+		}
+		readFiles = append(readFiles, path)
+	}
+	modifiedFiles := make([]string, 0, len(modified))
+	for path := range modified {
+		modifiedFiles = append(modifiedFiles, path)
+	}
+	sort.Strings(readFiles)
+	sort.Strings(modifiedFiles)
+	return FileLists{ReadFiles: readFiles, ModifiedFiles: modifiedFiles}
+}
+
+// AppendFileSections adds the file lists the model did not write. Empty lists
+// add no tags.
+func AppendFileSections(summary string, lists FileLists) string {
+	var sections []string
+	if len(lists.ReadFiles) > 0 {
+		sections = append(sections, "<read-files>\n"+strings.Join(lists.ReadFiles, "\n")+"\n</read-files>")
+	}
+	if len(lists.ModifiedFiles) > 0 {
+		sections = append(sections, "<modified-files>\n"+strings.Join(lists.ModifiedFiles, "\n")+"\n</modified-files>")
+	}
+	if len(sections) == 0 {
+		return summary
+	}
+	return summary + "\n\n" + strings.Join(sections, "\n\n")
+}
+
+// ParseStoredFiles reads readFiles and modifiedFiles from a compaction or
+// branch-summary details object.
+func ParseStoredFiles(raw []byte) (FileLists, bool) {
+	if len(raw) == 0 {
+		return FileLists{}, false
+	}
+	var lists FileLists
+	if err := json.Unmarshal(raw, &lists); err != nil {
+		return FileLists{}, false
+	}
+	return lists, true
 }
 
 func ceilDiv(a, b int) int {

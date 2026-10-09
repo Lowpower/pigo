@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -15,6 +16,7 @@ type NavigateOpts struct {
 	Label               string
 	Summary             string // precomputed summary text; empty skips branch_summary
 	FromHook            bool
+	Details             any // optional branch_summary details; omitted when nil
 }
 
 // NavigateResult is the outcome of Navigate.
@@ -118,7 +120,7 @@ func (m *Manager) Navigate(targetID string, opts NavigateOpts) (NavigateResult, 
 		if from == "" {
 			from = "root"
 		}
-		sum, err := m.AppendBranchSummary(from, opts.Summary, opts.FromHook)
+		sum, err := m.AppendBranchSummary(from, opts.Summary, opts.FromHook, opts.Details)
 		if err != nil {
 			return NavigateResult{}, err
 		}
@@ -170,7 +172,8 @@ func (m *Manager) AppendLabel(targetID, label string) (*Entry, error) {
 }
 
 // AppendBranchSummary writes a branch_summary child of the current leaf.
-func (m *Manager) AppendBranchSummary(fromID, summary string, fromHook bool) (*Entry, error) {
+// A nil details value omits the field.
+func (m *Manager) AppendBranchSummary(fromID, summary string, fromHook bool, details any) (*Entry, error) {
 	e := &Entry{
 		Type:      "branch_summary",
 		ID:        newUUID(),
@@ -180,7 +183,64 @@ func (m *Manager) AppendBranchSummary(fromID, summary string, fromHook bool) (*E
 		FromHook:  fromHook,
 		role:      "assistant",
 	}
+	if details != nil {
+		raw, err := json.Marshal(details)
+		if err != nil {
+			return nil, err
+		}
+		e.Details = raw
+	}
 	return m.appendEntry(e)
+}
+
+// CompactionBase is the latest compaction on a leaf path and the entries the
+// next summary should read. Entries start at that compaction's firstKeptEntryId.
+// When that id is missing, or it names the compaction itself, Entries start
+// after the compaction. The compaction entry is not included.
+type CompactionBase struct {
+	Found    bool
+	Summary  string
+	FromHook bool
+	Details  json.RawMessage
+	Entries  []Entry
+}
+
+// CompactionBaseFrom finds the latest compaction on path.
+func CompactionBaseFrom(path []Entry) CompactionBase {
+	compIndex := -1
+	for i, e := range path {
+		if e.Type == "compaction" {
+			compIndex = i
+		}
+	}
+	if compIndex < 0 {
+		return CompactionBase{}
+	}
+	comp := path[compIndex]
+	start := compIndex + 1
+	if comp.FirstKeptEntryID != "" {
+		for i, e := range path {
+			if e.ID == comp.FirstKeptEntryID {
+				start = i
+				break
+			}
+		}
+	}
+	entries := make([]Entry, 0, len(path)-start)
+	for i := start; i < len(path); i++ {
+		if path[i].Type == "compaction" {
+			continue
+		}
+		entries = append(entries, path[i])
+	}
+	details := append(json.RawMessage(nil), comp.Details...)
+	return CompactionBase{
+		Found:    true,
+		Summary:  comp.Summary,
+		FromHook: comp.FromHook,
+		Details:  details,
+		Entries:  entries,
+	}
 }
 
 // AppendUsage records model usage that stays out of the LLM context.
