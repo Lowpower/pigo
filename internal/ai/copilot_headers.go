@@ -42,6 +42,7 @@ func guessCopilotAPI(model string) string {
 	case strings.HasPrefix(id, "claude"):
 		return "anthropic-messages"
 	case strings.HasPrefix(id, "gpt-5"),
+		strings.HasPrefix(id, "gpt-6"),
 		strings.HasPrefix(id, "o1"),
 		strings.HasPrefix(id, "o3"),
 		strings.HasPrefix(id, "o4"),

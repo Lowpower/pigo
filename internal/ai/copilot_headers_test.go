@@ -57,7 +57,13 @@ func TestGuessCopilotAPI(t *testing.T) {
 	if got := guessCopilotAPI("grok-4.5"); got != "openai-responses" {
 		t.Fatalf("%s", got)
 	}
+	if got := guessCopilotAPI("gpt-6-astra"); got != "openai-responses" {
+		t.Fatalf("%s", got)
+	}
 	if got := guessCopilotAPI("gpt-4.1"); got != "" {
+		t.Fatalf("%s", got)
+	}
+	if got := guessCopilotAPI("gemini-3.8-flash"); got != "" {
 		t.Fatalf("%s", got)
 	}
 }
