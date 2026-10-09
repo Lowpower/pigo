@@ -122,11 +122,21 @@ func midConvoEffort(opts Options) bool {
 	return c != nil && c.SupportsMidConvoEffort
 }
 
-// activeMidConvoEffort is the effort sent for this turn. Unmapped levels stay high.
+// midConvoEffortTurn is a managed-effort request that actually sends adaptive thinking.
+func midConvoEffortTurn(opts Options) bool {
+	if !midConvoEffort(opts) {
+		return false
+	}
+	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	return level != "" && level != "off"
+}
+
+// activeMidConvoEffort is the effort written on this turn's message marker.
 func activeMidConvoEffort(opts Options) string {
-	switch strings.ToLower(strings.TrimSpace(opts.Thinking)) {
+	effort := strings.ToLower(strings.TrimSpace(anthropicEffort(opts)))
+	switch effort {
 	case "low", "medium", "high", "xhigh", "max":
-		return strings.ToLower(strings.TrimSpace(opts.Thinking))
+		return effort
 	default:
 		return "high"
 	}

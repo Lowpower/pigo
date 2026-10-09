@@ -93,7 +93,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 
 		s := NewEventStream(16)
 		out := newOutputMessage(model, provider)
-		if midConvoEffort(opts) {
+		if midConvoEffortTurn(opts) {
 			out.ProviderThinkingLevel = activeMidConvoEffort(opts)
 		}
 		go func() {
@@ -198,7 +198,7 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		Model:    opts.Model,
 	}, normalizeSanitizedToolCallID)
 	var levels map[int]string
-	if midConvoEffort(opts) {
+	if midConvoEffortTurn(opts) {
 		levels = map[int]string{}
 	}
 	var msgs []map[string]any
@@ -207,7 +207,7 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 	} else {
 		msgs = anthropicWireMessages(replayed, false, nil, levels, provider)
 	}
-	if midConvoEffort(opts) {
+	if midConvoEffortTurn(opts) {
 		msgs = insertThinkingLevelMessages(msgs, levels, activeMidConvoEffort(opts))
 	}
 	applyAnthropicCacheControl(msgs, opts)
@@ -266,7 +266,13 @@ func applyAnthropicThinking(req map[string]any, opts Options, maxTokens int) {
 			}
 		}
 		req["thinking"] = thinking
-		req["output_config"] = map[string]any{"effort": anthropicEffort(opts)}
+		effort := anthropicEffort(opts)
+		if midConvoEffort(opts) {
+			// Per-turn effort lives on the trailing system marker so this field
+			// stays stable and the cached prefix survives a level change.
+			effort = "high"
+		}
+		req["output_config"] = map[string]any{"effort": effort}
 		return
 	}
 	budget := opts.ThinkingBudget

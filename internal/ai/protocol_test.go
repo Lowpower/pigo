@@ -417,8 +417,12 @@ func TestBuildAnthropicMidConvoEffort(t *testing.T) {
 	}
 	_ = json.Unmarshal(body, &req)
 	oc, _ = req["output_config"].(map[string]any)
-	if oc["effort"] != "low" {
-		t.Fatalf("mid-convo low effort = %#v", oc)
+	if oc["effort"] != "high" {
+		t.Fatalf("top-level effort = %#v", oc)
+	}
+	msgs, _ := req["messages"].([]any)
+	if len(msgs) == 0 || !reflect.DeepEqual(msgs[len(msgs)-1], effortMarker("low")) {
+		t.Fatalf("low marker = %#v", msgs)
 	}
 }
 

@@ -185,8 +185,8 @@ func TestAnthropicStreamRecordsProviderThinkingLevel(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, final = stream.Collect()
-	if final == nil || final.ProviderThinkingLevel != "high" {
-		t.Fatalf("default providerThinkingLevel = %#v", final)
+	if final == nil || final.ProviderThinkingLevel != "" {
+		t.Fatalf("off providerThinkingLevel = %#v", final)
 	}
 }
 
