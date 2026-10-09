@@ -488,6 +488,7 @@ func (m *Model) reloadFromSession() {
 	if m.engine == nil {
 		return
 	}
+	m.prevDropAssistant = nil
 	m.history = m.engine.History()
 	m.transcript = transcriptFromMessages(*m, m.history)
 }

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -155,6 +156,101 @@ func TestAnthropicOAuthTokenUsesBearerAndOAuthBetas(t *testing.T) {
 		t.Fatal(err)
 	}
 	stream.Collect()
+}
+
+func TestAnthropicStreamRecordsProviderThinkingLevel(t *testing.T) {
+	registerMidConvoModel(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(anthropicFixture))
+	}))
+	defer srv.Close()
+
+	client := &AnthropicClient{BaseURL: srv.URL, APIKey: "test", HTTPClient: srv.Client()}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Provider: "ant-mid", Model: "claude", Thinking: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	if final == nil || final.ProviderThinkingLevel != "low" {
+		t.Fatalf("providerThinkingLevel = %#v", final)
+	}
+
+	stream, err = client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Provider: "ant-mid", Model: "claude", Thinking: "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final = stream.Collect()
+	if final == nil || final.ProviderThinkingLevel != "high" {
+		t.Fatalf("default providerThinkingLevel = %#v", final)
+	}
+}
+
+func TestAnthropicInputTransformationsPreferMessageDelta(t *testing.T) {
+	fixture := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","model":"claude-test","usage":{"input_tokens":1,"output_tokens":0},"input_transformations":[{"type":"thinking_dropped","path":"messages.1.content.0","reason":"prefix_binding_mismatch"}]}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1},"input_transformations":[{"type":"thinking_dropped","path":"messages.3.content.0","reason":"model_binding_mismatch"}]}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+	_, final := StreamAnthropicReader(context.Background(), strings.NewReader(fixture), "claude-test", nil).Collect()
+	if final == nil || len(final.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v", final)
+	}
+	got := final.Diagnostics[0]
+	if got.Type != "anthropic_input_transformations" || got.Timestamp == 0 || got.Details == nil {
+		t.Fatalf("diagnostic = %#v", got)
+	}
+	want := []InputTransformation{{Type: "thinking_dropped", Path: "messages.3.content.0", Reason: "model_binding_mismatch"}}
+	if !reflect.DeepEqual(got.Details.Transformations, want) {
+		t.Fatalf("transformations = %#v", got.Details.Transformations)
+	}
+}
+
+func TestThinkingDropNoticeDedup(t *testing.T) {
+	one := droppedThinkingMessage(1)
+	if got := ThinkingDropNotice(one, nil); got != "Anthropic dropped 1 thinking block (details in session)" {
+		t.Fatalf("first = %q", got)
+	}
+	same := droppedThinkingMessage(2)
+	previous := droppedThinkingMessage(2)
+	if got := ThinkingDropNotice(same, previous); got != "" {
+		t.Fatalf("repeat = %q", got)
+	}
+	more := droppedThinkingMessage(3)
+	if got := ThinkingDropNotice(more, previous); got != "Anthropic dropped 3 thinking blocks (details in session)" {
+		t.Fatalf("growth = %q", got)
+	}
+}
+
+func droppedThinkingMessage(n int) *AssistantMessage {
+	transformations := make([]InputTransformation, n)
+	for i := range transformations {
+		transformations[i] = InputTransformation{Type: "thinking_dropped", Path: "messages.0.content.0", Reason: "prefix_binding_mismatch"}
+	}
+	return &AssistantMessage{
+		Role: RoleAssistant,
+		Diagnostics: []AssistantDiagnostic{{
+			Type:    "anthropic_input_transformations",
+			Details: &DiagnosticDetails{Transformations: transformations},
+		}},
+	}
 }
 
 func TestAnthropicClientHTTPError(t *testing.T) {

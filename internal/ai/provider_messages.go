@@ -9,10 +9,10 @@ import (
 // shape. Assistant tool calls become tool_use blocks; toolResult becomes a user
 // message with tool_result.
 func AnthropicWireMessages(msgs []Message) []map[string]any {
-	return anthropicWireMessages(msgs, false, nil)
+	return anthropicWireMessages(msgs, false, nil, nil, "")
 }
 
-func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]struct{}) []map[string]any {
+func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]struct{}, levels map[int]string, provider string) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	loaded := map[string]struct{}{}
 	for i := 0; i < len(msgs); i++ {
@@ -21,6 +21,11 @@ func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]st
 			blocks := anthropicContent(m.Assistant)
 			if len(blocks) == 0 {
 				continue
+			}
+			if levels != nil {
+				if effort, ok := replayMidConvoEffort(m.Assistant, provider); ok {
+					levels[len(out)] = effort
+				}
 			}
 			out = append(out, map[string]any{
 				"role":    "assistant",

@@ -122,6 +122,28 @@ func midConvoEffort(opts Options) bool {
 	return c != nil && c.SupportsMidConvoEffort
 }
 
+// activeMidConvoEffort is the effort sent for this turn. Unmapped levels stay high.
+func activeMidConvoEffort(opts Options) string {
+	switch strings.ToLower(strings.TrimSpace(opts.Thinking)) {
+	case "low", "medium", "high", "xhigh", "max":
+		return strings.ToLower(strings.TrimSpace(opts.Thinking))
+	default:
+		return "high"
+	}
+}
+
+func replayMidConvoEffort(msg *AssistantMessage, provider string) (string, bool) {
+	if msg == nil || msg.API != "anthropic-messages" || msg.Provider != provider {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(msg.ProviderThinkingLevel)) {
+	case "low", "medium", "high", "xhigh", "max":
+		return strings.ToLower(strings.TrimSpace(msg.ProviderThinkingLevel)), true
+	default:
+		return "", false
+	}
+}
+
 func midConvoBetas(opts Options) []string {
 	if !midConvoEffort(opts) {
 		return nil
