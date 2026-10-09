@@ -3,11 +3,13 @@
 Specify a model as `provider/id` or `id`, optionally with `:<thinking>`:
 
 ```bash
-pigo --model anthropic/claude-sonnet-4:high
+pigo --model anthropic/claude-sonnet-4-5:high
 pigo --thinking medium
 pigo --models "claude-*,gpt-4o"
 pigo --list-models
 ```
+
+A `provider/id` pattern selects that one model. A bare name is a substring match, and `*` is a glob.
 
 Thinking levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`.
 Per-level token budgets: `settings.thinkingBudgets`. Per-model defaults:
@@ -25,8 +27,25 @@ Built-in providers include `anthropic`, `openai`, `opencode`, `google`,
 `google-vertex`, `azure-openai-responses`, Cloudflare, MiniMax, Moonshot, Z.AI,
 and others. `pigo --list-models` is the live list.
 
-Remote overlays: `PIGO_CATALOG_BASE_URL` and `pigo update --models` (cache
-`models-store.json`).
+The offline list is a snapshot of [models.dev](https://models.dev) `api.json`
+(MIT, Copyright 2025 models.dev), embedded in the binary. Refresh it from the
+repo root before a release:
+
+```bash
+go run ./internal/models/cataloggen
+```
+
+CI checks the committed snapshot: it parses, each matched provider is non-empty,
+and that provider's default model has a non-zero context window and max token
+cap. Price, input types, and effort `thinkingLevelMap` values are copied when
+models.dev has them. Image-generation and classifier models are left out.
+`compat` is not filled from this snapshot.
+
+`llama.cpp` and `radius` are not in the snapshot. `ant-ling`, `kimi-coding`,
+`qwen-token-plan-individual`, and `openai-codex` keep a single local placeholder.
+
+Remote overlays still win: `PIGO_CATALOG_BASE_URL` (empty by default) and
+`pigo update --models` (cache `models-store.json`).
 
 `radius` ships a public model list, so `radius/balanced` and the other public
 ids can be selected before a gateway responds. `RADIUS_GATEWAY` /

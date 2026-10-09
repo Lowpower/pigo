@@ -75,14 +75,13 @@ func TestBudgetTokensOverride(t *testing.T) {
 }
 
 func TestBuiltinCacheReadAndMaxTokens(t *testing.T) {
-	if CacheReadPerToken("anthropic", "claude-sonnet-4") <= 0 {
-		t.Fatal("builtin sonnet should have cache-read price")
+	sonnet, ok := Lookup("anthropic", "claude-sonnet-4-5")
+	if !ok || sonnet.Cost == nil || sonnet.Cost.CacheRead <= 0 || sonnet.MaxTokens <= 0 || sonnet.ContextWindow <= 0 {
+		t.Fatalf("builtin sonnet = %+v ok=%v", sonnet, ok)
 	}
-	if MaxTokens("anthropic", "claude-sonnet-4") != 64000 {
-		t.Fatalf("maxTokens=%d", MaxTokens("anthropic", "claude-sonnet-4"))
-	}
-	if CacheReadPerToken("openai", "gpt-4o") <= 0 || MaxTokens("openai", "gpt-4o") != 16384 {
-		t.Fatal("openai gpt-4o catalog")
+	gpt, ok := Lookup("openai", "gpt-4o")
+	if !ok || gpt.Cost == nil || gpt.Cost.CacheRead <= 0 || gpt.MaxTokens <= 0 || gpt.ContextWindow <= 0 {
+		t.Fatalf("openai gpt-4o = %+v ok=%v", gpt, ok)
 	}
 }
 
@@ -107,9 +106,9 @@ func TestOverlayMergesCostAndMaxTokens(t *testing.T) {
 }
 
 func TestAnthropicPromptCacheLifetime(t *testing.T) {
-	m, ok := Lookup("anthropic", "claude-sonnet-4")
+	m, ok := Lookup("anthropic", "claude-sonnet-4-5")
 	if !ok || m.PromptCache == nil || m.PromptCache.Short != 300 || m.PromptCache.Long != 3600 {
-		t.Fatalf("promptCache=%+v", m.PromptCache)
+		t.Fatalf("promptCache=%+v ok=%v", m.PromptCache, ok)
 	}
 	openai, ok := Lookup("openai", "gpt-4o")
 	if !ok || openai.PromptCache != nil {
