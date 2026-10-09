@@ -174,12 +174,18 @@ func ResolvePatternsIn(patterns []string, list []Model) []Spec {
 			}
 		}
 		g, gerr := glob.Compile(strings.ToLower(pattern))
+		exactID := patternIsExactID(pattern)
 		for _, m := range list {
 			hay := strings.ToLower(m.Provider + "/" + m.ID)
-			match := strings.Contains(hay, strings.ToLower(pattern)) ||
-				strings.Contains(strings.ToLower(m.ID), strings.ToLower(pattern))
-			if gerr == nil && g.Match(hay) {
-				match = true
+			var match bool
+			if exactID {
+				match = hay == strings.ToLower(pattern)
+			} else {
+				match = strings.Contains(hay, strings.ToLower(pattern)) ||
+					strings.Contains(strings.ToLower(m.ID), strings.ToLower(pattern))
+				if gerr == nil && g.Match(hay) {
+					match = true
+				}
 			}
 			if !match {
 				continue
@@ -208,6 +214,16 @@ func UnmatchedPatterns(patterns []string, list []Model) []string {
 		}
 	}
 	return out
+}
+
+// patternIsExactID is a provider/id with no glob metacharacters.
+// Those patterns select that one catalog row. Bare names and globs stay
+// substring and glob matches.
+func patternIsExactID(pattern string) bool {
+	if !strings.Contains(pattern, "/") {
+		return false
+	}
+	return !strings.ContainsAny(pattern, "*?[]")
 }
 
 // Cycle returns the next/previous catalog (or scoped) model.

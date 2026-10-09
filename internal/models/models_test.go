@@ -24,6 +24,22 @@ func TestResolvePatternsInRestrictsList(t *testing.T) {
 	}
 }
 
+func TestResolvePatternsInProviderIDIsExact(t *testing.T) {
+	list := []Model{
+		{Provider: "openai", ID: "gpt-4o"},
+		{Provider: "openai", ID: "gpt-4o-mini"},
+		{Provider: "openrouter", ID: "openai/gpt-4o"},
+	}
+	got := ResolvePatternsIn([]string{"openai/gpt-4o"}, list)
+	if len(got) != 1 || got[0].Provider != "openai" || got[0].ID != "gpt-4o" {
+		t.Fatalf("exact = %+v", got)
+	}
+	sub := ResolvePatternsIn([]string{"gpt-4o"}, list)
+	if len(sub) != 3 {
+		t.Fatalf("substring = %+v", sub)
+	}
+}
+
 func TestResolvePatternsInPreservesPatternOrder(t *testing.T) {
 	list := []Model{
 		{Provider: "anthropic", ID: "claude-sonnet-4"},

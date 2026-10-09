@@ -538,7 +538,7 @@ func Load(configDir string) (Config, error) {
 	v.AddConfigPath(configDir)
 
 	v.SetDefault("provider", "anthropic")
-	v.SetDefault("model", "claude-sonnet-4")
+	v.SetDefault("model", "claude-sonnet-4-5")
 	v.SetDefault("theme", "system")
 	v.SetDefault("thinking", "medium")
 	v.SetDefault("contextWindow", 0)

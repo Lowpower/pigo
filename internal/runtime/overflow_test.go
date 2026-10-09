@@ -37,7 +37,7 @@ func TestPrintJSONOverflowCompactsAndRetriesOnce(t *testing.T) {
 				Tools:    tools.NewRegistry(),
 				Opts: Options{Config: config.Config{
 					Provider:         "anthropic",
-					Model:            "claude-sonnet-4",
+					Model:            "claude-sonnet-4-5",
 					KeepRecentTokens: 1,
 					Retry: config.RetrySettings{
 						Enabled:     boolPtr(true),

@@ -511,11 +511,15 @@ func TestRPCGetTreeAndCycleThinking(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := newPongEngine(Options{
-		Config:   config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Thinking: "off"},
+		Config:   config.Config{Provider: "anthropic", Model: "claude-sonnet-4-5", Thinking: "off"},
 		Session:  sess,
 		Cwd:      cwd,
 		AgentDir: dir,
 	})
+	e.Scoped = []models.Spec{
+		{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4-5"}},
+		{Model: models.Model{Provider: "anthropic", ID: "claude-haiku-4-5"}},
+	}
 	wireQueues(e)
 	e.AdoptSession(sess)
 
@@ -938,7 +942,7 @@ func TestApplyModelDoesNotOverwriteSavedDefault(t *testing.T) {
 func TestNewResolvesScopedModels(t *testing.T) {
 	cfg := config.Config{
 		Provider: "anthropic", Model: "claude-sonnet-4",
-		EnabledModels: []string{"anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"},
+		EnabledModels: []string{"anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5"},
 	}
 	dir := t.TempDir()
 	tests := []struct {
@@ -946,7 +950,7 @@ func TestNewResolvesScopedModels(t *testing.T) {
 		opts Options
 		want []string
 	}{
-		{"settings when CLI empty", Options{Config: cfg}, []string{"claude-sonnet-4", "claude-haiku-4"}},
+		{"settings when CLI empty", Options{Config: cfg}, []string{"claude-sonnet-4-5", "claude-haiku-4-5"}},
 		{"CLI models replace settings", Options{Config: cfg, Models: []string{"openai/gpt-4o"}}, []string{"gpt-4o"}},
 		{"user config wins over overlay", Options{Config: cfg, UserConfig: &config.Config{EnabledModels: []string{"openai/gpt-4o"}}}, []string{"gpt-4o"}},
 		{"nil user enabledModels is implicit all", Options{Config: cfg, UserConfig: &config.Config{}}, nil},
