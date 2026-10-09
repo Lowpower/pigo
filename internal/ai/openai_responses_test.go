@@ -364,3 +364,199 @@ func TestOpenAIResponsesServiceTierPricing(t *testing.T) {
 		})
 	}
 }
+
+func sseData(events ...string) string {
+	var b strings.Builder
+	for _, ev := range events {
+		b.WriteString("data: ")
+		b.WriteString(ev)
+		b.WriteString("\n\n")
+	}
+	return b.String()
+}
+
+func collectResponsesSSE(t *testing.T, body string) ([]Event, *AssistantMessage) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	client := &OpenAIResponsesClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "gpt-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stream.Collect()
+}
+
+func TestResponsesStreamParallelToolCallsWithOutputIndex(t *testing.T) {
+	events, final := collectResponsesSSE(t, sseData(
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_a","delta":"{\"command\":\"echo a\"}"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":"{\"command\":\"echo a\"}"}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_b","call_id":"call_b","name":"read","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_b","delta":"{\"path\":\"b\"}"}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_b","call_id":"call_b","name":"read","arguments":"{\"path\":\"b\"}"}}`,
+		`{"type":"response.completed","response":{"id":"resp_tools","status":"completed","usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}}`,
+	))
+	if final == nil || final.StopReason != StopToolUse {
+		t.Fatalf("stop = %v", final)
+	}
+	calls := final.ToolCalls()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %#v", calls)
+	}
+	if calls[0].ToolName != "bash" || calls[0].ToolID != "call_a" || calls[0].Arguments["command"] != "echo a" {
+		t.Fatalf("call0 = %#v", calls[0])
+	}
+	if calls[1].ToolName != "read" || calls[1].ToolID != "call_b" || calls[1].Arguments["path"] != "b" {
+		t.Fatalf("call1 = %#v", calls[1])
+	}
+	var ends int
+	for _, ev := range events {
+		if ev.Type == EventToolCallEnd {
+			ends++
+		}
+	}
+	if ends != 2 {
+		t.Fatalf("toolcall_end = %d", ends)
+	}
+}
+
+func TestResponsesStreamParallelToolCallsWithoutOutputIndex(t *testing.T) {
+	events, final := collectResponsesSSE(t, sseData(
+		`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_a","delta":"{\"command\":\"echo a\"}"}`,
+		`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_b","call_id":"call_b","name":"bash","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_b","delta":"{\"command\":\"echo b\"}"}`,
+		`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":"{\"command\":\"echo a\"}"}}`,
+		`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_b","call_id":"call_b","name":"bash","arguments":"{\"command\":\"echo b\"}"}}`,
+		`{"type":"response.completed","response":{"id":"resp_no_output_index","status":"completed"}}`,
+	))
+	if final == nil || final.StopReason != StopError {
+		t.Fatalf("stop = %v", final)
+	}
+	if !strings.Contains(final.ErrorMessage, "unfinished tool call") || !strings.Contains(final.ErrorMessage, "bash") || !strings.Contains(final.ErrorMessage, "call_a") {
+		t.Fatalf("error = %q", final.ErrorMessage)
+	}
+	if IsRetryableAssistantError(final) {
+		t.Fatalf("unfinished tool call should not be retryable: %q", final.ErrorMessage)
+	}
+	for _, ev := range events {
+		if ev.Type == EventToolCallEnd {
+			t.Fatal("unfinished tool call emitted toolcall_end")
+		}
+	}
+}
+
+func TestResponsesStreamUnfinishedToolCall(t *testing.T) {
+	events, final := collectResponsesSSE(t, sseData(
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"bash","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"{\"command\":\"rm"}`,
+		`{"type":"response.completed","response":{"id":"resp_unfinished","status":"completed"}}`,
+	))
+	if final == nil || final.StopReason != StopError {
+		t.Fatalf("stop = %v", final)
+	}
+	if !strings.Contains(final.ErrorMessage, "unfinished tool call") || !strings.Contains(final.ErrorMessage, "call_1") {
+		t.Fatalf("error = %q", final.ErrorMessage)
+	}
+	for _, ev := range events {
+		if ev.Type == EventToolCallEnd {
+			t.Fatal("unfinished tool call emitted toolcall_end")
+		}
+	}
+}
+
+func TestResponsesStreamEndsBeforeTerminalEvent(t *testing.T) {
+	_, final := collectResponsesSSE(t, sseData(
+		`{"type":"response.output_text.delta","item_id":"msg_1","delta":"partial","output_index":0}`,
+	))
+	if final == nil || final.StopReason != StopError {
+		t.Fatalf("stop = %v", final)
+	}
+	if !strings.Contains(final.ErrorMessage, "stream ended before a terminal response event") {
+		t.Fatalf("error = %q", final.ErrorMessage)
+	}
+	if !IsRetryableAssistantError(final) {
+		t.Fatalf("want retryable: %q", final.ErrorMessage)
+	}
+}
+
+func TestResponsesStreamIncompleteReasons(t *testing.T) {
+	cases := []struct {
+		name      string
+		reason    string
+		wantStop  StopReason
+		wantError string
+		retryable bool
+	}{
+		{name: "max output tokens", reason: "max_output_tokens", wantStop: StopLength},
+		{name: "content filter", reason: "content_filter", wantStop: StopError, wantError: "Response incomplete: content_filter"},
+		{name: "unknown reason", reason: "max_time_limit", wantStop: StopError, wantError: "Response incomplete: max_time_limit"},
+		{name: "missing reason", wantStop: StopError, wantError: "Response incomplete without a provider reason"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			details := ""
+			if tc.reason != "" {
+				details = fmt.Sprintf(`,"incomplete_details":{"reason":%q}`, tc.reason)
+			}
+			body := sseData(fmt.Sprintf(
+				`{"type":"response.incomplete","response":{"id":"resp_inc","status":"incomplete"%s,"usage":{"input_tokens":3,"output_tokens":9,"total_tokens":12}}}`,
+				details,
+			))
+			_, final := collectResponsesSSE(t, body)
+			if final == nil || final.StopReason != tc.wantStop {
+				t.Fatalf("stop = %v, want %s", final, tc.wantStop)
+			}
+			if tc.wantStop == StopLength {
+				if final.Usage.Input != 3 || final.Usage.Output != 9 {
+					t.Fatalf("usage = %+v", final.Usage)
+				}
+				return
+			}
+			if final.ErrorMessage != tc.wantError {
+				t.Fatalf("error = %q, want %q", final.ErrorMessage, tc.wantError)
+			}
+			if IsRetryableAssistantError(final) {
+				t.Fatalf("incomplete error should not be retryable: %q", final.ErrorMessage)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamFailedEvent(t *testing.T) {
+	_, final := collectResponsesSSE(t, sseData(
+		`{"type":"response.failed","response":{"id":"resp_failed","status":"failed","error":{"code":"server_error","message":"boom"}}}`,
+	))
+	if final == nil || final.StopReason != StopError {
+		t.Fatalf("stop = %v", final)
+	}
+	if !strings.Contains(final.ErrorMessage, "server_error") || !strings.Contains(final.ErrorMessage, "boom") {
+		t.Fatalf("error = %q", final.ErrorMessage)
+	}
+	if strings.Contains(final.ErrorMessage, "stream ended before a terminal response event") {
+		t.Fatalf("failed event treated as a missing terminal: %q", final.ErrorMessage)
+	}
+}
+
+func TestResponsesStreamTerminalEventWithoutTrailingBlank(t *testing.T) {
+	body := strings.TrimSuffix(sseData(
+		`{"type":"response.output_text.delta","item_id":"msg_1","delta":"Hi","output_index":0}`,
+		`{"type":"response.completed","response":{"id":"resp_eof","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+	), "\n")
+	_, final := collectResponsesSSE(t, body)
+	if final == nil || final.StopReason != StopStop {
+		t.Fatalf("stop = %v", final)
+	}
+	if final.Text() != "Hi" {
+		t.Fatalf("text = %q", final.Text())
+	}
+	if final.Usage.Input != 1 || final.Usage.Output != 1 {
+		t.Fatalf("usage = %+v", final.Usage)
+	}
+}
