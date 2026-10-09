@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/migrate"
@@ -317,13 +318,18 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	if f.prompt != "" {
 		msgs = append([]string{f.prompt}, msgs...)
 	}
+	if err := rejectRPCAtFiles(f.mode, files); err != nil {
+		return err
+	}
 	fileText := ""
+	var promptImages []ai.ImageContent
 	if len(files) > 0 {
-		inline, err := inlineFiles(cwd, files)
+		inline, images, err := inlineFiles(cwd, files)
 		if err != nil {
 			return err
 		}
 		fileText = inline
+		promptImages = images
 	}
 
 	mode := f.mode
@@ -343,7 +349,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		}
 	}
 	prompt, restMsgs := buildInitialMessage(stdinContent, fileText, msgs)
-	if f.mode == "" && mode == "interactive" && prompt != "" {
+	if f.mode == "" && mode == "interactive" && (prompt != "" || len(promptImages) > 0) {
 		mode = "text"
 	}
 
@@ -479,8 +485,8 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	history := eng.History()
 	switch mode {
 	case "interactive":
-		if prompt != "" {
-			if err := eng.PrintText(ctx, out, history, prompt); err != nil {
+		if prompt != "" || len(promptImages) > 0 {
+			if err := eng.PrintText(ctx, out, history, prompt, promptImages); err != nil {
 				return err
 			}
 		}
@@ -489,21 +495,21 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		}
 		return tui.RunEngine(cfg, eng)
 	case "text", "print":
-		prompts := printPrompts(prompt, restMsgs)
+		prompts := printPrompts(prompt, restMsgs, len(promptImages) > 0)
 		if len(prompts) == 0 {
 			fmt.Fprintf(out, "provider=%s model=%s theme=%s\n", cfg.ResolvedProvider(), cfg.ResolvedModel(), cfg.Theme)
 			return nil
 		}
 		hist := history
-		for _, p := range prompts {
-			if err := eng.PrintText(ctx, out, hist, p); err != nil {
+		for i, p := range prompts {
+			if err := eng.PrintText(ctx, out, hist, p, promptImagesFor(i, promptImages)); err != nil {
 				return err
 			}
 			hist = eng.History()
 		}
 		return nil
 	case "json":
-		prompts := printPrompts(prompt, restMsgs)
+		prompts := printPrompts(prompt, restMsgs, len(promptImages) > 0)
 		if len(prompts) == 0 {
 			return fmt.Errorf("--mode json requires a prompt")
 		}
@@ -511,8 +517,8 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 			return err
 		}
 		hist := history
-		for _, p := range prompts {
-			if err := eng.PrintJSON(ctx, out, hist, p, nil); err != nil {
+		for i, p := range prompts {
+			if err := eng.PrintJSON(ctx, out, hist, p, promptImagesFor(i, promptImages)); err != nil {
 				return err
 			}
 			hist = eng.History()
@@ -525,13 +531,11 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 }
 
-func printPrompts(initial string, rest []string) []string {
-	var out []string
-	if initial != "" {
-		out = append(out, initial)
+func promptImagesFor(i int, images []ai.ImageContent) []ai.ImageContent {
+	if i != 0 {
+		return nil
 	}
-	out = append(out, rest...)
-	return out
+	return images
 }
 
 func splitCSV(s string) []string {

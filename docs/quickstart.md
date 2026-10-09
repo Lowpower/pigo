@@ -33,7 +33,8 @@ pigo --tools read,grep,find,ls -p "review only"
 pigo --export session.jsonl out.html
 ```
 
-Positional `@file` arguments are inlined as `<file name="...">` blocks (text
-only).
+Positional `@file` arguments go into the first prompt. Text files are inlined
+as `<file name="...">` blocks. PNG, JPEG, GIF, WebP, and BMP are attached as
+images (BMP is sent as PNG). Other binary files are rejected.
 
 See [Usage](usage.md) for the full flag and slash-command list.

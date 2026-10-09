@@ -1628,13 +1628,13 @@ func (e *Engine) PersistThinking(level string) error {
 }
 
 // PrintText streams a prompt to out as plain text (--mode text / --print).
-func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Message, user string) error {
+func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Message, user string, images []ai.ImageContent) error {
 	hist := history
 	first := true
 	for {
 		var stream *agent.Stream
 		if first {
-			stream = e.RunPrompt(ctx, hist, user, nil)
+			stream = e.RunPrompt(ctx, hist, user, images)
 			first = false
 		} else {
 			stream = e.Continue(ctx, hist)

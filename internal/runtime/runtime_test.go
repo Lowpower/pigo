@@ -1134,7 +1134,7 @@ func TestPrintTextErrorExit(t *testing.T) {
 		Opts:     Options{Config: config.Config{Model: "x"}},
 	}
 	wireQueues(e)
-	err := e.PrintText(context.Background(), io.Discard, nil, "hi")
+	err := e.PrintText(context.Background(), io.Discard, nil, "hi", nil)
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err=%v", err)
 	}
