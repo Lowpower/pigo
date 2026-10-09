@@ -2,7 +2,6 @@ package tui
 
 import (
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -164,7 +163,7 @@ func (p sessionPicker) item(s session.Summary, prefix string) pickerItem {
 		label = s.ID
 	}
 	label = prefix + strings.ReplaceAll(label, "\n", " ")
-	if p.currentPath != "" && filepath.Clean(s.Path) == filepath.Clean(p.currentPath) {
+	if session.SamePath(s.Path, p.currentPath) {
 		label = "* " + label
 	}
 	right := strconv.Itoa(s.MessageCount) + " " + session.FormatAge(s.Modified, time.Now())
@@ -236,7 +235,7 @@ func (m Model) handleSessionPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		if p.currentPath != "" && filepath.Clean(it.ID) == filepath.Clean(p.currentPath) {
+		if session.SamePath(it.ID, p.currentPath) {
 			p.status = "cannot delete the current session"
 			p.rebuild()
 			return m, nil
