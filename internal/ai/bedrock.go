@@ -144,12 +144,13 @@ func (c *BedrockClient) StreamFn() StreamFn {
 }
 
 func bedrockThinkingFields(opts Options) map[string]any {
-	if reasoningEffort(opts) == "" && opts.ThinkingBudget <= 0 {
+	canonical, _ := resolvedThinking(opts)
+	if !thinkingOn(canonical) && opts.ThinkingBudget <= 0 {
 		return nil
 	}
 	budget := opts.ThinkingBudget
 	if budget <= 0 {
-		budget = models.BudgetTokens(opts.Thinking)
+		budget = models.BudgetTokens(canonical)
 	}
 	if budget > 0 {
 		return map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": budget}}

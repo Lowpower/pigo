@@ -222,6 +222,128 @@ func TestPigoMessagesOptionsIncludesSessionAndToolChoice(t *testing.T) {
 	}
 }
 
+func TestThinkingLevelMapWireValues(t *testing.T) {
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "map-wire", DefaultAPI: "openai-completions", DefaultID: "custom",
+		Models: []models.Model{
+			{Provider: "map-wire", ID: "custom", Compat: &models.Compat{SupportsReasoningEffort: true}, ThinkingLevelMap: map[string]*string{
+				"xhigh": strPtrAI("max"), "minimal": nil, "low": strPtrAI("medium"),
+			}},
+			{Provider: "map-wire", ID: "off-none", ThinkingLevelMap: map[string]*string{"off": strPtrAI("none")}},
+			{Provider: "map-wire", ID: "off-null", ThinkingLevelMap: map[string]*string{"off": nil}},
+			{Provider: "map-wire", ID: "plain"},
+			{Provider: "map-wire", ID: "router", Compat: &models.Compat{ThinkingFormat: "openrouter"}},
+			{Provider: "map-wire", ID: "router-off", Compat: &models.Compat{ThinkingFormat: "openrouter"}, ThinkingLevelMap: map[string]*string{"off": nil}},
+			{Provider: "map-wire", ID: "router-none", Compat: &models.Compat{ThinkingFormat: "openrouter"}, ThinkingLevelMap: map[string]*string{"off": strPtrAI("disabled")}},
+			{Provider: "map-wire", ID: "google", ThinkingLevelMap: map[string]*string{"xhigh": strPtrAI("max")}},
+			{Provider: "map-wire", ID: "adaptive", Compat: &models.Compat{ForceAdaptiveThinking: boolPtrAI(true)}, ThinkingLevelMap: map[string]*string{
+				"minimal": nil, "low": strPtrAI("max"),
+			}},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("map-wire") })
+
+	body := func(id, level string) map[string]any {
+		t.Helper()
+		raw, err := buildOpenAIRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
+			Options{Provider: "map-wire", Model: id, Thinking: level})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var req map[string]any
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+
+	if body("custom", "xhigh")["reasoning_effort"] != "max" {
+		t.Fatalf("xhigh = %#v", body("custom", "xhigh")["reasoning_effort"])
+	}
+	if body("custom", "low")["reasoning_effort"] != "medium" {
+		t.Fatalf("low = %#v", body("custom", "low")["reasoning_effort"])
+	}
+	if body("custom", "minimal")["reasoning_effort"] != "medium" {
+		t.Fatalf("minimal = %#v", body("custom", "minimal")["reasoning_effort"])
+	}
+	if _, ok := body("custom", "off")["reasoning_effort"]; ok {
+		t.Fatalf("off should omit reasoning_effort: %#v", body("custom", "off"))
+	}
+	if body("off-none", "off")["reasoning_effort"] != "none" {
+		t.Fatalf("off map = %#v", body("off-none", "off")["reasoning_effort"])
+	}
+	if _, ok := body("off-null", "off")["reasoning_effort"]; ok {
+		t.Fatalf("off null = %#v", body("off-null", "off"))
+	}
+	if body("plain", "high")["reasoning_effort"] != "high" {
+		t.Fatalf("plain high = %#v", body("plain", "high")["reasoning_effort"])
+	}
+	if _, ok := body("plain", "off")["reasoning_effort"]; ok {
+		t.Fatalf("plain off = %#v", body("plain", "off"))
+	}
+
+	router := body("router", "off")
+	reasoning, _ := router["reasoning"].(map[string]any)
+	if reasoning["effort"] != "none" {
+		t.Fatalf("unmapped openrouter off = %#v", router["reasoning"])
+	}
+	routerOff := body("router-off", "off")
+	if _, ok := routerOff["reasoning"]; ok {
+		t.Fatalf("openrouter off:null = %#v", routerOff["reasoning"])
+	}
+	routerNone := body("router-none", "off")
+	reasoning, _ = routerNone["reasoning"].(map[string]any)
+	if reasoning["effort"] != "disabled" {
+		t.Fatalf("openrouter off map = %#v", routerNone["reasoning"])
+	}
+
+	if reasoningEffort(Options{Provider: "map-wire", Model: "custom", Thinking: "xhigh"}) != "max" {
+		t.Fatal("shared effort should be max")
+	}
+	if reasoningEffort(Options{Provider: "map-wire", Model: "plain", Thinking: "high"}) != "high" {
+		t.Fatal("unmapped effort changed")
+	}
+	if reasoningEffort(Options{Provider: "map-wire", Model: "plain", Thinking: "off"}) != "" {
+		t.Fatal("unmapped off should omit")
+	}
+
+	cfg := googleThinkingConfig(Options{Provider: "map-wire", Model: "google", Thinking: "xhigh"})
+	if cfg == nil || string(cfg.ThinkingLevel) != "max" {
+		t.Fatalf("google mapped level = %+v", cfg)
+	}
+	cfg = googleThinkingConfig(Options{Provider: "map-wire", Model: "plain", Thinking: "low"})
+	if cfg == nil || cfg.ThinkingLevel != genai.ThinkingLevelLow {
+		t.Fatalf("google unmapped = %+v", cfg)
+	}
+
+	raw, err := buildAnthropicRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
+		Options{Provider: "map-wire", Model: "adaptive", Thinking: "minimal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ant map[string]any
+	if err := json.Unmarshal(raw, &ant); err != nil {
+		t.Fatal(err)
+	}
+	oc, _ := ant["output_config"].(map[string]any)
+	if oc["effort"] != "max" {
+		t.Fatalf("anthropic clamped effort = %#v", ant["output_config"])
+	}
+
+	fields := bedrockThinkingFields(Options{Provider: "map-wire", Model: "custom", Thinking: "minimal"})
+	thinking, _ := fields["thinking"].(map[string]any)
+	if thinking["budget_tokens"] != models.BudgetTokens("low") {
+		t.Fatalf("bedrock clamped budget = %#v", fields)
+	}
+	if bedrockThinkingFields(Options{Provider: "map-wire", Model: "off-null", Thinking: "off"}) != nil {
+		t.Fatal("bedrock off:null should omit thinking")
+	}
+}
+
+func strPtrAI(v string) *string { return &v }
+
+func boolPtrAI(v bool) *bool { return &v }
+
 func TestBuildOpenAIRequestThinkingFormats(t *testing.T) {
 	models.RegisterProvider(models.ProviderSpec{
 		ID: "fmt-test", DefaultAPI: "openai-completions", DefaultID: "m",
