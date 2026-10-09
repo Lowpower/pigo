@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/Lowpower/pigo/internal/runtime"
 	"github.com/Lowpower/pigo/internal/slash"
@@ -110,7 +111,21 @@ func slashSuggestions(before string, cmds []slash.Command) (items []completeItem
 		return nil, "", false
 	}
 	q := before[1:]
-	filtered := fuzzyFilter(cmds, q, func(c slash.Command) string { return c.Name })
+	// Skill commands are stored as skill:name. Rank by the bare name first so the
+	// fixed prefix does not outscore the skill, then match leftover skill commands
+	// on the full name so /skill and /skill: still list them.
+	primary := fuzzyFilter(cmds, q, func(c slash.Command) string { return skillBareName(c.Name) })
+	seen := make(map[string]bool, len(primary))
+	for _, c := range primary {
+		seen[c.Name] = true
+	}
+	var rest []slash.Command
+	for _, c := range cmds {
+		if strings.HasPrefix(c.Name, "skill:") && !seen[c.Name] {
+			rest = append(rest, c)
+		}
+	}
+	filtered := append(primary, fuzzyFilter(rest, q, func(c slash.Command) string { return c.Name })...)
 	for _, c := range filtered {
 		if len(items) >= completeMaxItems {
 			break
@@ -121,6 +136,14 @@ func slashSuggestions(before string, cmds []slash.Command) (items []completeItem
 		return nil, "", false
 	}
 	return items, before, true
+}
+
+func skillBareName(name string) string {
+	const prefix = "skill:"
+	if strings.HasPrefix(name, prefix) {
+		return name[len(prefix):]
+	}
+	return name
 }
 
 func commandArgSuggestions(before string, eng *runtime.Engine) (items []completeItem, prefix string, ok bool) {
@@ -202,7 +225,7 @@ func extensionAutocomplete(before string, eng *runtime.Engine) (items []complete
 }
 
 func fileSuggestions(before, cwd string, force bool) (items []completeItem, prefix string, ok bool) {
-	token := lastPathToken(before)
+	token := filePathToken(before)
 	if token == "" && !force {
 		return nil, "", false
 	}
@@ -242,12 +265,12 @@ func fileSuggestions(before, cwd string, force bool) (items []completeItem, pref
 		}
 		val := path
 		if at {
-			if quoted || strings.Contains(path, " ") {
+			if quoted || pathNeedsQuotes(path) {
 				val = "@\"" + path + "\""
 			} else {
 				val = "@" + path
 			}
-		} else if quoted || strings.Contains(path, " ") {
+		} else if quoted || pathNeedsQuotes(path) {
 			val = "\"" + path + "\""
 		}
 		items = append(items, completeItem{Value: val, Label: base + boolSlash(dir), Dir: dir})
@@ -276,6 +299,129 @@ func looksLikeFileToken(token string) bool {
 		return true
 	}
 	return strings.Contains(token, "/") || strings.HasPrefix(token, ".") || strings.HasPrefix(token, "~/")
+}
+
+// pathWrappers are opening marks in front of a path. They are removed only
+// while the matching closer is still absent, so "(./src" completes and
+// "(group)/page" stays intact.
+var pathWrappers = map[rune]rune{
+	'(': ')',
+	'[': ']',
+	'{': '}',
+	'<': '>',
+	'`': '`',
+}
+
+// cjkPathPunct separates prose from a path. Han, kana, and hangul letters stay
+// inside the token; this set is the punctuation pi treats as a boundary.
+const cjkPathPunct = "，．：；！？（）［］｛｝“”‘’…—。、「」『』《》【】"
+
+func filePathToken(before string) string {
+	runes := []rune(before)
+	if q := quotedFileToken(runes); q != "" {
+		return q
+	}
+	last := -1
+	for i, r := range runes {
+		if isFilePathDelimiter(r) {
+			last = i
+		}
+	}
+	return stripPathWrappers(string(runes[last+1:]))
+}
+
+func quotedFileToken(runes []rune) string {
+	in := false
+	start := -1
+	for i, r := range runes {
+		if r != '"' {
+			continue
+		}
+		in = !in
+		if in {
+			start = i
+		}
+	}
+	if !in || start < 0 {
+		return ""
+	}
+	at := start
+	if start > 0 && runes[start-1] == '@' {
+		at = start - 1
+	}
+	if !isFileTokenStart(runes, at) {
+		return ""
+	}
+	return string(runes[at:])
+}
+
+func isFileTokenStart(runes []rune, index int) bool {
+	if index <= 0 {
+		return true
+	}
+	switch runes[index-1] {
+	case ' ', '\t', '"', '\'', '=':
+		return true
+	}
+	start := index
+	for start > 0 {
+		if _, ok := pathWrappers[runes[start-1]]; !ok {
+			break
+		}
+		start--
+	}
+	if start == 0 {
+		return true
+	}
+	return isFilePathDelimiter(runes[start-1])
+}
+
+func isFilePathDelimiter(r rune) bool {
+	switch r {
+	case ' ', '\t', '"', '\'', '=':
+		return true
+	}
+	return unicode.IsSpace(r) || isCJKPunct(r)
+}
+
+func isCJKPunct(r rune) bool {
+	if strings.ContainsRune(cjkPathPunct, r) {
+		return true
+	}
+	return unicode.IsPunct(r) && unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul, unicode.Bopomofo)
+}
+
+func stripPathWrappers(token string) string {
+	runes := []rune(token)
+	for len(runes) > 0 {
+		closer, ok := pathWrappers[runes[0]]
+		if !ok || containsRune(runes[1:], closer) {
+			break
+		}
+		runes = runes[1:]
+	}
+	return string(runes)
+}
+
+func containsRune(runes []rune, r rune) bool {
+	for _, c := range runes {
+		if c == r {
+			return true
+		}
+	}
+	return false
+}
+
+func pathNeedsQuotes(path string) bool {
+	if strings.Contains(path, " ") {
+		return true
+	}
+	for _, r := range path {
+		if isCJKPunct(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func lastPathToken(before string) string {
@@ -404,6 +550,10 @@ func applyComplete(line, prefix string, col int, item completeItem) (string, int
 		start = 0
 	}
 	repl := item.Value
+	quotedPrefix := strings.HasPrefix(prefix, "\"") || strings.HasPrefix(prefix, "@\"")
+	if quotedPrefix && strings.HasSuffix(repl, "\"") && col < len(runes) && runes[col] == '"' {
+		col++
+	}
 	if strings.HasPrefix(prefix, "/") && !strings.Contains(prefix[1:], "/") {
 		repl = "/" + item.Value + " "
 	} else if !item.Dir && !strings.HasSuffix(item.Value, " ") && !strings.HasSuffix(item.Value, "/") {

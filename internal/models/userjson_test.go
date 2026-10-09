@@ -318,6 +318,45 @@ func TestLoadUserJSONSamplingParams(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONForceAdaptiveThinkingFalse(t *testing.T) {
+	on := true
+	RegisterProvider(ProviderSpec{
+		ID: "adapt-json", DefaultAPI: "anthropic-messages", DefaultID: "m",
+		Models: []Model{{
+			Provider: "adapt-json", ID: "m",
+			Compat: &Compat{ForceAdaptiveThinking: &on, ThinkingFormat: "keep"},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("adapt-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "adapt-json": {
+      "models": [
+        {"id": "m", "compat": {"forceAdaptiveThinking": false}}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := Lookup("adapt-json", "m")
+	if !ok || m.Compat == nil || m.Compat.ForceAdaptiveThinking == nil || *m.Compat.ForceAdaptiveThinking {
+		t.Fatalf("forceAdaptiveThinking = %+v ok=%v", m.Compat, ok)
+	}
+	if m.Compat.ThinkingFormat != "keep" {
+		t.Fatalf("thinking format lost: %+v", m.Compat)
+	}
+}
+
 func TestOpenAICatalogUsesResponsesAPI(t *testing.T) {
 	if APIFor("openai", "gpt-4o") != "openai-responses" {
 		t.Fatalf("openai gpt-4o api = %q", APIFor("openai", "gpt-4o"))

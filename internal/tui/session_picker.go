@@ -367,7 +367,7 @@ func (m Model) applyPickedSession() (tea.Model, tea.Cmd) {
 		m.engine.AdoptSession(opened)
 		m.reloadFromSession()
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("resumed " + opened.ID() + "\n" + opened.File())})
+	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(resumedSessionNote(opened))})
 	return m, nil
 }
 
@@ -391,7 +391,7 @@ func (m Model) handleResumeCommand(rest string) (tea.Model, tea.Cmd) {
 	if err != nil {
 		if all, e2 := session.ListAll(m.engine.Opts.AgentDir); e2 == nil {
 			for _, pth := range all {
-				h, _, e3 := session.Load(pth)
+				h, _, _, e3 := session.Load(pth)
 				if e3 == nil && (h.ID == rest || strings.HasPrefix(h.ID, rest)) {
 					opened, err = session.Open(pth)
 					break
@@ -404,5 +404,13 @@ func (m Model) handleResumeCommand(rest string) (tea.Model, tea.Cmd) {
 	}
 	m.engine.AdoptSession(opened)
 	m.reloadFromSession()
-	return note("resumed " + opened.ID() + "\n" + opened.File())
+	return note(resumedSessionNote(opened))
+}
+
+func resumedSessionNote(opened *session.Manager) string {
+	note := "resumed " + opened.ID() + "\n" + opened.File()
+	if w := opened.LoadWarningText(); w != "" {
+		return w + "\n" + note
+	}
+	return note
 }

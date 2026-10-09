@@ -61,7 +61,7 @@ func TestSlashScopedModelsSessionIgnoresSettingsUnmatched(t *testing.T) {
 
 func TestSlashScopedModelsEmptySessionShowsSettingsUnmatched(t *testing.T) {
 	cfg := testCfg()
-	cfg.EnabledModels = []string{"anthropic/claude-sonnet-4", "missing/model"}
+	cfg.EnabledModels = []string{"anthropic/claude-haiku-4-5", "missing/model"}
 	m := New(cfg)
 	m.engine = &runtime.Engine{Opts: runtime.Options{Config: cfg, Offline: true}}
 	m = submit(m, "/scoped-models")

@@ -16,6 +16,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `model` / `defaultModel` | Default model id |
 | `theme` | TUI theme name |
 | `thinking` / `defaultThinkingLevel` | `off` … `max` |
+| `thinkingDisplay` | Anthropic thinking text: `summarized` (default) or `omitted`. Any other value is ignored |
 | `thinkingBudgets` | Map of thinking level → token budget |
 | `modelThinkingLevels` | Per-model default thinking level |
 | `contextWindow` | Optional override. Effective window is this value when set, otherwise the selected model's catalog `contextWindow`, otherwise `200000`. Omit the key (or the historical default `200000`) to follow the model. `200000` itself is not stored as an override |

@@ -222,14 +222,14 @@ func TestSlashModelOpensPicker(t *testing.T) {
 
 func TestSlashModelExactMatchDoesNotOpenPicker(t *testing.T) {
 	m := New(testCfg())
-	m = submit(m, "/model anthropic/claude-haiku-4")
+	m = submit(m, "/model anthropic/claude-haiku-4-5")
 	if m.modelPickerActive() {
 		t.Fatal("exact spec should apply without a picker")
 	}
-	if m.cfg.ResolvedModel() != "claude-haiku-4" {
+	if m.cfg.ResolvedModel() != "claude-haiku-4-5" {
 		t.Fatalf("model = %s", m.cfg.ResolvedModel())
 	}
-	if m.cfg.DefaultModel == "claude-haiku-4" {
+	if m.cfg.DefaultModel == "claude-haiku-4-5" {
 		t.Fatal("session-only /model should not rewrite the saved default")
 	}
 }
@@ -243,20 +243,20 @@ func TestModelPickerEnterSelectsSessionOnly(t *testing.T) {
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	found := false
 	for i, it := range m.models.filtered {
-		if it.ID == "anthropic/claude-haiku-4" {
+		if it.ID == "anthropic/claude-haiku-4-5" {
 			m.models.selected = i
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatal("missing anthropic/claude-haiku-4")
+		t.Fatal("missing anthropic/claude-haiku-4-5")
 	}
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.modelPickerActive() {
 		t.Fatal("enter should close the picker")
 	}
-	if m.cfg.ResolvedModel() != "claude-haiku-4" {
+	if m.cfg.ResolvedModel() != "claude-haiku-4-5" {
 		t.Fatalf("session model = %s", m.cfg.ResolvedModel())
 	}
 	if m.cfg.DefaultModel != "claude-sonnet-4" {
@@ -295,27 +295,27 @@ func TestModelPickerCtrlSPersistsDefault(t *testing.T) {
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	found := false
 	for i, it := range m.models.filtered {
-		if it.ID == "anthropic/claude-haiku-4" {
+		if it.ID == "anthropic/claude-haiku-4-5" {
 			m.models.selected = i
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatal("missing anthropic/claude-haiku-4")
+		t.Fatal("missing anthropic/claude-haiku-4-5")
 	}
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlS})
 	if m.modelPickerActive() {
 		t.Fatal("ctrl+s should close the picker")
 	}
-	if m.cfg.DefaultModel != "claude-haiku-4" {
+	if m.cfg.DefaultModel != "claude-haiku-4-5" {
 		t.Fatalf("default = %s", m.cfg.DefaultModel)
 	}
 	loaded, err := config.Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.DefaultModel != "claude-haiku-4" {
+	if loaded.DefaultModel != "claude-haiku-4-5" {
 		t.Fatalf("saved default = %s", loaded.DefaultModel)
 	}
 }

@@ -79,8 +79,10 @@ type Engine struct {
 	ThemeFiles []string // enabled theme files from pkgmgr.Resolve; CLI --theme stays on Opts.ThemePaths
 	// promptTemplateWarnings are the latest prompt-template load warnings.
 	promptTemplateWarnings []string
-	Scoped                 []models.Spec
-	System                 string
+	// skillWarnings are the latest skill-load warnings.
+	skillWarnings []string
+	Scoped        []models.Spec
+	System        string
 
 	Steering  func() []ai.Message
 	FollowUp  func() []ai.Message
@@ -253,7 +255,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		}
 	}
 
-	sk := loadSkills(opts, rs)
+	sk, skillDiags := loadSkills(opts, rs)
 	tpls, promptDiags := loadTemplates(opts, rs)
 	themeFiles := loadThemeFiles(opts, rs)
 
@@ -274,6 +276,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.setBugExtensions(hostPaths(hosts), extSpecs, rs)
 	e.Skills = sk
 	e.Templates = tpls
+	e.skillWarnings = skills.FormatWarnings(skillDiags)
 	e.promptTemplateWarnings = prompt.FormatWarnings(promptDiags)
 	e.ThemeFiles = themeFiles
 	e.System = sys
@@ -1091,6 +1094,7 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 	return agent.Run(ctx, sf, req, e.Executor(), agent.Config{
 		Model:           e.Opts.Config.ResolvedModel(),
 		Thinking:        e.Opts.Config.Thinking,
+		ThinkingDisplay: e.Opts.Config.ThinkingDisplay,
 		Steering:        e.Steering,
 		FollowUp:        e.FollowUp,
 		NewUserMessages: newUsers,

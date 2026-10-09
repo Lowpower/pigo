@@ -233,6 +233,38 @@ func TestNewHonorsDisabledPromptAndTheme(t *testing.T) {
 	}
 }
 
+func TestNewWarnsOnSkillWithoutDescription(t *testing.T) {
+	isolateHome(t)
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	path := filepath.Join(agent, "skills", "blank", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("---\nname: blank\n---\n\nno description\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e, err := New(context.Background(), testEngineOpts(agent, cwd))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if names := skillNames(e.Skills); len(names) != 0 {
+		t.Fatalf("skills = %v", names)
+	}
+	warnings := e.SkillWarnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], path) || !strings.Contains(warnings[0], "has no description") {
+		t.Fatalf("warnings = %v", warnings)
+	}
+
+	e.Reload()
+	warnings = e.SkillWarnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], path) {
+		t.Fatalf("warnings after reload = %v", warnings)
+	}
+}
+
 func TestNewWarnsOnMalformedPromptFrontmatter(t *testing.T) {
 	agent := t.TempDir()
 	cwd := t.TempDir()

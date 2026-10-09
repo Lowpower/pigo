@@ -56,8 +56,10 @@ func (m Model) extraSlashCommands() []slash.Command {
 		return nil
 	}
 	var extra []slash.Command
-	for _, s := range m.engine.Skills {
-		extra = append(extra, slash.Command{Name: s.Name, Description: s.Description})
+	if m.cfg.SkillCommandsEnabled() {
+		for _, s := range m.engine.Skills {
+			extra = append(extra, slash.Command{Name: "skill:" + s.Name, Description: s.Description})
+		}
 	}
 	for _, t := range m.engine.Templates {
 		extra = append(extra, slash.Command{Name: t.Name, Description: t.Description})

@@ -90,8 +90,11 @@ type PromptCache struct {
 
 // Compat is optional per-model wire-protocol knobs from the catalog overlay.
 type Compat struct {
-	ThinkingFormat                  string `json:"thinkingFormat,omitempty"`
-	SupportsMidConvoEffort          bool   `json:"supportsMidConvoEffort,omitempty"`
+	ThinkingFormat         string `json:"thinkingFormat,omitempty"`
+	SupportsMidConvoEffort bool   `json:"supportsMidConvoEffort,omitempty"`
+	// ForceAdaptiveThinking requires Anthropic adaptive thinking.
+	// Nil leaves the model on budget thinking. False overrides a builtin true.
+	ForceAdaptiveThinking           *bool  `json:"forceAdaptiveThinking,omitempty"`
 	SupportsReasoningEffort         bool   `json:"supportsReasoningEffort,omitempty"`
 	SupportsExplicitPromptCacheMode bool   `json:"supportsExplicitPromptCacheMode,omitempty"`
 	VLLMPriority                    any    `json:"vllmPriority,omitempty"`
@@ -174,12 +177,18 @@ func ResolvePatternsIn(patterns []string, list []Model) []Spec {
 			}
 		}
 		g, gerr := glob.Compile(strings.ToLower(pattern))
+		exactID := patternIsExactID(pattern)
 		for _, m := range list {
 			hay := strings.ToLower(m.Provider + "/" + m.ID)
-			match := strings.Contains(hay, strings.ToLower(pattern)) ||
-				strings.Contains(strings.ToLower(m.ID), strings.ToLower(pattern))
-			if gerr == nil && g.Match(hay) {
-				match = true
+			var match bool
+			if exactID {
+				match = hay == strings.ToLower(pattern)
+			} else {
+				match = strings.Contains(hay, strings.ToLower(pattern)) ||
+					strings.Contains(strings.ToLower(m.ID), strings.ToLower(pattern))
+				if gerr == nil && g.Match(hay) {
+					match = true
+				}
 			}
 			if !match {
 				continue
@@ -208,6 +217,16 @@ func UnmatchedPatterns(patterns []string, list []Model) []string {
 		}
 	}
 	return out
+}
+
+// patternIsExactID is a provider/id with no glob metacharacters.
+// Those patterns select that one catalog row. Bare names and globs stay
+// substring and glob matches.
+func patternIsExactID(pattern string) bool {
+	if !strings.Contains(pattern, "/") {
+		return false
+	}
+	return !strings.ContainsAny(pattern, "*?[]")
 }
 
 // Cycle returns the next/previous catalog (or scoped) model.

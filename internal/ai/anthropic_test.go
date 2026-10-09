@@ -392,7 +392,7 @@ func TestAnthropicStreamPricesCatalogCost(t *testing.T) {
 	client := &AnthropicClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
 	stream, err := client.StreamFn()(context.Background(), Context{
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
-	}, Options{Provider: "anthropic", Model: "claude-sonnet-4"})
+	}, Options{Provider: "anthropic", Model: "claude-sonnet-4-5"})
 	if err != nil {
 		t.Fatal(err)
 	}

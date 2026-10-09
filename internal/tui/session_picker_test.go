@@ -27,6 +27,26 @@ func TestSlashResumeOpensPicker(t *testing.T) {
 	}
 }
 
+func TestResumeWarnsAboutTornTail(t *testing.T) {
+	m, sess := resumeFixture(t)
+	before, err := os.ReadFile(sess.File())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sess.File(), append(before, []byte(`{"type":"message","id":"zz","timest`)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.editor.SetValue("/resume " + sess.ID())
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	var text string
+	for _, e := range m.transcript {
+		text += e.rendered
+	}
+	if !strings.Contains(text, "unreadable line") {
+		t.Fatalf("transcript=%s", text)
+	}
+}
+
 func TestSlashResumeIDStillSwitches(t *testing.T) {
 	m, sess := resumeFixture(t)
 	other := newFlushedSession(t, m.engine.Opts.Cwd, m.engine.Opts.AgentDir, "other")
@@ -140,7 +160,7 @@ func TestSessionPickerRenamePersists(t *testing.T) {
 	}
 	m.sessions.renameBuf = "new-name"
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
-	h, _, err := session.Load(sess.File())
+	h, _, _, err := session.Load(sess.File())
 	if err != nil {
 		t.Fatal(err)
 	}

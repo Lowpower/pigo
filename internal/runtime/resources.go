@@ -77,26 +77,33 @@ func spawnPathKey(path string) string {
 }
 
 func (e *Engine) applyResolved(rs []pkgmgr.Resource) {
-	e.Skills = loadSkills(e.Opts, rs)
+	sk, skillDiags := loadSkills(e.Opts, rs)
+	e.Skills = sk
+	e.skillWarnings = skills.FormatWarnings(skillDiags)
 	tpls, diags := loadTemplates(e.Opts, rs)
 	e.Templates = tpls
 	e.promptTemplateWarnings = prompt.FormatWarnings(diags)
 	e.ThemeFiles = loadThemeFiles(e.Opts, rs)
 }
 
-func loadSkills(opts Options, rs []pkgmgr.Resource) []skills.Skill {
+func loadSkills(opts Options, rs []pkgmgr.Resource) ([]skills.Skill, []skills.Diagnostic) {
 	paths := append([]string{}, opts.SkillPaths...)
 	if !opts.NoSkills {
 		paths = append(paths, enabledPaths(rs, pkgmgr.KindSkills)...)
 	}
-	sk, _ := skills.Discover("", "", paths, false, false)
-	return sk
+	return skills.Discover("", "", paths, false, false)
 }
 
 // PromptTemplateWarnings returns the latest prompt-template load warnings.
 // Each line is a full "Warning: ..." sentence for startup stderr and /reload.
 func (e *Engine) PromptTemplateWarnings() []string {
 	return e.promptTemplateWarnings
+}
+
+// SkillWarnings returns the latest skill-load warnings.
+// Each line is a full "Warning: ..." sentence for the TUI and non-interactive stderr.
+func (e *Engine) SkillWarnings() []string {
+	return e.skillWarnings
 }
 
 func loadTemplates(opts Options, rs []pkgmgr.Resource) ([]prompt.Template, []prompt.Diagnostic) {
@@ -160,8 +167,9 @@ func (e *Engine) extendResourcesFromExtensions(ctx context.Context, reason strin
 	})
 	if paths := asStringSlice(res["skillPaths"]); len(paths) > 0 {
 		e.Opts.SkillPaths = append(e.Opts.SkillPaths, paths...)
-		more, _ := skills.Discover("", "", paths, false, false)
+		more, diags := skills.Discover("", "", paths, false, false)
 		e.Skills = append(e.Skills, more...)
+		e.skillWarnings = append(e.skillWarnings, skills.FormatWarnings(diags)...)
 	}
 	if paths := asStringSlice(res["promptPaths"]); len(paths) > 0 {
 		e.Opts.PromptPaths = append(e.Opts.PromptPaths, paths...)

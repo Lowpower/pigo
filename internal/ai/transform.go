@@ -27,15 +27,18 @@ func recordedProvider(opts Options, fallback string) string {
 }
 
 // transformMessages rewrites a copy of msgs for the target model.
-// Assistant messages whose provider, api, and model all match keep thinking
-// blocks and tool-call ids. Anything else drops signatures: thinking text
-// becomes a plain text block, redacted thinking is discarded, and tool-call
-// ids are rewritten with normalize when it is set. Tool results that point
-// at a rewritten id are updated to match. The input messages are not modified.
+// It first drops aborted turns, closes orphan tool calls, and downgrades
+// images the target model cannot accept. Assistant messages whose provider,
+// api, and model all match keep thinking blocks and tool-call ids. Anything
+// else drops signatures: thinking text becomes a plain text block, redacted
+// thinking is discarded, and tool-call ids are rewritten with normalize when
+// it is set. Tool results that point at a rewritten id are updated to match.
+// The input messages are not modified.
 func transformMessages(msgs []Message, target replayTarget, normalize toolCallIDNormalizer) []Message {
 	if len(msgs) == 0 {
 		return msgs
 	}
+	msgs = sanitizeProviderMessages(msgs, modelSupportsImages(target.Provider, target.Model))
 	out := make([]Message, len(msgs))
 	idMap := map[string]string{}
 	for i, m := range msgs {
