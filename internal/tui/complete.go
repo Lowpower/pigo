@@ -110,7 +110,21 @@ func slashSuggestions(before string, cmds []slash.Command) (items []completeItem
 		return nil, "", false
 	}
 	q := before[1:]
-	filtered := fuzzyFilter(cmds, q, func(c slash.Command) string { return c.Name })
+	// Skill commands are stored as skill:name. Rank by the bare name first so the
+	// fixed prefix does not outscore the skill, then match leftover skill commands
+	// on the full name so /skill and /skill: still list them.
+	primary := fuzzyFilter(cmds, q, func(c slash.Command) string { return skillBareName(c.Name) })
+	seen := make(map[string]bool, len(primary))
+	for _, c := range primary {
+		seen[c.Name] = true
+	}
+	var rest []slash.Command
+	for _, c := range cmds {
+		if strings.HasPrefix(c.Name, "skill:") && !seen[c.Name] {
+			rest = append(rest, c)
+		}
+	}
+	filtered := append(primary, fuzzyFilter(rest, q, func(c slash.Command) string { return c.Name })...)
 	for _, c := range filtered {
 		if len(items) >= completeMaxItems {
 			break
@@ -121,6 +135,14 @@ func slashSuggestions(before string, cmds []slash.Command) (items []completeItem
 		return nil, "", false
 	}
 	return items, before, true
+}
+
+func skillBareName(name string) string {
+	const prefix = "skill:"
+	if strings.HasPrefix(name, prefix) {
+		return name[len(prefix):]
+	}
+	return name
 }
 
 func commandArgSuggestions(before string, eng *runtime.Engine) (items []completeItem, prefix string, ok bool) {
