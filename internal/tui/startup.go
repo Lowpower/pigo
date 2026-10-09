@@ -17,10 +17,15 @@ func (m Model) showStartupListing() bool {
 }
 
 func (m Model) startupView() string {
+	warnings := m.skillWarningBlock()
 	if !m.showStartupListing() {
-		return ""
+		return warnings
 	}
 	var b strings.Builder
+	if warnings != "" {
+		b.WriteString(warnings)
+		b.WriteString("\n\n")
+	}
 	b.WriteString(m.startupHeader())
 	b.WriteString("\n\n")
 	if line := m.scopedModelsLine(); line != "" {
@@ -31,6 +36,17 @@ func (m Model) startupView() string {
 		b.WriteString(res)
 	}
 	return b.String()
+}
+
+func (m Model) skillWarningBlock() string {
+	if m.engine == nil {
+		return ""
+	}
+	lines := m.engine.SkillWarnings()
+	if len(lines) == 0 {
+		return ""
+	}
+	return m.metaStyle.Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) startupHeader() string {

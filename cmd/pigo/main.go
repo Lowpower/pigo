@@ -456,6 +456,11 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	for _, w := range eng.PromptTemplateWarnings() {
 		fmt.Fprintln(cmd.ErrOrStderr(), w)
 	}
+	if mode != "interactive" {
+		for _, w := range eng.SkillWarnings() {
+			fmt.Fprintln(cmd.ErrOrStderr(), w)
+		}
+	}
 	defer eng.Close()
 	if leftover := eng.UnclaimedFlags(); len(leftover) > 0 {
 		return fmt.Errorf("%s", formatUnclaimed(leftover))

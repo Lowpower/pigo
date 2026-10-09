@@ -5,11 +5,14 @@ catalog and reads the file when the task matches.
 
 ## Discovery (first match of a name wins)
 
-1. `~/.pigo/agent/skills/`
-2. `cwd/.pigo/skills/` (trusted project)
-3. `~/.agents/skills/` (user; always)
-4. `cwd/.agents/skills` and ancestor `.agents/skills` up to the git root (trusted project)
-5. `--skill` paths, `settings.skills[]`, and package resources
+Project skills win over user skills. Within one level, the first file found is kept.
+
+1. `--skill` paths
+2. Project `settings.skills[]` (trusted project)
+3. `cwd/.pigo/skills/`, then `cwd/.agents/skills` and ancestor `.agents/skills` up to the git root (trusted project)
+4. User `settings.skills[]`
+5. `~/.pigo/agent/skills/`, then `~/.agents/skills/` (user; always)
+6. Package resources
 
 `--no-skills` skips discovery. Untrusted projects skip project-local skill
 dirs; user `~/.agents/skills` still loads.
@@ -31,8 +34,11 @@ disable-model-invocation: false
 2. …
 ```
 
-- `description` is **required** (files without it are ignored)
-- `name` defaults to the parent directory; must match `a-z0-9-`, length ≤ 64
+- `description` is **required** on `SKILL.md`. A missing description, including a file with no frontmatter or an unclosed `---`, is not loaded and produces a startup warning. A plain `.md` file without a description is ignored silently
+- a `SKILL.md` whose closed frontmatter is invalid YAML is not loaded and produces a warning. An unclosed fence is treated as a missing description, not a YAML error
+- `name` defaults to the parent directory. It does not have to match that directory. Preferred form is `a-z0-9-`, length ≤ 64, no leading, trailing, or doubled hyphens. An invalid name is still loaded, with a warning
+- `description` should be at most 1024 characters. A longer description is still loaded, with a warning
+- the same name from two different files keeps the first one and warns with both paths. A symlink to a file already loaded is not a conflict
 - `disable-model-invocation: true` hides the skill from the LLM catalog
 
 ## Slash
