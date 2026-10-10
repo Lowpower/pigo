@@ -162,6 +162,111 @@ func TestClipboardPasteImageInsertsPath(t *testing.T) {
 	}
 }
 
+func TestClipboardPasteFilePathsSkipImage(t *testing.T) {
+	m := editorModel()
+	imageReads := 0
+	m.editor.readFiles = func() []string {
+		return []string{"/tmp/screenshot.png", "/tmp/My Photos/photo.png"}
+	}
+	m.editor.readImage = func() *clipImage {
+		imageReads++
+		return &clipImage{bytes: []byte{0x89, 0x50, 0x4e, 0x47}, mime: "image/png"}
+	}
+	m.editor.readText = func() string { return "should-not-use" }
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "/tmp/screenshot.png\n/tmp/My Photos/photo.png" {
+		t.Fatalf("paths = %q", m.editor.Value())
+	}
+	if imageReads != 0 {
+		t.Fatalf("image reads = %d", imageReads)
+	}
+}
+
+func TestClipboardPasteFilePathsSpacing(t *testing.T) {
+	m := editorModel()
+	m.editor.readFiles = func() []string { return []string{"/tmp/photo.png"} }
+	m.editor.readImage = func() *clipImage { t.Fatal("image read"); return nil }
+	m.editor.SetValue("Review:")
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "Review: /tmp/photo.png" {
+		t.Fatalf("punctuation = %q", m.editor.Value())
+	}
+
+	m.editor.SetValue("确认")
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "确认 /tmp/photo.png" {
+		t.Fatalf("unicode = %q", m.editor.Value())
+	}
+
+	m.editor.SetValue("see ")
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "see /tmp/photo.png" {
+		t.Fatalf("existing space = %q", m.editor.Value())
+	}
+
+	m.editor.SetValue("ab")
+	m.editor.moveTo(0, 1)
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "a /tmp/photo.png b" {
+		t.Fatalf("middle = %q", m.editor.Value())
+	}
+}
+
+func TestClipboardPasteFilePathsBashQuotes(t *testing.T) {
+	m := editorModel()
+	m.editor.readFiles = func() []string {
+		return []string{"/tmp/My Photos/photo.png", "/tmp/$(touch hacked).png", "/tmp/plain.png"}
+	}
+	m.editor.readImage = func() *clipImage { t.Fatal("image read"); return nil }
+	m.editor.SetValue("!catDEST")
+	m.editor.moveTo(0, 4)
+	m = send(m, pasteImageKey())
+	want := "!cat '/tmp/My Photos/photo.png' '/tmp/$(touch hacked).png' /tmp/plain.png DEST"
+	if m.editor.Value() != want {
+		t.Fatalf("bash = %q", m.editor.Value())
+	}
+}
+
+func TestClipboardPasteFilePathsRejectControlCharacters(t *testing.T) {
+	m := editorModel()
+	imageReads := 0
+	m.editor.SetValue("keep")
+	m.editor.readFiles = func() []string { return []string{"/tmp/photo\x1b]0;unsafe\x07.png"} }
+	m.editor.readImage = func() *clipImage {
+		imageReads++
+		return &clipImage{bytes: []byte{0x89, 0x50, 0x4e, 0x47}, mime: "image/png"}
+	}
+	m.editor.readText = func() string { return "should-not-use" }
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "keep" {
+		t.Fatalf("value = %q", m.editor.Value())
+	}
+	if imageReads != 0 {
+		t.Fatalf("image reads = %d", imageReads)
+	}
+}
+
+func TestClipboardPasteNoFilePathsFallsBack(t *testing.T) {
+	m := editorModel()
+	png := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}
+	m.editor.readFiles = func() []string { return nil }
+	m.editor.readImage = func() *clipImage { return &clipImage{bytes: png, mime: "image/png"} }
+	m.editor.readText = func() string { return "should-not-use" }
+	m = send(m, pasteImageKey())
+	if !strings.Contains(m.editor.Value(), "pigo-clipboard-") {
+		t.Fatalf("image fallback = %q", m.editor.Value())
+	}
+
+	m = editorModel()
+	m.editor.readFiles = func() []string { return []string{} }
+	m.editor.readImage = func() *clipImage { return nil }
+	m.editor.readText = func() string { return "clip-text" }
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "clip-text" {
+		t.Fatalf("text fallback = %q", m.editor.Value())
+	}
+}
+
 func TestClipboardPasteFallsBackToText(t *testing.T) {
 	m := editorModel()
 	m.editor.readImage = func() *clipImage { return nil }
