@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/Lowpower/pigo/internal/bom"
 )
 
 // Store is the auth.json credential store.
@@ -132,7 +134,7 @@ func (s *Store) loadUnlocked() (map[string]Credential, error) {
 	if len(bytes.TrimSpace(b)) == 0 {
 		return map[string]Credential{}, nil
 	}
-	return decodeAuthJSON(b)
+	return decodeAuthJSON(bom.Strip(b))
 }
 
 func (s *Store) saveUnlocked(data map[string]Credential) error {

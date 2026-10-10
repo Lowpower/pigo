@@ -207,6 +207,33 @@ func TestDiscoverPlainMarkdownWithoutDescriptionIsSilent(t *testing.T) {
 	}
 }
 
+func TestParseFrontmatterStripsBOM(t *testing.T) {
+	fm, body := ParseFrontmatter("\ufeff---\nname: demo\ndescription: From BOM\n---\n\nbody\n")
+	if fm["name"] != "demo" || fm["description"] != "From BOM" || body != "body" {
+		t.Fatalf("fm=%v body=%q", fm, body)
+	}
+}
+
+func TestDiscoverSkillStripsBOM(t *testing.T) {
+	agent := t.TempDir()
+	path := filepath.Join(agent, "skills", "bommed", "SKILL.md")
+	writeSkillFile(t, path, "\ufeff---\nname: bommed\ndescription: Loaded despite BOM\n---\n\nDo the thing.\n")
+	got, diags := Discover("", agent, nil, true, false)
+	if len(diags) != 0 || len(got) != 1 || got[0].Name != "bommed" || got[0].Description != "Loaded despite BOM" {
+		t.Fatalf("skills = %+v diagnostics = %+v", got, diags)
+	}
+
+	broken := filepath.Join(agent, "skills", "broken", "SKILL.md")
+	writeSkillFile(t, broken, "\ufeff---\nname: broken\ndescription: Broken: unquoted colon\n---\n\nbody\n")
+	got, diags = Discover("", agent, nil, true, false)
+	if len(got) != 1 || got[0].Name != "bommed" {
+		t.Fatalf("malformed BOM skill loaded: %+v", got)
+	}
+	if len(diags) != 1 || !strings.Contains(diags[0].Message, "malformed skill frontmatter") {
+		t.Fatalf("diagnostics = %+v", diags)
+	}
+}
+
 func writeSkillFile(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

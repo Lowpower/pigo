@@ -148,6 +148,22 @@ func TestInvalidNameWithSlashDropped(t *testing.T) {
 	}
 }
 
+func TestLoadThemeStripsBOM(t *testing.T) {
+	dir := t.TempDir()
+	themes := filepath.Join(dir, "themes")
+	if err := os.Mkdir(themes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "\ufeff" + `{"name":"bommed","user":"#111111","assistant":"#222222","tool":"#333333","error":"#ff0000","muted":"240","accent":"#00aaff"}`
+	if err := os.WriteFile(filepath.Join(themes, "bommed.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	th := Load("bommed", "", dir)
+	if th.Name != "bommed" || th.Accent != "#00aaff" {
+		t.Fatalf("%+v", th)
+	}
+}
+
 func TestNamesIncludesExtra(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "extra.json")

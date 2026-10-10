@@ -391,6 +391,34 @@ func TestCheckAuthBedrockAmbient(t *testing.T) {
 	}
 }
 
+func TestReadAuthJSONStripsBOM(t *testing.T) {
+	dir := t.TempDir()
+	raw := "\ufeff" + `{"openai":{"type":"api_key","key":"sk-bom"}}`
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := Open(dir)
+	c, ok, err := s.Read("openai")
+	if err != nil || !ok || c.Key != "sk-bom" {
+		t.Fatalf("read bom auth: ok=%v err=%v cred=%+v", ok, err, c)
+	}
+	if _, err := s.Modify("openai", func(cur *Credential) (*Credential, error) {
+		return cur, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) >= 3 && string(b[:3]) == "\ufeff" {
+		t.Fatalf("save wrote a BOM: %q", b)
+	}
+	if !json.Valid(b) {
+		t.Fatalf("saved auth is not JSON: %s", b)
+	}
+}
+
 func TestCheckAuthBedrockNeedsSecret(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIATEST")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "")

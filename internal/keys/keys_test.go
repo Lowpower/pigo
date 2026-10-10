@@ -71,6 +71,35 @@ func TestHotkeysTextUsesEffectiveKeys(t *testing.T) {
 	}
 }
 
+func TestLoadKeybindingsStripsBOM(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keybindings.json")
+	if err := os.WriteFile(path, []byte("\ufeff"+`{"app.model.select":"ctrl+k"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newManager(dir, false)
+	if !m.Matches("ctrl+k", "app.model.select") {
+		t.Fatal("BOM keybindings were ignored")
+	}
+	legacy := "\ufeff" + `{"selectModel":"ctrl+k"}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !RewriteLegacyFile(path) {
+		t.Fatal("BOM legacy file was not rewritten")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(string(b), "\ufeff") || strings.Contains(string(b), `"selectModel"`) {
+		t.Fatalf("rewrite kept BOM or legacy name: %s", b)
+	}
+	if !strings.Contains(string(b), `"app.model.select"`) {
+		t.Fatalf("rewrite dropped binding: %s", b)
+	}
+}
+
 func TestRewriteLegacyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "keybindings.json")

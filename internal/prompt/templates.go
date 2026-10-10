@@ -152,6 +152,7 @@ func loadFile(path, source string) (Template, []Diagnostic) {
 // validateClosedFrontmatter rejects YAML that skills.ParseFrontmatter would
 // otherwise accept. An unclosed opening fence is not a closed block.
 func validateClosedFrontmatter(s string) error {
+	s = strings.TrimPrefix(s, "\ufeff")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	if !strings.HasPrefix(s, "---\n") {
 		return nil

@@ -1,8 +1,8 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/Lowpower/pigo/internal/bom"
 )
 
 // DefaultContextWindow is the effective window when the user did not set
@@ -554,11 +556,13 @@ func Load(configDir string) (Config, error) {
 	v.AutomaticEnv()
 
 	var cfg Config
-	if err := v.ReadInConfig(); err != nil {
-		var notFound viper.ConfigFileNotFoundError
-		if !errors.As(err, &notFound) {
+	settingsPath := filepath.Join(configDir, "settings.json")
+	if b, err := os.ReadFile(settingsPath); err != nil {
+		if !os.IsNotExist(err) {
 			return cfg, err
 		}
+	} else if err := v.MergeConfig(bytes.NewReader(bom.Strip(b))); err != nil {
+		return cfg, err
 	}
 	if err := v.Unmarshal(&cfg); err != nil {
 		return cfg, err
@@ -593,7 +597,7 @@ func applyThinkingAlias(configDir string, cfg *Config) {
 		return
 	}
 	var raw map[string]any
-	if json.Unmarshal(b, &raw) != nil {
+	if json.Unmarshal(bom.Strip(b), &raw) != nil {
 		return
 	}
 	if _, ok := raw["thinking"]; ok {
@@ -627,7 +631,7 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		Compaction          json.RawMessage `json:"compaction"`
 		Container           json.RawMessage `json:"container"`
 	}
-	if err := json.Unmarshal(b, &extra); err != nil {
+	if err := json.Unmarshal(bom.Strip(b), &extra); err != nil {
 		return
 	}
 	cfg.Packages = extra.Packages
@@ -694,7 +698,7 @@ func Save(configDir string, cfg Config) error {
 	path := filepath.Join(configDir, "settings.json")
 	existing := map[string]any{}
 	if b, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(b, &existing)
+		_ = json.Unmarshal(bom.Strip(b), &existing)
 	}
 	(&cfg).ensureAnalyticsTrackingID()
 	mergeSaveMap(existing, cfg)

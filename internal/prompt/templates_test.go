@@ -82,6 +82,36 @@ func TestDiscoverTemplatesNoFrontmatterUsesFilename(t *testing.T) {
 	}
 }
 
+func TestDiscoverTemplatesStripsBOM(t *testing.T) {
+	dir := t.TempDir()
+	body := "\ufeff---\ndescription: Review the named files\nargument-hint: <path>\n---\n\nReview these paths: $@\n"
+	if err := os.WriteFile(filepath.Join(dir, "review.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, diags := DiscoverTemplates("", "", []string{dir}, false, false)
+	if len(diags) != 0 || len(got) != 1 {
+		t.Fatalf("templates = %+v diagnostics = %+v", got, diags)
+	}
+	if got[0].Description != "Review the named files" || got[0].ArgumentHint != "<path>" || got[0].Content != "Review these paths: $@" {
+		t.Fatalf("%+v", got[0])
+	}
+
+	broken := "\ufeff---\ndescription: Broken: unquoted colon\n---\nDo something.\n"
+	if err := os.WriteFile(filepath.Join(dir, "invalid.md"), []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, diags = DiscoverTemplates("", "", []string{dir}, false, false)
+	if len(got) != 1 || got[0].Name != "review" {
+		t.Fatalf("malformed BOM template loaded: %+v", got)
+	}
+	if len(diags) != 1 || diags[0].Message == "" {
+		t.Fatalf("diagnostics = %+v", diags)
+	}
+	if !strings.Contains(FormatWarning(diags[0]), "malformed prompt template frontmatter") {
+		t.Fatalf("warning = %q", FormatWarning(diags[0]))
+	}
+}
+
 func TestDiscoverTemplatesValidFrontmatterFields(t *testing.T) {
 	dir := t.TempDir()
 	body := "---\ndescription: Review the named files\nargument-hint: <path>…\n---\n\nReview these paths: $@\n"

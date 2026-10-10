@@ -190,6 +190,7 @@ func loadFile(path, source string) (Skill, []Diagnostic) {
 // validateClosedFrontmatter rejects YAML that ParseFrontmatter would otherwise
 // accept. An unclosed opening fence is not a closed block.
 func validateClosedFrontmatter(s string) error {
+	s = strings.TrimPrefix(s, "\ufeff")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	if !strings.HasPrefix(s, "---\n") {
 		return nil
@@ -231,6 +232,7 @@ func validName(name string) bool {
 
 // ParseFrontmatter splits optional YAML --- frontmatter from a markdown body.
 func ParseFrontmatter(s string) (map[string]string, string) {
+	s = strings.TrimPrefix(s, "\ufeff")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	if !strings.HasPrefix(s, "---\n") {
 		return map[string]string{}, s

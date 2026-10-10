@@ -7,6 +7,25 @@ import (
 	"testing"
 )
 
+func TestApplyProjectStripsBOM(t *testing.T) {
+	user, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "\ufeff" + `{"theme":"light","shellPath":"/bin/custom-bash"}`
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ApplyProject(user, cwd, true)
+	if got.Theme != "light" || got.ShellPath != "/bin/custom-bash" {
+		t.Fatalf("theme=%q shellPath=%q", got.Theme, got.ShellPath)
+	}
+}
+
 func TestApplyProjectOverlaysTrustedSettings(t *testing.T) {
 	user, err := Load(t.TempDir())
 	if err != nil {

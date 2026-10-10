@@ -362,3 +362,19 @@ func TestOpenAICatalogUsesResponsesAPI(t *testing.T) {
 		t.Fatalf("openai gpt-4o api = %q", APIFor("openai", "gpt-4o"))
 	}
 }
+
+func TestLoadUserJSONStripsBOM(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	path := filepath.Join(t.TempDir(), "models.json")
+	body := "\ufeff" + `{"providers":{"bomprov":{"baseUrl":"https://example.test/v1","api":"openai-completions","models":[{"id":"m1"}]}}}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := Lookup("bomprov", "m1")
+	if !ok || m.BaseURL != "https://example.test/v1" {
+		t.Fatalf("model = %+v ok=%v", m, ok)
+	}
+}

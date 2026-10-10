@@ -5,7 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/Lowpower/pigo/internal/bom"
 )
 
 var errReadOnly = errors.New("read-only credential storage cannot modify auth.json")
@@ -23,7 +24,7 @@ func Migrate(agentDir string) []string {
 	oauthPath := filepath.Join(agentDir, "oauth.json")
 	if b, err := os.ReadFile(oauthPath); err == nil {
 		var oauth map[string]map[string]any
-		if json.Unmarshal(stripBOM(b), &oauth) == nil {
+		if json.Unmarshal(bom.Strip(b), &oauth) == nil {
 			for id, cred := range oauth {
 				c := Credential{Type: TypeOAuth, Extra: map[string]any{}}
 				for k, v := range cred {
@@ -48,7 +49,7 @@ func Migrate(agentDir string) []string {
 	settingsPath := filepath.Join(agentDir, "settings.json")
 	if b, err := os.ReadFile(settingsPath); err == nil {
 		var settings map[string]any
-		if json.Unmarshal(stripBOM(b), &settings) == nil {
+		if json.Unmarshal(bom.Strip(b), &settings) == nil {
 			if keys, ok := settings["apiKeys"].(map[string]any); ok {
 				for id, v := range keys {
 					if _, exists := migrated[id]; exists {
@@ -76,12 +77,6 @@ func Migrate(agentDir string) []string {
 	s := &Store{dir: agentDir}
 	_ = s.saveUnlocked(migrated)
 	return providers
-}
-
-func stripBOM(b []byte) []byte {
-	s := string(b)
-	s = strings.TrimPrefix(s, "\ufeff")
-	return []byte(s)
 }
 
 func jsonNumberMs(v any) int64 {

@@ -52,6 +52,45 @@ func TestLoadEnvOverride(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsStripsBOM(t *testing.T) {
+	dir := t.TempDir()
+	raw := "\ufeff" + `{
+  "theme": "light",
+  "defaultThinkingLevel": "high",
+  "packages": ["npm:@foo/bar"],
+  "keepMe": true
+}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme != "light" {
+		t.Fatalf("theme=%q", cfg.Theme)
+	}
+	if cfg.Thinking != "high" {
+		t.Fatalf("thinking=%q, want defaultThinkingLevel", cfg.Thinking)
+	}
+	if len(cfg.Packages) != 1 || cfg.Packages[0].Source != "npm:@foo/bar" {
+		t.Fatalf("packages=%+v", cfg.Packages)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(string(b), "\ufeff") {
+		t.Fatalf("save wrote a BOM: %q", b[:3])
+	}
+	if !strings.Contains(string(b), `"keepMe": true`) || !strings.Contains(string(b), `"theme": "light"`) {
+		t.Fatalf("saved file dropped keys: %s", b)
+	}
+}
+
 func TestLoadSettingsKeyNames(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"defaultProvider":"openai","defaultModel":"gpt-4o","theme":"light"}`), 0o644); err != nil {
