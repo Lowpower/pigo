@@ -39,6 +39,7 @@ type promptEditor struct {
 	jump   string // "", "forward", "backward"
 	undo   []string
 
+	readFiles func() []string
 	readImage func() *clipImage
 	readText  func() string
 	width     int
@@ -264,6 +265,19 @@ func (e *promptEditor) insertPaste(raw string) {
 }
 
 func (e *promptEditor) pasteClipboard() {
+	readFiles := e.readFiles
+	if readFiles == nil {
+		readFiles = readClipboardFilePaths
+	}
+	if paths := readFiles(); len(paths) > 0 {
+		text, ok := formatClipboardFilePaths(paths, e.bashMode())
+		if !ok {
+			return
+		}
+		before, after, hasBefore, hasAfter := e.clipboardNeighbors()
+		e.insert(padClipboardPaths(text, before, after, hasBefore, hasAfter))
+		return
+	}
 	readImg := e.readImage
 	if readImg == nil {
 		readImg = readClipboardImage
@@ -725,6 +739,35 @@ func normalizePaste(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func (e *promptEditor) clipboardNeighbors() (before, after rune, hasBefore, hasAfter bool) {
+	line, col := e.cursorLC()
+	lines := strings.Split(e.ta.Value(), "\n")
+	if line < 0 || line >= len(lines) {
+		return 0, 0, false, false
+	}
+	runes := []rune(lines[line])
+	if col > len(runes) {
+		col = len(runes)
+	}
+	if col > 0 {
+		before, hasBefore = runes[col-1], true
+	}
+	if col < len(runes) {
+		after, hasAfter = runes[col], true
+	}
+	return before, after, hasBefore, hasAfter
+}
+
+func padClipboardPaths(text string, before, after rune, hasBefore, hasAfter bool) string {
+	if hasBefore && !unicode.IsSpace(before) {
+		text = " " + text
+	}
+	if hasAfter && !unicode.IsSpace(after) {
+		text = text + " "
+	}
+	return text
 }
 
 func looksLikePath(s string) bool {
