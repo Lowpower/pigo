@@ -19,34 +19,34 @@ func registerBuiltins() {
 		Env:        []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"},
 		BaseURL:    "https://api.anthropic.com",
 		DefaultAPI: "anthropic-messages",
-		DefaultID:  "claude-sonnet-4-5",
+		DefaultID:  "claude-opus-4-8",
 	})
 	RegisterProvider(ProviderSpec{
 		ID:         "openai",
 		Env:        []string{"OPENAI_API_KEY"},
 		BaseURL:    "https://api.openai.com",
 		DefaultAPI: "openai-responses",
-		DefaultID:  "gpt-4o",
+		DefaultID:  "gpt-5.5",
 	})
 	RegisterProvider(ProviderSpec{
 		ID:         "opencode",
 		Env:        []string{"OPENCODE_API_KEY"},
 		BaseURL:    "https://opencode.ai/zen",
 		DefaultAPI: "opencode",
-		DefaultID:  "claude-sonnet-4",
+		DefaultID:  "kimi-k2.6",
 	})
 	RegisterProvider(ProviderSpec{
 		ID:         "google",
 		Env:        []string{"GEMINI_API_KEY"},
 		BaseURL:    "https://generativelanguage.googleapis.com",
 		DefaultAPI: "google-generative-ai",
-		DefaultID:  "gemini-2.5-pro",
+		DefaultID:  "gemini-3.1-pro-preview",
 	})
 	RegisterProvider(ProviderSpec{
 		ID:         "amazon-bedrock",
 		Env:        []string{"AWS_BEARER_TOKEN_BEDROCK", "AWS_PROFILE", "AWS_ACCESS_KEY_ID"},
 		DefaultAPI: "bedrock-converse-stream",
-		DefaultID:  "anthropic.claude-sonnet-4-5-20250929-v1:0",
+		DefaultID:  "us.anthropic.claude-opus-4-6-v1",
 	})
 	RegisterProvider(ProviderSpec{
 		ID:         "llama.cpp",
