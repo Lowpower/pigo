@@ -49,6 +49,20 @@ func TestGoogleBaseURLHTTPOptions(t *testing.T) {
 	}
 }
 
+func TestApplyGoogleUsageSplitsCachedContent(t *testing.T) {
+	var got Usage
+	applyGoogleUsage(&got, &genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:        100,
+		CandidatesTokenCount:    10,
+		CachedContentTokenCount: 80,
+		ThoughtsTokenCount:      7,
+		TotalTokenCount:         117,
+	})
+	if got.Input != 20 || got.Output != 10 || got.CacheRead != 80 || got.CacheWrite != 0 || got.TotalTokens != 110 {
+		t.Fatalf("usage = %+v", got)
+	}
+}
+
 func TestGoogleVertexMissingAuth(t *testing.T) {
 	c := &GoogleClient{Vertex: true, Project: "p"}
 	if msg := c.missingAuth(); msg == "" {

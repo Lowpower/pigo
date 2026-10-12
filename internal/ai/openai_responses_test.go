@@ -365,6 +365,72 @@ func TestOpenAIResponsesServiceTierPricing(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesSplitsCachedInputTokens(t *testing.T) {
+	const provider = "cache-price"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: provider, DefaultAPI: "openai-responses", DefaultID: "priced",
+		Models: []models.Model{{
+			Provider: provider, ID: "priced", API: "openai-responses",
+			Cost: &models.Cost{Input: 2, Output: 4, CacheRead: 0.5, CacheWrite: 2},
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(provider) })
+
+	cases := []struct {
+		name  string
+		usage string
+		want  Usage
+	}{
+		{
+			name:  "cached tokens",
+			usage: `{"input_tokens":1000000,"output_tokens":500000,"total_tokens":1500000,"input_tokens_details":{"cached_tokens":800000}}`,
+			want: Usage{
+				Input: 200_000, Output: 500_000, CacheRead: 800_000, TotalTokens: 1_500_000,
+				Cost: UsageCost{Input: 0.4, Output: 2, CacheRead: 0.4, Total: 2.8},
+			},
+		},
+		{
+			name:  "cache write extra field",
+			usage: `{"input_tokens":1000000,"output_tokens":500000,"total_tokens":1500000,"input_tokens_details":{"cached_tokens":600000,"cache_write_tokens":150000}}`,
+			want: Usage{
+				Input: 250_000, Output: 500_000, CacheRead: 600_000, CacheWrite: 150_000, TotalTokens: 1_500_000,
+				Cost: UsageCost{Input: 0.5, Output: 2, CacheRead: 0.3, CacheWrite: 0.3, Total: 3.1},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf("event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_cache\",\"status\":\"completed\",\"usage\":%s}}\n\n", tc.usage)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, body)
+			}))
+			defer srv.Close()
+
+			client := &OpenAIResponsesClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+			stream, err := client.StreamFn()(context.Background(), Context{
+				Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			}, Options{Provider: provider, Model: "priced"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, final := stream.Collect()
+			if final == nil {
+				t.Fatal("missing final message")
+			}
+			got := final.Usage
+			if got.Input != tc.want.Input || got.Output != tc.want.Output || got.CacheRead != tc.want.CacheRead || got.CacheWrite != tc.want.CacheWrite || got.TotalTokens != tc.want.TotalTokens {
+				t.Fatalf("tokens = %+v, want %+v", got, tc.want)
+			}
+			if math.Abs(got.Cost.Input-tc.want.Cost.Input) > 1e-9 || math.Abs(got.Cost.Output-tc.want.Cost.Output) > 1e-9 ||
+				math.Abs(got.Cost.CacheRead-tc.want.Cost.CacheRead) > 1e-9 || math.Abs(got.Cost.CacheWrite-tc.want.Cost.CacheWrite) > 1e-9 ||
+				math.Abs(got.Cost.Total-tc.want.Cost.Total) > 1e-9 {
+				t.Fatalf("cost = %+v, want %+v", got.Cost, tc.want.Cost)
+			}
+		})
+	}
+}
+
 func sseData(events ...string) string {
 	var b strings.Builder
 	for _, ev := range events {

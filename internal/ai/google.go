@@ -212,9 +212,7 @@ func (c *GoogleClient) StreamFn() StreamFn {
 					}
 				}
 				if resp.UsageMetadata != nil {
-					out.Usage.Input = int(resp.UsageMetadata.PromptTokenCount)
-					out.Usage.Output = int(resp.UsageMetadata.CandidatesTokenCount)
-					out.Usage.TotalTokens = int(resp.UsageMetadata.TotalTokenCount)
+					applyGoogleUsage(&out.Usage, resp.UsageMetadata)
 				}
 			}
 			if thinkIdx >= 0 {
@@ -314,6 +312,15 @@ func googleContents(reqCtx Context, target replayTarget) []*genai.Content {
 		out = append(out, &genai.Content{Role: string(role), Parts: parts})
 	}
 	return out
+}
+
+// applyGoogleUsage splits Gemini usage. PromptTokenCount includes cached
+// content. Thoughts and tool-use tokens stay out of Output.
+func applyGoogleUsage(dst *Usage, meta *genai.GenerateContentResponseUsageMetadata) {
+	if dst == nil || meta == nil {
+		return
+	}
+	applyInclusivePromptUsage(dst, int(meta.PromptTokenCount), int(meta.CandidatesTokenCount), int(meta.CachedContentTokenCount), 0)
 }
 
 func googleImageParts(m Message) []*genai.Part {

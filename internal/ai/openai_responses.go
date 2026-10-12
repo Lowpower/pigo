@@ -372,9 +372,9 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 
 func finalizeResponsesTerminal(out *AssistantMessage, resp responses.Response, cost *models.Cost) {
 	if resp.Usage.InputTokens != 0 || resp.Usage.OutputTokens != 0 {
-		out.Usage.Input = int(resp.Usage.InputTokens)
-		out.Usage.Output = int(resp.Usage.OutputTokens)
-		out.Usage.TotalTokens = int(resp.Usage.TotalTokens)
+		read := int(resp.Usage.InputTokensDetails.CachedTokens)
+		write := responseCacheWriteTokens(resp.Usage.InputTokensDetails)
+		applyInclusivePromptUsage(&out.Usage, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), read, write)
 	}
 	calculateCost(cost, &out.Usage)
 	applyServiceTierCost(&out.Usage, string(resp.ServiceTier))
@@ -401,6 +401,19 @@ func finalizeResponsesTerminal(out *AssistantMessage, resp responses.Response, c
 		out.StopReason = StopError
 		out.ErrorMessage = responsesFailedMessage(resp)
 	}
+}
+
+func responseCacheWriteTokens(details responses.ResponseUsageInputTokensDetails) int {
+	f, ok := details.JSON.ExtraFields["cache_write_tokens"]
+	// The SDK marks this unknown field invalid, but still keeps the raw JSON.
+	if !ok || f.Raw() == "" {
+		return 0
+	}
+	var n int
+	if err := json.Unmarshal([]byte(f.Raw()), &n); err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 func responsesFailedMessage(resp responses.Response) string {

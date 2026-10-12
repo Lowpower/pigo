@@ -23,6 +23,30 @@ func tokenPrice(tokens int, perMillion float64) float64 {
 	return float64(tokens) * perMillion / 1_000_000
 }
 
+// applyInclusivePromptUsage splits a prompt count that already includes cache
+// reads and writes. Input keeps only the uncached portion. TotalTokens is the
+// sum of input, output, cache read, and cache write.
+func applyInclusivePromptUsage(dst *Usage, prompt, output, cacheRead, cacheWrite int) {
+	if dst == nil {
+		return
+	}
+	if cacheRead < 0 {
+		cacheRead = 0
+	}
+	if cacheWrite < 0 {
+		cacheWrite = 0
+	}
+	input := prompt - cacheRead - cacheWrite
+	if input < 0 {
+		input = 0
+	}
+	dst.Input = input
+	dst.Output = output
+	dst.CacheRead = cacheRead
+	dst.CacheWrite = cacheWrite
+	dst.TotalTokens = input + output + cacheRead + cacheWrite
+}
+
 // applyServiceTierCost multiplies a catalog cost when OpenAI served the
 // request on the fast or priority tier. Missing, default, and auto stay at
 // the catalog rate. Fast uses the same markup as priority.
