@@ -222,9 +222,11 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 	}
 	if reqCtx.System != "" {
 		sys := map[string]any{
-			"type":          "text",
-			"text":          reqCtx.System,
-			"cache_control": anthropicCacheControl(opts),
+			"type": "text",
+			"text": reqCtx.System,
+		}
+		if cc := anthropicCacheControl(opts); cc != nil {
+			sys["cache_control"] = cc
 		}
 		req["system"] = []map[string]any{sys}
 	}
@@ -232,7 +234,9 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		tools := anthropicToolDefs(immediate, false)
 		tools = append(tools, anthropicToolDefs(deferred, true)...)
 		if len(tools) > 0 {
-			tools[len(tools)-1]["cache_control"] = anthropicCacheControl(opts)
+			if cc := anthropicCacheControl(opts); cc != nil {
+				tools[len(tools)-1]["cache_control"] = cc
+			}
 		}
 		req["tools"] = tools
 		req["tool_choice"] = map[string]any{"type": "auto"}
@@ -372,6 +376,9 @@ func anthropicToolDefs(tools []Tool, deferLoading bool) []map[string]any {
 }
 
 func anthropicCacheControl(opts Options) map[string]any {
+	if strings.EqualFold(strings.TrimSpace(opts.CacheRetention), "none") {
+		return nil
+	}
 	cc := map[string]any{"type": "ephemeral"}
 	if strings.EqualFold(opts.CacheRetention, "long") && longCacheOK(lookupCompat(opts)) {
 		cc["ttl"] = "1h"
@@ -400,6 +407,9 @@ func insertThinkingLevelMessages(msgs []map[string]any, levels map[int]string, a
 
 func applyAnthropicCacheControl(msgs []map[string]any, opts Options) {
 	cc := anthropicCacheControl(opts)
+	if cc == nil {
+		return
+	}
 	for i := len(msgs) - 1; i >= 0; i-- {
 		role, _ := msgs[i]["role"].(string)
 		if role != RoleUser {

@@ -24,11 +24,9 @@ func TestFirstCompactionTracksFiles(t *testing.T) {
 		toolUse("grep", "d.go"),
 	)
 	tail := appendUserText(t, sess, strings.Repeat("z", 80))
-	var prompt string
-	var convo []ai.Message
+	var prompt, convo string
 	e := compactionEngine(sess, func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
-		prompt = req.Messages[len(req.Messages)-1].Content
-		convo = append([]ai.Message(nil), req.Messages[:len(req.Messages)-1]...)
+		prompt, convo = captureSummaryRequest(t, req)
 		return textReply("FIRST")(ctx, req, opts)
 	})
 	msgs := session.ModelMessages(session.ContextEntries(sess))
@@ -38,8 +36,8 @@ func TestFirstCompactionTracksFiles(t *testing.T) {
 	if strings.Contains(prompt, "<previous-summary>") || strings.Contains(prompt, "PRESERVE all existing information") {
 		t.Fatalf("first compaction used the update prompt:\n%s", prompt)
 	}
-	if strings.Contains(conversationText(convo), "<summary>") {
-		t.Fatalf("summarized the previous summary message: %+v", convo)
+	if strings.Contains(convo, "<summary>") {
+		t.Fatalf("summarized the previous summary message: %s", convo)
 	}
 	entry := lastCompaction(t, sess)
 	if entry.FromHook || entry.FirstKeptEntryID != tail.ID {
@@ -80,11 +78,9 @@ func TestSecondCompactionUpdatesSummaryAndAccumulatesFiles(t *testing.T) {
 	appendToolAssistant(t, sess, toolUse("read", "d.go"), toolUse("edit", "e.go"))
 	appendUserText(t, sess, strings.Repeat("y", 80))
 
-	var prompt string
-	var convo []ai.Message
+	var prompt, convo string
 	e.Stream = func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
-		prompt = req.Messages[len(req.Messages)-1].Content
-		convo = append([]ai.Message(nil), req.Messages[:len(req.Messages)-1]...)
+		prompt, convo = captureSummaryRequest(t, req)
 		return textReply("SECOND")(ctx, req, opts)
 	}
 	msgs = session.ModelMessages(session.ContextEntries(sess))
@@ -97,12 +93,11 @@ func TestSecondCompactionUpdatesSummaryAndAccumulatesFiles(t *testing.T) {
 	if !strings.Contains(prompt, "PRESERVE all existing information from the previous summary") {
 		t.Fatalf("prompt missing update instructions:\n%s", prompt)
 	}
-	text := conversationText(convo)
-	if !strings.Contains(text, "KEPT-TAIL-") {
-		t.Fatalf("summarized messages dropped the kept tail: %s", text)
+	if !strings.Contains(convo, "KEPT-TAIL-") {
+		t.Fatalf("summarized messages dropped the kept tail: %s", convo)
 	}
-	if strings.Contains(text, compaction.SummaryPrefix) {
-		t.Fatalf("summarized the compaction entry itself: %s", text)
+	if strings.Contains(convo, compaction.SummaryPrefix) {
+		t.Fatalf("summarized the compaction entry itself: %s", convo)
 	}
 	lists, ok := compaction.ParseStoredFiles(lastCompaction(t, sess).Details)
 	if !ok {
@@ -130,11 +125,9 @@ func TestFromHookCompactionDoesNotAccumulateFiles(t *testing.T) {
 	}
 	appendToolAssistant(t, sess, toolUse("read", "other.go"))
 	appendUserText(t, sess, strings.Repeat("t", 80))
-	var prompt string
-	var convo []ai.Message
+	var prompt, convo string
 	e := compactionEngine(sess, func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
-		prompt = req.Messages[len(req.Messages)-1].Content
-		convo = append([]ai.Message(nil), req.Messages[:len(req.Messages)-1]...)
+		prompt, convo = captureSummaryRequest(t, req)
 		return textReply("NEXT")(ctx, req, opts)
 	})
 	msgs := session.ModelMessages(session.ContextEntries(sess))
@@ -144,12 +137,11 @@ func TestFromHookCompactionDoesNotAccumulateFiles(t *testing.T) {
 	if !strings.Contains(prompt, "<previous-summary>\nHOOK-SUM\n</previous-summary>") {
 		t.Fatalf("prompt = %s", prompt)
 	}
-	text := conversationText(convo)
-	if strings.Contains(text, "BEFORE-UNIQUE") || strings.Contains(text, compaction.SummaryPrefix) {
-		t.Fatalf("summarized outside the kept boundary: %s", text)
+	if strings.Contains(convo, "BEFORE-UNIQUE") || strings.Contains(convo, compaction.SummaryPrefix) {
+		t.Fatalf("summarized outside the kept boundary: %s", convo)
 	}
-	if !strings.Contains(text, "KEPT-") {
-		t.Fatalf("dropped kept tail: %s", text)
+	if !strings.Contains(convo, "KEPT-") {
+		t.Fatalf("dropped kept tail: %s", convo)
 	}
 	lists, ok := compaction.ParseStoredFiles(lastCompaction(t, sess).Details)
 	if !ok {
@@ -172,21 +164,20 @@ func TestMissingFirstKeptStartsAfterCompaction(t *testing.T) {
 	}
 	appendUserText(t, sess, "AFTER-UNIQUE-"+strings.Repeat("a", 40))
 	appendUserText(t, sess, strings.Repeat("t", 80))
-	var convo []ai.Message
+	var convo string
 	e := compactionEngine(sess, func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
-		convo = append([]ai.Message(nil), req.Messages[:len(req.Messages)-1]...)
+		_, convo = captureSummaryRequest(t, req)
 		return textReply("NEXT")(ctx, req, opts)
 	})
 	msgs := session.ModelMessages(session.ContextEntries(sess))
 	if _, err := e.runCompaction(context.Background(), "manual", msgs, compaction.Settings{KeepRecentTokens: 20}, false); err != nil {
 		t.Fatal(err)
 	}
-	text := conversationText(convo)
-	if strings.Contains(text, "BEFORE-UNIQUE") {
-		t.Fatalf("summarized entries before the missing boundary: %s", text)
+	if strings.Contains(convo, "BEFORE-UNIQUE") {
+		t.Fatalf("summarized entries before the missing boundary: %s", convo)
 	}
-	if !strings.Contains(text, "AFTER-UNIQUE-") {
-		t.Fatalf("dropped messages after the compaction: %s", text)
+	if !strings.Contains(convo, "AFTER-UNIQUE-") {
+		t.Fatalf("dropped messages after the compaction: %s", convo)
 	}
 	lists, ok := compaction.ParseStoredFiles(lastCompaction(t, sess).Details)
 	if !ok || strings.Join(lists.ReadFiles, ",") != "old.go" {
@@ -358,11 +349,17 @@ func lastBranchSummary(t *testing.T, m *session.Manager) session.Entry {
 	return session.Entry{}
 }
 
-func conversationText(msgs []ai.Message) string {
-	var b strings.Builder
-	for _, m := range msgs {
-		b.WriteString(m.Content)
-		b.WriteByte('\n')
+func captureSummaryRequest(t *testing.T, req ai.Context) (prompt, convo string) {
+	t.Helper()
+	if len(req.Messages) != 1 || len(req.Tools) != 0 {
+		t.Fatalf("summary request messages=%d tools=%d", len(req.Messages), len(req.Tools))
 	}
-	return b.String()
+	prompt = req.Messages[0].Content
+	const open = "<conversation>\n"
+	start := strings.Index(prompt, open)
+	end := strings.Index(prompt, "\n</conversation>")
+	if start < 0 || end < start {
+		t.Fatalf("prompt missing conversation block:\n%s", prompt)
+	}
+	return prompt, prompt[start+len(open) : end]
 }

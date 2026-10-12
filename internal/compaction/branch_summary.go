@@ -101,8 +101,9 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 
 	var kept []ai.Message
 	acc := 0
+	oldest := len(msgs)
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == ai.RoleToolResult {
+		if msgs[i].Role == ai.RoleToolResult || msgs[i].Role == ai.RoleTool {
 			continue
 		}
 		n := EstimateTokens(msgs[i])
@@ -110,21 +111,11 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 			break
 		}
 		kept = append(kept, msgs[i])
+		oldest = i
 		acc += n
-	}
-	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
-		kept[i], kept[j] = kept[j], kept[i]
 	}
 	if len(kept) == 0 {
 		return "No content to summarize", FileLists{}, nil
-	}
-
-	var conv strings.Builder
-	for _, m := range kept {
-		conv.WriteString(string(m.Role))
-		conv.WriteString(": ")
-		conv.WriteString(m.Text())
-		conv.WriteByte('\n')
 	}
 
 	instructions := BranchSummaryPrompt
@@ -133,9 +124,12 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 	} else if opts.CustomInstructions != "" {
 		instructions = BranchSummaryPrompt + "\n\nAdditional focus: " + opts.CustomInstructions
 	}
-	prompt := "# Conversation\n" + conv.String() + "\n# Instructions\n" + instructions
+	prompt := "# Conversation\n" + serializeConversation(msgs[oldest:]) + "\n\n# Instructions\n" + instructions
 
-	stream, err := sf(ctx, ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: prompt}}}, modelCallOptions(opts.Provider, model))
+	stream, err := sf(ctx, ai.Context{
+		System:   SummarizationSystemPrompt,
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: prompt}},
+	}, modelCallOptions(opts.Provider, model, reserve))
 	if err != nil {
 		return "", FileLists{}, err
 	}
@@ -151,6 +145,9 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 	}
 	if final.StopReason == ai.StopError {
 		return "", FileLists{}, &SummarizeError{Cause: final.ErrorMessage}
+	}
+	if final.StopReason == ai.StopLength {
+		return "", FileLists{}, incompleteSummaryError("Branch summary")
 	}
 	text := strings.TrimSpace(final.Text())
 	if text == "" {
