@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // Settings controls when and how much to compact.
@@ -270,25 +271,50 @@ const BranchSummarySuffix = `</summary>`
 // SummaryMarker prefixes the synthetic message that replaces compacted history.
 const SummaryMarker = SummaryPrefix
 
-func modelCallOptions(provider, model string) ai.Options {
+func modelCallOptions(provider, model string, reserveTokens int) ai.Options {
 	return ai.Options{
 		Model:          model,
 		Provider:       provider,
+		MaxTokens:      summaryMaxTokens(reserveTokens, models.MaxTokens(provider, model)),
+		CacheRetention: "none",
 		SamplingParams: ai.ResolveSamplingParams(provider, model, nil),
 	}
+}
+
+// summaryMaxTokens is floor(0.8 * reserveTokens), capped by the catalog output
+// limit when one is known. A non-positive reserve uses the built-in 16384.
+func summaryMaxTokens(reserve, modelMax int) int {
+	if reserve <= 0 {
+		reserve = DefaultSettings().ReserveTokens
+	}
+	maxTokens := int((int64(reserve) * 8) / 10)
+	if maxTokens < 1 {
+		maxTokens = 1
+	}
+	if modelMax > 0 && maxTokens > modelMax {
+		return modelMax
+	}
+	return maxTokens
+}
+
+func incompleteSummaryError(label string) error {
+	return errors.New(label + " failed: generation hit the token cap and the summary is incomplete")
 }
 
 // Summarize asks the model to summarize the given messages using StreamFn,
 // returning the assistant's text. provider is the catalog id used to attach
 // samplingParams; an empty provider leaves those fields unset. previousSummary
 // selects the update prompt and is sent in a <previous-summary> block.
-func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra, provider, previousSummary string) (string, error) {
-	reqMsgs := make([]ai.Message, 0, len(toSummarize)+1)
-	reqMsgs = append(reqMsgs, toSummarize...)
-	prompt := summaryPrompt(previousSummary, extra)
-	reqMsgs = append(reqMsgs, ai.Message{Role: ai.RoleUser, Content: prompt})
-
-	stream, err := sf(ctx, ai.Context{Messages: reqMsgs}, modelCallOptions(provider, model))
+// reserveTokens sets the output budget; 0 uses DefaultSettings.
+func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra, provider, previousSummary string, reserveTokens int) (string, error) {
+	req := ai.Context{
+		System: SummarizationSystemPrompt,
+		Messages: []ai.Message{{
+			Role:    ai.RoleUser,
+			Content: summaryUserContent(toSummarize, previousSummary, extra),
+		}},
+	}
+	stream, err := sf(ctx, req, modelCallOptions(provider, model, reserveTokens))
 	if err != nil {
 		return "", err
 	}
@@ -301,6 +327,9 @@ func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []
 	}
 	if final.StopReason == ai.StopError {
 		return "", &SummarizeError{Cause: final.ErrorMessage}
+	}
+	if final.StopReason == ai.StopLength {
+		return "", incompleteSummaryError("Summarization")
 	}
 	summary := final.Text()
 	if summary == "" {
@@ -317,7 +346,7 @@ func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Messag
 	if cut <= 0 {
 		return msgs, "", nil
 	}
-	summary, err := Summarize(ctx, sf, model, msgs[:cut], s.CustomInstructions, s.Provider, s.PreviousSummary)
+	summary, err := Summarize(ctx, sf, model, msgs[:cut], s.CustomInstructions, s.Provider, s.PreviousSummary, s.ReserveTokens)
 	if err != nil {
 		return msgs, "", err
 	}
@@ -329,15 +358,24 @@ func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Messag
 	return compacted, summary, nil
 }
 
-func summaryPrompt(previous, extra string) string {
+func summaryUserContent(msgs []ai.Message, previous, extra string) string {
+	var b strings.Builder
+	b.WriteString("<conversation>\n")
+	b.WriteString(serializeConversation(msgs))
+	b.WriteString("\n</conversation>\n\n")
 	prompt := SummarizationPrompt
 	if previous != "" {
-		prompt = "<previous-summary>\n" + previous + "\n</previous-summary>\n\n" + UpdateSummarizationPrompt
+		b.WriteString("<previous-summary>\n")
+		b.WriteString(previous)
+		b.WriteString("\n</previous-summary>\n\n")
+		prompt = UpdateSummarizationPrompt
 	}
+	b.WriteString(prompt)
 	if extra != "" {
-		prompt += "\n\nAdditional focus: " + extra
+		b.WriteString("\n\nAdditional focus: ")
+		b.WriteString(extra)
 	}
-	return prompt
+	return b.String()
 }
 
 // CollectFileLists extracts read, write, and edit paths from assistant tool

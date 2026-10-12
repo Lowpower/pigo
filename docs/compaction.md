@@ -34,6 +34,17 @@ at the entry after the compaction.
 
 The new compaction records the id of the first entry that remains verbatim.
 
+## Summary request
+
+The transcript is serialized into one user message, with a system prompt that
+asks only for the structured summary. Tool calls stay as text
+(`[Assistant tool calls]: read(path="foo.ts")`). Each tool result is cut at
+2000 characters and the marker records how many characters were removed.
+`maxTokens` is `floor(0.8 * reserveTokens)`, and no larger than the model's
+output cap when the catalog lists one. A `reserveTokens` of 0 uses 16384.
+A length stop is a failure and is not stored. The request sets
+`cacheRetention` to `none`.
+
 ## Iterative summary
 
 The first compaction uses the initial checkpoint prompt (Goal, Constraints,

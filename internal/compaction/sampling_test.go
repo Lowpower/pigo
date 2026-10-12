@@ -28,7 +28,7 @@ func TestSummarizePassesSamplingParams(t *testing.T) {
 		got = opts
 		return ai.ScriptedStreamFn("done summarizing", 0)(ctx, req, opts)
 	}
-	text, err := Summarize(context.Background(), sf, "m", []ai.Message{{Role: ai.RoleUser, Content: "hello"}}, "", "samp-sum", "")
+	text, err := Summarize(context.Background(), sf, "m", []ai.Message{{Role: ai.RoleUser, Content: "hello"}}, "", "samp-sum", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

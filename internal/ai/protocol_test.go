@@ -132,6 +132,31 @@ func TestBuildAnthropicRequestCacheThinkingAndTools(t *testing.T) {
 	}
 }
 
+func TestBuildAnthropicRequestCacheRetentionNone(t *testing.T) {
+	body, err := buildAnthropicRequest(Context{
+		System:   "sys",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		Tools:    []Tool{{Name: "read", Description: "r", Parameters: map[string]any{"type": "object"}}},
+	}, Options{Model: "claude-sonnet-4", CacheRetention: "none", MaxTokens: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "cache_control") {
+		t.Fatalf("cacheRetention none still wrote cache_control: %s", body)
+	}
+
+	kept, err := buildAnthropicRequest(Context{
+		System:   "sys",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "claude-sonnet-4", CacheRetention: "short"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(kept), "cache_control") {
+		t.Fatal("short retention dropped cache_control")
+	}
+}
+
 func TestBuildAnthropicRequestAdaptiveThinking(t *testing.T) {
 	t.Cleanup(func() { models.SetThinkingBudgets(nil) })
 	models.SetThinkingBudgets(map[string]int{"low": 0})

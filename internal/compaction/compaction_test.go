@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 func TestEstimateTokens(t *testing.T) {
@@ -236,21 +237,27 @@ func TestSummarizeUpdatePromptIncludesPreviousSummary(t *testing.T) {
 	var prompt string
 	var prior []ai.Message
 	sf := func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
-		if len(req.Messages) == 0 {
-			t.Fatal("no messages")
+		if len(req.Messages) != 1 {
+			t.Fatalf("messages = %d, want 1", len(req.Messages))
 		}
-		prompt = req.Messages[len(req.Messages)-1].Content
-		prior = append([]ai.Message(nil), req.Messages[:len(req.Messages)-1]...)
+		if len(req.Tools) != 0 {
+			t.Fatalf("tools = %d, want 0", len(req.Tools))
+		}
+		if req.System != SummarizationSystemPrompt {
+			t.Fatalf("system = %q", req.System)
+		}
+		prompt = req.Messages[0].Content
+		prior = append([]ai.Message(nil), req.Messages...)
 		return ai.ScriptedStreamFn("## Goal\nUpdated.", 0)(ctx, req, opts)
 	}
-	summary, err := Summarize(context.Background(), sf, "test", msgs, "Keep the API", "prov", "OLD GOAL")
+	summary, err := Summarize(context.Background(), sf, "test", msgs, "Keep the API", "prov", "OLD GOAL", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(summary, "Goal") || !strings.Contains(summary, "Updated") {
 		t.Fatalf("summary = %q", summary)
 	}
-	if len(prior) != 1 || prior[0].Content != "new work" {
+	if len(prior) != 1 || !strings.Contains(prior[0].Content, "<conversation>\n[User]: new work\n</conversation>") {
 		t.Fatalf("conversation = %+v", prior)
 	}
 	if !strings.Contains(prompt, "<previous-summary>\nOLD GOAL\n</previous-summary>") {
@@ -273,11 +280,14 @@ func TestSummarizeUpdatePromptIncludesPreviousSummary(t *testing.T) {
 func TestSummarizeWithoutPreviousUsesInitialPrompt(t *testing.T) {
 	var prompt string
 	sf := func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
-		prompt = req.Messages[len(req.Messages)-1].Content
+		if len(req.Messages) != 1 {
+			t.Fatalf("messages = %d, want 1", len(req.Messages))
+		}
+		prompt = req.Messages[0].Content
 		return ai.ScriptedStreamFn("## Goal\nFirst.", 0)(ctx, req, opts)
 	}
 	msgs := []ai.Message{{Role: ai.RoleUser, Content: "hello"}}
-	if _, err := Summarize(context.Background(), sf, "test", msgs, "", "", ""); err != nil {
+	if _, err := Summarize(context.Background(), sf, "test", msgs, "", "", "", 0); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(prompt, "<previous-summary>") || strings.Contains(prompt, "PRESERVE all existing information") {
@@ -409,7 +419,7 @@ func TestGenerateBranchSummaryPromptBoundary(t *testing.T) {
 	}
 	prompt := captureBranchSummaryPrompt(t, msgs, BranchSummaryOpts{})
 
-	const boundary = "# Conversation\nuser: try something\nassistant: did it\n\n# Instructions\n"
+	const boundary = "# Conversation\n[User]: try something\n\n[Assistant]: did it\n\n# Instructions\n"
 	if !strings.HasPrefix(prompt, boundary) {
 		t.Fatalf("prompt = %q, want prefix %q", prompt, boundary)
 	}
@@ -454,7 +464,7 @@ func TestGenerateBranchSummaryReplaceInstructions(t *testing.T) {
 		CustomInstructions:  "Just the decisions.",
 		ReplaceInstructions: true,
 	})
-	const boundary = "# Conversation\nuser: try something\n\n# Instructions\n"
+	const boundary = "# Conversation\n[User]: try something\n\n# Instructions\n"
 	if !strings.HasPrefix(prompt, boundary) {
 		t.Fatalf("prompt = %q, want prefix %q", prompt, boundary)
 	}
@@ -514,6 +524,171 @@ func TestGenerateBranchSummaryFiles(t *testing.T) {
 	}
 	if strings.Contains(got, "too-big.go") {
 		t.Fatalf("summary included a file from a message outside the budget: %q", got)
+	}
+}
+
+func TestSerializeConversation(t *testing.T) {
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: "do it"},
+		{
+			Role: ai.RoleAssistant,
+			Assistant: &ai.AssistantMessage{Content: []*ai.Content{
+				{Type: ai.KindThinking, Thinking: "plan"},
+				{Type: ai.KindText, Text: "running"},
+				{Type: ai.KindToolCall, ToolName: "read", Arguments: map[string]any{"path": "foo.ts"}},
+				{Type: ai.KindToolCall, ToolName: "bash", Arguments: map[string]any{"command": "ls", "block": false}},
+			}},
+		},
+		{Role: ai.RoleToolResult, Content: "file contents"},
+		{Role: ai.RoleUser, Content: ""},
+		{Role: ai.RoleToolResult, Content: ""},
+	}
+	got := serializeConversation(msgs)
+	want := strings.Join([]string{
+		"[User]: do it",
+		"[Assistant thinking]: plan",
+		"[Assistant]: running",
+		`[Assistant tool calls]: read(path="foo.ts"); bash(block=false, command="ls")`,
+		"[Tool result]: file contents",
+	}, "\n\n")
+	if got != want {
+		t.Fatalf("serialized =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestSerializeConversationTruncatesToolResults(t *testing.T) {
+	exact := strings.Repeat("b", toolResultMaxChars)
+	got := serializeConversation([]ai.Message{{Role: ai.RoleToolResult, Content: exact}})
+	if got != "[Tool result]: "+exact {
+		t.Fatalf("exact result was truncated: len=%d", len(got))
+	}
+	if strings.Contains(got, "truncated") {
+		t.Fatalf("exact result included a truncation marker: %q", got[len(got)-40:])
+	}
+
+	body := strings.Repeat("a", toolResultMaxChars+1)
+	got = serializeConversation([]ai.Message{{Role: ai.RoleToolResult, Content: body}})
+	prefix := "[Tool result]: " + strings.Repeat("a", toolResultMaxChars)
+	if !strings.HasPrefix(got, prefix) {
+		t.Fatalf("truncated result does not keep the first %d characters", toolResultMaxChars)
+	}
+	if !strings.HasSuffix(got, "\n\n[... 1 more characters truncated]") {
+		t.Fatalf("marker = %q", got[len(prefix):])
+	}
+}
+
+func TestSummarizeRequestShape(t *testing.T) {
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "sum-cap", DefaultAPI: "anthropic-messages", DefaultID: "small",
+		Models: []models.Model{{
+			Provider: "sum-cap", ID: "small", API: "anthropic-messages", MaxTokens: 4096,
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("sum-cap") })
+
+	var req ai.Context
+	var opts ai.Options
+	sf := func(ctx context.Context, gotReq ai.Context, gotOpts ai.Options) (*ai.EventStream, error) {
+		req = gotReq
+		opts = gotOpts
+		return ai.ScriptedStreamFn("## Goal\nDone.", 0)(ctx, gotReq, gotOpts)
+	}
+	msgs := []ai.Message{{Role: ai.RoleUser, Content: "hello"}}
+	if _, err := Summarize(context.Background(), sf, "small", msgs, "", "sum-cap", "", 16384); err != nil {
+		t.Fatal(err)
+	}
+	if req.System != SummarizationSystemPrompt {
+		t.Fatalf("system = %q", req.System)
+	}
+	if len(req.Messages) != 1 || len(req.Tools) != 0 {
+		t.Fatalf("messages=%d tools=%d", len(req.Messages), len(req.Tools))
+	}
+	if !strings.Contains(req.Messages[0].Content, "<conversation>\n[User]: hello\n</conversation>") {
+		t.Fatalf("user = %q", req.Messages[0].Content)
+	}
+	if opts.CacheRetention != "none" {
+		t.Fatalf("cacheRetention = %q", opts.CacheRetention)
+	}
+	if opts.MaxTokens != 4096 {
+		t.Fatalf("maxTokens = %d, want model cap 4096", opts.MaxTokens)
+	}
+
+	if _, err := Summarize(context.Background(), sf, "missing", msgs, "", "sum-cap", "", 16384); err != nil {
+		t.Fatal(err)
+	}
+	if opts.MaxTokens != 13107 {
+		t.Fatalf("maxTokens = %d, want floor(0.8*16384)=13107", opts.MaxTokens)
+	}
+}
+
+func TestSummarizeStopLengthIsFailure(t *testing.T) {
+	sf := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		return ai.EmitMessage(ctx, &ai.AssistantMessage{
+			Role:       ai.RoleAssistant,
+			StopReason: ai.StopLength,
+			Content:    []*ai.Content{{Type: ai.KindText, Text: "partial summary"}},
+		}), nil
+	}
+	text, err := Summarize(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "hello"}}, "", "", "", 0)
+	if text != "" {
+		t.Fatalf("text = %q, want empty", text)
+	}
+	if err == nil || err.Error() != "Summarization failed: generation hit the token cap and the summary is incomplete" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGenerateBranchSummarySerializesToolResults(t *testing.T) {
+	var req ai.Context
+	var opts ai.Options
+	sf := func(ctx context.Context, gotReq ai.Context, gotOpts ai.Options) (*ai.EventStream, error) {
+		req = gotReq
+		opts = gotOpts
+		return ai.ScriptedStreamFn("## Goal\nExplore.", 0)(ctx, gotReq, gotOpts)
+	}
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: "run it"},
+		assistantTools(toolCall("bash", "script.sh")),
+		{Role: ai.RoleToolResult, Content: strings.Repeat("z", toolResultMaxChars+25)},
+	}
+	if _, _, err := GenerateBranchSummary(context.Background(), sf, "test", msgs, BranchSummaryOpts{ReserveTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+	prompt := req.Messages[0].Content
+	if strings.Contains(prompt, "<conversation>") {
+		t.Fatalf("branch prompt restored conversation XML:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "[User]: run it") || !strings.Contains(prompt, `[Assistant tool calls]: bash(path="script.sh")`) {
+		t.Fatalf("prompt = %q", prompt)
+	}
+	if !strings.Contains(prompt, "[... 25 more characters truncated]") {
+		t.Fatalf("prompt missing truncation marker:\n%s", prompt)
+	}
+	if !strings.HasPrefix(prompt, "# Conversation\n") || !strings.Contains(prompt, "\n\n# Instructions\n") {
+		t.Fatalf("prompt boundary = %q", prompt)
+	}
+	if req.System != SummarizationSystemPrompt {
+		t.Fatalf("system = %q", req.System)
+	}
+	if opts.CacheRetention != "none" || opts.MaxTokens != 80 {
+		t.Fatalf("opts max=%d cache=%q", opts.MaxTokens, opts.CacheRetention)
+	}
+}
+
+func TestGenerateBranchSummaryStopLengthIsFailure(t *testing.T) {
+	sf := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		return ai.EmitMessage(ctx, &ai.AssistantMessage{
+			Role:       ai.RoleAssistant,
+			StopReason: ai.StopLength,
+			Content:    []*ai.Content{{Type: ai.KindText, Text: "partial branch"}},
+		}), nil
+	}
+	text, files, err := GenerateBranchSummary(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "x"}}, BranchSummaryOpts{})
+	if text != "" || len(files.ReadFiles) != 0 || len(files.ModifiedFiles) != 0 {
+		t.Fatalf("text=%q files=%+v", text, files)
+	}
+	if err == nil || err.Error() != "Branch summary failed: generation hit the token cap and the summary is incomplete" {
+		t.Fatalf("err = %v", err)
 	}
 }
 
