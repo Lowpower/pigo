@@ -87,6 +87,7 @@ func listSessionFilesAt(cwd, agentDir, sessionDir string) ([]string, error) {
 		resolvedCwd = abs
 	}
 	var files []fileInfo
+	seen := map[string]struct{}{}
 	for _, e := range ents {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
@@ -109,6 +110,11 @@ func listSessionFilesAt(cwd, agentDir, sessionDir string) ([]string, error) {
 				continue
 			}
 		}
+		key := pathKey(p)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
 		files = append(files, fileInfo{path: p, mod: info.ModTime()})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mod.After(files[j].mod) })
