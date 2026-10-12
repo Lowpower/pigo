@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // PigoMessagesClient posts {model, context, options} to {base}/messages and
@@ -77,7 +79,7 @@ func (c *PigoMessagesClient) StreamFn() StreamFn {
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamPigoMessagesSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent)
+			streamPigoMessagesSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, catalogCost(opts))
 		}()
 		return s, nil
 	}
@@ -117,7 +119,7 @@ type pigoMessagesEvent struct {
 	ResponseID   string     `json:"responseId"`
 }
 
-func streamPigoMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
+func streamPigoMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), cost *models.Cost) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	var data strings.Builder
@@ -130,7 +132,7 @@ func streamPigoMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessa
 		if payload == "[DONE]" {
 			return true
 		}
-		return handlePigoMessagesEvent(ctx, payload, out, s, observe)
+		return handlePigoMessagesEvent(ctx, payload, out, s, observe, cost)
 	}
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -150,7 +152,7 @@ func streamPigoMessagesSSE(ctx context.Context, r io.Reader, out *AssistantMessa
 	}
 }
 
-func handlePigoMessagesEvent(ctx context.Context, payload string, out *AssistantMessage, s *EventStream, observe func([]byte)) bool {
+func handlePigoMessagesEvent(ctx context.Context, payload string, out *AssistantMessage, s *EventStream, observe func([]byte), cost *models.Cost) bool {
 	var ev pigoMessagesEvent
 	if json.Unmarshal([]byte(payload), &ev) != nil {
 		return true
@@ -218,6 +220,7 @@ func handlePigoMessagesEvent(ctx context.Context, payload string, out *Assistant
 	case "done":
 		if ev.Usage != nil {
 			out.Usage = *ev.Usage
+			pricePigoMessagesUsage(&out.Usage, cost)
 		}
 		if ev.ResponseID != "" {
 			out.ResponseID = ev.ResponseID
@@ -230,6 +233,7 @@ func handlePigoMessagesEvent(ctx context.Context, payload string, out *Assistant
 	case "error":
 		if ev.Usage != nil {
 			out.Usage = *ev.Usage
+			pricePigoMessagesUsage(&out.Usage, cost)
 		}
 		out.StopReason = ev.Reason
 		if out.StopReason == "" {
@@ -239,6 +243,20 @@ func handlePigoMessagesEvent(ctx context.Context, payload string, out *Assistant
 		return s.push(ctx, Event{Type: EventError, Reason: out.StopReason, Message: out})
 	}
 	return true
+}
+
+// pricePigoMessagesUsage replaces a gateway usage cost with the local catalog
+// rate. A model without a catalog cost stays at zero, including when the
+// event already carried dollar fields.
+func pricePigoMessagesUsage(usage *Usage, cost *models.Cost) {
+	if usage == nil {
+		return
+	}
+	if cost == nil {
+		usage.Cost = UsageCost{}
+		return
+	}
+	calculateCost(cost, usage)
 }
 
 func ensureContentBlock(out *AssistantMessage, idx int, kind ContentKind) {
