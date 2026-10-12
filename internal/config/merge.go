@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/Lowpower/pigo/internal/bom"
 )
 
 // projectOverlay is the JSON keys a trusted project settings.json may supply.
@@ -76,7 +78,7 @@ func ApplyProject(user Config, cwd string, trusted bool) Config {
 		return user
 	}
 	var over projectOverlay
-	if err := json.Unmarshal(b, &over); err != nil {
+	if err := json.Unmarshal(bom.Strip(b), &over); err != nil {
 		return user
 	}
 	return applyOverlay(user, over)

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/bom"
 )
 
 // Theme is a named colour set for the TUI.
@@ -240,7 +242,7 @@ type fileTheme struct {
 
 func parseThemeJSON(b []byte) (Theme, bool) {
 	var raw fileTheme
-	if json.Unmarshal(b, &raw) != nil {
+	if json.Unmarshal(bom.Strip(b), &raw) != nil {
 		return Theme{}, false
 	}
 	if len(raw.Colors) > 0 {

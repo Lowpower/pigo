@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/bom"
 )
 
 // Manager resolves action ids to keys (defaults, then keybindings.json).
@@ -287,7 +289,7 @@ func loadFile(path string) map[string][]string {
 		return nil
 	}
 	var raw map[string]any
-	if json.Unmarshal(b, &raw) != nil {
+	if json.Unmarshal(bom.Strip(b), &raw) != nil {
 		return nil
 	}
 	out := map[string][]string{}
@@ -310,7 +312,7 @@ func RewriteLegacyFile(path string) bool {
 		return false
 	}
 	var raw map[string]any
-	if json.Unmarshal(b, &raw) != nil || raw == nil {
+	if json.Unmarshal(bom.Strip(b), &raw) != nil || raw == nil {
 		return false
 	}
 	out := map[string]any{}

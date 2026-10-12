@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/bom"
 )
 
 type userModelsFile struct {
@@ -32,7 +34,7 @@ func LoadUserJSON(path string) error {
 		return err
 	}
 	var file userModelsFile
-	if err := json.Unmarshal(b, &file); err != nil {
+	if err := json.Unmarshal(bom.Strip(b), &file); err != nil {
 		return err
 	}
 	for id, p := range file.Providers {
