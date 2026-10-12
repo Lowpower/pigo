@@ -56,6 +56,15 @@ func TestStreamForCloudflareGatewaySwitchesPathByAPI(t *testing.T) {
 	if gotPath != "/v1/acct/gw/compat/chat/completions" {
 		t.Fatalf("llama path = %q, want /v1/acct/gw/compat/chat/completions", gotPath)
 	}
+
+	stream, err = StreamFor("cloudflare-ai-gateway", cfg)(ctx, req, Options{Model: "workers-ai/@cf/moonshotai/kimi-k2.6"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	if gotPath != "/v1/acct/gw/compat/chat/completions" {
+		t.Fatalf("workers-ai path = %q, want /v1/acct/gw/compat/chat/completions", gotPath)
+	}
 }
 
 func TestStreamForCloudflareGatewayLeavesCustomBaseURL(t *testing.T) {

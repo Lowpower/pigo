@@ -117,10 +117,7 @@ func TestMixedProvidersAreRegistered(t *testing.T) {
 	}
 }
 
-// offlineDefaultIDs is the offline fallback table.
-// It matches pi defaultModelPerProvider except cloudflare-ai-gateway:
-// pi uses workers-ai/@cf/moonshotai/kimi-k2.6, which is absent from the
-// embedded models.dev snapshot, so the in-snapshot id stays.
+// TestOfflineDefaultIDs locks the offline fallback table to pi defaultModelPerProvider.
 func TestOfflineDefaultIDs(t *testing.T) {
 	want := map[string]string{
 		"amazon-bedrock":             "us.anthropic.claude-opus-4-6-v1",
@@ -129,7 +126,7 @@ func TestOfflineDefaultIDs(t *testing.T) {
 		"azure-openai-responses":     "gpt-5.4",
 		"baseten":                    "zai-org/GLM-5.2",
 		"cerebras":                   "gpt-oss-120b",
-		"cloudflare-ai-gateway":      "anthropic/claude-fable-5",
+		"cloudflare-ai-gateway":      "workers-ai/@cf/moonshotai/kimi-k2.6",
 		"cloudflare-workers-ai":      "@cf/moonshotai/kimi-k2.6",
 		"deepseek":                   "deepseek-v4-pro",
 		"fireworks":                  "accounts/fireworks/models/kimi-k3",

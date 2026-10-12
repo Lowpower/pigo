@@ -63,10 +63,19 @@ func run() error {
 		if len(list) == 0 {
 			return fmt.Errorf("%s: models.dev provider %s produced no chat models", id, devID)
 		}
+		providers[id] = list
+	}
+	if gateway, ok := providers["cloudflare-ai-gateway"]; ok {
+		providers["cloudflare-ai-gateway"] = models.AppendGatewayWorkersAI(gateway, providers["cloudflare-workers-ai"])
+	}
+	for id, list := range providers {
+		spec, ok := models.LookupProvider(id)
+		if !ok {
+			return fmt.Errorf("missing provider spec %s", id)
+		}
 		if err := models.CatalogDefaultOK(id, spec.DefaultID, list); err != nil {
 			return err
 		}
-		providers[id] = list
 	}
 	out := struct {
 		License   string                    `json:"license"`
