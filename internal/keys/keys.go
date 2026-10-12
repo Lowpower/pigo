@@ -499,7 +499,7 @@ func defaults(windows bool) map[string]Def {
 		"app.message.copy":              {Keys: strs("ctrl+x"), Description: "Copy message to clipboard"},
 		"app.message.followUp":          {Keys: strs(follow), Description: "queue follow-up while streaming"},
 		"app.message.dequeue":           {Keys: strs("alt+up"), Description: "Restore queued messages"},
-		"app.clipboard.pasteImage":      {Keys: strs(pasteImg), Description: "Paste image from clipboard (text fallback)"},
+		"app.clipboard.pasteImage":      {Keys: strs(pasteImg), Description: "Paste files on macOS, images, or text from clipboard"},
 		"app.session.new":               {Description: "Start a new session"},
 		"app.session.tree":              {Description: "Open session tree"},
 		"app.session.fork":              {Description: "Fork current session"},

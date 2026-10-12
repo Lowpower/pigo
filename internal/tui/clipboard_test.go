@@ -164,7 +164,7 @@ func TestReadDarwinClipboardFilePaths(t *testing.T) {
 	if strings.Join(paths, "|") != "/tmp/screenshot.png|/tmp/My Photos/photo.png" {
 		t.Fatalf("paths = %#v", paths)
 	}
-	if len(cmds) != 1 || !strings.Contains(cmds[0], "NSPasteboardURLReadingFileURLsOnlyKey") || !strings.Contains(cmds[0], "NSJSONSerialization") {
+	if len(cmds) != 1 || !strings.Contains(cmds[0], "-l JavaScript") || !strings.Contains(cmds[0], "NSPasteboardURLReadingFileURLsOnlyKey") || !strings.Contains(cmds[0], "JSON.stringify") || !strings.Contains(cmds[0], "isNil") {
 		t.Fatalf("cmd = %#v", cmds)
 	}
 }

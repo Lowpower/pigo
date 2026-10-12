@@ -107,26 +107,16 @@ func readXclipImage() *clipImage {
 }
 
 // darwinFileURLScript prints a JSON array of POSIX paths for Finder file URLs.
-// An empty array, or a failing osascript, means there is nothing to prefer over images.
-const darwinFileURLScript = `use framework "Foundation"
-use framework "AppKit"
-set pb to current application's NSPasteboard's generalPasteboard()
-set opts to current application's NSDictionary's dictionaryWithObject:(current application's NSNumber's numberWithBool:true) forKey:(current application's NSPasteboardURLReadingFileURLsOnlyKey)
-set urls to pb's readObjectsForClasses:{current application's NSURL} options:opts
-set paths to current application's NSMutableArray's array()
-if urls is not missing value then
-	repeat with u in urls
-		set p to (u's |path|())
-		if p is not missing value and (p as text) is not "" then
-			(paths's addObject:(p as text))
-		end if
-	end repeat
-end if
-set json to current application's NSJSONSerialization's dataWithJSONObject:paths options:0 |error|:(missing value)
-if json is missing value then return "[]"
-set s to current application's NSString's alloc()'s initWithData:json encoding:(current application's NSUTF8StringEncoding)
-if s is missing value then return "[]"
-return s as text`
+// JavaScript for Automation calls the same AppKit API as pi. An empty array, or a
+// failing osascript, means there is nothing to prefer over images.
+const darwinFileURLScript = `ObjC.import("AppKit");
+function run() {
+  const options = $.NSDictionary.dictionaryWithObjectForKey(true, $.NSPasteboardURLReadingFileURLsOnlyKey);
+  const urls = $.NSPasteboard.generalPasteboard.readObjectsForClassesOptions($([$.NSURL]), options);
+  if (!urls || urls.isNil()) return "[]";
+  const paths = urls.js.map((url) => url.path.js).filter((path) => path);
+  return JSON.stringify(paths);
+}`
 
 func readClipboardFilePaths() []string {
 	if runtime.GOOS != "darwin" {
@@ -136,7 +126,7 @@ func readClipboardFilePaths() []string {
 }
 
 func readDarwinClipboardFilePaths() []string {
-	out, ok := runClip("osascript", clipReadTimeout, "-e", darwinFileURLScript)
+	out, ok := runClip("osascript", clipReadTimeout, "-l", "JavaScript", "-e", darwinFileURLScript)
 	if !ok {
 		return nil
 	}

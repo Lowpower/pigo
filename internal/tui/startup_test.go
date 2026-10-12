@@ -284,4 +284,7 @@ func TestCtrlODoesNotNoteToolOutputInTranscript(t *testing.T) {
 	if !strings.Contains(view, "to expand tools") {
 		t.Fatalf("ctrl+o should expand startup help:\n%s", view)
 	}
+	if !strings.Contains(view, "to paste file or image") {
+		t.Fatalf("startup help should mention file paste:\n%s", view)
+	}
 }
