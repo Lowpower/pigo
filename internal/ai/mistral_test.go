@@ -60,6 +60,74 @@ func TestMistralClientHTTP(t *testing.T) {
 	}
 }
 
+func TestMistralSplitsCachedPromptTokens(t *testing.T) {
+	cases := []struct {
+		name  string
+		usage string
+		want  Usage
+	}{
+		{
+			name:  "prompt_tokens_details",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110,"prompt_tokens_details":{"cached_tokens":80}}`,
+			want:  Usage{Input: 20, Output: 10, CacheRead: 80, TotalTokens: 110},
+		},
+		{
+			name:  "prompt_token_details",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"prompt_token_details":{"cached_tokens":40}}`,
+			want:  Usage{Input: 60, Output: 10, CacheRead: 40, TotalTokens: 110},
+		},
+		{
+			name:  "camel promptTokensDetails",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"promptTokensDetails":{"cachedTokens":80}}`,
+			want:  Usage{Input: 20, Output: 10, CacheRead: 80, TotalTokens: 110},
+		},
+		{
+			name:  "camel promptTokenDetails",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"promptTokenDetails":{"cachedTokens":25}}`,
+			want:  Usage{Input: 75, Output: 10, CacheRead: 25, TotalTokens: 110},
+		},
+		{
+			name:  "num_cached_tokens",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"num_cached_tokens":15}`,
+			want:  Usage{Input: 85, Output: 10, CacheRead: 15, TotalTokens: 110},
+		},
+		{
+			name:  "numCachedTokens",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"numCachedTokens":15}`,
+			want:  Usage{Input: 85, Output: 10, CacheRead: 15, TotalTokens: 110},
+		},
+		{
+			name:  "details win over later fields",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"num_cached_tokens":1,"promptTokensDetails":{"cachedTokens":2},"prompt_tokens_details":{"cached_tokens":80}}`,
+			want:  Usage{Input: 20, Output: 10, CacheRead: 80, TotalTokens: 110},
+		},
+		{
+			name:  "clamp to prompt",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":150}}`,
+			want:  Usage{Input: 0, Output: 10, CacheRead: 100, TotalTokens: 110},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":" + tc.usage + "}\n\ndata: [DONE]\n"
+			s := NewEventStream(16)
+			out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "mistral-conversations", StopReason: StopPending}
+			go func() {
+				defer s.end()
+				streamMistralSSE(context.Background(), strings.NewReader(body), out, s, nil)
+			}()
+			_, final := s.Collect()
+			if final == nil {
+				t.Fatal("no final message")
+			}
+			got := final.Usage
+			if got.Input != tc.want.Input || got.Output != tc.want.Output || got.CacheRead != tc.want.CacheRead || got.CacheWrite != tc.want.CacheWrite || got.TotalTokens != tc.want.TotalTokens {
+				t.Fatalf("usage = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMistralThinkingContentArray(t *testing.T) {
 	s := NewEventStream(16)
 	out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "mistral-conversations", StopReason: StopPending}

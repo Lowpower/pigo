@@ -162,11 +162,41 @@ type oaiChunk struct {
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage *oaiUsage `json:"usage"`
+}
+
+// oaiUsage is a Chat Completions usage object. PromptTokens includes cache
+// hits. Providers disagree on where the hit count lives.
+type oaiUsage struct {
+	PromptTokens         int               `json:"prompt_tokens"`
+	CompletionTokens     int               `json:"completion_tokens"`
+	CachedTokens         *int              `json:"cached_tokens"`
+	PromptCacheHitTokens *int              `json:"prompt_cache_hit_tokens"`
+	PromptTokensDetails  *oaiPromptDetails `json:"prompt_tokens_details"`
+}
+
+type oaiPromptDetails struct {
+	CachedTokens     *int `json:"cached_tokens"`
+	CacheWriteTokens *int `json:"cache_write_tokens"`
+}
+
+// openAICacheCounts reads cache hits from prompt_tokens_details, then
+// prompt_cache_hit_tokens, then top-level cached_tokens. A present field wins
+// even when it is zero, so a later placement is not added on top. Cache writes
+// are a separate count and are not folded into the hit count.
+func openAICacheCounts(u oaiUsage) (read, write int) {
+	switch {
+	case u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens != nil:
+		read = *u.PromptTokensDetails.CachedTokens
+	case u.PromptCacheHitTokens != nil:
+		read = *u.PromptCacheHitTokens
+	case u.CachedTokens != nil:
+		read = *u.CachedTokens
+	}
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CacheWriteTokens != nil {
+		write = *u.PromptTokensDetails.CacheWriteTokens
+	}
+	return read, write
 }
 
 func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
@@ -258,12 +288,8 @@ func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessag
 	emitProviderStreamEvent(observe, []byte(payload))
 
 	if chunk.Usage != nil {
-		out.Usage.Input = chunk.Usage.PromptTokens
-		out.Usage.Output = chunk.Usage.CompletionTokens
-		out.Usage.TotalTokens = chunk.Usage.TotalTokens
-		if out.Usage.TotalTokens == 0 {
-			out.Usage.TotalTokens = out.Usage.Input + out.Usage.Output
-		}
+		read, write := openAICacheCounts(*chunk.Usage)
+		applyInclusivePromptUsage(&out.Usage, chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, read, write)
 	}
 	if len(chunk.Choices) == 0 {
 		return true

@@ -221,11 +221,62 @@ type mistralChunk struct {
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage *mistralUsage `json:"usage"`
+}
+
+type mistralCachedCount struct {
+	CachedTokens      *int `json:"cached_tokens"`
+	CachedTokensCamel *int `json:"cachedTokens"`
+}
+
+type mistralUsage struct {
+	PromptTokens             int                 `json:"prompt_tokens"`
+	CompletionTokens         int                 `json:"completion_tokens"`
+	NumCachedTokens          *int                `json:"num_cached_tokens"`
+	NumCachedTokensCamel     *int                `json:"numCachedTokens"`
+	PromptTokensDetails      *mistralCachedCount `json:"prompt_tokens_details"`
+	PromptTokenDetails       *mistralCachedCount `json:"prompt_token_details"`
+	PromptTokensDetailsCamel *mistralCachedCount `json:"promptTokensDetails"`
+	PromptTokenDetailsCamel  *mistralCachedCount `json:"promptTokenDetails"`
+}
+
+// mistralCacheRead returns the first present cache-hit field. The hit count is
+// later clamped to the prompt size.
+func mistralCacheRead(u mistralUsage) int {
+	candidates := []*int{
+		mistralDetailCount(u.PromptTokensDetails, false),
+		mistralDetailCount(u.PromptTokenDetails, false),
+		mistralDetailCount(u.PromptTokensDetailsCamel, true),
+		mistralDetailCount(u.PromptTokenDetailsCamel, true),
+		u.NumCachedTokens,
+		u.NumCachedTokensCamel,
+	}
+	for _, n := range candidates {
+		if n != nil {
+			return *n
+		}
+	}
+	return 0
+}
+
+func mistralDetailCount(d *mistralCachedCount, camel bool) *int {
+	if d == nil {
+		return nil
+	}
+	if camel {
+		return d.CachedTokensCamel
+	}
+	return d.CachedTokens
+}
+
+func clampCacheRead(read, prompt int) int {
+	if read < 0 {
+		return 0
+	}
+	if read > prompt {
+		return prompt
+	}
+	return read
 }
 
 func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
@@ -298,12 +349,8 @@ func handleMistralChunk(ctx context.Context, payload string, out *AssistantMessa
 		out.ResponseID = chunk.ID
 	}
 	if chunk.Usage != nil {
-		out.Usage.Input = chunk.Usage.PromptTokens
-		out.Usage.Output = chunk.Usage.CompletionTokens
-		out.Usage.TotalTokens = chunk.Usage.TotalTokens
-		if out.Usage.TotalTokens == 0 {
-			out.Usage.TotalTokens = out.Usage.Input + out.Usage.Output
-		}
+		read := clampCacheRead(mistralCacheRead(*chunk.Usage), chunk.Usage.PromptTokens)
+		applyInclusivePromptUsage(&out.Usage, chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, read, 0)
 	}
 	if len(chunk.Choices) == 0 {
 		return true

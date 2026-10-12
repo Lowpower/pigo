@@ -64,6 +64,58 @@ func TestStreamOpenAIReaderFixture(t *testing.T) {
 	}
 }
 
+func TestStreamOpenAIReaderSplitsCacheUsage(t *testing.T) {
+	cases := []struct {
+		name  string
+		usage string
+		want  Usage
+	}{
+		{
+			name:  "prompt details",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110,"prompt_tokens_details":{"cached_tokens":80}}`,
+			want:  Usage{Input: 20, Output: 10, CacheRead: 80, TotalTokens: 110},
+		},
+		{
+			name:  "kimi cached_tokens",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110,"cached_tokens":80}`,
+			want:  Usage{Input: 20, Output: 10, CacheRead: 80, TotalTokens: 110},
+		},
+		{
+			name:  "deepseek prompt_cache_hit_tokens",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"prompt_cache_hit_tokens":80}`,
+			want:  Usage{Input: 20, Output: 10, CacheRead: 80, TotalTokens: 110},
+		},
+		{
+			name:  "cache write stays separate",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":60,"cache_write_tokens":20}}`,
+			want:  Usage{Input: 20, Output: 10, CacheRead: 60, CacheWrite: 20, TotalTokens: 110},
+		},
+		{
+			name:  "details win over top-level",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"cached_tokens":5,"prompt_cache_hit_tokens":7,"prompt_tokens_details":{"cached_tokens":80}}`,
+			want:  Usage{Input: 20, Output: 10, CacheRead: 80, TotalTokens: 110},
+		},
+		{
+			name:  "zero details do not fall through",
+			usage: `{"prompt_tokens":100,"completion_tokens":10,"cached_tokens":80,"prompt_tokens_details":{"cached_tokens":0}}`,
+			want:  Usage{Input: 100, Output: 10, TotalTokens: 110},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":" + tc.usage + "}\n\ndata: [DONE]\n"
+			_, final := StreamOpenAIReader(context.Background(), strings.NewReader(body), "gpt-test").Collect()
+			if final == nil {
+				t.Fatal("no final message")
+			}
+			got := final.Usage
+			if got.Input != tc.want.Input || got.Output != tc.want.Output || got.CacheRead != tc.want.CacheRead || got.CacheWrite != tc.want.CacheWrite || got.TotalTokens != tc.want.TotalTokens {
+				t.Fatalf("usage = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestOpenAICompletionsJoinsBaseURL(t *testing.T) {
 	cases := []struct {
 		name     string
