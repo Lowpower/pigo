@@ -248,12 +248,12 @@ func resolveOrSynthetic(provider, id string) Model {
 }
 
 func applyOverlays(providerID string, list []Model) []Model {
-	list = mergeOverlay(list, remoteOverlay(providerID))
-	list = mergeOverlay(list, userOverlay(providerID))
+	list = mergeOverlay(providerID, list, remoteOverlay(providerID))
+	list = mergeOverlay(providerID, list, userOverlay(providerID))
 	return list
 }
 
-func mergeOverlay(base, extra []Model) []Model {
+func mergeOverlay(providerID string, base, extra []Model) []Model {
 	if len(extra) == 0 {
 		return base
 	}
@@ -306,6 +306,14 @@ func mergeOverlay(base, extra []Model) []Model {
 			continue
 		}
 		m.SamplingParams = MergeSamplingParams(nil, m.SamplingParams)
+		if m.Provider == "" {
+			m.Provider = providerID
+		}
+		if len(m.ThinkingLevelMap) == 0 {
+			m = applyOpenRouterReasoning(m, false)
+		} else {
+			m = ensureOpenRouterFormat(m)
+		}
 		idx[m.ID] = len(out)
 		out = append(out, m)
 	}

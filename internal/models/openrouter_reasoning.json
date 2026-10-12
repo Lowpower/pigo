@@ -1,0 +1,1769 @@
+{
+  "source": "https://openrouter.ai/api/v1/models",
+  "models": {
+    "aion-labs/aion-2.0": {
+      "mandatory": true
+    },
+    "aion-labs/aion-3.0": {
+      "mandatory": true
+    },
+    "aion-labs/aion-3.0-mini": {
+      "mandatory": true
+    },
+    "aion-labs/aion-3.5": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "aion-labs/aion-3.5-mini": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "anthropic/claude-fable-5": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-fable-5.1": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-fable-5.1:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-fable-5:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-haiku-5.5": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-haiku-5.5:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-4.6": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-4.6:batch": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-4.7": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-4.7:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-4.8": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-4.8:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-5": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-5.5": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-5.5:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-opus-5:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-sonnet-4.6": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-sonnet-4.6:batch": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-sonnet-5": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-sonnet-5.5": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-sonnet-5.5:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "anthropic/claude-sonnet-5:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "arcee-ai/trinity-large-thinking": {
+      "mandatory": true
+    },
+    "bytedance-seed/seed-2.0-code": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "bytedance-seed/seed-2.0-lite": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "bytedance-seed/seed-2.0-mini": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "deepseek/deepseek-r1": {
+      "mandatory": true
+    },
+    "deepseek/deepseek-r1-0528": {
+      "mandatory": true
+    },
+    "deepseek/deepseek-v4-flash": {
+      "supported_efforts": [
+        "xhigh",
+        "high"
+      ]
+    },
+    "deepseek/deepseek-v4-flash-0731": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "deepseek/deepseek-v4-flash-vision-exp": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "deepseek/deepseek-v4-pro": {
+      "supported_efforts": [
+        "xhigh",
+        "high"
+      ]
+    },
+    "deepseek/deepseek-v4-pro-0813": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "deepseek/deepseek-v4.1-flash": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "deepseek/deepseek-v4.1-flash:batch": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "fireworks/ember-1": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "google/gemini-2.5-pro": {
+      "mandatory": true
+    },
+    "google/gemini-2.5-pro-preview": {
+      "mandatory": true
+    },
+    "google/gemini-2.5-pro:batch": {
+      "mandatory": true
+    },
+    "google/gemini-3-flash-preview": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3-flash-preview:batch": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3-pro-image": {
+      "mandatory": true
+    },
+    "google/gemini-3-pro-image-preview": {
+      "mandatory": true
+    },
+    "google/gemini-3.1-flash-image": {
+      "supported_efforts": [
+        "high",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.1-flash-image-preview": {
+      "supported_efforts": [
+        "high",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.1-flash-lite": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.1-flash-lite-image": {
+      "supported_efforts": [
+        "high",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.1-flash-lite-preview": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.1-flash-lite:batch": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.1-pro-preview": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "google/gemini-3.1-pro-preview-customtools": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "google/gemini-3.1-pro-preview:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "google/gemini-3.5-flash": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.5-flash-lite": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.5-flash-lite:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.5-flash:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.6-flash": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.6-flash:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "google/gemini-3.7-flash": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "google/gemini-3.7-flash:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "google/gemini-3.8-flash": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "google/gemini-3.8-flash:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "google/gemini-nano-banana-2.1": {
+      "supported_efforts": [
+        "high",
+        "minimal"
+      ]
+    },
+    "ibm-granite/granite-4.2-8b": {
+      "supported_efforts": [
+        "high",
+        "low",
+        "none"
+      ]
+    },
+    "inception/mercury-2": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "inception/mercury-2.5": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "liquid/lfm-2.5-2.6b:free": {
+      "mandatory": true
+    },
+    "meta/muse-glimmer-30b": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "meta/muse-spark-1.1": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "meta/muse-spark-1.2": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "meta/muse-spark-1.2-contributor": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "meta/muse-spark-1.3": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "meta/muse-spark-1.3-contributor": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "minimax/minimax-m2": {
+      "mandatory": true
+    },
+    "minimax/minimax-m2.1": {
+      "mandatory": true
+    },
+    "minimax/minimax-m2.5": {
+      "mandatory": true
+    },
+    "minimax/minimax-m2.7": {
+      "mandatory": true
+    },
+    "mistralai/mistral-large-4-0": {
+      "supported_efforts": [
+        "high",
+        "none"
+      ]
+    },
+    "mistralai/mistral-medium-3-5": {
+      "supported_efforts": [
+        "high",
+        "none"
+      ]
+    },
+    "mistralai/mistral-medium-3-5:batch": {
+      "supported_efforts": [
+        "high",
+        "none"
+      ]
+    },
+    "mistralai/mistral-small-2603": {
+      "supported_efforts": [
+        "high",
+        "none"
+      ]
+    },
+    "mistralai/mistral-small-2603:batch": {
+      "supported_efforts": [
+        "high",
+        "none"
+      ]
+    },
+    "moonshotai/kimi-k2-thinking": {
+      "mandatory": true
+    },
+    "moonshotai/kimi-k2.7-code": {
+      "mandatory": true
+    },
+    "moonshotai/kimi-k3": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "moonshotai/kimi-k3:batch": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "nex-agi/nex-n2.5-mini": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "none"
+      ]
+    },
+    "nex-agi/nex-n2.5-pro": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "none"
+      ]
+    },
+    "nvidia/nemotron-3-super-120b-a12b": {
+      "supported_efforts": [
+        "medium",
+        "low"
+      ]
+    },
+    "nvidia/nemotron-3-super-120b-a12b:free": {
+      "supported_efforts": [
+        "medium",
+        "low"
+      ]
+    },
+    "nvidia/nemotron-3-ultra-550b-a55b": {
+      "supported_efforts": [
+        "high",
+        "medium"
+      ]
+    },
+    "nvidia/nemotron-3-ultra-550b-a55b:free": {
+      "supported_efforts": [
+        "high",
+        "medium"
+      ]
+    },
+    "openai/gpt-5": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "openai/gpt-5-image": {
+      "mandatory": true
+    },
+    "openai/gpt-5-image-mini": {
+      "mandatory": true
+    },
+    "openai/gpt-5-mini": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "openai/gpt-5-mini:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "openai/gpt-5-nano": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "openai/gpt-5-nano:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "openai/gpt-5-pro": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high"
+      ]
+    },
+    "openai/gpt-5-pro:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high"
+      ]
+    },
+    "openai/gpt-5.1": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.1-codex": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-5.1-codex-max": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-5.1-codex-mini": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-5.1:batch": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.2": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.2-codex": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-5.2-pro": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium"
+      ]
+    },
+    "openai/gpt-5.2-pro:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium"
+      ]
+    },
+    "openai/gpt-5.2:batch": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.3-codex": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.4": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.4-image-2": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.4-mini": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.4-mini:batch": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.4-nano": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.4-nano:batch": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.4-pro": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium"
+      ]
+    },
+    "openai/gpt-5.4-pro:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium"
+      ]
+    },
+    "openai/gpt-5.4:batch": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.5": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.5-pro": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium"
+      ]
+    },
+    "openai/gpt-5.5-pro:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium"
+      ]
+    },
+    "openai/gpt-5.5:batch": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-luna": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-luna-pro": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-luna-pro:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-luna:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-sol": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-sol-pro": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-sol-pro:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-sol:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-terra": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-terra-pro": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-terra-pro:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5.6-terra:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-5:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "openai/gpt-6-astra": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-6-astra-pro": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-6-astra-pro:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-6-astra:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-6-luna": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-6-luna-pro": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-6-luna-pro:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-6-luna:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-6-sol": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-6-sol-pro": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-6-sol-pro:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-6-sol:batch": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "openai/gpt-6.1-sol": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-6.1-sol-pro": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-6.1-sol-pro:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-6.1-sol:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-oss-120b": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-oss-120b:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-oss-20b": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-oss-20b:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "openai/gpt-oss-safeguard-20b": {
+      "mandatory": true
+    },
+    "openai/o3-mini-high": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high"
+      ]
+    },
+    "openai/o4-mini-high": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high"
+      ]
+    },
+    "perceptron/perceptron-mk1.5": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "none"
+      ]
+    },
+    "perplexity/sonar-pro-search": {
+      "mandatory": true
+    },
+    "prism-ml/ternary-bonsai-2-27b": {
+      "supported_efforts": [
+        "xhigh",
+        "medium"
+      ]
+    },
+    "qwen/qwen3-235b-a22b-thinking-2507": {
+      "mandatory": true
+    },
+    "qwen/qwen3-next-80b-a3b-thinking": {
+      "mandatory": true
+    },
+    "qwen/qwen3-vl-30b-a3b-thinking": {
+      "mandatory": true
+    },
+    "qwen/qwen3.8-2.4t-a95b": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "medium",
+        "low"
+      ]
+    },
+    "qwen/qwen3.8-27b": {
+      "supported_efforts": [
+        "xhigh",
+        "medium",
+        "low"
+      ]
+    },
+    "qwen/qwen3.8-max-0902": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "qwen/qwen3.8-max-prime": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ]
+    },
+    "rekaai/reka-flash-3": {
+      "mandatory": true
+    },
+    "sakana/fugu-max": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high"
+      ]
+    },
+    "sakana/fugu-ultra": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high"
+      ]
+    },
+    "sakana/fugu-ultra-v2": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high"
+      ]
+    },
+    "sakana/sakana-namazu": {
+      "supported_efforts": [
+        "high",
+        "none"
+      ]
+    },
+    "stepfun/step-3.5-flash": {
+      "mandatory": true
+    },
+    "stepfun/step-3.7-flash": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "stepfun/step-5-preview": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "tencent/hy3": {
+      "supported_efforts": [
+        "high",
+        "low",
+        "none"
+      ]
+    },
+    "tencent/hy3-preview": {
+      "supported_efforts": [
+        "high",
+        "low",
+        "none"
+      ]
+    },
+    "tencent/hy4-preview": {
+      "supported_efforts": [
+        "high",
+        "low",
+        "none"
+      ]
+    },
+    "thinkingmachines/inkling": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "none"
+      ]
+    },
+    "thinkingmachines/inkling-small": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "none"
+      ]
+    },
+    "thinkingmachines/inkling-small:free": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "none"
+      ]
+    },
+    "thinkingmachines/inkling:free": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "none"
+      ]
+    },
+    "upstage/solar-mini4": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "none"
+      ]
+    },
+    "upstage/solar-pro-3": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "none"
+      ]
+    },
+    "upstage/solar-pro4": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal",
+        "none"
+      ]
+    },
+    "x-ai/grok-4.20-multi-agent": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "x-ai/grok-4.3": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "x-ai/grok-4.3:batch": {
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "x-ai/grok-4.5": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "x-ai/grok-4.6": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "x-ai/grok-4.7": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "x-ai/grok-build-0.1": {
+      "mandatory": true
+    },
+    "z-ai/glm-5.2": {
+      "supported_efforts": [
+        "xhigh",
+        "high"
+      ]
+    },
+    "z-ai/glm-5.3": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "z-ai/glm-5.3-flash": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "z-ai/glm-5.3-flash:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "z-ai/glm-5.3-flashx": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "z-ai/glm-5.3-prime": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "z-ai/glm-5.3:batch": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "~anthropic/claude-fable-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "~anthropic/claude-haiku-latest": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "~anthropic/claude-opus-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "~anthropic/claude-sonnet-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "~deepseek/deepseek-flash-latest": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "~deepseek/deepseek-pro-latest": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "~deepseek/deepseek-v4-flash-latest": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "~google/gemini-flash-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "~google/gemini-pro-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "~moonshotai/kimi-latest": {
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "~openai/gpt-astra-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "~openai/gpt-luna-latest": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "~openai/gpt-mini-latest": {
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "~openai/gpt-sol-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "~openai/gpt-terra-latest": {
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "none"
+      ]
+    },
+    "~x-ai/grok-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "~z-ai/glm-flash-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    },
+    "~z-ai/glm-latest": {
+      "mandatory": true,
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ]
+    }
+  }
+}

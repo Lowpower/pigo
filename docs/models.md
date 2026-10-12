@@ -41,6 +41,15 @@ cap. Price, input types, and effort `thinkingLevelMap` values are copied when
 models.dev has them. Image-generation and classifier models are left out.
 `compat` is not filled from this snapshot.
 
+OpenRouter reasoning levels are a second snapshot,
+`internal/models/openrouter_reasoning.json`, taken from
+`https://openrouter.ai/api/v1/models`. At load, that metadata replaces the
+models.dev effort map for matching OpenRouter models and sets
+`compat.thinkingFormat` to `openrouter`. Mandatory reasoning sets `off` to
+null so a request does not send `reasoning.effort: "none"`. Refresh it with
+`go run ./internal/models/cataloggen -openrouter-reasoning`. `cataloggen`
+without that flag refreshes both snapshots.
+
 `llama.cpp` and `radius` are not in the snapshot. `ant-ling`, `kimi-coding`,
 `qwen-token-plan-individual`, and `openai-codex` keep a single local placeholder.
 

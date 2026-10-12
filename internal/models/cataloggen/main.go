@@ -20,6 +20,13 @@ import (
 const modelsDevURL = "https://models.dev/api.json"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-openrouter-reasoning" {
+		if err := writeOpenRouterReasoning(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -100,6 +107,23 @@ func run() error {
 		return err
 	}
 	fmt.Printf("wrote %s (%d providers, sha256 %s)\n", path, len(providers), out.SHA256)
+	return writeOpenRouterReasoning()
+}
+
+func writeOpenRouterReasoning() error {
+	body, err := fetch(models.OpenRouterModelsURL)
+	if err != nil {
+		return err
+	}
+	buf, err := models.EncodeOpenRouterReasoningSnapshot(body)
+	if err != nil {
+		return err
+	}
+	const path = "internal/models/openrouter_reasoning.json"
+	if err := os.WriteFile(path, buf, 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s (%d bytes)\n", path, len(buf))
 	return nil
 }
 
