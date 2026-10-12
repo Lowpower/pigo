@@ -119,6 +119,42 @@ func TestOpenAIWireMessagesIncludesUserImages(t *testing.T) {
 	}
 }
 
+func TestOpenAIWireMessagesUserTextAndImages(t *testing.T) {
+	img := []ImageContent{{Type: "image", Data: "AAA", MimeType: "image/png"}}
+
+	t.Run("image only", func(t *testing.T) {
+		wire := OpenAIWireMessages([]Message{{Role: RoleUser, Images: img}})
+		blocks, ok := wire[0]["content"].([]map[string]any)
+		if !ok || len(blocks) != 1 || blocks[0]["type"] != "image_url" {
+			t.Fatalf("content = %#v", wire[0]["content"])
+		}
+		for _, b := range blocks {
+			if b["type"] == "text" {
+				t.Fatalf("empty text part = %#v", b)
+			}
+		}
+	})
+
+	t.Run("text and image", func(t *testing.T) {
+		wire := OpenAIWireMessages([]Message{{
+			Role:    RoleUser,
+			Content: "look",
+			Images:  img,
+		}})
+		blocks, ok := wire[0]["content"].([]map[string]any)
+		if !ok || len(blocks) != 2 || blocks[0]["type"] != "text" || blocks[0]["text"] != "look" || blocks[1]["type"] != "image_url" {
+			t.Fatalf("content = %#v", wire[0]["content"])
+		}
+	})
+
+	t.Run("text only", func(t *testing.T) {
+		wire := OpenAIWireMessages([]Message{{Role: RoleUser, Content: "look"}})
+		if wire[0]["content"] != "look" {
+			t.Fatalf("content = %#v", wire[0]["content"])
+		}
+	})
+}
+
 func TestAnthropicWireMessagesIncludesToolResultImages(t *testing.T) {
 	raw := `{"content":[{"type":"text","text":"Read image file [image/png]"},{"type":"image","data":"AAA","mimeType":"image/png"}]}`
 	wire := AnthropicWireMessages([]Message{{

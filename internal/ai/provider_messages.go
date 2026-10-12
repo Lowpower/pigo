@@ -276,7 +276,9 @@ func openaiUserContent(m Message) any {
 		return m.Content
 	}
 	blocks := make([]map[string]any, 0, 1+len(m.Images))
-	blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+	if m.Content != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+	}
 	for _, img := range m.Images {
 		blocks = append(blocks, map[string]any{
 			"type": "image_url",
