@@ -99,7 +99,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamAnthropicSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, catalogCost(opts))
+			streamAnthropicSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, newAnthropicPricing(opts))
 		}()
 		return s, nil
 	}
@@ -113,7 +113,7 @@ func StreamAnthropicReader(ctx context.Context, r io.Reader, model string, cost 
 	out := newOutputMessage(model, "anthropic")
 	go func() {
 		defer s.end()
-		streamAnthropicSSE(ctx, r, out, s, nil, cost)
+		streamAnthropicSSE(ctx, r, out, s, nil, anthropicPricing{requested: cost, active: cost})
 	}()
 	return s
 }
@@ -473,9 +473,53 @@ type anthropicSSE struct {
 	} `json:"error"`
 }
 
+// anthropicPricing prices one Anthropic turn.
+// A served model listed in allowedFallbackModels uses that entry's cost,
+// including a nil cost. The requested model and any other served id keep the
+// request catalog cost.
+type anthropicPricing struct {
+	requestedModel string
+	requested      *models.Cost
+	fallbacks      []models.FallbackModel
+	active         *models.Cost
+}
+
+func newAnthropicPricing(opts Options) anthropicPricing {
+	cost := catalogCost(opts)
+	p := anthropicPricing{requestedModel: opts.Model, requested: cost, active: cost}
+	if c := lookupCompat(opts); c != nil {
+		p.fallbacks = c.AllowedFallbackModels
+	}
+	return p
+}
+
+func (p *anthropicPricing) noteServed(model string) {
+	if p == nil || model == "" {
+		return
+	}
+	if model == p.requestedModel {
+		p.active = p.requested
+		return
+	}
+	for _, fb := range p.fallbacks {
+		if fb.Model == model {
+			p.active = fb.Cost
+			return
+		}
+	}
+	p.active = p.requested
+}
+
+func (p *anthropicPricing) cost() *models.Cost {
+	if p == nil {
+		return nil
+	}
+	return p.active
+}
+
 // streamAnthropicSSE reads Anthropic SSE from r and pushes AssistantMessageEvents
 // onto s, building out in place. It does not close s (the caller does).
-func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), cost *models.Cost) {
+func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), price anthropicPricing) {
 	if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 		return
 	}
@@ -493,7 +537,7 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 		}
 		payload := data.String()
 		data.Reset()
-		return handleAnthropicEvent(ctx, payload, out, pos, &transformations, s, observe, cost)
+		return handleAnthropicEvent(ctx, payload, out, pos, &transformations, s, observe, &price)
 	}
 
 	for scanner.Scan() {
@@ -533,7 +577,7 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 	}
 }
 
-func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, transformations *[]InputTransformation, s *EventStream, observe func([]byte), cost *models.Cost) bool {
+func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, transformations *[]InputTransformation, s *EventStream, observe func([]byte), price *anthropicPricing) bool {
 	var ev anthropicSSE
 	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 		return true // ignore unparseable keepalive/comment payloads
@@ -548,6 +592,7 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 			}
 			if ev.Message.Model != "" {
 				out.Model = ev.Message.Model
+				price.noteServed(ev.Message.Model)
 			}
 			u := ev.Message.Usage
 			out.Usage.Input = deref(u.InputTokens)
@@ -555,7 +600,7 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 			out.Usage.CacheRead = deref(u.CacheReadInputTokens)
 			out.Usage.CacheWrite = deref(u.CacheCreationInputTokens)
 			out.Usage.CacheWrite1h = deref(anthropicCacheWrite1h(u))
-			finishAnthropicUsage(&out.Usage, cost)
+			finishAnthropicUsage(&out.Usage, price.cost())
 			if ev.Message.InputTransformations != nil {
 				*transformations = ev.Message.InputTransformations
 			}
@@ -667,7 +712,7 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 			if n := anthropicCacheWrite1h(*u); n != nil {
 				out.Usage.CacheWrite1h = *n
 			}
-			finishAnthropicUsage(&out.Usage, cost)
+			finishAnthropicUsage(&out.Usage, price.cost())
 		}
 
 	case "error":

@@ -482,3 +482,118 @@ func TestAnthropicCacheWriteTTLSplit(t *testing.T) {
 		})
 	}
 }
+
+func TestAnthropicCatalogAndFallbackCost(t *testing.T) {
+	priced := &models.Cost{Input: 3, Output: 15, CacheRead: 0.30, CacheWrite: 3.75}
+	opus := &models.Cost{Input: 15, Output: 75, CacheRead: 1.5, CacheWrite: 18.75}
+	haiku := &models.Cost{Input: 1, Output: 5, CacheRead: 0.1, CacheWrite: 1.25}
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "cost-ant", DefaultAPI: "anthropic-messages", DefaultID: "priced",
+		Models: []models.Model{
+			{Provider: "cost-ant", ID: "priced", Cost: priced},
+			{Provider: "cost-ant", ID: "free"},
+			{Provider: "cost-ant", ID: "opus", Cost: opus, Compat: &models.Compat{AllowedFallbackModels: []models.FallbackModel{
+				{Model: "claude-haiku-4", Cost: haiku},
+				{Model: "claude-free-fallback"},
+			}}},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("cost-ant") })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		usage := r.Header.Get("X-Test-Usage")
+		if usage == "" {
+			usage = `{"input_tokens":1000000,"output_tokens":1000000}`
+		}
+		served := r.Header.Get("X-Test-Model")
+		if served == "" {
+			served = req.Model
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":%q,\"usage\":%s}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":%s}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n", served, usage, usage)
+	}))
+	defer srv.Close()
+
+	run := func(model, served, usage string) Usage {
+		t.Helper()
+		client := &AnthropicClient{
+			BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client(),
+			Headers: map[string]string{},
+		}
+		if served != "" {
+			client.Headers["X-Test-Model"] = served
+		}
+		if usage != "" {
+			client.Headers["X-Test-Usage"] = usage
+		}
+		stream, err := client.StreamFn()(context.Background(), Context{
+			Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		}, Options{Provider: "cost-ant", Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, final := stream.Collect()
+		if final == nil {
+			t.Fatal("no final message")
+		}
+		return final.Usage
+	}
+
+	t.Run("priced input and output", func(t *testing.T) {
+		u := run("priced", "", "")
+		if math.Abs(u.Cost.Input-3) > 1e-9 || math.Abs(u.Cost.Output-15) > 1e-9 || math.Abs(u.Cost.Total-18) > 1e-9 {
+			t.Fatalf("cost=%+v, want input 3 output 15 total 18", u.Cost)
+		}
+	})
+
+	t.Run("missing catalog cost stays zero", func(t *testing.T) {
+		u := run("free", "", "")
+		if u.Cost != (UsageCost{}) {
+			t.Fatalf("cost=%+v, want zeros", u.Cost)
+		}
+	})
+
+	t.Run("cache read and write", func(t *testing.T) {
+		u := run("priced", "", `{"input_tokens":1000000,"output_tokens":0,"cache_read_input_tokens":2000000,"cache_creation_input_tokens":500000}`)
+		if math.Abs(u.Cost.Input-3) > 1e-9 || math.Abs(u.Cost.CacheRead-0.6) > 1e-9 || math.Abs(u.Cost.CacheWrite-1.875) > 1e-9 {
+			t.Fatalf("cost=%+v", u.Cost)
+		}
+		if math.Abs(u.Cost.Total-(3+0.6+1.875)) > 1e-9 {
+			t.Fatalf("total=%v", u.Cost.Total)
+		}
+	})
+
+	t.Run("fallback model price", func(t *testing.T) {
+		u := run("opus", "claude-haiku-4", "")
+		if math.Abs(u.Cost.Input-1) > 1e-9 || math.Abs(u.Cost.Output-5) > 1e-9 || math.Abs(u.Cost.Total-6) > 1e-9 {
+			t.Fatalf("cost=%+v, want haiku input 1 output 5 total 6", u.Cost)
+		}
+	})
+
+	t.Run("fallback without cost stays zero", func(t *testing.T) {
+		u := run("opus", "claude-free-fallback", "")
+		if u.Cost != (UsageCost{}) {
+			t.Fatalf("cost=%+v, want zeros", u.Cost)
+		}
+	})
+
+	t.Run("same served model keeps request price", func(t *testing.T) {
+		u := run("opus", "opus", "")
+		if math.Abs(u.Cost.Total-90) > 1e-9 {
+			t.Fatalf("cost=%+v, want opus total 90", u.Cost)
+		}
+	})
+
+	t.Run("unknown served model keeps request price", func(t *testing.T) {
+		u := run("opus", "claude-unknown", "")
+		if math.Abs(u.Cost.Total-90) > 1e-9 {
+			t.Fatalf("cost=%+v, want opus total 90", u.Cost)
+		}
+	})
+}
