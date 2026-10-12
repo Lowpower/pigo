@@ -208,18 +208,30 @@ func New(cfg config.Config) Model {
 		complete:     completer{maxVisible: cfg.AutocompleteVisible()},
 	}
 	m.glam = newRenderer(80)
+	applyTrueColor(cfg)
 	m.applyTheme(theme.Load(cfg.Theme, "", ""))
 	m.refreshGit()
-	applyTrueColor(cfg)
 	return m
 }
 
+// applyTrueColor sets the process color profile from terminal.trueColor.
+// on is 24-bit, off is 256-color, and auto follows termenv detection
+// without dropping below 256-color.
 func applyTrueColor(cfg config.Config) {
-	switch cfg.TrueColorMode() {
+	lipgloss.SetColorProfile(colorProfile(cfg.TrueColorMode(), termenv.EnvColorProfile()))
+}
+
+func colorProfile(mode string, detected termenv.Profile) termenv.Profile {
+	switch mode {
 	case "on":
-		lipgloss.SetColorProfile(termenv.TrueColor)
+		return termenv.TrueColor
 	case "off":
-		lipgloss.SetColorProfile(termenv.ANSI)
+		return termenv.ANSI256
+	default:
+		if detected == termenv.TrueColor {
+			return termenv.TrueColor
+		}
+		return termenv.ANSI256
 	}
 }
 
@@ -1077,6 +1089,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			m.keys.Reload()
 		}
 		m.attachExtensions()
+		applyTrueColor(m.cfg)
 		m.applyTheme(theme.LoadWith(m.themeOpts(m.cfg.Theme)))
 		msg := "reloaded keybindings, skills, settings, and context files"
 		if lines := m.engine.PromptTemplateWarnings(); len(lines) > 0 {
