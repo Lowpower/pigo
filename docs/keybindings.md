@@ -8,7 +8,7 @@ Extensions may `register_shortcut` with a key id; reserved host actions cannot
 be stolen.
 
 Windows / WSL use a slightly different default table (follow-up is `ctrl+q`,
-paste-image is `alt+v`, …).
+paste is `alt+v`, …).
 
 ## Main editor (non-Windows defaults)
 

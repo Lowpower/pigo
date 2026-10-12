@@ -90,7 +90,7 @@ func (m Model) expandedStartupHints(kb *keys.Manager) string {
 		startupRawHint("!!", "to run bash (no context)"),
 		startupKeyHint(kb, "app.message.followUp", "to queue follow-up"),
 		startupKeyHint(kb, "app.message.dequeue", "to edit all queued messages"),
-		startupKeyHint(kb, "app.clipboard.pasteImage", "to paste image"),
+		startupKeyHint(kb, "app.clipboard.pasteImage", "to paste file or image"),
 		startupRawHint("drop files", "to attach"),
 	}
 	return m.metaStyle.Render(strings.Join(lines, "\n"))

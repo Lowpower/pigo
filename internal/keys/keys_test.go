@@ -144,6 +144,10 @@ func TestPasteImageDefaultKeys(t *testing.T) {
 	if win.Matches("ctrl+v", "app.clipboard.pasteImage") {
 		t.Fatal("windows should not keep ctrl+v for paste image")
 	}
+	const want = "Paste files on macOS, images, or text from clipboard"
+	if unix.Description("app.clipboard.pasteImage") != want || win.Description("app.clipboard.pasteImage") != want {
+		t.Fatalf("description = %q", unix.Description("app.clipboard.pasteImage"))
+	}
 }
 
 func TestBindExtensionSkipsReservedAndOverrides(t *testing.T) {
