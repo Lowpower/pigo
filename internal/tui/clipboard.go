@@ -5,12 +5,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type clipImage struct {
@@ -102,6 +104,104 @@ func readXclipImage() *clipImage {
 		return nil
 	}
 	return supportedClipImage(data, mime)
+}
+
+// darwinFileURLScript prints a JSON array of POSIX paths for Finder file URLs.
+// An empty array, or a failing osascript, means there is nothing to prefer over images.
+const darwinFileURLScript = `use framework "Foundation"
+use framework "AppKit"
+set pb to current application's NSPasteboard's generalPasteboard()
+set opts to current application's NSDictionary's dictionaryWithObject:(current application's NSNumber's numberWithBool:true) forKey:(current application's NSPasteboardURLReadingFileURLsOnlyKey)
+set urls to pb's readObjectsForClasses:{current application's NSURL} options:opts
+set paths to current application's NSMutableArray's array()
+if urls is not missing value then
+	repeat with u in urls
+		set p to (u's |path|())
+		if p is not missing value and (p as text) is not "" then
+			(paths's addObject:(p as text))
+		end if
+	end repeat
+end if
+set json to current application's NSJSONSerialization's dataWithJSONObject:paths options:0 |error|:(missing value)
+if json is missing value then return "[]"
+set s to current application's NSString's alloc()'s initWithData:json encoding:(current application's NSUTF8StringEncoding)
+if s is missing value then return "[]"
+return s as text`
+
+func readClipboardFilePaths() []string {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	return readDarwinClipboardFilePaths()
+}
+
+func readDarwinClipboardFilePaths() []string {
+	out, ok := runClip("osascript", clipReadTimeout, "-e", darwinFileURLScript)
+	if !ok {
+		return nil
+	}
+	return parseClipboardFilePaths(out)
+}
+
+func parseClipboardFilePaths(data []byte) []string {
+	var paths []string
+	if err := json.Unmarshal(bytes.TrimSpace(data), &paths); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func formatClipboardFilePaths(paths []string, bash bool) (string, bool) {
+	if len(paths) == 0 || clipboardPathsHaveControl(paths) {
+		return "", false
+	}
+	if !bash {
+		return strings.Join(paths, "\n"), true
+	}
+	quoted := make([]string, len(paths))
+	for i, p := range paths {
+		quoted[i] = quotePathIfNeeded(p)
+	}
+	return strings.Join(quoted, " "), true
+}
+
+func clipboardPathsHaveControl(paths []string) bool {
+	for _, p := range paths {
+		for _, r := range p {
+			if unicode.IsControl(r) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func quotePathIfNeeded(value string) string {
+	if value != "" && shellSafePath(value) {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func shellSafePath(value string) bool {
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_' || r == '-' || r == '.' || r == '/' || r == '~' || r == ':' || r == '@':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func readDarwinClipboardImage() *clipImage {
