@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // This file streams OpenAI Chat Completions SSE: text, reasoning_content
@@ -67,7 +69,7 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamOpenAISSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent)
+			streamOpenAISSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, catalogCost(opts))
 		}()
 		return s, nil
 	}
@@ -79,7 +81,7 @@ func StreamOpenAIReader(ctx context.Context, r io.Reader, model string) *EventSt
 	out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "openai-completions", Provider: "openai", Model: model, StopReason: StopPending}
 	go func() {
 		defer s.end()
-		streamOpenAISSE(ctx, r, out, s, nil)
+		streamOpenAISSE(ctx, r, out, s, nil, nil)
 	}()
 	return s
 }
@@ -199,7 +201,7 @@ func openAICacheCounts(u oaiUsage) (read, write int) {
 	return read, write
 }
 
-func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
+func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), cost *models.Cost) {
 	if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 		return
 	}
@@ -221,7 +223,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 		if payload == "[DONE]" {
 			return true
 		}
-		return handleOpenAIChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s, observe)
+		return handleOpenAIChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s, observe, cost)
 	}
 
 	for scanner.Scan() {
@@ -280,7 +282,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 	}
 }
 
-func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream, observe func([]byte)) bool {
+func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream, observe func([]byte), cost *models.Cost) bool {
 	var chunk oaiChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return true
@@ -290,6 +292,7 @@ func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessag
 	if chunk.Usage != nil {
 		read, write := openAICacheCounts(*chunk.Usage)
 		applyInclusivePromptUsage(&out.Usage, chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, read, write)
+		calculateCost(cost, &out.Usage)
 	}
 	if len(chunk.Choices) == 0 {
 		return true

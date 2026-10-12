@@ -2,9 +2,14 @@ package ai
 
 import (
 	"context"
+	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"google.golang.org/genai"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 func TestGoogleContentsRolesAndTools(t *testing.T) {
@@ -75,5 +80,57 @@ func TestGoogleVertexMissingAuth(t *testing.T) {
 	_, final := stream.Collect()
 	if final == nil || final.StopReason != StopError || final.API != "google-vertex" {
 		t.Fatalf("%+v", final)
+	}
+}
+
+func TestGoogleStreamPricesCatalogCost(t *testing.T) {
+	const provider = "cost-goog"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: provider, DefaultAPI: "google-generative-ai", DefaultID: "priced",
+		Models: []models.Model{
+			{Provider: provider, ID: "priced", API: "google-generative-ai", Cost: &models.Cost{Input: 3, Output: 15, CacheRead: 0.30}},
+			{Provider: provider, ID: "free", API: "google-generative-ai"},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(provider) })
+
+	run := func(model, usage string) Usage {
+		t.Helper()
+		body := "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":" + usage + "}\n\n"
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(body))
+		}))
+		defer srv.Close()
+		client := &GoogleClient{APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client()}
+		stream, err := client.StreamFn()(context.Background(), Context{
+			Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		}, Options{Provider: provider, Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, final := stream.Collect()
+		if final == nil || final.StopReason == StopError {
+			t.Fatalf("final = %+v", final)
+		}
+		return final.Usage
+	}
+
+	u := run("priced", `{"promptTokenCount":1000000,"candidatesTokenCount":1000000,"totalTokenCount":2000000}`)
+	if math.Abs(u.Cost.Input-3) > 1e-9 || math.Abs(u.Cost.Output-15) > 1e-9 || math.Abs(u.Cost.Total-18) > 1e-9 {
+		t.Fatalf("priced cost = %+v, want total 18", u.Cost)
+	}
+
+	u = run("priced", `{"promptTokenCount":1000000,"candidatesTokenCount":0,"cachedContentTokenCount":400000}`)
+	if u.Input != 600_000 || u.CacheRead != 400_000 {
+		t.Fatalf("cache tokens = %+v", u)
+	}
+	if math.Abs(u.Cost.Input-1.8) > 1e-9 || math.Abs(u.Cost.CacheRead-0.12) > 1e-9 || math.Abs(u.Cost.Total-1.92) > 1e-9 {
+		t.Fatalf("cache cost = %+v", u.Cost)
+	}
+
+	u = run("free", `{"promptTokenCount":1000000,"candidatesTokenCount":1000000,"totalTokenCount":2000000}`)
+	if u.Cost != (UsageCost{}) {
+		t.Fatalf("free cost = %+v, want zeros", u.Cost)
 	}
 }
