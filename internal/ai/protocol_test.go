@@ -344,6 +344,50 @@ func strPtrAI(v string) *string { return &v }
 
 func boolPtrAI(v bool) *bool { return &v }
 
+func TestOpenRouterMetadataWire(t *testing.T) {
+	step, ok := models.Lookup("openrouter", "stepfun/step-5-preview")
+	if !ok {
+		t.Fatal("missing mandatory model")
+	}
+	body := openRouterBody(t, step.ID, "off")
+	if _, ok := body["reasoning"]; ok {
+		t.Fatalf("mandatory off sent reasoning: %#v", body["reasoning"])
+	}
+	if _, ok := body["reasoning_effort"]; ok {
+		t.Fatalf("mandatory off sent reasoning_effort: %#v", body["reasoning_effort"])
+	}
+	on := openRouterBody(t, step.ID, "low")
+	reasoning, _ := on["reasoning"].(map[string]any)
+	if reasoning["effort"] != "low" {
+		t.Fatalf("mandatory low = %#v", on["reasoning"])
+	}
+
+	glm := openRouterBody(t, "z-ai/glm-5.2", "off")
+	reasoning, _ = glm["reasoning"].(map[string]any)
+	if reasoning["effort"] != "none" {
+		t.Fatalf("optional off = %#v", glm["reasoning"])
+	}
+	high := openRouterBody(t, "z-ai/glm-5.2", "low")
+	reasoning, _ = high["reasoning"].(map[string]any)
+	if reasoning["effort"] != "high" {
+		t.Fatalf("glm clamped low = %#v", high["reasoning"])
+	}
+}
+
+func openRouterBody(t *testing.T, id, level string) map[string]any {
+	t.Helper()
+	raw, err := buildOpenAIRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
+		Options{Provider: "openrouter", Model: id, Thinking: level})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(raw, &req); err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
+
 func TestBuildOpenAIRequestThinkingFormats(t *testing.T) {
 	models.RegisterProvider(models.ProviderSpec{
 		ID: "fmt-test", DefaultAPI: "openai-completions", DefaultID: "m",

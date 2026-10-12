@@ -64,7 +64,7 @@ func annotateBuiltin(m Model) Model {
 	if m.Provider == "openai" && m.ID == "gpt-6-astra" && m.Compat == nil {
 		m.Compat = &Compat{SupportsExplicitPromptCacheMode: true}
 	}
-	return m
+	return applyOpenRouterReasoning(m, true)
 }
 
 // CatalogDefaultOK reports whether providerID's default model is in list
