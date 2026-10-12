@@ -22,6 +22,12 @@ import (
 
 const imageMaxEdge = 2000
 
+// SniffImageMIME reports a supported image type from magic bytes.
+// PNG, JPEG, GIF, WebP, and BMP are recognized. Other input returns "".
+func SniffImageMIME(data []byte) string {
+	return sniffImageMIME(data)
+}
+
 func sniffImageMIME(data []byte) string {
 	switch {
 	case bytes.HasPrefix(data, []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}):
@@ -242,10 +248,14 @@ func encodeImage(img image.Image, mime string, quality int) ([]byte, string, err
 
 // FitUserImages resizes user-message attachments before they enter history.
 // Images already inside the limits keep their original bytes. An image that
-// cannot be fit under maxBytes is omitted.
+// cannot be fit under maxBytes is omitted. BMP attachments are converted to
+// PNG even when auto-resize is off, and are not scaled in that case.
 func FitUserImages(text string, images []ai.ImageContent, autoResize bool, profile *models.ImageResize) (string, []ai.ImageContent) {
-	if len(images) == 0 || !autoResize {
+	if len(images) == 0 {
 		return text, images
+	}
+	if !autoResize {
+		return convertBMPAttachments(text, images)
 	}
 	out := make([]ai.ImageContent, 0, len(images))
 	var hints []string
@@ -256,6 +266,41 @@ func FitUserImages(text string, images []ai.ImageContent, autoResize bool, profi
 		}
 		out = append(out, fitted)
 		hints = append(hints, h...)
+	}
+	if len(hints) == 0 {
+		return text, out
+	}
+	note := strings.Join(hints, "\n")
+	if strings.TrimSpace(text) == "" {
+		return note, out
+	}
+	return text + "\n" + note, out
+}
+
+// convertBMPAttachments turns BMP attachments into PNG without scaling.
+// Other images keep their original bytes when auto-resize is off.
+func convertBMPAttachments(text string, images []ai.ImageContent) (string, []ai.ImageContent) {
+	out := make([]ai.ImageContent, len(images))
+	copy(out, images)
+	var hints []string
+	for i, img := range images {
+		raw, err := base64.StdEncoding.DecodeString(img.Data)
+		if err != nil {
+			continue
+		}
+		mime := img.MimeType
+		if mime == "" {
+			mime = sniffImageMIME(raw)
+		}
+		if mime != "image/bmp" {
+			continue
+		}
+		processed, ok := processImage(raw, mime, false, nil)
+		if !ok {
+			continue
+		}
+		out[i] = ai.ImageContent{Type: "image", Data: processed.data, MimeType: processed.mimeType}
+		hints = append(hints, processed.hints...)
 	}
 	if len(hints) == 0 {
 		return text, out

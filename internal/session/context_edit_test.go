@@ -42,7 +42,7 @@ func TestContextEditOmitLeavesRawHistoryAndUsage(t *testing.T) {
 	if !ok || !strings.Contains(string(stored.Message), "secret") {
 		t.Fatalf("stored entry changed: %+v", stored)
 	}
-	stats := CollectStats(m, nil, 0)
+	stats := CollectStats(m, nil, 0, "", nil)
 	if stats.UserMessages != 1 || stats.Tokens.Input != 3 || stats.Tokens.Output != 4 {
 		t.Fatalf("stats changed: %+v", stats)
 	}

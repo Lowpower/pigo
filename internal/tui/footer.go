@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/compaction"
 )
 
 func formatTokens(count int) string {
@@ -141,6 +142,13 @@ func (m *Model) refreshGit() {
 	m.gitBranch = gitBranch(cwd)
 }
 
+func (m Model) contextTokens() int {
+	if m.engine != nil {
+		return m.engine.ContextTokens(m.history)
+	}
+	return compaction.ContextTokens(m.history, "", nil)
+}
+
 func (m Model) footerText() string {
 	if m.extFooterSet {
 		return strings.Join(m.extFooter, "\n")
@@ -186,7 +194,7 @@ func (m Model) footerText() string {
 		win = m.cfg.ContextWindow
 	}
 	if win > 0 {
-		used := m.usage.Input + m.usage.CacheRead
+		used := m.contextTokens()
 		pct := "?"
 		if used > 0 {
 			pct = strconv.FormatFloat(float64(used)*100/float64(win), 'f', 1, 64)

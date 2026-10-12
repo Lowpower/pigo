@@ -33,6 +33,39 @@ func TestStreamForDispatchesByModelAPI(t *testing.T) {
 	}
 }
 
+func TestStreamForClampsThinkingBeforeBudget(t *testing.T) {
+	var got Options
+	RegisterAPI("clamp-api", func(_ ClientConfig) StreamFn {
+		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+			got = opts
+			return ScriptedStreamFn("ok", 0)(ctx, reqCtx, opts)
+		}
+	})
+	models.RegisterProvider(models.ProviderSpec{
+		ID: "clamp-prov", DefaultAPI: "clamp-api", DefaultID: "m",
+		Models: []models.Model{{
+			Provider: "clamp-prov", ID: "m", API: "clamp-api",
+			ThinkingLevelMap: map[string]*string{"minimal": nil, "low": strPtrAI("medium")},
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider("clamp-prov") })
+	requested := Options{Model: "m", Thinking: "minimal"}
+	stream, err := StreamFor("clamp-prov", ClientConfig{})(context.Background(), Context{}, requested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	if got.Thinking != "low" {
+		t.Fatalf("thinking = %q", got.Thinking)
+	}
+	if got.ThinkingBudget != models.BudgetTokens("low") {
+		t.Fatalf("budget = %d", got.ThinkingBudget)
+	}
+	if requested.Thinking != "minimal" {
+		t.Fatalf("caller thinking mutated to %q", requested.Thinking)
+	}
+}
+
 func TestStreamForSetsThinkingBudget(t *testing.T) {
 	t.Cleanup(func() { models.SetThinkingBudgets(nil) })
 	models.SetThinkingBudgets(map[string]int{"high": 77})

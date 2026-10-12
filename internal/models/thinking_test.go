@@ -62,6 +62,80 @@ func TestSupportsImage(t *testing.T) {
 	}
 }
 
+func TestProviderThinkingValue(t *testing.T) {
+	m := Model{Reasoning: boolPtr(true), ThinkingLevelMap: map[string]*string{
+		"xhigh":   strPtr("max"),
+		"minimal": nil,
+		"low":     strPtr("medium"),
+		"off":     strPtr("none"),
+		"high":    strPtr("  "),
+	}}
+	if v, send := m.ProviderThinkingValue("xhigh"); !send || v != "max" {
+		t.Fatalf("xhigh = %q send=%v", v, send)
+	}
+	if v, send := m.ProviderThinkingValue("low"); !send || v != "medium" {
+		t.Fatalf("low = %q send=%v", v, send)
+	}
+	if v, send := m.ProviderThinkingValue("minimal"); send || v != "" {
+		t.Fatalf("null minimal = %q send=%v", v, send)
+	}
+	if v, send := m.ProviderThinkingValue("off"); !send || v != "none" {
+		t.Fatalf("off = %q send=%v", v, send)
+	}
+	if v, send := m.ProviderThinkingValue("high"); send || v != "" {
+		t.Fatalf("blank high = %q send=%v", v, send)
+	}
+	if v, send := m.ProviderThinkingValue("medium"); !send || v != "medium" {
+		t.Fatalf("unmapped medium = %q send=%v", v, send)
+	}
+
+	offNull := Model{ThinkingLevelMap: map[string]*string{"off": nil}}
+	if v, send := offNull.ProviderThinkingValue("off"); send || v != "" {
+		t.Fatalf("off null = %q send=%v", v, send)
+	}
+
+	plain := Model{}
+	if v, send := plain.ProviderThinkingValue("high"); !send || v != "high" {
+		t.Fatalf("plain high = %q send=%v", v, send)
+	}
+	if v, send := plain.ProviderThinkingValue("off"); send || v != "" {
+		t.Fatalf("plain off = %q send=%v", v, send)
+	}
+	if v, send := plain.ProviderThinkingValue(""); send || v != "" {
+		t.Fatalf("plain empty = %q send=%v", v, send)
+	}
+}
+
+func TestRequestThinkingLevelKeepsUnsupportedOff(t *testing.T) {
+	m := Model{Reasoning: boolPtr(true), ThinkingLevelMap: map[string]*string{
+		"off":     nil,
+		"minimal": nil,
+		"low":     strPtr("medium"),
+		"xhigh":   strPtr("max"),
+	}}
+	if got := m.RequestThinkingLevel("off"); got != "off" {
+		t.Fatalf("off clamped to %q", got)
+	}
+	if _, send := m.ProviderThinkingValue(m.RequestThinkingLevel("off")); send {
+		t.Fatal("off:null should not send")
+	}
+	if got := m.RequestThinkingLevel("minimal"); got != "low" {
+		t.Fatalf("minimal clamped to %q", got)
+	}
+	if v, send := m.ProviderThinkingValue(m.RequestThinkingLevel("minimal")); !send || v != "medium" {
+		t.Fatalf("clamped minimal wire = %q send=%v", v, send)
+	}
+	if got := m.RequestThinkingLevel("xhigh"); got != "xhigh" {
+		t.Fatalf("xhigh = %q", got)
+	}
+	if got := m.RequestThinkingLevel(""); got != "" {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := (Model{Reasoning: boolPtr(false)}).RequestThinkingLevel("high"); got != "off" {
+		t.Fatalf("non-reasoning = %q", got)
+	}
+}
+
 func TestNextThinkingLevelIn(t *testing.T) {
 	if NextThinkingLevelIn("off", []string{"off", "low", "high"}) != "low" {
 		t.Fatal("next")

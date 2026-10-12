@@ -36,6 +36,32 @@ func send(m tea.Model, msg tea.Msg) Model {
 	return next.(Model)
 }
 
+func TestFooterPercentUsesContextTokens(t *testing.T) {
+	m := New(testCfg())
+	m.engine = &runtime.Engine{
+		System: strings.Repeat("s", 4000),
+		Opts:   runtime.Options{ContextWindow: 1000},
+	}
+	m.usage.Input = 50000
+	m.usage.CacheRead = 50000
+	m.history = []ai.Message{{
+		Role: ai.RoleAssistant,
+		Assistant: &ai.AssistantMessage{
+			Role:       ai.RoleAssistant,
+			StopReason: ai.StopStop,
+			Usage:      ai.Usage{TotalTokens: 100},
+			Content:    []*ai.Content{{Type: ai.KindText, Text: "hi"}},
+		},
+	}}
+	got := m.footerText()
+	if !strings.Contains(got, "10.0%/1.0k (auto)") {
+		t.Fatalf("footer = %q", got)
+	}
+	if !strings.Contains(got, "↑50k") {
+		t.Fatalf("billed input missing: %q", got)
+	}
+}
+
 func TestCtrlC(t *testing.T) {
 	m := New(testCfg())
 	m.editor.SetValue("hello")

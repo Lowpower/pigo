@@ -8,6 +8,8 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+
+	"golang.org/x/image/bmp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,6 +192,36 @@ func TestFitUserImagesNoProfileUses2000(t *testing.T) {
 	if !strings.Contains(text, "resized from 2001x10 to 2000x") {
 		t.Fatalf("text = %q", text)
 	}
+}
+
+func TestFitUserImagesAutoResizeOffConvertsBMP(t *testing.T) {
+	raw := solidBMP(t, 8, 8)
+	img := ai.ImageContent{Type: "image", Data: base64.StdEncoding.EncodeToString(raw), MimeType: "image/bmp"}
+	width := 2
+	text, images := FitUserImages("look", []ai.ImageContent{img}, false, &models.ImageResize{MaxWidth: &width})
+	if len(images) != 1 || images[0].MimeType != "image/png" {
+		t.Fatalf("images = %+v", images)
+	}
+	if strings.Contains(text, "resized from") {
+		t.Fatalf("resized with autoResize off: %q", text)
+	}
+	decoded, err := png.Decode(base64.NewDecoder(base64.StdEncoding, strings.NewReader(images[0].Data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Bounds().Dx() != 8 || decoded.Bounds().Dy() != 8 {
+		t.Fatalf("bounds = %v", decoded.Bounds())
+	}
+}
+
+func solidBMP(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	var buf bytes.Buffer
+	if err := bmp.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 func TestFitUserImagesAutoResizeOff(t *testing.T) {

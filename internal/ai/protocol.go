@@ -11,13 +11,47 @@ import (
 const openaiPromptCacheKeyMax = 64
 
 func reasoningEffort(opts Options) string {
-	t := strings.ToLower(strings.TrimSpace(opts.Thinking))
-	switch t {
-	case "", "off":
-		return ""
-	default:
-		return t
+	_, effort := resolvedThinking(opts)
+	return effort
+}
+
+// resolvedThinking clamps the requested level onto the current model and
+// returns the provider effort string. off stays off when the map marks it
+// unsupported. An unknown model keeps the historical raw level.
+func resolvedThinking(opts Options) (canonical, effort string) {
+	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	m, ok := models.Lookup(opts.Provider, opts.Model)
+	if !ok {
+		if level == "" || level == "off" {
+			return level, ""
+		}
+		return level, level
 	}
+	canonical = m.RequestThinkingLevel(level)
+	if canonical == "" {
+		return "", ""
+	}
+	wire, send := m.ProviderThinkingValue(canonical)
+	if !send {
+		return canonical, ""
+	}
+	return canonical, wire
+}
+
+func thinkingOn(canonical string) bool {
+	return canonical != "" && canonical != "off"
+}
+
+func offExplicitlyUnsupported(opts Options) bool {
+	m, ok := models.Lookup(opts.Provider, opts.Model)
+	if !ok {
+		return false
+	}
+	mapped, present := m.ThinkingLevelMap["off"]
+	if !present {
+		return false
+	}
+	return mapped == nil || strings.TrimSpace(*mapped) == ""
 }
 
 func clampPromptCacheKey(key string) string {
@@ -189,4 +223,32 @@ func googleThinkingLevel(effort string) string {
 	default:
 		return ""
 	}
+}
+
+// googleMappedLevel keeps the four Google enums in SDK spelling and passes
+// any other mapped provider value through unchanged.
+func googleMappedLevel(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "minimal", "low", "medium", "high":
+		return googleThinkingLevel(value)
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func googleThinkingWire(opts Options) string {
+	canonical, _ := resolvedThinking(opts)
+	level := googleThinkingLevel(canonical)
+	m, ok := models.Lookup(opts.Provider, opts.Model)
+	if !ok {
+		return level
+	}
+	mapped, present := m.ThinkingLevelMap[canonical]
+	if !present || mapped == nil {
+		return level
+	}
+	if value := strings.TrimSpace(*mapped); value != "" {
+		return googleMappedLevel(value)
+	}
+	return level
 }

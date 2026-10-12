@@ -14,6 +14,48 @@ import (
 	"github.com/Lowpower/pigo/internal/tools"
 )
 
+func TestGetContextUsageUsesLastUsage(t *testing.T) {
+	dir := t.TempDir()
+	sess := session.New(dir, dir)
+	if _, err := sess.AppendMessage("assistant", &ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		StopReason: ai.StopStop,
+		Usage:      ai.Usage{Input: 800, Output: 50, TotalTokens: 850},
+		Content:    []*ai.Content{{Type: ai.KindText, Text: "old"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.AppendMessage("assistant", &ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		StopReason: ai.StopStop,
+		Usage:      ai.Usage{Input: 9000, Output: 100, TotalTokens: 9100},
+		Content:    []*ai.Content{{Type: ai.KindText, Text: "later"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.AppendMessage("toolResult", map[string]any{
+		"role": "toolResult", "content": strings.Repeat("x", 40),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{
+		System: strings.Repeat("s", 4000),
+		Opts:   Options{Session: sess, ContextWindow: 10000},
+	}
+	usage := e.HandleHostCall(nil, "getContextUsage", nil)
+	// Last assistant usage is 9100; the earlier 850 is not added again. The
+	// tool result is 40 chars (10 tokens). The system prompt is already inside
+	// that usage.
+	if usage["tokens"] != 9110 {
+		t.Fatalf("usage=%v", usage)
+	}
+
+	empty := (&Engine{System: "abcdefgh", Opts: Options{ContextWindow: 1000}}).HandleHostCall(nil, "getContextUsage", nil)
+	if empty["tokens"] != 2 {
+		t.Fatalf("no usage=%v", empty)
+	}
+}
+
 func TestHostCallExecAndUsage(t *testing.T) {
 	e := &Engine{Opts: Options{Cwd: t.TempDir(), ContextWindow: 1000}}
 	got := e.HandleHostCall(nil, "exec", map[string]any{"command": "echo", "args": []any{"hello-host"}})
