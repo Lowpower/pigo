@@ -340,7 +340,7 @@ func TestEditorChromeIsCompact(t *testing.T) {
 	if strings.Contains(view, "Enter send") || strings.Contains(view, "Ctrl+G editor") {
 		t.Fatalf("placeholder still dumps keybindings:\n%s", view)
 	}
-	if !strings.Contains(view, "Ask pigo") {
+	if !strings.Contains(stripANSI(view), "Ask pigo") {
 		t.Fatalf("missing placeholder:\n%s", view)
 	}
 	if strings.Count(view, "│") > 0 && strings.Contains(view, "│ Ask pigo") {
