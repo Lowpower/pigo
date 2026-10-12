@@ -168,10 +168,11 @@ func httpClient(cfg ClientConfig) *http.Client {
 // StreamFor dispatches by models.APIFor(provider, opts.Model).
 func StreamFor(provider string, cfg ClientConfig) StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
-		opts.ThinkingBudget = models.BudgetTokens(opts.Thinking)
 		if opts.Provider == "" {
 			opts.Provider = provider
 		}
+		opts.Thinking, _ = resolvedThinking(opts)
+		opts.ThinkingBudget = models.BudgetTokens(opts.Thinking)
 		c := cfg
 		if m, ok := models.Lookup(provider, opts.Model); ok && m.BaseURL != "" && c.BaseURL == "" {
 			c.BaseURL = m.BaseURL

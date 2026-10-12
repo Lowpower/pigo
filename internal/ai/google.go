@@ -233,7 +233,7 @@ func (c *GoogleClient) StreamFn() StreamFn {
 }
 
 func googleThinkingConfig(opts Options) *genai.ThinkingConfig {
-	level := googleThinkingLevel(opts.Thinking)
+	level := googleThinkingWire(opts)
 	if opts.ThinkingBudget <= 0 && level == "" {
 		return nil
 	}

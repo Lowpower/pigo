@@ -245,16 +245,17 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 }
 
 func applyAnthropicThinking(req map[string]any, opts Options, maxTokens int) {
-	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
-	if level == "" {
+	canonical, _ := resolvedThinking(opts)
+	if canonical == "" {
 		return
 	}
-	if level == "off" {
+	if canonical == "off" {
 		if anthropicDisabledThinking(opts) {
 			req["thinking"] = map[string]any{"type": "disabled"}
 		}
 		return
 	}
+	opts.Thinking = canonical
 	if forceAdaptiveThinking(opts) || midConvoEffort(opts) {
 		thinking := map[string]any{
 			"type":    "adaptive",
@@ -277,7 +278,7 @@ func applyAnthropicThinking(req map[string]any, opts Options, maxTokens int) {
 	}
 	budget := opts.ThinkingBudget
 	if budget == 0 {
-		budget = models.BudgetTokens(opts.Thinking)
+		budget = models.BudgetTokens(canonical)
 	}
 	if budget > 0 {
 		req["thinking"] = map[string]any{
@@ -305,17 +306,17 @@ func anthropicDisabledThinking(opts Options) bool {
 	if !ok || !m.SupportsReasoning() {
 		return false
 	}
-	if mapped, present := m.ThinkingLevelMap["off"]; present && mapped == nil {
+	if mapped, present := m.ThinkingLevelMap["off"]; present && (mapped == nil || strings.TrimSpace(*mapped) == "") {
 		return false
 	}
 	return true
 }
 
 func anthropicEffort(opts Options) string {
-	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	level, _ := resolvedThinking(opts)
 	if m, ok := models.Lookup(opts.Provider, opts.Model); ok {
-		if mapped, present := m.ThinkingLevelMap[level]; present && mapped != nil {
-			if effort := strings.TrimSpace(*mapped); effort != "" {
+		if _, present := m.ThinkingLevelMap[level]; present {
+			if effort, send := m.ProviderThinkingValue(level); send {
 				return effort
 			}
 		}

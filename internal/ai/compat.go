@@ -167,23 +167,26 @@ func applyThinkingFormat(req map[string]any, opts Options) {
 	if c != nil {
 		format = strings.ToLower(strings.TrimSpace(c.ThinkingFormat))
 	}
-	on := reasoningEffort(opts) != ""
-	effort := reasoningEffort(opts)
+	canonical, effort := resolvedThinking(opts)
+	on := thinkingOn(canonical)
 	switch format {
 	case "zai":
 		delete(req, "reasoning_effort")
 		if on {
 			req["thinking"] = map[string]any{"type": "enabled", "clear_thinking": false}
-			if c != nil && c.SupportsReasoningEffort {
+			if c != nil && c.SupportsReasoningEffort && effort != "" {
 				req["reasoning_effort"] = effort
 			}
 		} else {
 			req["thinking"] = map[string]any{"type": "disabled"}
+			if effort != "" && c != nil && c.SupportsReasoningEffort {
+				req["reasoning_effort"] = effort
+			}
 		}
 	case "qwen":
 		delete(req, "reasoning_effort")
 		req["enable_thinking"] = on
-		if on && c != nil && c.SupportsReasoningEffort {
+		if effort != "" && c != nil && c.SupportsReasoningEffort {
 			req["reasoning_effort"] = effort
 		}
 	case "qwen-chat-template":
@@ -210,35 +213,38 @@ func applyThinkingFormat(req map[string]any, opts Options) {
 		delete(req, "reasoning_effort")
 		if on {
 			req["thinking"] = map[string]any{"type": "enabled"}
-			if c != nil && c.SupportsReasoningEffort {
+			if c != nil && c.SupportsReasoningEffort && effort != "" {
 				req["reasoning_effort"] = effort
 			}
 		} else {
 			req["thinking"] = map[string]any{"type": "disabled"}
+			if effort != "" && c != nil && c.SupportsReasoningEffort {
+				req["reasoning_effort"] = effort
+			}
 		}
 	case "openrouter":
 		delete(req, "reasoning_effort")
-		if on {
+		if effort != "" {
 			req["reasoning"] = map[string]any{"effort": effort}
-		} else {
+		} else if !on && !offExplicitlyUnsupported(opts) {
 			req["reasoning"] = map[string]any{"effort": "none"}
 		}
 	case "ant-ling":
 		delete(req, "reasoning_effort")
-		if on {
+		if effort != "" {
 			req["reasoning"] = map[string]any{"effort": effort}
 		}
 	case "together":
 		delete(req, "reasoning_effort")
 		req["reasoning"] = map[string]any{"enabled": on}
-		if on && c != nil && c.SupportsReasoningEffort {
+		if effort != "" && c != nil && c.SupportsReasoningEffort {
 			req["reasoning_effort"] = effort
 		}
 	case "string-thinking":
 		delete(req, "reasoning_effort")
-		if on {
+		if effort != "" {
 			req["thinking"] = effort
-		} else {
+		} else if !on && !offExplicitlyUnsupported(opts) {
 			req["thinking"] = "none"
 		}
 	}
