@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"unicode"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 const mistralToolCallIDLength = 9
@@ -67,7 +69,7 @@ func (c *MistralClient) StreamFn() StreamFn {
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamMistralSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent)
+			streamMistralSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, catalogCost(opts))
 		}()
 		return s, nil
 	}
@@ -279,7 +281,7 @@ func clampCacheRead(read, prompt int) int {
 	return read
 }
 
-func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte)) {
+func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), cost *models.Cost) {
 	if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 		return
 	}
@@ -297,7 +299,7 @@ func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s
 		if payload == "[DONE]" {
 			return true
 		}
-		return handleMistralChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s, observe)
+		return handleMistralChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s, observe, cost)
 	}
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -339,7 +341,7 @@ func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s
 	}
 }
 
-func handleMistralChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream, observe func([]byte)) bool {
+func handleMistralChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream, observe func([]byte), cost *models.Cost) bool {
 	var chunk mistralChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return true
@@ -351,6 +353,7 @@ func handleMistralChunk(ctx context.Context, payload string, out *AssistantMessa
 	if chunk.Usage != nil {
 		read := clampCacheRead(mistralCacheRead(*chunk.Usage), chunk.Usage.PromptTokens)
 		applyInclusivePromptUsage(&out.Usage, chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, read, 0)
+		calculateCost(cost, &out.Usage)
 	}
 	if len(chunk.Choices) == 0 {
 		return true

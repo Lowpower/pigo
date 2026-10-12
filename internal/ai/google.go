@@ -131,6 +131,7 @@ func (c *GoogleClient) StreamFn() StreamFn {
 				return
 			}
 			textIdx, thinkIdx := -1, -1
+			cost := catalogCost(opts)
 			var finish genai.FinishReason
 			for resp, err := range client.Models.GenerateContentStream(ctx, opts.Model, contents, gcfg) {
 				if err != nil {
@@ -213,6 +214,7 @@ func (c *GoogleClient) StreamFn() StreamFn {
 				}
 				if resp.UsageMetadata != nil {
 					applyGoogleUsage(&out.Usage, resp.UsageMetadata)
+					calculateCost(cost, &out.Usage)
 				}
 			}
 			if thinkIdx >= 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -296,6 +297,58 @@ func TestOpenAICompletionsSessionAffinityHeaders(t *testing.T) {
 				t.Errorf("prompt_cache_key = %#v", payload["prompt_cache_key"])
 			}
 		})
+	}
+}
+
+func TestOpenAICompletionsCatalogCost(t *testing.T) {
+	const provider = "cost-comp"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: provider, DefaultAPI: "openai-completions", DefaultID: "priced",
+		Models: []models.Model{
+			{Provider: provider, ID: "priced", API: "openai-completions", Cost: &models.Cost{Input: 3, Output: 15, CacheRead: 0.30, CacheWrite: 3.75}},
+			{Provider: provider, ID: "free", API: "openai-completions"},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(provider) })
+
+	run := func(model, usage string) Usage {
+		t.Helper()
+		body := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],\"usage\":" + usage + "}\n\ndata: [DONE]\n"
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, body)
+		}))
+		defer srv.Close()
+		client := &OpenAICompletionsClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+		stream, err := client.StreamFn()(context.Background(), Context{
+			Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		}, Options{Provider: provider, Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, final := stream.Collect()
+		if final == nil {
+			t.Fatal("no final message")
+		}
+		return final.Usage
+	}
+
+	u := run("priced", `{"prompt_tokens":1000000,"completion_tokens":1000000,"total_tokens":2000000}`)
+	if math.Abs(u.Cost.Input-3) > 1e-9 || math.Abs(u.Cost.Output-15) > 1e-9 || math.Abs(u.Cost.Total-18) > 1e-9 {
+		t.Fatalf("priced cost = %+v, want total 18", u.Cost)
+	}
+
+	u = run("priced", `{"prompt_tokens":1000000,"completion_tokens":0,"prompt_tokens_details":{"cached_tokens":500000,"cache_write_tokens":200000}}`)
+	if u.Input != 300_000 || u.CacheRead != 500_000 || u.CacheWrite != 200_000 {
+		t.Fatalf("cache tokens = %+v", u)
+	}
+	if math.Abs(u.Cost.Input-0.9) > 1e-9 || math.Abs(u.Cost.CacheRead-0.15) > 1e-9 || math.Abs(u.Cost.CacheWrite-0.75) > 1e-9 || math.Abs(u.Cost.Total-1.8) > 1e-9 {
+		t.Fatalf("cache cost = %+v", u.Cost)
+	}
+
+	u = run("free", `{"prompt_tokens":1000000,"completion_tokens":1000000,"total_tokens":2000000}`)
+	if u.Cost != (UsageCost{}) {
+		t.Fatalf("free cost = %+v, want zeros", u.Cost)
 	}
 }
 
