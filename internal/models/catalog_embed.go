@@ -36,6 +36,9 @@ func applyEmbeddedCatalog() error {
 	if err != nil {
 		return err
 	}
+	if gateway, ok := file.Providers["cloudflare-ai-gateway"]; ok {
+		file.Providers["cloudflare-ai-gateway"] = AppendGatewayWorkersAI(gateway, file.Providers["cloudflare-workers-ai"])
+	}
 	for id, list := range file.Providers {
 		spec, ok := LookupProvider(id)
 		if !ok || len(list) == 0 {
@@ -65,6 +68,43 @@ func annotateBuiltin(m Model) Model {
 		m.Compat = &Compat{SupportsExplicitPromptCacheMode: true}
 	}
 	return m
+}
+
+// AppendGatewayWorkersAI copies the Workers AI catalog onto the AI Gateway
+// under the workers-ai/ prefix. models.dev omits those gateway rows; pi keeps
+// them by mirroring, and serves them through openai-completions.
+func AppendGatewayWorkersAI(gateway, workers []Model) []Model {
+	if len(workers) == 0 {
+		return gateway
+	}
+	seen := make(map[string]struct{}, len(gateway)+len(workers))
+	out := make([]Model, 0, len(gateway)+len(workers))
+	for _, m := range gateway {
+		seen[m.ID] = struct{}{}
+		out = append(out, m)
+	}
+	for _, src := range workers {
+		id := "workers-ai/" + src.ID
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		m := src
+		m.Provider = "cloudflare-ai-gateway"
+		m.ID = id
+		m.API = "openai-completions"
+		m.BaseURL = ""
+		m.Input = append([]string(nil), src.Input...)
+		if src.ThinkingLevelMap != nil {
+			cloned := make(map[string]*string, len(src.ThinkingLevelMap))
+			for k, v := range src.ThinkingLevelMap {
+				cloned[k] = v
+			}
+			m.ThinkingLevelMap = cloned
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // CatalogDefaultOK reports whether providerID's default model is in list

@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/Lowpower/pigo/internal/bom"
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 // DefaultContextWindow is the effective window when the user did not set
@@ -541,7 +542,7 @@ func Load(configDir string) (Config, error) {
 	v.AddConfigPath(configDir)
 
 	v.SetDefault("provider", "anthropic")
-	v.SetDefault("model", "claude-sonnet-4-5")
+	v.SetDefault("model", models.DefaultID("anthropic"))
 	v.SetDefault("theme", "system")
 	v.SetDefault("thinking", "medium")
 	v.SetDefault("contextWindow", 0)

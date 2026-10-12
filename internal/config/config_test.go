@@ -16,8 +16,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Provider != "anthropic" {
 		t.Errorf("provider: got %q, want %q", cfg.Provider, "anthropic")
 	}
-	if cfg.Model != "claude-sonnet-4-5" {
-		t.Errorf("model: got %q, want %q", cfg.Model, "claude-sonnet-4-5")
+	if cfg.Model != "claude-opus-4-8" {
+		t.Errorf("model: got %q, want %q", cfg.Model, "claude-opus-4-8")
 	}
 	if cfg.Theme != "system" {
 		t.Errorf("theme: got %q, want %q", cfg.Theme, "system")
