@@ -134,6 +134,7 @@ func (c *GoogleClient) StreamFn() StreamFn {
 			textIdx, thinkIdx := -1, -1
 			cost := catalogCost(opts)
 			var finish genai.FinishReason
+			var finishMessage string
 			for resp, err := range client.Models.GenerateContentStream(ctx, opts.Model, contents, gcfg) {
 				if err != nil {
 					finishError(ctx, out, s, err.Error())
@@ -146,12 +147,21 @@ func (c *GoogleClient) StreamFn() StreamFn {
 					observeSDKEvent(opts.OnProviderStreamEvent, resp)
 					resp.SDKHTTPResponse = saved
 				}
-				if resp == nil || len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
+				if resp == nil || len(resp.Candidates) == 0 {
 					continue
 				}
 				cand := resp.Candidates[0]
 				if cand.FinishReason != "" {
 					finish = cand.FinishReason
+					// The Gemini API converter drops finishMessage. Vertex keeps the candidate field.
+					finishMessage = cand.FinishMessage
+				}
+				if cand.Content == nil {
+					if resp.UsageMetadata != nil {
+						applyGoogleUsage(&out.Usage, resp.UsageMetadata)
+						calculateCost(cost, &out.Usage)
+					}
+					continue
 				}
 				for _, p := range cand.Content.Parts {
 					if p == nil {
@@ -225,7 +235,12 @@ func (c *GoogleClient) StreamFn() StreamFn {
 				s.push(ctx, Event{Type: EventTextEnd, ContentIndex: textIdx, Content: out.Content[textIdx].Text, Partial: out})
 			}
 			if out.StopReason == StopPending {
-				out.StopReason = mapGoogleFinishReason(finish, len(out.ToolCalls()) > 0)
+				out.RawStopReason = string(finish)
+				out.StopReason, out.ErrorMessage = mapGoogleFinishReason(finish, finishMessage, len(out.ToolCalls()) > 0)
+			}
+			if out.StopReason == StopError {
+				finishError(ctx, out, s, out.ErrorMessage)
+				return
 			}
 			s.push(ctx, Event{Type: EventDone, Reason: out.StopReason, Message: out})
 		}()
@@ -249,22 +264,24 @@ func googleThinkingConfig(opts Options) *genai.ThinkingConfig {
 	return cfg
 }
 
-func mapGoogleFinishReason(reason genai.FinishReason, toolUse bool) StopReason {
+func mapGoogleFinishReason(reason genai.FinishReason, finishMessage string, toolUse bool) (StopReason, string) {
 	switch reason {
+	case genai.FinishReasonStop:
+		if toolUse {
+			return StopToolUse, ""
+		}
+		return StopStop, ""
 	case genai.FinishReasonMaxTokens:
-		return StopLength
-	case genai.FinishReasonSafety, genai.FinishReasonRecitation, genai.FinishReasonBlocklist, genai.FinishReasonProhibitedContent:
-		return StopError
-	case genai.FinishReasonStop, "":
-		if toolUse {
-			return StopToolUse
-		}
-		return StopStop
+		return StopLength, ""
 	default:
-		if toolUse {
-			return StopToolUse
+		label := string(reason)
+		if label == "" {
+			label = string(genai.FinishReasonUnspecified)
 		}
-		return StopStop
+		if finishMessage != "" {
+			return StopError, label + ": " + finishMessage
+		}
+		return StopError, label
 	}
 }
 
