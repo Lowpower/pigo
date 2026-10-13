@@ -220,14 +220,33 @@ func anthropicContent(msg *AssistantMessage) []map[string]any {
 	return blocks
 }
 
+type openAIWireOpts struct {
+	toolResultName     bool
+	assistantAfterTool bool
+	thinkingAsText     bool
+	emptyReasoning     bool
+}
+
 // OpenAIWireMessages maps pigo messages onto OpenAI Chat Completions.
 // toolResult becomes role=tool with tool_call_id; assistant tool calls become
 // tool_calls.
 func OpenAIWireMessages(msgs []Message) []map[string]any {
+	return openAIWireMessages(msgs, openAIWireOpts{})
+}
+
+func openAIWireMessages(msgs []Message, w openAIWireOpts) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
+	lastRole := ""
 	for _, m := range msgs {
+		if w.assistantAfterTool && lastRole == "tool" && m.Role == RoleUser && m.Assistant == nil && m.ToolCallID == "" {
+			out = append(out, map[string]any{
+				"role":    "assistant",
+				"content": "I have processed the tool results.",
+			})
+		}
 		if m.Assistant != nil {
-			out = append(out, openaiAssistant(m.Assistant))
+			out = append(out, openaiAssistant(m.Assistant, w))
+			lastRole = "assistant"
 			continue
 		}
 		if m.Role == RoleToolResult || m.ToolCallID != "" {
@@ -241,6 +260,9 @@ func OpenAIWireMessages(msgs []Message) []map[string]any {
 			msg := map[string]any{
 				"role":         "tool",
 				"tool_call_id": m.ToolCallID,
+			}
+			if w.toolResultName && m.ToolName != "" {
+				msg["name"] = m.ToolName
 			}
 			if len(imgs) == 0 {
 				msg["content"] = text
@@ -260,6 +282,7 @@ func OpenAIWireMessages(msgs []Message) []map[string]any {
 				msg["content"] = blocks
 			}
 			out = append(out, msg)
+			lastRole = "tool"
 			continue
 		}
 		role := m.Role
@@ -267,6 +290,7 @@ func OpenAIWireMessages(msgs []Message) []map[string]any {
 			role = "tool"
 		}
 		out = append(out, map[string]any{"role": role, "content": openaiUserContent(m)})
+		lastRole = role
 	}
 	return out
 }
@@ -290,16 +314,24 @@ func openaiUserContent(m Message) any {
 	return blocks
 }
 
-func openaiAssistant(msg *AssistantMessage) map[string]any {
+func openaiAssistant(msg *AssistantMessage, w openAIWireOpts) map[string]any {
 	var text string
 	var thinking string
+	var thoughts []string
+	var texts []string
 	var toolCalls []map[string]any
 	for _, c := range msg.Content {
 		switch c.Type {
 		case KindText:
 			text += c.Text
+			if strings.TrimSpace(c.Text) != "" {
+				texts = append(texts, c.Text)
+			}
 		case KindThinking:
 			thinking += c.Thinking
+			if strings.TrimSpace(c.Thinking) != "" {
+				thoughts = append(thoughts, c.Thinking)
+			}
 		case KindToolCall:
 			args, _ := json.Marshal(c.Arguments)
 			if string(args) == "null" {
@@ -316,11 +348,23 @@ func openaiAssistant(msg *AssistantMessage) map[string]any {
 		}
 	}
 	out := map[string]any{"role": "assistant", "content": text}
-	if thinking != "" {
+	if w.thinkingAsText && len(thoughts) > 0 {
+		parts := make([]map[string]any, 0, 1+len(texts))
+		parts = append(parts, map[string]any{"type": "text", "text": strings.Join(thoughts, "\n\n")})
+		for _, part := range texts {
+			parts = append(parts, map[string]any{"type": "text", "text": part})
+		}
+		out["content"] = parts
+	} else if thinking != "" {
 		out["reasoning_content"] = thinking
 	}
 	if len(toolCalls) > 0 {
 		out["tool_calls"] = toolCalls
+	}
+	if w.emptyReasoning {
+		if _, ok := out["reasoning_content"]; !ok {
+			out["reasoning_content"] = ""
+		}
 	}
 	return out
 }

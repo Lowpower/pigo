@@ -188,6 +188,99 @@ func TestOverlayMergesFallbackAndStrict(t *testing.T) {
 	}
 }
 
+func TestOverlayMergesOpenAICompatFlags(t *testing.T) {
+	off := false
+	on := true
+	RegisterProvider(ProviderSpec{
+		ID: "oai-compat-merge", DefaultAPI: "openai-completions", DefaultID: "m",
+		Models: []Model{{
+			Provider: "oai-compat-merge", ID: "m",
+			Compat: &Compat{
+				ThinkingFormat:           "keep",
+				SupportsStore:            &on,
+				MaxTokensField:           "max_completion_tokens",
+				OpenRouterRouting:        map[string]any{"only": []any{"keep"}},
+				CacheControlFormat:       "anthropic",
+				ThinkingTokenBudgetField: "thinking_token_budget",
+			},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("oai-compat-merge")
+	})
+	SetUserOverlay("oai-compat-merge", []Model{{
+		ID: "m",
+		Compat: &Compat{
+			SupportsStore:                               &off,
+			SupportsUsageInStreaming:                    &off,
+			SupportsDeveloperRole:                       &off,
+			MaxTokensField:                              "max_tokens",
+			RequiresToolResultName:                      &on,
+			RequiresAssistantAfterToolResult:            &on,
+			RequiresThinkingAsText:                      &on,
+			RequiresReasoningContentOnAssistantMessages: &off,
+			OpenRouterRouting:                           map[string]any{},
+			VercelGatewayRouting:                        &VercelGatewayRouting{Only: []string{"bedrock"}, Order: []string{"anthropic"}},
+			ZaiToolStream:                               &on,
+			SupportsThinkingTokenBudget:                 &on,
+		},
+	}})
+	m, ok := Lookup("oai-compat-merge", "m")
+	if !ok || m.Compat == nil {
+		t.Fatalf("compat missing ok=%v", ok)
+	}
+	c := m.Compat
+	if c.ThinkingFormat != "keep" {
+		t.Fatalf("thinking format lost: %+v", c)
+	}
+	if c.SupportsStore == nil || *c.SupportsStore {
+		t.Fatalf("supportsStore = %v", c.SupportsStore)
+	}
+	if c.SupportsUsageInStreaming == nil || *c.SupportsUsageInStreaming {
+		t.Fatalf("supportsUsageInStreaming = %v", c.SupportsUsageInStreaming)
+	}
+	if c.SupportsDeveloperRole == nil || *c.SupportsDeveloperRole {
+		t.Fatalf("supportsDeveloperRole = %v", c.SupportsDeveloperRole)
+	}
+	if c.MaxTokensField != "max_tokens" {
+		t.Fatalf("maxTokensField = %q", c.MaxTokensField)
+	}
+	if c.RequiresToolResultName == nil || !*c.RequiresToolResultName {
+		t.Fatalf("requiresToolResultName = %v", c.RequiresToolResultName)
+	}
+	if c.RequiresAssistantAfterToolResult == nil || !*c.RequiresAssistantAfterToolResult {
+		t.Fatalf("requiresAssistantAfterToolResult = %v", c.RequiresAssistantAfterToolResult)
+	}
+	if c.RequiresThinkingAsText == nil || !*c.RequiresThinkingAsText {
+		t.Fatalf("requiresThinkingAsText = %v", c.RequiresThinkingAsText)
+	}
+	if c.RequiresReasoningContentOnAssistantMessages == nil || *c.RequiresReasoningContentOnAssistantMessages {
+		t.Fatalf("requiresReasoningContent = %v", c.RequiresReasoningContentOnAssistantMessages)
+	}
+	if c.OpenRouterRouting == nil || len(c.OpenRouterRouting) != 0 {
+		t.Fatalf("openRouterRouting = %#v, want empty object", c.OpenRouterRouting)
+	}
+	if c.VercelGatewayRouting == nil || len(c.VercelGatewayRouting.Only) != 1 || c.VercelGatewayRouting.Only[0] != "bedrock" {
+		t.Fatalf("vercel = %#v", c.VercelGatewayRouting)
+	}
+	if len(c.VercelGatewayRouting.Order) != 1 || c.VercelGatewayRouting.Order[0] != "anthropic" {
+		t.Fatalf("vercel order = %#v", c.VercelGatewayRouting)
+	}
+	if c.ZaiToolStream == nil || !*c.ZaiToolStream {
+		t.Fatalf("zaiToolStream = %v", c.ZaiToolStream)
+	}
+	if c.ThinkingTokenBudgetField != "thinking_token_budget" {
+		t.Fatalf("thinkingTokenBudgetField cleared: %q", c.ThinkingTokenBudgetField)
+	}
+	if c.SupportsThinkingTokenBudget == nil || !*c.SupportsThinkingTokenBudget {
+		t.Fatalf("supportsThinkingTokenBudget = %v", c.SupportsThinkingTokenBudget)
+	}
+	if c.CacheControlFormat != "anthropic" {
+		t.Fatalf("cacheControlFormat cleared: %q", c.CacheControlFormat)
+	}
+}
+
 func TestOverlayMergesImageResizeOntoExistingModel(t *testing.T) {
 	height := 800
 	quality := 70

@@ -106,6 +106,90 @@ func TestLoadUserJSONReadsSessionAffinityFormat(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONReadsOpenAICompatFlags(t *testing.T) {
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("oai-flags-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "oai-flags-json": {
+      "api": "openai-completions",
+      "baseUrl": "https://example.invalid/v1",
+      "models": [{
+        "id": "m1",
+        "compat": {
+          "supportsStore": false,
+          "supportsUsageInStreaming": false,
+          "supportsDeveloperRole": false,
+          "maxTokensField": "max_tokens",
+          "requiresToolResultName": true,
+          "requiresAssistantAfterToolResult": true,
+          "requiresThinkingAsText": true,
+          "requiresReasoningContentOnAssistantMessages": false,
+          "openRouterRouting": {"only": ["anthropic"], "allow_fallbacks": false},
+          "vercelGatewayRouting": {"only": ["bedrock"], "order": ["anthropic"]},
+          "zaiToolStream": true,
+          "thinkingTokenBudgetField": "thinking_budget",
+          "supportsThinkingTokenBudget": true,
+          "cacheControlFormat": "anthropic"
+        }
+      }]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := Lookup("oai-flags-json", "m1")
+	if !ok || m.Compat == nil {
+		t.Fatalf("m1 = %+v ok=%v", m, ok)
+	}
+	c := m.Compat
+	if c.SupportsStore == nil || *c.SupportsStore {
+		t.Fatalf("supportsStore = %v", c.SupportsStore)
+	}
+	if c.SupportsUsageInStreaming == nil || *c.SupportsUsageInStreaming {
+		t.Fatalf("supportsUsageInStreaming = %v", c.SupportsUsageInStreaming)
+	}
+	if c.SupportsDeveloperRole == nil || *c.SupportsDeveloperRole {
+		t.Fatalf("supportsDeveloperRole = %v", c.SupportsDeveloperRole)
+	}
+	if c.MaxTokensField != "max_tokens" {
+		t.Fatalf("maxTokensField = %q", c.MaxTokensField)
+	}
+	if c.RequiresToolResultName == nil || !*c.RequiresToolResultName ||
+		c.RequiresAssistantAfterToolResult == nil || !*c.RequiresAssistantAfterToolResult ||
+		c.RequiresThinkingAsText == nil || !*c.RequiresThinkingAsText {
+		t.Fatalf("requires flags = %+v", c)
+	}
+	if c.RequiresReasoningContentOnAssistantMessages == nil || *c.RequiresReasoningContentOnAssistantMessages {
+		t.Fatalf("reasoning content flag = %v", c.RequiresReasoningContentOnAssistantMessages)
+	}
+	only, _ := c.OpenRouterRouting["only"].([]any)
+	if len(only) != 1 || only[0] != "anthropic" || c.OpenRouterRouting["allow_fallbacks"] != false {
+		t.Fatalf("openRouterRouting = %#v", c.OpenRouterRouting)
+	}
+	if c.VercelGatewayRouting == nil || len(c.VercelGatewayRouting.Only) != 1 || c.VercelGatewayRouting.Only[0] != "bedrock" ||
+		len(c.VercelGatewayRouting.Order) != 1 || c.VercelGatewayRouting.Order[0] != "anthropic" {
+		t.Fatalf("vercel = %#v", c.VercelGatewayRouting)
+	}
+	if c.ZaiToolStream == nil || !*c.ZaiToolStream {
+		t.Fatalf("zaiToolStream = %v", c.ZaiToolStream)
+	}
+	if c.ThinkingTokenBudgetField != "thinking_budget" || c.SupportsThinkingTokenBudget == nil || !*c.SupportsThinkingTokenBudget {
+		t.Fatalf("budget = %q %v", c.ThinkingTokenBudgetField, c.SupportsThinkingTokenBudget)
+	}
+	if c.CacheControlFormat != "anthropic" {
+		t.Fatalf("cacheControlFormat = %q", c.CacheControlFormat)
+	}
+}
+
 func TestLoadUserJSONReadsSupportsMaxOutputTokens(t *testing.T) {
 	t.Cleanup(func() {
 		ClearOverlays()
