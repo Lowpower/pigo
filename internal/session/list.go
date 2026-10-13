@@ -94,5 +94,9 @@ func UpdateHeader(path string, fn func(*Header)) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(nb, []byte(rest)...), 0o644)
+	data := append(nb, []byte(rest)...)
+	return writeSessionFile(path, 0, false, func(f *os.File) error {
+		_, err := f.Write(data)
+		return err
+	})
 }

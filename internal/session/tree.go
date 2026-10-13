@@ -209,18 +209,18 @@ func (m *Manager) flushCopied() error {
 	if err := os.MkdirAll(m.dir, 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(m.file, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	if err := writeLine(f, m.header); err != nil {
-		return err
-	}
-	for _, e := range m.entries {
-		if err := writeLine(f, e); err != nil {
+	if err := writeSessionFile(m.file, 0o644, true, func(f *os.File) error {
+		if err := writeLine(f, m.header); err != nil {
 			return err
 		}
+		for _, e := range m.entries {
+			if err := writeLine(f, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	m.flushed = true
 	return nil
