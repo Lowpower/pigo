@@ -73,6 +73,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		if opts.SessionID != "" && sendAnthropicSessionAffinity(opts) {
 			httpReq.Header.Set("x-session-affinity", opts.SessionID)
 		}
+		applyOpenCodeSessionHeader(httpReq.Header, c.Headers, opts)
 
 		client := c.HTTPClient
 		if client == nil {

@@ -40,11 +40,18 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			option.WithBaseURL(base + "/"),
 		}
 		optsList = append(optsList, option.WithHTTPClient(frameSSEClient(c.HTTPClient, opts.OnProviderStreamEvent)))
+		sessionValue, setSession, dropSession := responsesOpenCodeHeader(c.Headers, opts)
 		for k, v := range c.Headers {
+			if dropSession && strings.EqualFold(k, openCodeSessionHeaderName) {
+				continue
+			}
 			optsList = append(optsList, option.WithHeader(k, v))
 		}
 		for k, v := range sessionAffinityHeaders(opts, affinityResponses) {
 			optsList = append(optsList, option.WithHeader(k, v))
+		}
+		if setSession {
+			optsList = append(optsList, option.WithHeader(openCodeSessionHeaderName, sessionValue))
 		}
 		client := openai.NewClient(optsList...)
 

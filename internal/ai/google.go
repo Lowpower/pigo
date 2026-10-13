@@ -34,10 +34,11 @@ func (c *GoogleClient) providerID() string {
 }
 
 func (c *GoogleClient) outboundHeaders(opts Options) http.Header {
-	hdr := make(http.Header, len(c.Headers)+1)
+	hdr := make(http.Header, len(c.Headers)+2)
 	for k, v := range c.Headers {
 		hdr.Set(k, v)
 	}
+	applyOpenCodeSessionHeader(hdr, c.Headers, opts)
 	setDefaultUserAgent(hdr)
 	applyExtraHeaders(hdr, opts.ExtraHeaders)
 	return hdr

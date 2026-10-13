@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/Lowpower/pigo/internal/models"
@@ -12,6 +13,10 @@ const (
 
 	affinityCompletions = "completions"
 	affinityResponses   = "responses"
+
+	// openCodeSessionHeaderName is required by OpenCode Zen. A missing value is a
+	// 400, so it is sent whenever a session id exists, including cacheRetention none.
+	openCodeSessionHeaderName = "x-opencode-session"
 )
 
 func lookupCompat(opts Options) *models.Compat {
@@ -104,6 +109,89 @@ func supportsMaxOutputTokens(opts Options) bool {
 		return true
 	}
 	return *c.SupportsMaxOutputTokens
+}
+
+func isOpenCodeProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "opencode", "opencode-go":
+		return true
+	default:
+		return false
+	}
+}
+
+func headerValue(h map[string]string, name string) (string, bool) {
+	want := strings.ToLower(name)
+	for k, v := range h {
+		if strings.ToLower(k) == want {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func headerOwned(clientHeaders, extra map[string]string, name string) bool {
+	if _, ok := headerValue(clientHeaders, name); ok {
+		return true
+	}
+	_, ok := headerValue(extra, name)
+	return ok
+}
+
+// applyOpenCodeSessionHeader sets x-opencode-session from SessionID.
+// Client headers and ExtraHeaders already naming it are left alone; doHTTP
+// and Google apply ExtraHeaders afterwards, including an empty value that deletes.
+func applyOpenCodeSessionHeader(h http.Header, clientHeaders map[string]string, opts Options) {
+	if !isOpenCodeProvider(opts.Provider) || opts.SessionID == "" {
+		return
+	}
+	if headerOwned(clientHeaders, opts.ExtraHeaders, openCodeSessionHeaderName) {
+		return
+	}
+	h.Set(openCodeSessionHeaderName, opts.SessionID)
+}
+
+// responsesOpenCodeHeader is the Responses-API form of applyOpenCodeSessionHeader.
+// That client does not run doHTTP, so a caller header is returned here and a
+// same-named client header is dropped when ExtraHeaders owns the name.
+func responsesOpenCodeHeader(clientHeaders map[string]string, opts Options) (value string, set, dropClient bool) {
+	if !isOpenCodeProvider(opts.Provider) || opts.SessionID == "" {
+		return "", false, false
+	}
+	if v, ok := headerValue(opts.ExtraHeaders, openCodeSessionHeaderName); ok {
+		return v, v != "", true
+	}
+	if _, ok := headerValue(clientHeaders, openCodeSessionHeaderName); ok {
+		return "", false, false
+	}
+	return opts.SessionID, true, false
+}
+
+// basetenAffinityHeaders matches Fireworks Chat Completions affinity:
+// session_id, x-client-request-id, and x-session-affinity. cacheRetention none
+// suppresses them. The sessionAffinityFormat path is unchanged.
+func basetenAffinityHeaders(opts Options) map[string]string {
+	if !strings.EqualFold(strings.TrimSpace(opts.Provider), "baseten") {
+		return nil
+	}
+	if opts.SessionID == "" || strings.EqualFold(strings.TrimSpace(opts.CacheRetention), "none") {
+		return nil
+	}
+	sid := opts.SessionID
+	return map[string]string{
+		"session_id":          sid,
+		"x-client-request-id": sid,
+		"x-session-affinity":  sid,
+	}
+}
+
+func applyBasetenAffinityHeaders(h http.Header, clientHeaders map[string]string, opts Options) {
+	for k, v := range basetenAffinityHeaders(opts) {
+		if headerOwned(clientHeaders, opts.ExtraHeaders, k) {
+			continue
+		}
+		h.Set(k, v)
+	}
 }
 
 func sendAnthropicSessionAffinity(opts Options) bool {
