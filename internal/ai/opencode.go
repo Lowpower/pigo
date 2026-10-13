@@ -31,6 +31,11 @@ func NewOpenCodeFromEnv() (StreamFn, bool) {
 
 func openCodeMux(cfg ClientConfig) StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+		// NewOpenCodeFromEnv does not set a provider. The session header is
+		// keyed off Options.Provider inside each API client.
+		if strings.TrimSpace(opts.Provider) == "" {
+			opts.Provider = "opencode"
+		}
 		api := guessOpenCodeAPI(opts.Model)
 		f, ok := LookupAPI(api)
 		if !ok {

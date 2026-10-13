@@ -49,6 +49,8 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 		for k, v := range sessionAffinityHeaders(opts, affinityCompletions) {
 			httpReq.Header.Set(k, v)
 		}
+		applyBasetenAffinityHeaders(httpReq.Header, c.Headers, opts)
+		applyOpenCodeSessionHeader(httpReq.Header, c.Headers, opts)
 
 		client := c.HTTPClient
 		if client == nil {
