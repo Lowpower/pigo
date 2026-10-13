@@ -513,6 +513,6 @@ func RunConfigSelector(mgr *pkgmgr.Manager, writeProject bool) error {
 	if err != nil {
 		return err
 	}
-	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithInput(programInput())).Run()
 	return err
 }

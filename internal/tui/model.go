@@ -1868,6 +1868,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 	if useMouseTracking(m.cfg) {
 		opts = append(opts, tea.WithMouseCellMotion())
 	}
+	opts = append(opts, tea.WithInput(programInput()))
 	p := tea.NewProgram(m, opts...)
 	if m.extHub != nil {
 		m.extHub.send = func(msg tea.Msg) { p.Send(msg) }
