@@ -28,7 +28,7 @@ type OpenAICompletionsClient struct {
 // StreamFn returns a StreamFn bound to this client.
 func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
-		body, err := buildOpenAIRequest(reqCtx, opts)
+		body, err := buildOpenAIRequestAt(reqCtx, opts, c.BaseURL)
 		if err != nil {
 			return nil, err
 		}
@@ -102,25 +102,42 @@ func chatCompletionsURL(base string) string {
 }
 
 func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
+	return buildOpenAIRequestAt(reqCtx, opts, "")
+}
+
+func buildOpenAIRequestAt(reqCtx Context, opts Options, baseURL string) ([]byte, error) {
+	compat := resolveOpenAICompat(opts, baseURL)
 	msgs := make([]map[string]any, 0, len(reqCtx.Messages)+1)
 	if reqCtx.System != "" {
-		msgs = append(msgs, map[string]any{"role": "system", "content": reqCtx.System})
+		role := "system"
+		if compat.developerRole() {
+			role = "developer"
+		}
+		msgs = append(msgs, map[string]any{"role": role, "content": reqCtx.System})
 	}
 	replayed := transformMessages(reqCtx.Messages, replayTarget{
 		Provider: chatProvider(opts),
 		API:      "openai-completions",
 		Model:    opts.Model,
 	}, normalizeOpenAIChatToolCallID(chatProvider(opts)))
-	msgs = append(msgs, OpenAIWireMessages(replayed)...)
+	msgs = append(msgs, openAIWireMessages(replayed, openAIWireOpts{
+		toolResultName:     compat.requiresToolResultName,
+		assistantAfterTool: compat.requiresAssistantAfterToolResult,
+		thinkingAsText:     compat.requiresThinkingAsText,
+		emptyReasoning:     compat.emptyReasoningContent(),
+	})...)
 
 	req := map[string]any{
-		"model":          opts.Model,
-		"messages":       msgs,
-		"stream":         true,
-		"stream_options": map[string]any{"include_usage": true},
+		"model":    opts.Model,
+		"messages": msgs,
+		"stream":   true,
 	}
-	if opts.MaxTokens > 0 {
-		req["max_tokens"] = opts.MaxTokens
+	if compat.supportsUsageInStreaming {
+		req["stream_options"] = map[string]any{"include_usage": true}
+	}
+	limited := opts.MaxTokens > 0
+	if limited {
+		req[compat.maxTokensField] = opts.MaxTokens
 	}
 	if effort := reasoningEffort(opts); effort != "" {
 		req["reasoning_effort"] = effort
@@ -128,9 +145,12 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 	if key := clampPromptCacheKey(opts.SessionID); key != "" {
 		req["prompt_cache_key"] = key
 	}
-	req["store"] = false
+	if compat.supportsStore {
+		req["store"] = false
+	}
+	var tools []map[string]any
 	if len(reqCtx.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(reqCtx.Tools))
+		tools = make([]map[string]any, 0, len(reqCtx.Tools))
 		for _, t := range reqCtx.Tools {
 			fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters}
 			if sendChatStrict(t, opts) {
@@ -142,9 +162,34 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 			})
 		}
 		req["tools"] = tools
+		if compat.zaiToolStream {
+			req["tool_stream"] = true
+		}
+	}
+	if compat.cacheControlFormat == "anthropic" && !strings.EqualFold(strings.TrimSpace(opts.CacheRetention), "none") {
+		applyOpenAICacheControl(msgs, tools, opts, compat)
 	}
 	applyThinkingFormat(req, opts)
+	if field := compat.thinkingBudgetField; field != "" {
+		if budget := clampedThinkingBudget(opts, compat.model, opts.MaxTokens); budget > 0 {
+			req[field] = budget
+		}
+	}
+	if compat.openRouterRouting != nil {
+		req["provider"] = compat.openRouterRouting
+	}
+	if gateway := vercelGatewayOptions(compat.vercel); gateway != nil {
+		req["providerOptions"] = map[string]any{"gateway": gateway}
+	}
 	applySamplingParams(req, ResolveSamplingParams(opts.Provider, opts.Model, opts.SamplingParams))
+	if limited {
+		if compat.maxTokensField != "max_tokens" {
+			delete(req, "max_tokens")
+		}
+		if compat.maxTokensField != "max_completion_tokens" {
+			delete(req, "max_completion_tokens")
+		}
+	}
 	return json.Marshal(req)
 }
 

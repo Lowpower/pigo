@@ -56,8 +56,11 @@ func TestBuildOpenAIRequestSamplingParams(t *testing.T) {
 	if payload["top_k"] != float64(0) {
 		t.Fatalf("top_k = %#v, want 0", payload["top_k"])
 	}
-	if payload["max_tokens"] != float64(100) {
-		t.Fatalf("max_tokens = %#v, want caller 100", payload["max_tokens"])
+	if payload["max_completion_tokens"] != float64(100) {
+		t.Fatalf("max_completion_tokens = %#v, want caller 100", payload["max_completion_tokens"])
+	}
+	if _, ok := payload["max_tokens"]; ok {
+		t.Fatalf("sampling max_tokens leaked: %#v", payload["max_tokens"])
 	}
 	if payload["vendor_flag"] != false {
 		t.Fatalf("vendor_flag = %#v", payload["vendor_flag"])
@@ -156,8 +159,11 @@ func TestOpenAICompletionsStreamSendsSamplingParams(t *testing.T) {
 	if payload["dry_multiplier"] != 0.8 {
 		t.Fatalf("dry_multiplier = %#v", payload["dry_multiplier"])
 	}
-	if payload["max_tokens"] != float64(64) {
-		t.Fatalf("max_tokens = %#v, want 64", payload["max_tokens"])
+	if payload["max_completion_tokens"] != float64(64) {
+		t.Fatalf("max_completion_tokens = %#v, want 64", payload["max_completion_tokens"])
+	}
+	if _, ok := payload["max_tokens"]; ok {
+		t.Fatalf("sampling max_tokens leaked: %#v", payload["max_tokens"])
 	}
 }
 
