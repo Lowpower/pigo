@@ -32,5 +32,9 @@ func redactShareFile(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, redactSecrets(b), 0o600)
+	data := redactSecrets(b)
+	return writeSessionFile(path, 0, false, func(f *os.File) error {
+		_, err := f.Write(data)
+		return err
+	})
 }
