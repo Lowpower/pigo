@@ -136,7 +136,11 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 	if !ok {
 		return "unknown tool: " + name, true
 	}
-	return t.Execute(ctx, args)
+	prepared, err := prepareToolArgs(t, args)
+	if err != nil {
+		return "invalid arguments: " + err.Error(), true
+	}
+	return t.Execute(ctx, prepared)
 }
 
 // schemaFor reflects a JSON Schema from a params struct, inlined (no $ref) and
