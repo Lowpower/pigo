@@ -37,7 +37,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `markdown.{mermaid,codeBlockIndent}` | Markdown rendering |
 | `images.{blockImages,autoResize}` | Image attachments (autoResize default true, max edge 2000) |
 | `tuiMode` / `fullscreenExitOutput` | TUI layout (`regular` keeps native terminal selection; `fullscreen` uses the alternate screen) |
-| `fullscreenScrollbar` | `auto` \| `always` \| `hidden` (bool true/false still accepted; unset is `always`) |
+| `fullscreenScrollbar` | `auto` \| `always` \| `hidden` (bool true/false still accepted; unset is `auto`) |
 | `fullscreenCopyOnSelect` | Fullscreen only: copy the mouse selection on release (default true). When false, the highlight stays and `Ctrl+X` copies it |
 | `warnings.anthropicExtraUsage` | TUI notice when Anthropic subscription/OAuth auth is active (default true) |
 | `quietStartup` | Skip startup notes |
