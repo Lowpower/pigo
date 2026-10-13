@@ -134,3 +134,143 @@ func TestGoogleStreamPricesCatalogCost(t *testing.T) {
 		t.Fatalf("free cost = %+v, want zeros", u.Cost)
 	}
 }
+
+func TestGoogleStreamFinishReasons(t *testing.T) {
+	const toolPart = `{"functionCall":{"id":"call_1","name":"bash","args":{"command":"ls"}}}`
+	cases := []struct {
+		name      string
+		candidate string
+		wantStop  StopReason
+		wantError string
+		wantRaw   string
+		wantEvent EventType
+		wantTool  bool
+		vertex    bool
+	}{
+		{
+			name:      "stop",
+			candidate: `{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP"}`,
+			wantStop:  StopStop,
+			wantRaw:   "STOP",
+			wantEvent: EventDone,
+		},
+		{
+			name:      "stop with tool",
+			candidate: `{"content":{"role":"model","parts":[` + toolPart + `]},"finishReason":"STOP"}`,
+			wantStop:  StopToolUse,
+			wantRaw:   "STOP",
+			wantEvent: EventDone,
+			wantTool:  true,
+		},
+		{
+			name:      "max tokens",
+			candidate: `{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"MAX_TOKENS"}`,
+			wantStop:  StopLength,
+			wantRaw:   "MAX_TOKENS",
+			wantEvent: EventDone,
+		},
+		{
+			name:      "max tokens with tool",
+			candidate: `{"content":{"role":"model","parts":[` + toolPart + `]},"finishReason":"MAX_TOKENS"}`,
+			wantStop:  StopLength,
+			wantRaw:   "MAX_TOKENS",
+			wantEvent: EventDone,
+			wantTool:  true,
+		},
+		{
+			name:      "malformed function call",
+			candidate: `{"content":{"role":"model","parts":[` + toolPart + `]},"finishReason":"MALFORMED_FUNCTION_CALL","finishMessage":"bad args"}`,
+			wantStop:  StopError,
+			wantError: "MALFORMED_FUNCTION_CALL: bad args",
+			wantRaw:   "MALFORMED_FUNCTION_CALL",
+			wantEvent: EventError,
+			wantTool:  true,
+			vertex:    true,
+		},
+		{
+			// Gemini's response converter drops finishMessage. Vertex keeps it.
+			name:      "malformed function call on gemini",
+			candidate: `{"content":{"role":"model","parts":[` + toolPart + `]},"finishReason":"MALFORMED_FUNCTION_CALL","finishMessage":"bad args"}`,
+			wantStop:  StopError,
+			wantError: "MALFORMED_FUNCTION_CALL",
+			wantRaw:   "MALFORMED_FUNCTION_CALL",
+			wantEvent: EventError,
+			wantTool:  true,
+		},
+		{
+			name:      "unspecified",
+			candidate: `{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"FINISH_REASON_UNSPECIFIED"}`,
+			wantStop:  StopError,
+			wantError: "FINISH_REASON_UNSPECIFIED",
+			wantRaw:   "FINISH_REASON_UNSPECIFIED",
+			wantEvent: EventError,
+		},
+		{
+			name:      "empty finish reason",
+			candidate: `{"content":{"role":"model","parts":[{"text":"hi"}]}}`,
+			wantStop:  StopError,
+			wantError: "FINISH_REASON_UNSPECIFIED",
+			wantEvent: EventError,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events, final := collectGoogleSSE(t, "data: {\"candidates\":["+tc.candidate+"]}\n\n", tc.vertex)
+			if final == nil || final.StopReason != tc.wantStop {
+				t.Fatalf("stop = %v, want %s", final, tc.wantStop)
+			}
+			if final.ErrorMessage != tc.wantError {
+				t.Fatalf("error = %q, want %q", final.ErrorMessage, tc.wantError)
+			}
+			if final.RawStopReason != tc.wantRaw {
+				t.Fatalf("raw = %q, want %q", final.RawStopReason, tc.wantRaw)
+			}
+			if events[len(events)-1].Type != tc.wantEvent {
+				t.Fatalf("terminal = %s, want %s", events[len(events)-1].Type, tc.wantEvent)
+			}
+			calls := final.ToolCalls()
+			if tc.wantTool {
+				if len(calls) != 1 || calls[0].ToolName != "bash" || calls[0].ToolID != "call_1" {
+					t.Fatalf("tools = %#v", calls)
+				}
+			} else if len(calls) != 0 {
+				t.Fatalf("tools = %#v", calls)
+			}
+			if tc.wantStop == StopError && IsRetryableAssistantError(final) {
+				t.Fatalf("finish reason error should not be retryable: %q", final.ErrorMessage)
+			}
+		})
+	}
+}
+
+func TestGoogleStreamFinishReasonWithoutContent(t *testing.T) {
+	body := "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"partial\"}]}}]}\n\n" +
+		"data: {\"candidates\":[{\"finishReason\":\"SAFETY\"}]}\n\n"
+	_, final := collectGoogleSSE(t, body, false)
+	if final == nil || final.StopReason != StopError || final.ErrorMessage != "SAFETY" || final.RawStopReason != "SAFETY" {
+		t.Fatalf("%+v", final)
+	}
+	if final.Text() != "partial" {
+		t.Fatalf("text = %q", final.Text())
+	}
+	if IsRetryableAssistantError(final) {
+		t.Fatal("safety stop should not be retryable")
+	}
+}
+
+func collectGoogleSSE(t *testing.T, body string, vertex bool) ([]Event, *AssistantMessage) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	client := &GoogleClient{APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client(), Vertex: vertex, Project: "p", Location: "us-central1"}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "gemini-2.5-flash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stream.Collect()
+}
