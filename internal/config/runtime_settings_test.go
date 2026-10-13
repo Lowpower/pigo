@@ -49,8 +49,8 @@ func TestRuntimeSettingDefaults(t *testing.T) {
 	if !c.CopyOnSelect() || !c.ScrollbarEnabled() {
 		t.Fatal("fullscreen copy/scrollbar default true")
 	}
-	if c.ScrollbarMode() != "always" || !c.ScrollbarVisible(0) {
-		t.Fatal("unset scrollbar should be always")
+	if c.ScrollbarMode() != "auto" || c.ScrollbarVisible(0) {
+		t.Fatal("unset scrollbar should be auto")
 	}
 	if c.TrueColorMode() != "auto" {
 		t.Fatalf("trueColor=%s", c.TrueColorMode())

@@ -254,10 +254,10 @@ func (c Config) CopyOnSelect() bool {
 	return *c.FullscreenCopyOnSelect
 }
 
-// ScrollbarMode is auto, always, or hidden. Unset and bool true match the old default (always).
+// ScrollbarMode is auto, always, or hidden. Unset is auto. Bool true stays always.
 func (c Config) ScrollbarMode() string {
 	if c.FullscreenScrollbar == nil {
-		return "always"
+		return "auto"
 	}
 	switch v := c.FullscreenScrollbar.(type) {
 	case bool:
