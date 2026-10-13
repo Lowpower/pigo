@@ -23,6 +23,7 @@ Most names use the `PIGO_` prefix. Span export also reads standard
 | `PIGO_RADIUS_GATEWAY` / `PIGO_RADIUS_CLIENT_ID` | Radius (`RADIUS_GATEWAY` / `RADIUS_CLIENT_ID` also accepted) |
 | `PIGO_CHANGELOG_PATH` | Changelog file override |
 | `PIGO_HYPERLINKS` / `PIGO_TRUE_COLOR` / `PIGO_IMAGE_PROTOCOL` / `PIGO_CACHE_RETENTION` | Terminal / cache (`on`/`off`/`auto`; cache is `none\|short\|long`) |
+| `PIGO_TUI_ESC_TIMEOUT` | Milliseconds to wait after a lone Escape before treating it as Esc (`PI_TUI_ESC_TIMEOUT` is the fallback). `0` disables. Unset: 100ms over SSH, 10ms otherwise |
 
 Span export is off unless `PIGO_TELEMETRY_JSONL` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set (or an extension subscribes to `telemetry_span`). `PIGO_TELEMETRY=0` / `enableInstallTelemetry: false` disables install ping **and** spans. `--no-extensions` does not disable built-in JSONL/OTLP.
 
