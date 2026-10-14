@@ -227,14 +227,72 @@ func TestBuildMistralRequestReasoningAndCache(t *testing.T) {
 	}
 	var req map[string]any
 	_ = json.Unmarshal(body, &req)
-	if req["reasoning_effort"] != "high" {
-		t.Fatalf("reasoning_effort = %#v", req["reasoning_effort"])
-	}
-	if req["prompt_mode"] != "reasoning" {
-		t.Fatalf("prompt_mode = %#v", req["prompt_mode"])
-	}
 	if req["prompt_cache_key"] != "sess-9" {
 		t.Fatalf("prompt_cache_key = %#v", req["prompt_cache_key"])
+	}
+}
+
+func TestBuildMistralRequestReasoningFields(t *testing.T) {
+	const provider = "mistral-fields"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: provider, DefaultAPI: "mistral-conversations",
+		Models: []models.Model{
+			{Provider: provider, ID: "mapped", API: "mistral-conversations", Reasoning: boolPtrAI(true), ThinkingLevelMap: map[string]*string{
+				"high": strPtrAI("max"), "off": strPtrAI("none"),
+			}},
+			{Provider: provider, ID: "off-null", API: "mistral-conversations", Reasoning: boolPtrAI(true), ThinkingLevelMap: map[string]*string{
+				"high": strPtrAI("high"), "off": nil,
+			}},
+			{Provider: provider, ID: "reason", API: "mistral-conversations", Reasoning: boolPtrAI(true)},
+			{Provider: provider, ID: "plain", API: "mistral-conversations", Reasoning: boolPtrAI(false)},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(provider) })
+
+	cases := []struct {
+		name   string
+		opts   Options
+		effort string
+		mode   string
+	}{
+		{name: "mapped high", opts: Options{Provider: provider, Model: "mapped", Thinking: "high"}, effort: "max"},
+		{name: "mapped off", opts: Options{Provider: provider, Model: "mapped", Thinking: "off"}, effort: "none"},
+		{name: "off null", opts: Options{Provider: provider, Model: "off-null", Thinking: "off"}},
+		{name: "reason high", opts: Options{Provider: provider, Model: "reason", Thinking: "high"}, mode: "reasoning"},
+		{name: "reason off", opts: Options{Provider: provider, Model: "reason", Thinking: "off"}},
+		{name: "plain high", opts: Options{Provider: provider, Model: "plain", Thinking: "high"}},
+		{name: "plain off", opts: Options{Provider: provider, Model: "plain", Thinking: "off"}},
+		{name: "unknown high", opts: Options{Model: "unlisted", Thinking: "high"}, effort: "high"},
+		{name: "unknown off", opts: Options{Model: "unlisted", Thinking: "off"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := buildMistralRequest(Context{
+				Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			}, tc.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var req map[string]any
+			if err := json.Unmarshal(body, &req); err != nil {
+				t.Fatal(err)
+			}
+			gotEffort, _ := req["reasoning_effort"].(string)
+			gotMode, _ := req["prompt_mode"].(string)
+			if gotEffort != tc.effort || gotMode != tc.mode {
+				t.Fatalf("reasoning_effort=%q prompt_mode=%q, want effort=%q mode=%q", gotEffort, gotMode, tc.effort, tc.mode)
+			}
+			if tc.effort == "" {
+				if _, ok := req["reasoning_effort"]; ok {
+					t.Fatalf("reasoning_effort present: %#v", req["reasoning_effort"])
+				}
+			}
+			if tc.mode == "" {
+				if _, ok := req["prompt_mode"]; ok {
+					t.Fatalf("prompt_mode present: %#v", req["prompt_mode"])
+				}
+			}
+		})
 	}
 }
 
