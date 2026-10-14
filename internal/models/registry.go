@@ -303,6 +303,7 @@ func mergeOverlay(providerID string, base, extra []Model) []Model {
 			if len(m.SamplingParams) > 0 {
 				out[i].SamplingParams = MergeSamplingParams(out[i].SamplingParams, m.SamplingParams)
 			}
+			out[i] = fillOpus55ThinkingLevels(out[i])
 			continue
 		}
 		m.SamplingParams = MergeSamplingParams(nil, m.SamplingParams)
@@ -314,6 +315,7 @@ func mergeOverlay(providerID string, base, extra []Model) []Model {
 		} else {
 			m = ensureOpenRouterFormat(m)
 		}
+		m = fillOpus55ThinkingLevels(m)
 		idx[m.ID] = len(out)
 		out = append(out, m)
 	}
