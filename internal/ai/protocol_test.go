@@ -798,6 +798,52 @@ func effortMarker(effort string) map[string]any {
 	}
 }
 
+func TestBuildAnthropicMidConvoEffortSelectedLevel(t *testing.T) {
+	high := "high"
+	models.SetUserOverlay("anthropic", []models.Model{{
+		ID:               "claude-opus-5-5",
+		Compat:           &models.Compat{SupportsMidConvoEffort: true},
+		ThinkingLevelMap: map[string]*string{"high": &high},
+	}})
+	t.Cleanup(models.ClearOverlays)
+
+	for _, level := range []string{"low", "xhigh"} {
+		opts := Options{Provider: "anthropic", Model: "claude-opus-5-5", Thinking: level}
+		body, err := buildAnthropicRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := decodeAnthropicRequest(t, body)
+		oc, _ := req["output_config"].(map[string]any)
+		if oc["effort"] != "high" {
+			t.Fatalf("%s top-level effort = %#v", level, req["output_config"])
+		}
+		msgs, _ := req["messages"].([]any)
+		if len(msgs) == 0 || !reflect.DeepEqual(msgs[len(msgs)-1], effortMarker(level)) {
+			t.Fatalf("%s marker = %#v", level, msgs)
+		}
+		if got := activeMidConvoEffort(opts); got != level {
+			t.Fatalf("%s provider effort = %s", level, got)
+		}
+	}
+
+	body, err := buildAnthropicRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
+		Options{Provider: "anthropic", Model: "claude-opus-5-5", Thinking: "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := decodeAnthropicRequest(t, body)
+	if _, ok := req["output_config"]; ok {
+		t.Fatalf("off output_config = %#v", req["output_config"])
+	}
+	for _, msg := range req["messages"].([]any) {
+		m, _ := msg.(map[string]any)
+		if m["role"] == "system" {
+			t.Fatalf("off marker = %#v", msg)
+		}
+	}
+}
+
 func decodeAnthropicRequest(t *testing.T, body []byte) map[string]any {
 	t.Helper()
 	var req map[string]any

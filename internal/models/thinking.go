@@ -163,6 +163,57 @@ func ClampThinking(level string, m Model) string {
 	return available[0]
 }
 
+// fillOpus55ThinkingLevels supplies the effort table pi uses when models.dev
+// lists Opus 5.5 before effort metadata is complete. A map that already has
+// every fallback key is left unchanged, including null entries.
+func fillOpus55ThinkingLevels(m Model) Model {
+	if !opus55EffortModel(m) {
+		return m
+	}
+	fallback := opus55EffortFallback()
+	if thinkingMapHasKeys(m.ThinkingLevelMap, fallback) {
+		return m
+	}
+	out := make(map[string]*string, len(fallback)+len(m.ThinkingLevelMap))
+	for k, v := range m.ThinkingLevelMap {
+		out[k] = v
+	}
+	for k, v := range fallback {
+		if _, ok := out[k]; ok {
+			continue
+		}
+		out[k] = v
+	}
+	m.ThinkingLevelMap = out
+	return m
+}
+
+func opus55EffortModel(m Model) bool {
+	return (m.Provider == "anthropic" && m.ID == "claude-opus-5-5") ||
+		(m.Provider == "github-copilot" && m.ID == "claude-opus-5.5")
+}
+
+func opus55EffortFallback() map[string]*string {
+	out := map[string]*string{
+		"off":     nil,
+		"minimal": nil,
+	}
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		s := level
+		out[level] = &s
+	}
+	return out
+}
+
+func thinkingMapHasKeys(got, keys map[string]*string) bool {
+	for k := range keys {
+		if _, ok := got[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // NextThinkingLevelIn cycles current within levels.
 func NextThinkingLevelIn(current string, levels []string) string {
 	if len(levels) == 0 {
