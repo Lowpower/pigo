@@ -401,7 +401,7 @@ func TestResolveAgentsSkillsIgnoresRootMarkdown(t *testing.T) {
 	if _, ok := findSkill(rs, nested); !ok {
 		t.Fatalf("missing nested SKILL.md: %+v", skillResources(rs))
 	}
-	if _, ok := findSkill(rs, childMD); !ok {
-		t.Fatalf("missing nested markdown skill: %+v", skillResources(rs))
+	if _, ok := findSkill(rs, childMD); ok {
+		t.Fatalf("nested markdown should not resolve: %+v", skillResources(rs))
 	}
 }
