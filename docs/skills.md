@@ -19,7 +19,20 @@ dirs; user `~/.agents/skills` still loads.
 
 ## File format
 
-`SKILL.md` in a directory, or any `.md` file. Frontmatter:
+A skill is `SKILL.md`, or a `.md` file placed directly in an allowed root.
+Allowed roots are `~/.pigo/agent/skills/`, `.pigo/skills/`, a package `skills/`
+directory, and an extra directory other than `.agents/skills`. `.agents/skills`
+ignores `.md` files in that root. A directory that contains `SKILL.md` is that
+one skill; files beside it are not separate skills. Subdirectories are searched
+only for `SKILL.md`.
+
+Discovery follows directory and file symlinks, skips broken links, and keeps a
+single copy when several paths reach the same file. `.gitignore`, `.ignore`,
+and `.fdignore` inside the skill root apply, including subdirectory rules and
+`!` exceptions. Ignore rules above the skill root do not. Names starting with
+`.` and `node_modules` are skipped.
+
+Frontmatter:
 
 ```markdown
 ---

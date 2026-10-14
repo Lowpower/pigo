@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Lowpower/pigo/internal/skills"
 )
 
 // Resource is one discovered extensions/skills/prompts/themes path.
@@ -200,57 +202,11 @@ func collectResourceFiles(dir, kind string) []string {
 }
 
 func collectSkillEntries(dir string) []string {
-	return collectSkillEntriesAt(dir, dir, false)
+	return skills.ListCandidates(dir, true)
 }
 
 func collectAgentsSkillEntries(dir string) []string {
-	return collectSkillEntriesAt(dir, dir, true)
-}
-
-func collectSkillEntriesAt(dir, root string, agents bool) []string {
-	ents, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	for _, e := range ents {
-		if e.Name() != "SKILL.md" {
-			continue
-		}
-		full := filepath.Join(dir, e.Name())
-		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
-			return []string{full}
-		}
-	}
-	var out []string
-	for _, e := range ents {
-		name := e.Name()
-		if strings.HasPrefix(name, ".") || name == "node_modules" {
-			continue
-		}
-		full := filepath.Join(dir, name)
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if e.Type()&os.ModeSymlink != 0 {
-			info, err = os.Stat(full)
-			if err != nil {
-				continue
-			}
-		}
-		if info.Mode().IsRegular() {
-			includeMD := strings.HasSuffix(name, ".md") &&
-				((agents && dir != root) || (!agents && dir == root))
-			if includeMD {
-				out = append(out, full)
-			}
-			continue
-		}
-		if info.IsDir() {
-			out = append(out, collectSkillEntriesAt(full, root, agents)...)
-		}
-	}
-	return out
+	return skills.ListCandidates(dir, false)
 }
 
 func findGitRepoRoot(startDir string) string {
