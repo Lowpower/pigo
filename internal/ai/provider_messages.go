@@ -235,8 +235,13 @@ func OpenAIWireMessages(msgs []Message) []map[string]any {
 }
 
 func chatToolDef(t Tool, opts Options) map[string]any {
-	fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters}
-	if sendChatStrict(t, opts) {
+	parameters := t.Parameters
+	strict := sendChatStrict(t, opts)
+	if strict {
+		parameters = strictToolParameters(t.Parameters)
+	}
+	fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": parameters}
+	if strict {
 		fn["strict"] = true
 	}
 	return map[string]any{"type": "function", "function": fn}

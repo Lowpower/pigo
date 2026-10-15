@@ -102,14 +102,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 		if len(listedTools) > 0 {
 			tools := make([]responses.ToolUnionParam, 0, len(listedTools))
 			for _, t := range listedTools {
-				ft := responses.FunctionToolParam{
-					Name:       t.Name,
-					Parameters: t.Parameters,
-					Strict:     param.NewOpt(toolStrict(t)),
-				}
-				if t.Description != "" {
-					ft.Description = param.NewOpt(t.Description)
-				}
+				ft := responsesFunctionTool(t, false)
 				tools = append(tools, responses.ToolUnionParam{OfFunction: &ft})
 			}
 			params.Tools = tools
@@ -212,10 +205,15 @@ func responsesFunctionCallItem(c *Content) responses.ResponseInputItemUnionParam
 }
 
 func responsesFunctionTool(t Tool, deferLoading bool) responses.FunctionToolParam {
+	parameters := t.Parameters
+	strict := toolStrict(t)
+	if strict {
+		parameters = strictToolParameters(t.Parameters)
+	}
 	ft := responses.FunctionToolParam{
 		Name:       t.Name,
-		Parameters: t.Parameters,
-		Strict:     param.NewOpt(toolStrict(t)),
+		Parameters: parameters,
+		Strict:     param.NewOpt(strict),
 	}
 	if t.Description != "" {
 		ft.Description = param.NewOpt(t.Description)
