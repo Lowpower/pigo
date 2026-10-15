@@ -175,16 +175,108 @@ func TestShouldCompact(t *testing.T) {
 	}
 }
 
-func TestFindCutIndex(t *testing.T) {
-	// 30 messages of 4000 chars each = 1000 tokens each.
+func TestFindCutPointKeepsUserBoundary(t *testing.T) {
+	// 30 messages of 4000 chars each = 1000 tokens each, alternating user/assistant.
 	msgs := makeMessages(30, 4000)
 	// keepRecent 20000 -> the last 20 messages reach the threshold, cut at index 10.
-	if got := FindCutIndex(msgs, 20000); got != 10 {
-		t.Errorf("FindCutIndex = %d, want 10", got)
+	got, err := FindCutPoint(msgs, 20000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Skip || got.Split || got.Index != 10 || got.TurnStart != -1 {
+		t.Fatalf("cut = %+v, want index 10", got)
+	}
+	if msgs[got.Index].Role != ai.RoleUser {
+		t.Fatalf("cut role = %s, want user", msgs[got.Index].Role)
 	}
 	// Whole conversation fits within keepRecent -> nothing to summarize.
-	if got := FindCutIndex(msgs, 1_000_000); got != 0 {
-		t.Errorf("FindCutIndex (large keep) = %d, want 0", got)
+	fit, err := FindCutPoint(msgs, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fit.Skip || fit.Index != 0 || fit.Split {
+		t.Fatalf("large keep = %+v, want skip", fit)
+	}
+}
+
+func TestFindCutPointNeverLandsOnToolResult(t *testing.T) {
+	// Issue 216: user, assistant tool call, 4000-char toolResult, user; keep 900.
+	// The budget is crossed on the tool result. The next legal cut is the last user.
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: "u"},
+		assistantTools(toolCall("read", "a.go")),
+		{Role: ai.RoleToolResult, ToolCallID: "read-a.go", ToolName: "read", Content: strings.Repeat("x", 4000)},
+		{Role: ai.RoleUser, Content: "v"},
+	}
+	got, err := FindCutPoint(msgs, 900)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Index != 3 || got.Split || msgs[got.Index].Role != ai.RoleUser {
+		t.Fatalf("cut = %+v role=%s, want last user", got, msgs[got.Index].Role)
+	}
+}
+
+func TestFindCutPointConsecutiveToolResults(t *testing.T) {
+	later := []ai.Message{
+		{Role: ai.RoleUser, Content: "u"},
+		assistantTools(toolCall("read", "a.go")),
+		{Role: ai.RoleToolResult, Content: strings.Repeat("x", 4000)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("y", 4000)},
+		{Role: ai.RoleUser, Content: "v"},
+	}
+	got, err := FindCutPoint(later, 900)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Index != 4 || got.Split || later[got.Index].Role != ai.RoleUser {
+		t.Fatalf("later user cut = %+v", got)
+	}
+
+	// No message after the tool results: fall back to the assistant that called them.
+	trailing := later[:4]
+	got, err = FindCutPoint(trailing, 900)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Index != 1 || !got.Split || got.TurnStart != 0 {
+		t.Fatalf("trailing cut = %+v, want assistant split", got)
+	}
+	if trailing[got.Index].Role != ai.RoleAssistant {
+		t.Fatalf("cut role = %s", trailing[got.Index].Role)
+	}
+}
+
+func TestFindCutPointSplitsOversizedTurn(t *testing.T) {
+	// One user span. Each message is 100 tokens. keep 250 crosses on a tool result
+	// and the next legal cut is the following assistant.
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: strings.Repeat("u", 400)},
+		{Role: ai.RoleAssistant, Content: strings.Repeat("a", 400)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+		{Role: ai.RoleAssistant, Content: strings.Repeat("a", 400)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+		{Role: ai.RoleAssistant, Content: strings.Repeat("a", 400)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+	}
+	got, err := FindCutPoint(msgs, 250)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Index != 6 || !got.Split || got.TurnStart != 0 {
+		t.Fatalf("cut = %+v, want split at assistant 6", got)
+	}
+}
+
+func TestFindCutPointNoLegalCut(t *testing.T) {
+	msgs := []ai.Message{
+		{Role: ai.RoleToolResult, Content: strings.Repeat("x", 4000)},
+		{Role: ai.RoleTool, Content: strings.Repeat("y", 4000)},
+	}
+	_, err := FindCutPoint(msgs, 1)
+	if !errors.Is(err, ErrNoLegalCut) {
+		t.Fatalf("err = %v, want ErrNoLegalCut", err)
 	}
 }
 
@@ -373,6 +465,108 @@ func toolCall(name string, path any) *ai.Content {
 		args["path"] = path
 	}
 	return &ai.Content{Type: ai.KindToolCall, ToolID: name, ToolName: name, Arguments: args}
+}
+
+func TestCompactMergesSplitTurnSummaries(t *testing.T) {
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: "OLD-USER " + strings.Repeat("h", 400)},
+		assistantTools(toolCall("read", "old.go")),
+		{Role: ai.RoleUser, Content: "TURN-USER " + strings.Repeat("u", 400)},
+		assistantTools(toolCall("edit", "new.go")),
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+		{Role: ai.RoleAssistant, Content: strings.Repeat("a", 400)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+	}
+	// 400 chars = 100 tokens, plus a few for the prefixes and tool-call args.
+	// The tail assistant+tool is under 250; including the previous tool crosses it.
+	var prompts []string
+	sf := func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		prompts = append(prompts, req.Messages[0].Content)
+		reply := "PREFIX"
+		if len(prompts) == 1 {
+			reply = "HIST"
+		}
+		return ai.ScriptedStreamFn(reply, 0)(ctx, req, opts)
+	}
+	s := Settings{KeepRecentTokens: 250, PreviousSummary: "PREV", CustomInstructions: "Focus on files"}
+	compacted, summary, err := Compact(context.Background(), sf, "test", msgs, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("summary calls = %d, want history then turn prefix", len(prompts))
+	}
+	if !strings.Contains(prompts[0], "OLD-USER") || !strings.Contains(prompts[0], "<previous-summary>") || !strings.Contains(prompts[0], "PREV") {
+		t.Fatalf("history prompt = %s", prompts[0])
+	}
+	if !strings.Contains(prompts[0], "Additional focus: Focus on files") {
+		t.Fatalf("history prompt missing custom instructions:\n%s", prompts[0])
+	}
+	if strings.Contains(prompts[0], "TURN-USER") {
+		t.Fatalf("history prompt included the split turn:\n%s", prompts[0])
+	}
+	if !strings.Contains(prompts[1], TurnPrefixSummarizationPrompt) || !strings.Contains(prompts[1], "TURN-USER") {
+		t.Fatalf("turn prefix prompt = %s", prompts[1])
+	}
+	if strings.Contains(prompts[1], "<previous-summary>") || strings.Contains(prompts[1], "Additional focus:") || strings.Contains(prompts[1], "OLD-USER") {
+		t.Fatalf("turn prefix prompt leaked history:\n%s", prompts[1])
+	}
+	wantMerge := "HIST\n\n---\n\n**Turn Context (split turn):**\n\nPREFIX"
+	if !strings.Contains(summary, wantMerge) {
+		t.Fatalf("summary = %q, want merged checkpoints", summary)
+	}
+	if !strings.Contains(summary, "<read-files>\nold.go\n</read-files>") || !strings.Contains(summary, "<modified-files>\nnew.go\n</modified-files>") {
+		t.Fatalf("summary files = %q", summary)
+	}
+	if len(compacted) != 3 || !strings.Contains(compacted[0].Content, wantMerge) {
+		t.Fatalf("compacted len=%d first=%q", len(compacted), compacted[0].Content)
+	}
+	if compacted[1].Role != ai.RoleAssistant {
+		t.Fatalf("kept tail starts at %s", compacted[1].Role)
+	}
+}
+
+func TestCompactSplitTurnUsesPreviousSummaryWhenHistoryEmpty(t *testing.T) {
+	msgs := []ai.Message{
+		{Role: ai.RoleUser, Content: strings.Repeat("u", 400)},
+		{Role: ai.RoleAssistant, Content: strings.Repeat("a", 400)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+		{Role: ai.RoleAssistant, Content: strings.Repeat("a", 400)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+		{Role: ai.RoleAssistant, Content: strings.Repeat("a", 400)},
+		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
+	}
+	var calls int
+	sf := func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
+		calls++
+		if strings.Contains(req.Messages[0].Content, "<previous-summary>") || strings.Contains(req.Messages[0].Content, "Additional focus:") {
+			t.Fatalf("empty history should not be resummarized:\n%s", req.Messages[0].Content)
+		}
+		return ai.ScriptedStreamFn("PREFIX", 0)(ctx, req, opts)
+	}
+	s := Settings{KeepRecentTokens: 250, PreviousSummary: "PREV-ONLY", CustomInstructions: "ignore"}
+	_, summary, err := Compact(context.Background(), sf, "test", msgs, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want only the turn prefix", calls)
+	}
+	if !strings.Contains(summary, "PREV-ONLY\n\n---\n\n**Turn Context (split turn):**\n\nPREFIX") {
+		t.Fatalf("summary = %q", summary)
+	}
+}
+
+func TestCompactRefusesToolResultOnlySpan(t *testing.T) {
+	msgs := []ai.Message{{Role: ai.RoleToolResult, Content: strings.Repeat("x", 4000)}}
+	got, summary, err := Compact(context.Background(), ai.ScriptedStreamFn("NO", 0), "test", msgs, Settings{KeepRecentTokens: 1})
+	if !errors.Is(err, ErrNoLegalCut) {
+		t.Fatalf("err = %v", err)
+	}
+	if summary != "" || len(got) != 1 {
+		t.Fatalf("summary=%q len=%d", summary, len(got))
+	}
 }
 
 func TestCompactNoopWhenSmall(t *testing.T) {

@@ -1371,8 +1371,11 @@ func TestMaybeCompactCountsToolResultAfterUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary == "" {
-		t.Fatal("expected compaction after the tool result")
+	// The budget is crossed on the tool result, and the only legal cut is the
+	// assistant it belongs to. That leaves nothing to summarize, so the tool
+	// result stays with its call instead of opening the next request.
+	if summary != "" {
+		t.Fatalf("summary = %q, want no compaction", summary)
 	}
 	_, alone, err := e.MaybeCompact(context.Background(), msgs[:1])
 	if err != nil {

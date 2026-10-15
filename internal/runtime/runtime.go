@@ -599,17 +599,10 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 		s.UsePriorFiles = true
 	}
 	s.PreviousSummary = base.Summary
-	cut := compaction.FindCutIndex(body, s.KeepRecentTokens)
+	cut, cutErr := compaction.FindCutPoint(body, s.KeepRecentTokens)
 	tokensBefore := e.ContextTokens(msgs)
 	span.SetAttribute("pigo.compaction.tokens_before", tokensBefore)
 	keep := ""
-	if e.Opts.Session != nil {
-		if base.Found {
-			keep = session.FirstKeptEntryID(base.Entries, nil, cut)
-		} else {
-			keep = session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, cut)
-		}
-	}
 	resultOf := func(messages []ai.Message, summary string) CompactResult {
 		return CompactResult{
 			Messages:             messages,
@@ -619,9 +612,22 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 			EstimatedTokensAfter: e.ContextTokens(messages),
 		}
 	}
+	if cutErr != nil {
+		span.RecordError(cutErr)
+		e.failCompaction(cctx, reason, cutErr)
+		return resultOf(msgs, ""), cutErr
+	}
+	if e.Opts.Session != nil {
+		if base.Found {
+			keep = session.FirstKeptEntryID(base.Entries, nil, cut.Index)
+		} else {
+			keep = session.FirstKeptEntryID(session.ContextEntries(e.Opts.Session), msgs, cut.Index)
+		}
+	}
 
 	hook := e.DispatchEvent(cctx, "session_before_compact", map[string]any{
 		"reason": reason, "willRetry": false, "customInstructions": s.CustomInstructions,
+		"firstKeptEntryId": keep,
 	})
 	if asBool(hook["cancel"]) {
 		return resultOf(msgs, ""), nil
@@ -651,20 +657,12 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	var summary string
 	err := e.withSummarizationRetry(cctx, map[string]any{"source": "compaction", "reason": reason}, func() error {
 		var cerr error
-		compacted, summary, cerr = compaction.Compact(cctx, e.Stream, e.Opts.Config.ResolvedModel(), body, s)
+		compacted, summary, cerr = compaction.CompactPrepared(cctx, e.Stream, e.Opts.Config.ResolvedModel(), body, s, cut)
 		return cerr
 	})
 	if err != nil {
 		span.RecordError(err)
-		aborted := errors.Is(err, compaction.ErrSummarizeAborted) || errors.Is(err, context.Canceled)
-		e.emitSession(map[string]any{
-			"type": "compaction_end", "reason": reason,
-			"result": nil, "aborted": aborted,
-			"willRetry": false, "errorMessage": err.Error(),
-		})
-		e.DispatchEvent(cctx, "session_compact_failed", map[string]any{
-			"reason": reason, "aborted": aborted, "errorMessage": err.Error(),
-		})
+		e.failCompaction(cctx, reason, err)
 		return resultOf(msgs, ""), err
 	}
 	if summary == "" || compacted == nil {
@@ -673,7 +671,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	out := resultOf(compacted, summary)
 	span.SetAttribute("pigo.compaction.tokens_after", out.EstimatedTokensAfter)
 	if summary != "" && e.Opts.Session != nil {
-		files := compaction.CollectFileLists(body[:cut], s.PriorRead, s.PriorModified, s.UsePriorFiles)
+		files := compaction.CollectFileLists(body[:cut.Index], s.PriorRead, s.PriorModified, s.UsePriorFiles)
 		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokensBefore, session.CompactionMeta{
 			SystemMessage: e.currentSystemCheckpoint(),
 			Details:       files,
@@ -691,6 +689,18 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 		})
 	}
 	return out, nil
+}
+
+func (e *Engine) failCompaction(ctx context.Context, reason string, err error) {
+	aborted := errors.Is(err, compaction.ErrSummarizeAborted) || errors.Is(err, context.Canceled)
+	e.emitSession(map[string]any{
+		"type": "compaction_end", "reason": reason,
+		"result": nil, "aborted": aborted,
+		"willRetry": false, "errorMessage": err.Error(),
+	})
+	e.DispatchEvent(ctx, "session_compact_failed", map[string]any{
+		"reason": reason, "aborted": aborted, "errorMessage": err.Error(),
+	})
 }
 
 func compactPayload(r CompactResult) map[string]any {
