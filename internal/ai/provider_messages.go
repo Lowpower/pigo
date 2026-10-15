@@ -224,7 +224,32 @@ func anthropicContent(msg *AssistantMessage) []map[string]any {
 // toolResult becomes role=tool with tool_call_id; assistant tool calls become
 // tool_calls.
 func OpenAIWireMessages(msgs []Message) []map[string]any {
+	return openAIWireMessages(msgs, nil, Options{})
+}
+
+func chatToolDef(t Tool, opts Options) map[string]any {
+	fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters}
+	if sendChatStrict(t, opts) {
+		fn["strict"] = true
+	}
+	return map[string]any{"type": "function", "function": fn}
+}
+
+func kimiToolsMessage(m Message, deferred []Tool, loaded map[string]struct{}, opts Options) map[string]any {
+	tools := takeDeferredTools(m.AddedToolNames, deferred, loaded)
+	if len(tools) == 0 {
+		return nil
+	}
+	defs := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		defs = append(defs, chatToolDef(t, opts))
+	}
+	return map[string]any{"role": "system", "tools": defs}
+}
+
+func openAIWireMessages(msgs []Message, deferred []Tool, opts Options) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
+	loaded := map[string]struct{}{}
 	for _, m := range msgs {
 		if m.Assistant != nil {
 			out = append(out, openaiAssistant(m.Assistant))
@@ -260,6 +285,9 @@ func OpenAIWireMessages(msgs []Message) []map[string]any {
 				msg["content"] = blocks
 			}
 			out = append(out, msg)
+			if extra := kimiToolsMessage(m, deferred, loaded, opts); extra != nil {
+				out = append(out, extra)
+			}
 			continue
 		}
 		role := m.Role

@@ -111,7 +111,12 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 		API:      "openai-completions",
 		Model:    opts.Model,
 	}, normalizeOpenAIChatToolCallID(chatProvider(opts)))
-	msgs = append(msgs, OpenAIWireMessages(replayed)...)
+	listed := reqCtx.Tools
+	var deferred []Tool
+	if chatDeferredKimi(opts) {
+		listed, deferred = splitDeferredTools(replayed, reqCtx.Tools, true)
+	}
+	msgs = append(msgs, openAIWireMessages(replayed, deferred, opts)...)
 
 	req := map[string]any{
 		"model":          opts.Model,
@@ -129,17 +134,10 @@ func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {
 		req["prompt_cache_key"] = key
 	}
 	req["store"] = false
-	if len(reqCtx.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(reqCtx.Tools))
-		for _, t := range reqCtx.Tools {
-			fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters}
-			if sendChatStrict(t, opts) {
-				fn["strict"] = true
-			}
-			tools = append(tools, map[string]any{
-				"type":     "function",
-				"function": fn,
-			})
+	if len(listed) > 0 {
+		tools := make([]map[string]any, 0, len(listed))
+		for _, t := range listed {
+			tools = append(tools, chatToolDef(t, opts))
 		}
 		req["tools"] = tools
 	}

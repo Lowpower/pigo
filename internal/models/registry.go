@@ -372,6 +372,15 @@ func mergeCompat(base, extra *Compat) *Compat {
 	if extra.AllowedFallbackModels != nil {
 		out.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
 	}
+	if extra.SupportsAdditionalTools {
+		out.SupportsAdditionalTools = true
+	}
+	if extra.SupportsToolSearch {
+		out.SupportsToolSearch = true
+	}
+	if mode := strings.TrimSpace(extra.DeferredToolsMode); mode != "" {
+		out.DeferredToolsMode = mode
+	}
 	return &out
 }
 

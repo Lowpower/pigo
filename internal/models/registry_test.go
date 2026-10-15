@@ -296,6 +296,38 @@ func TestOverlayWithoutImageResizeKeepsExistingProfile(t *testing.T) {
 	}
 }
 
+func TestOverlayMergesDeferredToolCompat(t *testing.T) {
+	RegisterProvider(ProviderSpec{
+		ID: "defer-merge", DefaultAPI: "openai-responses", DefaultID: "m",
+		Models: []Model{{
+			Provider: "defer-merge", ID: "m",
+			Compat: &Compat{ThinkingFormat: "keep"},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("defer-merge")
+	})
+	SetUserOverlay("defer-merge", []Model{{
+		ID: "m",
+		Compat: &Compat{
+			SupportsAdditionalTools: true,
+			SupportsToolSearch:      true,
+			DeferredToolsMode:       "kimi",
+		},
+	}})
+	m, ok := Lookup("defer-merge", "m")
+	if !ok || m.Compat == nil {
+		t.Fatalf("compat = %+v ok=%v", m.Compat, ok)
+	}
+	if !m.Compat.SupportsAdditionalTools || !m.Compat.SupportsToolSearch || m.Compat.DeferredToolsMode != "kimi" {
+		t.Fatalf("deferred compat = %+v", m.Compat)
+	}
+	if m.Compat.ThinkingFormat != "keep" {
+		t.Fatalf("thinking format lost: %+v", m.Compat)
+	}
+}
+
 func TestOverlayMergesSamplingParams(t *testing.T) {
 	RegisterProvider(ProviderSpec{
 		ID: "samp-merge", DefaultAPI: "openai-completions", DefaultID: "m",
