@@ -110,6 +110,26 @@ func TestRestoreAIMessagesAddedToolNames(t *testing.T) {
 	}
 }
 
+func TestRestoreAssistantToolCallNamespace(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	if _, err := m.AppendMessage("assistant", &ai.AssistantMessage{
+		Role: "assistant",
+		Content: []*ai.Content{{
+			Type: ai.KindToolCall, ToolID: "c1", ToolName: "read", Namespace: "functions",
+			Arguments: map[string]any{"path": "a"},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	msgs := RestoreAIMessages(m.Entries())
+	if len(msgs) != 1 || msgs[0].Assistant == nil || len(msgs[0].Assistant.Content) != 1 {
+		t.Fatalf("msgs = %#v", msgs)
+	}
+	if msgs[0].Assistant.Content[0].Namespace != "functions" {
+		t.Fatalf("namespace = %#v", msgs[0].Assistant.Content[0])
+	}
+}
+
 func TestNewWithIDAndExactLookup(t *testing.T) {
 	agentDir := t.TempDir()
 	cwd := t.TempDir()

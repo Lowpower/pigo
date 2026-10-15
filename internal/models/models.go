@@ -108,6 +108,14 @@ type Compat struct {
 	// (defer_loading / tool_reference). Fireworks Messages also enable this
 	// when Options.Provider is "fireworks", even if this flag is unset.
 	SupportsToolReferences bool `json:"supportsToolReferences,omitempty"`
+	// SupportsAdditionalTools anchors late tools with Responses additional_tools items.
+	SupportsAdditionalTools bool `json:"supportsAdditionalTools,omitempty"`
+	// SupportsToolSearch anchors late tools with client-executed Responses tool search.
+	// Ignored when SupportsAdditionalTools is set.
+	SupportsToolSearch bool `json:"supportsToolSearch,omitempty"`
+	// DeferredToolsMode selects Chat Completions deferred-tool wire format.
+	// "kimi" inserts a system message carrying the late tool definitions.
+	DeferredToolsMode string `json:"deferredToolsMode,omitempty"`
 	// SupportsStrictMode gates Chat Completions function.strict.
 	// Nil or false keeps the field off. Cerebras never sends it.
 	SupportsStrictMode *bool `json:"supportsStrictMode,omitempty"`

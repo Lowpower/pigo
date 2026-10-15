@@ -120,12 +120,17 @@ func buildOpenAIRequestAt(reqCtx Context, opts Options, baseURL string) ([]byte,
 		API:      "openai-completions",
 		Model:    opts.Model,
 	}, normalizeOpenAIChatToolCallID(chatProvider(opts)))
-	msgs = append(msgs, openAIWireMessages(replayed, openAIWireOpts{
+	listed := reqCtx.Tools
+	var deferred []Tool
+	if chatDeferredKimi(opts) {
+		listed, deferred = splitDeferredTools(replayed, reqCtx.Tools, true)
+	}
+	msgs = append(msgs, openAIWireMessages(replayed, deferred, openAIWireOpts{
 		toolResultName:     compat.requiresToolResultName,
 		assistantAfterTool: compat.requiresAssistantAfterToolResult,
 		thinkingAsText:     compat.requiresThinkingAsText,
 		emptyReasoning:     compat.emptyReasoningContent(),
-	})...)
+	}, opts)...)
 
 	req := map[string]any{
 		"model":    opts.Model,
@@ -149,22 +154,10 @@ func buildOpenAIRequestAt(reqCtx Context, opts Options, baseURL string) ([]byte,
 		req["store"] = false
 	}
 	var tools []map[string]any
-	if len(reqCtx.Tools) > 0 {
-		tools = make([]map[string]any, 0, len(reqCtx.Tools))
-		for _, t := range reqCtx.Tools {
-			parameters := t.Parameters
-			strict := sendChatStrict(t, opts)
-			if strict {
-				parameters = strictToolParameters(t.Parameters)
-			}
-			fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": parameters}
-			if strict {
-				fn["strict"] = true
-			}
-			tools = append(tools, map[string]any{
-				"type":     "function",
-				"function": fn,
-			})
+	if len(listed) > 0 {
+		tools = make([]map[string]any, 0, len(listed))
+		for _, t := range listed {
+			tools = append(tools, chatToolDef(t, opts))
 		}
 		req["tools"] = tools
 		if compat.zaiToolStream {

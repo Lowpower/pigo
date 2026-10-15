@@ -377,5 +377,5 @@ func continuationItems(out *AssistantMessage) []any {
 		Provider: out.Provider,
 		API:      out.API,
 		Model:    out.Model,
-	}))
+	}, deferredAnchor{}))
 }

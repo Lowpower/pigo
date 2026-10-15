@@ -106,6 +106,36 @@ func TestLoadUserJSONReadsSessionAffinityFormat(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONReadsDeferredToolCompat(t *testing.T) {
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("defer-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "defer-json": {
+      "api": "openai-responses",
+      "baseUrl": "https://example.invalid/v1",
+      "models": [
+        {"id": "m1", "compat": {"supportsAdditionalTools": true, "supportsToolSearch": true, "deferredToolsMode": "kimi"}}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := Lookup("defer-json", "m1")
+	if !ok || m.Compat == nil || !m.Compat.SupportsAdditionalTools || !m.Compat.SupportsToolSearch || m.Compat.DeferredToolsMode != "kimi" {
+		t.Fatalf("m1 = %+v ok=%v", m.Compat, ok)
+	}
+}
+
 func TestLoadUserJSONReadsOpenAICompatFlags(t *testing.T) {
 	t.Cleanup(func() {
 		ClearOverlays()

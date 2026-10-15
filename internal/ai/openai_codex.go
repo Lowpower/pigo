@@ -109,6 +109,7 @@ func (c *OpenAICodexClient) buildRequestBody(reqCtx Context, opts Options) (map[
 	if instructions == "" {
 		instructions = "You are a helpful assistant."
 	}
+	codexAnchor, listedTools := responsesDeferred(reqCtx, opts)
 	bodyMap := map[string]any{
 		"model":        opts.Model,
 		"store":        false,
@@ -118,7 +119,7 @@ func (c *OpenAICodexClient) buildRequestBody(reqCtx Context, opts Options) (map[
 			Provider: recordedProvider(opts, "openai-codex"),
 			API:      "openai-codex-responses",
 			Model:    opts.Model,
-		}),
+		}, codexAnchor),
 		"text":                map[string]any{"verbosity": "low"},
 		"include":             []string{"reasoning.encrypted_content"},
 		"tool_choice":         "auto",
@@ -140,9 +141,9 @@ func (c *OpenAICodexClient) buildRequestBody(reqCtx Context, opts Options) (map[
 		}
 		bodyMap["max_output_tokens"] = n
 	}
-	if len(reqCtx.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(reqCtx.Tools))
-		for _, t := range reqCtx.Tools {
+	if len(listedTools) > 0 {
+		tools := make([]map[string]any, 0, len(listedTools))
+		for _, t := range listedTools {
 			fn := map[string]any{
 				"type":       "function",
 				"name":       t.Name,
