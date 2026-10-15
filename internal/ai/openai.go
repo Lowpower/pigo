@@ -152,8 +152,13 @@ func buildOpenAIRequestAt(reqCtx Context, opts Options, baseURL string) ([]byte,
 	if len(reqCtx.Tools) > 0 {
 		tools = make([]map[string]any, 0, len(reqCtx.Tools))
 		for _, t := range reqCtx.Tools {
-			fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters}
-			if sendChatStrict(t, opts) {
+			parameters := t.Parameters
+			strict := sendChatStrict(t, opts)
+			if strict {
+				parameters = strictToolParameters(t.Parameters)
+			}
+			fn := map[string]any{"name": t.Name, "description": t.Description, "parameters": parameters}
+			if strict {
 				fn["strict"] = true
 			}
 			tools = append(tools, map[string]any{

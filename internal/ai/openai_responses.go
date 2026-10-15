@@ -101,10 +101,15 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 		if len(reqCtx.Tools) > 0 {
 			tools := make([]responses.ToolUnionParam, 0, len(reqCtx.Tools))
 			for _, t := range reqCtx.Tools {
+				params := t.Parameters
+				strict := toolStrict(t)
+				if strict {
+					params = strictToolParameters(t.Parameters)
+				}
 				ft := responses.FunctionToolParam{
 					Name:       t.Name,
-					Parameters: t.Parameters,
-					Strict:     param.NewOpt(toolStrict(t)),
+					Parameters: params,
+					Strict:     param.NewOpt(strict),
 				}
 				if t.Description != "" {
 					ft.Description = param.NewOpt(t.Description)
