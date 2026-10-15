@@ -22,9 +22,33 @@ Token estimates are `chars/4`. Compaction runs when
 
 ## Cut
 
-Compaction walks the current context from the end until the tail reaches
-`keepRecentTokens`. That tail stays verbatim. Older messages in the span are
-summarized.
+Compaction walks the current context from the end, adding each message's
+token estimate, until the tail reaches `keepRecentTokens`. The message that
+crosses that budget is not always the cut. A cut is a user or assistant
+message. Bash commands, custom messages, branch summaries, and earlier
+compaction summaries are already user messages by the time the cut is chosen,
+so they are legal cuts and they start a turn. Tool results are not cuts.
+
+The cut is the nearest legal message at or after the one that crossed the
+budget. When the crossing messages are trailing tool results and nothing
+legal follows them, the cut moves back to the newest legal message before
+them, which keeps those results with the assistant that called the tool.
+A span that contains only tool results is not compacted. The failure is
+reported on `compaction_end.errorMessage` and `session_compact_failed`, and
+no compaction entry is written. A span that still fits, or whose only legal
+cut leaves nothing to summarize, is left unchanged.
+
+That tail stays verbatim. Older messages in the span are summarized.
+
+A turn starts at a user message and runs until the next user message. When
+the cut lands on an assistant message inside that turn, the turn is split.
+Messages before the turn are one summary. Messages from the turn start up to
+the cut are a second summary, from the turn-prefix prompt, without the
+previous summary or `/compact` instructions. The stored summary is the history
+text, then a `**Turn Context (split turn):**` section, then the prefix. If
+there is no earlier history, the history text is the previous compaction
+summary, or `No prior history.` when this is the first compaction. File lists
+include tool calls from both halves.
 
 On a later compaction the span starts at the previous compaction's
 `firstKeptEntryId`, so messages that survived the last cut are included in
@@ -99,9 +123,10 @@ summarized. An extension-supplied branch summary does not get file `details`.
 ## Extension hooks
 
 Subscribe to `session_before_compact`, `session_compact`, and
-`session_compact_failed`. A `session_before_compact` handler may cancel
-compaction or supply `compaction` text. That text is stored as the summary
-with `fromHook: true`.
+`session_compact_failed`. `session_before_compact` includes `firstKeptEntryId`,
+the same id stored on the compaction entry. A handler may cancel compaction or
+supply `compaction` text. That text is stored as the summary with
+`fromHook: true`.
 
 Branch navigation uses `session_before_tree`. A handler may supply `summary`,
 which is stored as a `fromHook` branch summary.
