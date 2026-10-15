@@ -77,8 +77,20 @@ definitions.
 On Fireworks Messages (and on any `anthropic-messages` model with
 `compat.supportsToolReferences: true`), late tools are sent with
 `defer_loading: true` and loaded at the tool result via `tool_reference`
-blocks. Other providers still receive the full active list with no extra
-fields.
+blocks.
+
+OpenAI Responses models with `compat.supportsAdditionalTools: true` keep that
+stable prefix in the top-level `tools` array and attach each new batch with an
+`additional_tools` item immediately after the tool result that added it. Models
+with only `compat.supportsToolSearch: true` use a client-executed
+`tool_search_call` / `tool_search_output` pair at that same point. When both
+flags are set, `additional_tools` is used. Responses models with neither flag
+still receive the full active list and no extra input items.
+
+Chat Completions models with `compat.deferredToolsMode` set to `kimi` use the
+same split. Each new batch is a `system` message whose `tools` field carries
+the definitions, placed after the tool result that added them. Other Chat
+Completions models still receive the full active list.
 
 Fireworks only drops deferred schemas from the cached prefix when the loader is
 named `ToolSearch` or `tool_search`. Other loader names still work, but the
@@ -88,8 +100,9 @@ Do not remove currently active tools in the same `SetActiveTools` call if you
 want deferred loading; a shrink or replace falls back to sending the whole
 active list.
 
-GLM and Kimi K3 on Fireworks use Chat Completions, not Messages, so this
-protocol does not apply there.
+GLM and Kimi K3 on Fireworks use Chat Completions, not Messages, so the
+Fireworks `tool_reference` protocol does not apply there. Kimi Chat Completions
+can opt in with `compat.deferredToolsMode: "kimi"` instead.
 
 ## Lifecycle events (subscribe)
 

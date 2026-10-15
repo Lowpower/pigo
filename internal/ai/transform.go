@@ -94,6 +94,7 @@ func transformAssistant(m *AssistantMessage, target replayTarget, normalize tool
 		case KindToolCall:
 			block := cloneContent(c)
 			if !same {
+				block.Namespace = ""
 				block.ThinkingSignature = ""
 				if normalize != nil && block.ToolID != "" {
 					next := normalize(c.ToolID, m)

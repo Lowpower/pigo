@@ -68,6 +68,284 @@ func TestSplitDeferredTools(t *testing.T) {
 	}
 }
 
+func registerCompat(t *testing.T, id, api string, compat *models.Compat) {
+	t.Helper()
+	models.RegisterProvider(models.ProviderSpec{
+		ID: id, DefaultAPI: api, DefaultID: "m",
+		Models: []models.Model{{Provider: id, ID: "m", API: api, Compat: compat}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(id) })
+}
+
+func twoStepDeferredContext() (short, full Context) {
+	base := []Message{
+		{Role: RoleUser, Content: "look up alpha"},
+		{Assistant: &AssistantMessage{Content: []*Content{
+			{Type: KindToolCall, ToolID: "search1", ToolName: "tool_search", Arguments: map[string]any{"query": "lookup"}},
+		}}},
+		{Role: RoleToolResult, ToolCallID: "search1", ToolName: "tool_search", Content: "Found lookup.", AddedToolNames: []string{"lookup"}},
+	}
+	short = Context{
+		Messages: append([]Message(nil), base...),
+		Tools:    []Tool{testTool("tool_search"), testTool("lookup")},
+	}
+	full = Context{Messages: append(append([]Message(nil), base...),
+		Message{Assistant: &AssistantMessage{Content: []*Content{
+			{Type: KindToolCall, ToolID: "search2", ToolName: "tool_search", Arguments: map[string]any{"query": "extra"}},
+		}}},
+		Message{Role: RoleToolResult, ToolCallID: "search2", ToolName: "tool_search", Content: "Found extra.", AddedToolNames: []string{"extra"}},
+	), Tools: []Tool{testTool("tool_search"), testTool("lookup"), testTool("extra")}}
+	return short, full
+}
+
+func responsesItemMaps(t *testing.T, ctx Context, anchor deferredAnchor) []map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(buildResponsesInput(ctx, replayTarget{
+		Provider: "openai", API: "openai-responses", Model: "gpt",
+	}, anchor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatal(err)
+	}
+	return items
+}
+
+func itemsOfType(items []map[string]any, typ string) []map[string]any {
+	var out []map[string]any
+	for _, item := range items {
+		if item["type"] == typ {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func TestResponsesDeferredModes(t *testing.T) {
+	ctx := deferredContext()
+	short, full := twoStepDeferredContext()
+	additional := func(c Context) deferredAnchor {
+		_, deferred := splitDeferredTools(c.Messages, c.Tools, true)
+		return deferredAnchor{mode: toolAnchorAdditional, deferred: deferred}
+	}
+	search := func(c Context) deferredAnchor {
+		_, deferred := splitDeferredTools(c.Messages, c.Tools, true)
+		return deferredAnchor{mode: toolAnchorSearch, deferred: deferred}
+	}
+
+	t.Run("additional tools anchor after the result", func(t *testing.T) {
+		items := responsesItemMaps(t, ctx, additional(ctx))
+		added := itemsOfType(items, "additional_tools")
+		if len(added) != 1 || added[0]["role"] != "developer" {
+			t.Fatalf("additional_tools = %#v", added)
+		}
+		tools, _ := added[0]["tools"].([]any)
+		if len(tools) != 1 || tools[0].(map[string]any)["name"] != "lookup" {
+			t.Fatalf("anchored tools = %#v", tools)
+		}
+		if len(itemsOfType(items, "tool_search_call")) != 0 {
+			t.Fatal("additional mode must not emit tool search")
+		}
+		outIdx := -1
+		addIdx := -1
+		for i, item := range items {
+			if item["type"] == "function_call_output" && item["call_id"] == "search1" {
+				outIdx = i
+			}
+			if item["type"] == "additional_tools" {
+				addIdx = i
+			}
+		}
+		if outIdx < 0 || addIdx != outIdx+1 {
+			t.Fatalf("anchor index output=%d additional=%d items=%#v", outIdx, addIdx, items)
+		}
+	})
+
+	t.Run("tool search when additional tools are off", func(t *testing.T) {
+		items := responsesItemMaps(t, ctx, search(ctx))
+		if len(itemsOfType(items, "additional_tools")) != 0 {
+			t.Fatal("tool search mode must not emit additional_tools")
+		}
+		calls := itemsOfType(items, "tool_search_call")
+		outs := itemsOfType(items, "tool_search_output")
+		if len(calls) != 1 || len(outs) != 1 {
+			t.Fatalf("calls=%#v outs=%#v", calls, outs)
+		}
+		if calls[0]["execution"] != "client" || calls[0]["status"] != "completed" {
+			t.Fatalf("call = %#v", calls[0])
+		}
+		if calls[0]["call_id"] != outs[0]["call_id"] {
+			t.Fatalf("call ids %v vs %v", calls[0]["call_id"], outs[0]["call_id"])
+		}
+		args, _ := calls[0]["arguments"].(map[string]any)
+		if args["query"] != "lookup" || args["limit"] != float64(1) {
+			t.Fatalf("arguments = %#v", calls[0]["arguments"])
+		}
+		tools, _ := outs[0]["tools"].([]any)
+		tool, _ := tools[0].(map[string]any)
+		if tool["name"] != "lookup" || tool["defer_loading"] != true {
+			t.Fatalf("search tool = %#v", tool)
+		}
+		again := responsesItemMaps(t, ctx, search(ctx))
+		if againJSON, _ := json.Marshal(again); string(againJSON) != mustJSON(t, items) {
+			t.Fatal("tool search call id changed between replays")
+		}
+	})
+
+	t.Run("unsupported leaves the transcript unchanged", func(t *testing.T) {
+		items := responsesItemMaps(t, ctx, deferredAnchor{})
+		if len(itemsOfType(items, "additional_tools")) != 0 || len(itemsOfType(items, "tool_search_call")) != 0 {
+			t.Fatalf("items = %#v", items)
+		}
+	})
+
+	t.Run("later tools do not rewrite the prefix", func(t *testing.T) {
+		shortItems := responsesItemMaps(t, short, additional(short))
+		fullItems := responsesItemMaps(t, full, additional(full))
+		if len(fullItems) <= len(shortItems) {
+			t.Fatalf("full = %#v short = %#v", fullItems, shortItems)
+		}
+		if mustJSON(t, fullItems[:len(shortItems)]) != mustJSON(t, shortItems) {
+			t.Fatalf("prefix changed\nshort %s\nfull  %s", mustJSON(t, shortItems), mustJSON(t, fullItems[:len(shortItems)]))
+		}
+		added := itemsOfType(fullItems, "additional_tools")
+		if len(added) != 2 {
+			t.Fatalf("anchors = %#v", added)
+		}
+		firstTools, _ := added[0]["tools"].([]any)
+		secondTools, _ := added[1]["tools"].([]any)
+		if firstTools[0].(map[string]any)["name"] != "lookup" || secondTools[0].(map[string]any)["name"] != "extra" {
+			t.Fatalf("anchors = %#v", added)
+		}
+	})
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestResponsesDeferredListing(t *testing.T) {
+	ctx := deferredContext()
+	registerCompat(t, "resp-both", "openai-responses", &models.Compat{
+		SupportsAdditionalTools: true,
+		SupportsToolSearch:      true,
+		ThinkingFormat:          "keep",
+	})
+	registerCompat(t, "resp-search", "openai-responses", &models.Compat{SupportsToolSearch: true})
+	opts := func(provider string) Options { return Options{Provider: provider, Model: "m"} }
+
+	anchor, listed := responsesDeferred(ctx, opts("resp-both"))
+	if anchor.mode != toolAnchorAdditional {
+		t.Fatalf("mode = %v", anchor.mode)
+	}
+	if names := toolNames(listed); len(names) != 1 || names[0] != "tool_search" {
+		t.Fatalf("listed = %v", names)
+	}
+	anchor, listed = responsesDeferred(ctx, opts("resp-search"))
+	if anchor.mode != toolAnchorSearch {
+		t.Fatalf("search mode = %v", anchor.mode)
+	}
+	if names := toolNames(listed); len(names) != 1 || names[0] != "tool_search" {
+		t.Fatalf("search listed = %v", names)
+	}
+	anchor, listed = responsesDeferred(ctx, opts("missing"))
+	if anchor.mode != toolAnchorOff || len(listed) != 2 {
+		t.Fatalf("off mode=%v listed=%v", anchor.mode, toolNames(listed))
+	}
+}
+
+func TestBuildOpenAIRequestKimiDeferredTools(t *testing.T) {
+	registerCompat(t, "kimi-defer", "openai-completions", &models.Compat{DeferredToolsMode: "kimi"})
+	short, full := twoStepDeferredContext()
+	shortReq := decodeReq(t, mustBuildOpenAI(t, short, Options{Provider: "kimi-defer", Model: "m"}))
+	fullReq := decodeReq(t, mustBuildOpenAI(t, full, Options{Provider: "kimi-defer", Model: "m"}))
+
+	if names := chatToolNames(t, shortReq["tools"]); len(names) != 1 || names[0] != "tool_search" {
+		t.Fatalf("short tools = %v", names)
+	}
+	if names := chatToolNames(t, fullReq["tools"]); len(names) != 1 || names[0] != "tool_search" {
+		t.Fatalf("full tools = %v", names)
+	}
+	shortMsgs, _ := shortReq["messages"].([]any)
+	fullMsgs, _ := fullReq["messages"].([]any)
+	if mustJSON(t, fullMsgs[:len(shortMsgs)]) != mustJSON(t, shortMsgs) {
+		t.Fatalf("prefix changed\nshort %s\nfull %s", mustJSON(t, shortMsgs), mustJSON(t, fullMsgs[:len(shortMsgs)]))
+	}
+	batches := kimiToolBatches(t, fullMsgs)
+	if len(batches) != 2 || batches[0][0] != "lookup" || batches[1][0] != "extra" {
+		t.Fatalf("batches = %#v", batches)
+	}
+
+	plain := decodeReq(t, mustBuildOpenAI(t, full, Options{Provider: "openai", Model: "gpt-4o"}))
+	if names := chatToolNames(t, plain["tools"]); len(names) != 3 {
+		t.Fatalf("plain tools = %v", names)
+	}
+	if batches := kimiToolBatches(t, plain["messages"].([]any)); len(batches) != 0 {
+		t.Fatalf("plain batches = %#v", batches)
+	}
+}
+
+func mustBuildOpenAI(t *testing.T, ctx Context, opts Options) []byte {
+	t.Helper()
+	body, err := buildOpenAIRequest(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func chatToolNames(t *testing.T, raw any) []string {
+	t.Helper()
+	tools, _ := raw.([]any)
+	var names []string
+	for _, item := range tools {
+		tool, _ := item.(map[string]any)
+		fn, _ := tool["function"].(map[string]any)
+		name, _ := fn["name"].(string)
+		names = append(names, name)
+	}
+	return names
+}
+
+func kimiToolBatches(t *testing.T, msgs []any) [][]string {
+	t.Helper()
+	var batches [][]string
+	for _, raw := range msgs {
+		msg, _ := raw.(map[string]any)
+		tools, ok := msg["tools"].([]any)
+		if !ok {
+			continue
+		}
+		if msg["role"] != "system" {
+			t.Fatalf("tools message role = %v", msg["role"])
+		}
+		var names []string
+		for _, item := range tools {
+			tool, _ := item.(map[string]any)
+			fn, _ := tool["function"].(map[string]any)
+			name, _ := fn["name"].(string)
+			names = append(names, name)
+		}
+		batches = append(batches, names)
+	}
+	return batches
+}
+
+func toolNames(ts []Tool) []string {
+	var out []string
+	for _, t := range ts {
+		out = append(out, t.Name)
+	}
+	return out
+}
+
 func TestBuildAnthropicRequestFireworksDeferredTools(t *testing.T) {
 	body, err := buildAnthropicRequest(deferredContext(), Options{Provider: "fireworks", Model: "accounts/fireworks/models/deepseek-v4-flash-0731"})
 	if err != nil {

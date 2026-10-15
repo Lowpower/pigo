@@ -2,6 +2,52 @@ package ai
 
 import "strings"
 
+// toolAnchorMode selects how late tools are attached to a transcript.
+type toolAnchorMode int
+
+const (
+	toolAnchorOff toolAnchorMode = iota
+	toolAnchorAdditional
+	toolAnchorSearch
+)
+
+// deferredAnchor is the Responses input placement for tools that must stay
+// out of the cached tool prefix.
+type deferredAnchor struct {
+	mode     toolAnchorMode
+	deferred []Tool
+}
+
+// responsesDeferred splits tools for an OpenAI Responses request.
+// The returned list is the top-level tools array. Late tools stay on anchor.
+func responsesDeferred(reqCtx Context, opts Options) (deferredAnchor, []Tool) {
+	mode := responsesAnchorMode(opts)
+	if mode == toolAnchorOff {
+		return deferredAnchor{}, reqCtx.Tools
+	}
+	immediate, deferred := splitDeferredTools(reqCtx.Messages, reqCtx.Tools, true)
+	return deferredAnchor{mode: mode, deferred: deferred}, immediate
+}
+
+func responsesAnchorMode(opts Options) toolAnchorMode {
+	c := lookupCompat(opts)
+	if c == nil {
+		return toolAnchorOff
+	}
+	if c.SupportsAdditionalTools {
+		return toolAnchorAdditional
+	}
+	if c.SupportsToolSearch {
+		return toolAnchorSearch
+	}
+	return toolAnchorOff
+}
+
+func chatDeferredKimi(opts Options) bool {
+	c := lookupCompat(opts)
+	return c != nil && strings.EqualFold(strings.TrimSpace(c.DeferredToolsMode), "kimi")
+}
+
 // supportsToolReferences reports whether Anthropic Messages deferred-tool
 // fields (defer_loading / tool_reference) should be sent.
 func supportsToolReferences(opts Options) bool {
@@ -67,6 +113,34 @@ func splitDeferredTools(msgs []Message, tools []Tool, enabled bool) (immediate, 
 		return deferred, nil
 	}
 	return immediate, deferred
+}
+
+// takeDeferredTools returns deferred tools named in names that have not been
+// anchored yet, in names order. It records the ones it returns.
+func takeDeferredTools(names []string, deferred []Tool, loaded map[string]struct{}) []Tool {
+	if len(names) == 0 || len(deferred) == 0 {
+		return nil
+	}
+	byName := make(map[string]Tool, len(deferred))
+	for _, t := range deferred {
+		byName[t.Name] = t
+	}
+	var out []Tool
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		t, ok := byName[name]
+		if !ok {
+			continue
+		}
+		if _, seen := loaded[name]; seen {
+			continue
+		}
+		loaded[name] = struct{}{}
+		out = append(out, t)
+	}
+	return out
 }
 
 func deferredNameSet(tools []Tool) map[string]struct{} {

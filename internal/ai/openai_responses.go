@@ -60,6 +60,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			apiID = "openai-responses"
 		}
 		provider := recordedProvider(opts, "openai")
+		responsesAnchor, listedTools := responsesDeferred(reqCtx, opts)
 		params := responses.ResponseNewParams{
 			Model: shared.ResponsesModel(opts.Model),
 			Input: responses.ResponseNewParamsInputUnion{
@@ -67,7 +68,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 					Provider: provider,
 					API:      apiID,
 					Model:    opts.Model,
-				}),
+				}, responsesAnchor),
 			},
 			Store: param.NewOpt(false),
 		}
@@ -98,9 +99,9 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			}
 			params.Include = []responses.ResponseIncludable{responses.ResponseIncludableReasoningEncryptedContent}
 		}
-		if len(reqCtx.Tools) > 0 {
-			tools := make([]responses.ToolUnionParam, 0, len(reqCtx.Tools))
-			for _, t := range reqCtx.Tools {
+		if len(listedTools) > 0 {
+			tools := make([]responses.ToolUnionParam, 0, len(listedTools))
+			for _, t := range listedTools {
 				ft := responses.FunctionToolParam{
 					Name:       t.Name,
 					Parameters: t.Parameters,
@@ -147,8 +148,9 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 	}
 }
 
-func buildResponsesInput(reqCtx Context, target replayTarget) responses.ResponseInputParam {
+func buildResponsesInput(reqCtx Context, target replayTarget, anchor deferredAnchor) responses.ResponseInputParam {
 	var items responses.ResponseInputParam
+	loaded := map[string]struct{}{}
 	for _, m := range transformMessages(reqCtx.Messages, target, normalizeResponsesToolCallID) {
 		if m.Assistant != nil {
 			for _, c := range m.Assistant.Content {
@@ -164,8 +166,7 @@ func buildResponsesInput(reqCtx Context, target replayTarget) responses.Response
 						items = append(items, item)
 					}
 				case KindToolCall:
-					args, _ := json.Marshal(c.Arguments)
-					items = append(items, responses.ResponseInputItemParamOfFunctionCall(string(args), c.ToolID, c.ToolName))
+					items = append(items, responsesFunctionCallItem(c))
 				}
 			}
 			continue
@@ -179,6 +180,7 @@ func buildResponsesInput(reqCtx Context, target replayTarget) responses.Response
 				imgs = m.Images
 			}
 			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(m.ToolCallID, text))
+			items = append(items, responsesDeferredItems(m, anchor, loaded)...)
 			if len(imgs) > 0 {
 				items = append(items, responsesUserImageMessage("", imgs))
 			}
@@ -198,6 +200,106 @@ func buildResponsesInput(reqCtx Context, target replayTarget) responses.Response
 		items = append(items, responsesUserImageMessage(m.Content, m.Images))
 	}
 	return items
+}
+
+func responsesFunctionCallItem(c *Content) responses.ResponseInputItemUnionParam {
+	args, _ := json.Marshal(c.Arguments)
+	item := responses.ResponseInputItemParamOfFunctionCall(string(args), c.ToolID, c.ToolName)
+	if c.Namespace != "" && item.OfFunctionCall != nil {
+		item.OfFunctionCall.SetExtraFields(map[string]any{"namespace": c.Namespace})
+	}
+	return item
+}
+
+func responsesFunctionTool(t Tool, deferLoading bool) responses.FunctionToolParam {
+	ft := responses.FunctionToolParam{
+		Name:       t.Name,
+		Parameters: t.Parameters,
+		Strict:     param.NewOpt(toolStrict(t)),
+	}
+	if t.Description != "" {
+		ft.Description = param.NewOpt(t.Description)
+	}
+	if deferLoading {
+		ft.SetExtraFields(map[string]any{"defer_loading": true})
+	}
+	return ft
+}
+
+func responsesDeferredItems(m Message, anchor deferredAnchor, loaded map[string]struct{}) []responses.ResponseInputItemUnionParam {
+	tools := takeDeferredTools(m.AddedToolNames, anchor.deferred, loaded)
+	if len(tools) == 0 {
+		return nil
+	}
+	switch anchor.mode {
+	case toolAnchorAdditional:
+		defs := make([]responses.FunctionToolParam, 0, len(tools))
+		for _, t := range tools {
+			defs = append(defs, responsesFunctionTool(t, false))
+		}
+		return []responses.ResponseInputItemUnionParam{
+			param.Override[responses.ResponseInputItemUnionParam](map[string]any{
+				"type":  "additional_tools",
+				"role":  "developer",
+				"tools": defs,
+			}),
+		}
+	case toolAnchorSearch:
+		names := make([]string, len(tools))
+		defs := make([]responses.FunctionToolParam, 0, len(tools))
+		for i, t := range tools {
+			names[i] = t.Name
+			defs = append(defs, responsesFunctionTool(t, true))
+		}
+		callID := "pigo_tool_load_" + shortHash8(m.ToolCallID+":"+strings.Join(names, ","))
+		return []responses.ResponseInputItemUnionParam{
+			param.Override[responses.ResponseInputItemUnionParam](map[string]any{
+				"type":      "tool_search_call",
+				"call_id":   callID,
+				"execution": "client",
+				"status":    "completed",
+				"arguments": map[string]any{"query": strings.Join(names, " "), "limit": len(names)},
+			}),
+			param.Override[responses.ResponseInputItemUnionParam](map[string]any{
+				"type":      "tool_search_output",
+				"call_id":   callID,
+				"execution": "client",
+				"status":    "completed",
+				"tools":     defs,
+			}),
+		}
+	default:
+		return nil
+	}
+}
+
+func functionCallNamespace(item responses.ResponseOutputItemUnion) string {
+	if item.Type != "function_call" {
+		return ""
+	}
+	fc := item.AsFunctionCall()
+	if field, ok := fc.JSON.ExtraFields["namespace"]; ok && field.Valid() {
+		var ns string
+		if json.Unmarshal([]byte(field.Raw()), &ns) == nil && ns != "" {
+			return ns
+		}
+	}
+	var raw map[string]any
+	if json.Unmarshal([]byte(item.RawJSON()), &raw) == nil {
+		if ns, ok := raw["namespace"].(string); ok {
+			return ns
+		}
+	}
+	return ""
+}
+
+func applyFunctionCallNamespace(block *Content, item responses.ResponseOutputItemUnion) {
+	if block == nil {
+		return
+	}
+	if ns := functionCallNamespace(item); ns != "" {
+		block.Namespace = ns
+	}
 }
 
 func responsesUserImageMessage(text string, imgs []ImageContent) responses.ResponseInputItemUnionParam {
@@ -250,7 +352,9 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 			}
 		case responses.ResponseOutputItemAddedEvent:
 			if v.Item.Type == "function_call" {
-				out.Content = append(out.Content, &Content{Type: KindToolCall, ToolID: firstNonEmpty(v.Item.CallID, v.Item.ID), ToolName: v.Item.Name})
+				block := &Content{Type: KindToolCall, ToolID: firstNonEmpty(v.Item.CallID, v.Item.ID), ToolName: v.Item.Name}
+				applyFunctionCallNamespace(block, v.Item)
+				out.Content = append(out.Content, block)
 				idx := len(out.Content) - 1
 				toolSlots[responsesOutputKey(v.JSON.OutputIndex.Valid(), v.OutputIndex)] = idx
 				if !s.push(ctx, Event{Type: EventToolCallStart, ContentIndex: idx, Partial: out}) {
@@ -283,6 +387,7 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 					block.partialJSON = v.Item.Arguments
 					block.Arguments = parseStreamingJSON(block.partialJSON)
 				}
+				applyFunctionCallNamespace(block, v.Item)
 				block.partialJSON = ""
 				block.toolDone = true
 				delete(toolSlots, key)
