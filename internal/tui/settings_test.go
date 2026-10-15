@@ -150,11 +150,11 @@ func TestSettingsCyclesScrollbarAndAnthropicWarning(t *testing.T) {
 	m := New(testCfg())
 	m = submit(m, "/settings")
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("fullscreen scrollbar")})
-	if !strings.Contains(m.View(), "always") {
-		t.Fatalf("expected default always:\n%s", m.View())
+	if !strings.Contains(m.View(), "Fullscreen scrollbar auto") {
+		t.Fatalf("expected default auto:\n%s", m.View())
 	}
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.cfg.ScrollbarMode() != "auto" {
+	if m.cfg.ScrollbarMode() != "hidden" {
 		t.Fatalf("cycle scrollbar = %s", m.cfg.ScrollbarMode())
 	}
 
@@ -173,7 +173,7 @@ func TestSettingsCyclesScrollbarAndAnthropicWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.ScrollbarMode() != "auto" {
+	if loaded.ScrollbarMode() != "hidden" {
 		t.Fatalf("saved scrollbar = %s", loaded.ScrollbarMode())
 	}
 	if loaded.AnthropicExtraUsageWarning() {

@@ -866,12 +866,20 @@ func TestLoadCompactionModelOverridesRetryCapAndWarnings(t *testing.T) {
 
 func TestLoadFullscreenScrollbarModes(t *testing.T) {
 	var unset Config
-	if unset.ScrollbarMode() != "always" || !unset.ScrollbarEnabled() || !unset.ScrollbarVisible(0) {
-		t.Fatal("unset scrollbar should act as always")
+	if unset.ScrollbarMode() != "auto" || !unset.ScrollbarEnabled() || unset.ScrollbarVisible(0) || !unset.ScrollbarVisible(2) {
+		t.Fatal("unset scrollbar should act as auto")
 	}
 	off := Config{FullscreenScrollbar: false}
 	if off.ScrollbarMode() != "hidden" || off.ScrollbarEnabled() || off.ScrollbarVisible(3) {
 		t.Fatal("bool false should hide")
+	}
+	on := Config{FullscreenScrollbar: true}
+	if on.ScrollbarMode() != "always" || !on.ScrollbarVisible(0) {
+		t.Fatal("bool true should stay always")
+	}
+	bad := Config{FullscreenScrollbar: "nope"}
+	if bad.ScrollbarMode() != "always" {
+		t.Fatal("unrecognized scrollbar should stay always")
 	}
 	auto := Config{FullscreenScrollbar: "auto"}
 	if auto.ScrollbarMode() != "auto" || !auto.ScrollbarEnabled() {

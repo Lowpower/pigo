@@ -122,6 +122,29 @@ type Compat struct {
 	// AllowedFallbackModels is the Anthropic server-side fallback list.
 	// A non-empty list is sent as `fallbacks`. Nil or empty omits the field.
 	AllowedFallbackModels []FallbackModel `json:"allowedFallbackModels,omitempty"`
+
+	// OpenAI Chat Completions wire switches. Nil or empty means unset:
+	// the request builder fills provider and baseUrl defaults.
+	SupportsStore                               *bool                 `json:"supportsStore,omitempty"`
+	SupportsUsageInStreaming                    *bool                 `json:"supportsUsageInStreaming,omitempty"`
+	SupportsDeveloperRole                       *bool                 `json:"supportsDeveloperRole,omitempty"`
+	MaxTokensField                              string                `json:"maxTokensField,omitempty"`
+	RequiresToolResultName                      *bool                 `json:"requiresToolResultName,omitempty"`
+	RequiresAssistantAfterToolResult            *bool                 `json:"requiresAssistantAfterToolResult,omitempty"`
+	RequiresThinkingAsText                      *bool                 `json:"requiresThinkingAsText,omitempty"`
+	RequiresReasoningContentOnAssistantMessages *bool                 `json:"requiresReasoningContentOnAssistantMessages,omitempty"`
+	OpenRouterRouting                           map[string]any        `json:"openRouterRouting,omitempty"`
+	VercelGatewayRouting                        *VercelGatewayRouting `json:"vercelGatewayRouting,omitempty"`
+	ZaiToolStream                               *bool                 `json:"zaiToolStream,omitempty"`
+	ThinkingTokenBudgetField                    string                `json:"thinkingTokenBudgetField,omitempty"`
+	SupportsThinkingTokenBudget                 *bool                 `json:"supportsThinkingTokenBudget,omitempty"`
+	CacheControlFormat                          string                `json:"cacheControlFormat,omitempty"`
+}
+
+// VercelGatewayRouting is sent as providerOptions.gateway when only or order is set.
+type VercelGatewayRouting struct {
+	Only  []string `json:"only,omitempty"`
+	Order []string `json:"order,omitempty"`
 }
 
 // FallbackModel is one Anthropic server-side fallback target.

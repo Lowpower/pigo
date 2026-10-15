@@ -107,6 +107,10 @@ func (t editTool) applyEdits(path string, edits []editReplace) (string, bool) {
 		len(spans), path, plainDiff(original, updated)), false
 }
 
+func (editTool) normalizeArgs(args map[string]any) map[string]any {
+	return normalizeEditArgs(args)
+}
+
 func normalizeEditArgs(args map[string]any) map[string]any {
 	if args == nil {
 		return map[string]any{}

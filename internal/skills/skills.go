@@ -1,3 +1,4 @@
+// Package skills loads SKILL.md documents and renders them into the prompt.
 package skills
 
 import (
@@ -44,23 +45,27 @@ func FormatWarnings(ds []Diagnostic) []string {
 // Discover walks the skill directories and extra paths.
 // Project skills are scanned before user skills. The first skill of a name wins.
 // A second path to the same file, including a symlink, is skipped with no diagnostic.
+// Directory discovery follows ListCandidates: symlinks, ignore files, and SKILL.md
+// roots. Standalone .md files are kept only as direct children of ~/.pigo/agent/skills,
+// .pigo/skills, package skill directories, and other extra directories that are not
+// .agents/skills.
 func Discover(cwd, agentDir string, extra []string, includeDefaults, includeProject bool) ([]Skill, []Diagnostic) {
 	var dirs []dirSrc
 	if includeDefaults {
 		if includeProject && cwd != "" {
-			dirs = append(dirs, dirSrc{filepath.Join(cwd, ".pigo", "skills"), "project"})
+			dirs = append(dirs, dirSrc{path: filepath.Join(cwd, ".pigo", "skills"), source: "project", allowRootMD: true})
 		}
-		dirs = append(dirs, dirSrc{filepath.Join(agentDir, "skills"), "user"})
+		dirs = append(dirs, dirSrc{path: filepath.Join(agentDir, "skills"), source: "user", allowRootMD: true})
 	}
 	for _, p := range extra {
-		dirs = append(dirs, dirSrc{p, "extra"})
+		dirs = append(dirs, dirSrc{path: p, source: "extra", allowRootMD: standaloneMarkdownRoot(p)})
 	}
 	seenName := map[string]Skill{}
 	seenReal := map[string]bool{}
 	var out []Skill
 	var diags []Diagnostic
 	for _, d := range dirs {
-		found, more := walk(d.path, d.source)
+		found, more := walk(d.path, d.source, d.allowRootMD)
 		diags = append(diags, more...)
 		for _, s := range found {
 			resolved := canonicalPath(s.FilePath)
@@ -85,9 +90,10 @@ func Discover(cwd, agentDir string, extra []string, includeDefaults, includeProj
 
 type dirSrc struct {
 	path, source string
+	allowRootMD  bool
 }
 
-func walk(root, source string) ([]Skill, []Diagnostic) {
+func walk(root, source string, allowRootMarkdown bool) ([]Skill, []Diagnostic) {
 	info, err := os.Stat(root)
 	if err != nil {
 		return nil, nil
@@ -99,34 +105,16 @@ func walk(root, source string) ([]Skill, []Diagnostic) {
 		}
 		return []Skill{s}, diags
 	}
-	var skills []Skill
+	var found []Skill
 	var diags []Diagnostic
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			base := d.Name()
-			if base == "node_modules" || (strings.HasPrefix(base, ".") && path != root) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		name := d.Name()
-		if !strings.EqualFold(name, "SKILL.md") && !strings.HasSuffix(strings.ToLower(name), ".md") {
-			return nil
-		}
+	for _, path := range ListCandidates(root, allowRootMarkdown) {
 		s, more := loadFile(path, source)
 		diags = append(diags, more...)
 		if s.FilePath != "" {
-			skills = append(skills, s)
+			found = append(found, s)
 		}
-		if strings.EqualFold(name, "SKILL.md") {
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	return skills, diags
+	}
+	return found, diags
 }
 
 func loadFile(path, source string) (Skill, []Diagnostic) {

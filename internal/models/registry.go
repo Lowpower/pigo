@@ -303,6 +303,7 @@ func mergeOverlay(providerID string, base, extra []Model) []Model {
 			if len(m.SamplingParams) > 0 {
 				out[i].SamplingParams = MergeSamplingParams(out[i].SamplingParams, m.SamplingParams)
 			}
+			out[i] = fillOpus55ThinkingLevels(out[i])
 			continue
 		}
 		m.SamplingParams = MergeSamplingParams(nil, m.SamplingParams)
@@ -314,6 +315,7 @@ func mergeOverlay(providerID string, base, extra []Model) []Model {
 		} else {
 			m = ensureOpenRouterFormat(m)
 		}
+		m = fillOpus55ThinkingLevels(m)
 		idx[m.ID] = len(out)
 		out = append(out, m)
 	}
@@ -357,9 +359,7 @@ func mergeCompat(base, extra *Compat) *Compat {
 	}
 	if base == nil {
 		c := *extra
-		c.SupportsStrictMode = cloneBool(extra.SupportsStrictMode)
-		c.ForceAdaptiveThinking = cloneBool(extra.ForceAdaptiveThinking)
-		c.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
+		cloneCompatPointers(&c, extra)
 		return &c
 	}
 	out := *base
@@ -372,6 +372,7 @@ func mergeCompat(base, extra *Compat) *Compat {
 	if extra.AllowedFallbackModels != nil {
 		out.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
 	}
+	mergeOpenAICompat(&out, extra)
 	if extra.SupportsAdditionalTools {
 		out.SupportsAdditionalTools = true
 	}
@@ -380,6 +381,97 @@ func mergeCompat(base, extra *Compat) *Compat {
 	}
 	if mode := strings.TrimSpace(extra.DeferredToolsMode); mode != "" {
 		out.DeferredToolsMode = mode
+	}
+	return &out
+}
+
+// cloneCompatPointers copies pointer and map fields so the result does not
+// alias the overlay value. Callers pass the struct that was copied from extra.
+func cloneCompatPointers(out, extra *Compat) {
+	out.SupportsStrictMode = cloneBool(extra.SupportsStrictMode)
+	out.ForceAdaptiveThinking = cloneBool(extra.ForceAdaptiveThinking)
+	out.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
+	out.SupportsStore = cloneBool(extra.SupportsStore)
+	out.SupportsUsageInStreaming = cloneBool(extra.SupportsUsageInStreaming)
+	out.SupportsDeveloperRole = cloneBool(extra.SupportsDeveloperRole)
+	out.RequiresToolResultName = cloneBool(extra.RequiresToolResultName)
+	out.RequiresAssistantAfterToolResult = cloneBool(extra.RequiresAssistantAfterToolResult)
+	out.RequiresThinkingAsText = cloneBool(extra.RequiresThinkingAsText)
+	out.RequiresReasoningContentOnAssistantMessages = cloneBool(extra.RequiresReasoningContentOnAssistantMessages)
+	out.OpenRouterRouting = cloneAnyMap(extra.OpenRouterRouting)
+	out.VercelGatewayRouting = cloneVercelRouting(extra.VercelGatewayRouting)
+	out.ZaiToolStream = cloneBool(extra.ZaiToolStream)
+	out.SupportsThinkingTokenBudget = cloneBool(extra.SupportsThinkingTokenBudget)
+}
+
+// mergeOpenAICompat overlays Chat Completions switches that extra sets.
+// An unset pointer, empty string, or nil map leaves the catalog value.
+func mergeOpenAICompat(out, extra *Compat) {
+	if extra.SupportsStore != nil {
+		out.SupportsStore = cloneBool(extra.SupportsStore)
+	}
+	if extra.SupportsUsageInStreaming != nil {
+		out.SupportsUsageInStreaming = cloneBool(extra.SupportsUsageInStreaming)
+	}
+	if extra.SupportsDeveloperRole != nil {
+		out.SupportsDeveloperRole = cloneBool(extra.SupportsDeveloperRole)
+	}
+	if extra.MaxTokensField != "" {
+		out.MaxTokensField = extra.MaxTokensField
+	}
+	if extra.RequiresToolResultName != nil {
+		out.RequiresToolResultName = cloneBool(extra.RequiresToolResultName)
+	}
+	if extra.RequiresAssistantAfterToolResult != nil {
+		out.RequiresAssistantAfterToolResult = cloneBool(extra.RequiresAssistantAfterToolResult)
+	}
+	if extra.RequiresThinkingAsText != nil {
+		out.RequiresThinkingAsText = cloneBool(extra.RequiresThinkingAsText)
+	}
+	if extra.RequiresReasoningContentOnAssistantMessages != nil {
+		out.RequiresReasoningContentOnAssistantMessages = cloneBool(extra.RequiresReasoningContentOnAssistantMessages)
+	}
+	if extra.OpenRouterRouting != nil {
+		out.OpenRouterRouting = cloneAnyMap(extra.OpenRouterRouting)
+	}
+	if extra.VercelGatewayRouting != nil {
+		out.VercelGatewayRouting = cloneVercelRouting(extra.VercelGatewayRouting)
+	}
+	if extra.ZaiToolStream != nil {
+		out.ZaiToolStream = cloneBool(extra.ZaiToolStream)
+	}
+	if extra.ThinkingTokenBudgetField != "" {
+		out.ThinkingTokenBudgetField = extra.ThinkingTokenBudgetField
+	}
+	if extra.SupportsThinkingTokenBudget != nil {
+		out.SupportsThinkingTokenBudget = cloneBool(extra.SupportsThinkingTokenBudget)
+	}
+	if extra.CacheControlFormat != "" {
+		out.CacheControlFormat = extra.CacheControlFormat
+	}
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneVercelRouting(in *VercelGatewayRouting) *VercelGatewayRouting {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.Only != nil {
+		out.Only = append([]string(nil), in.Only...)
+	}
+	if in.Order != nil {
+		out.Order = append([]string(nil), in.Order...)
 	}
 	return &out
 }

@@ -140,19 +140,38 @@ func serveFIFO(t *testing.T, path string, line []byte, n int) {
 			close(release)
 		}
 	})
+	payload := append(append([]byte{}, line...), '\n')
 	go func() {
-		f, err := os.OpenFile(path, os.O_WRONLY, 0)
-		if err != nil {
-			return
-		}
-		defer func() { _ = f.Close() }()
-		payload := append(append([]byte{}, line...), '\n')
-		for i := 0; i < n; i++ {
-			if _, err := f.Write(payload); err != nil {
+		// Listing and lookup each open the file. A reader that stops after the
+		// header closes its end and the next write returns EPIPE. Reopen so the
+		// following open does not block with no writer left. After n successful
+		// writes, hold the end open so a reader that continues into the body
+		// waits instead of seeing EOF.
+		for {
+			select {
+			case <-release:
+				return
+			default:
+			}
+			f, err := os.OpenFile(path, os.O_WRONLY, 0)
+			if err != nil {
 				return
 			}
+			held := true
+			for i := 0; i < n; i++ {
+				if _, err := f.Write(payload); err != nil {
+					held = false
+					break
+				}
+			}
+			if !held {
+				_ = f.Close()
+				continue
+			}
+			<-release
+			_ = f.Close()
+			return
 		}
-		<-release
 	}()
 }
 
