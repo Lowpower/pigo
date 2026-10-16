@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,8 +23,10 @@ type clipImage struct {
 }
 
 const (
-	clipListTimeout = time.Second
-	clipReadTimeout = 3 * time.Second
+	clipListTimeout    = time.Second
+	clipReadTimeout    = 3 * time.Second
+	clipWriteTimeout   = 5 * time.Second
+	maxOSC52EncodedLen = 100_000
 )
 
 var imageMIMEPref = []string{"image/png", "image/jpeg", "image/webp", "image/gif"}
@@ -372,42 +376,178 @@ var runClipCmd = func(name string, timeout time.Duration, args ...string) ([]byt
 	return exec.CommandContext(ctx, name, args...).Output()
 }
 
-// copyText returns an OSC 52 sequence and, on WSL, also writes the Windows clipboard.
-func copyText(text string) string {
-	_ = copyWindowsClipboard(text, os.Getenv, runtime.GOOS)
-	return osc52(text)
+// runClipWrite writes text to a clipboard helper's stdin. Tests replace it.
+// A zero exit is success. The timeout only interrupts a helper that never exits;
+// wl-copy and xclip fork a child that keeps the selection after the parent returns.
+var runClipWrite = func(name string, timeout time.Duration, input string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = strings.NewReader(input)
+	return cmd.Run()
 }
 
+// clipboardGOOS and clipboardGetenv are replaced by tests so copy results do not
+// depend on the machine's display variables.
+var (
+	clipboardGOOS   = runtime.GOOS
+	clipboardGetenv = os.Getenv
+)
+
+type clipCmd struct {
+	name string
+	args []string
+}
+
+// copyToClipboard tries native clipboard writers, then OSC 52 when that sequence
+// is the only route (headless Linux, or a remote session). osc is empty when the
+// native writer succeeded and the terminal does not also need the sequence.
+// A desktop session with a display does not treat an unverified OSC 52 write as
+// success: terminals such as GNOME Terminal ignore it.
+func copyToClipboard(text, goos string, getenv func(string) string) (string, error) {
+	if getenv == nil {
+		getenv = func(string) string { return "" }
+	}
+	var lastErr error
+	copied := false
+	for _, c := range clipboardCommands(goos, getenv) {
+		err := runClipWrite(c.name, clipWriteTimeout, text, c.args...)
+		if err == nil {
+			copied = true
+			break
+		}
+		lastErr = err
+	}
+	osc := ""
+	oscEmitted := false
+	if !copied && goos == "linux" && isWSL(getenv) {
+		if getenv("WT_SESSION") != "" {
+			if s, ok := osc52IfFits(text); ok {
+				osc = s
+				oscEmitted = true
+				copied = true
+			}
+		}
+		if !copied {
+			if err := writeWindowsClipboard(text, getenv, goos); err != nil {
+				lastErr = err
+			} else {
+				copied = true
+			}
+		}
+	}
+	headless := goos == "linux" && getenv("DISPLAY") == "" && getenv("WAYLAND_DISPLAY") == "" && getenv("TERMUX_VERSION") == ""
+	oversized := false
+	if !oscEmitted && (remoteClipboard(getenv) || (!copied && headless)) {
+		if s, ok := osc52IfFits(text); ok {
+			osc = s
+			copied = true
+		} else {
+			oversized = true
+		}
+	}
+	if copied {
+		return osc, nil
+	}
+	if oversized {
+		return "", clipboardError("Clipboard unavailable: text exceeds the OSC 52 size limit")
+	}
+	return "", clipboardFailure(clipboardHint(goos, getenv), lastErr)
+}
+
+func clipboardCommands(goos string, getenv func(string) string) []clipCmd {
+	switch goos {
+	case "darwin":
+		return []clipCmd{{name: "pbcopy"}}
+	case "windows":
+		return []clipCmd{{name: "clip"}}
+	default:
+		var cmds []clipCmd
+		if getenv("TERMUX_VERSION") != "" {
+			cmds = append(cmds, clipCmd{name: "termux-clipboard-set"})
+		}
+		if getenv("WAYLAND_DISPLAY") != "" {
+			cmds = append(cmds, clipCmd{name: "wl-copy"})
+		}
+		if getenv("DISPLAY") != "" {
+			cmds = append(cmds, clipCmd{name: "xclip", args: []string{"-selection", "clipboard"}})
+			cmds = append(cmds, clipCmd{name: "xsel", args: []string{"--clipboard", "--input"}})
+		}
+		return cmds
+	}
+}
+
+func remoteClipboard(getenv func(string) string) bool {
+	return getenv("SSH_CONNECTION") != "" || getenv("SSH_CLIENT") != "" || getenv("MOSH_CONNECTION") != "" || getenv("PI_CLIPBOARD_OSC52") == "1"
+}
+
+func osc52IfFits(text string) (string, bool) {
+	if base64.StdEncoding.EncodedLen(len(text)) > maxOSC52EncodedLen {
+		return "", false
+	}
+	return osc52(text), true
+}
+
+func clipboardHint(goos string, getenv func(string) string) string {
+	if getenv("TERMUX_VERSION") != "" {
+		return "Clipboard unavailable: install the Termux:API app and termux-api package"
+	}
+	if goos == "linux" {
+		if getenv("WAYLAND_DISPLAY") != "" {
+			return "Clipboard unavailable: install wl-clipboard (wl-copy) or check Wayland access"
+		}
+		if getenv("DISPLAY") != "" {
+			return "Clipboard unavailable: install xclip or xsel, or check X11 access"
+		}
+	}
+	return "Clipboard unavailable"
+}
+
+func clipboardFailure(hint string, cause error) error {
+	if cause != nil {
+		hint += ": " + cause.Error()
+	}
+	return clipboardError(hint)
+}
+
+type clipboardError string
+
+func (e clipboardError) Error() string { return string(e) }
+
 func copyWindowsClipboard(text string, getenv func(string) string, goos string) bool {
+	return writeWindowsClipboard(text, getenv, goos) == nil
+}
+
+func writeWindowsClipboard(text string, getenv func(string) string, goos string) error {
 	if goos != "linux" || !isWSL(getenv) {
-		return false
+		return errors.New("windows clipboard is only used on WSL")
 	}
 	f, err := os.CreateTemp("", "pigo-wsl-clip-*.txt")
 	if err != nil {
-		return false
+		return err
 	}
 	path := f.Name()
 	defer func() { _ = os.Remove(path) }()
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
-		return false
+		return err
 	}
 	if _, err := f.WriteString(text); err != nil {
 		_ = f.Close()
-		return false
+		return err
 	}
 	if err := f.Close(); err != nil {
-		return false
+		return err
 	}
 	out, err := runClipCmd("wslpath", time.Second, "-w", path)
 	if err != nil {
-		return false
+		return err
 	}
 	winPath := strings.TrimSpace(string(out))
 	if winPath == "" {
-		return false
+		return errors.New("wslpath returned an empty path")
 	}
 	script := "Set-Clipboard -Value ([System.IO.File]::ReadAllText('" + strings.ReplaceAll(winPath, "'", "''") + "', [System.Text.Encoding]::UTF8))"
 	_, err = runClipCmd("powershell.exe", 5*time.Second, "-NoProfile", "-Command", script)
-	return err == nil
+	return err
 }

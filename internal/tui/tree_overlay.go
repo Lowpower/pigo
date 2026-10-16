@@ -404,9 +404,7 @@ func (m Model) copyTreeSelection() (tea.Model, tea.Cmd) {
 		m.tree.status = "Selected entry has no text to copy"
 		return m, nil
 	}
-	m.clipOSC = copyText(text)
-	m.tree.status = "Copied selected message to clipboard"
-	return m, nil
+	return m.copyWithNotice(text, "Copied selected message to clipboard", copyNoticeTree)
 }
 
 func (m Model) confirmTreeNav(summarize bool, custom string, replace bool) (tea.Model, tea.Cmd) {

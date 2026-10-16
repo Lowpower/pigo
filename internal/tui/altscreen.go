@@ -2,17 +2,82 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 const altWheelMultiplier = 5
 
+const (
+	copyErrorFlashDuration = 5 * time.Second
+	copyOKFlashDuration    = 2 * time.Second
+)
+
+type copyNotice int
+
+const (
+	copyNoticeTranscript copyNotice = iota
+	copyNoticeTree
+	copyNoticeFlash
+)
+
+type copyFlashClearMsg struct{ gen int }
+
+func (m Model) copyWithNotice(text, success string, notice copyNotice) (Model, tea.Cmd) {
+	osc, err := copyToClipboard(text, clipboardGOOS, clipboardGetenv)
+	if err != nil {
+		m.clipOSC = ""
+		return m.showCopyFailure(err.Error(), notice == copyNoticeTree)
+	}
+	m.clipOSC = osc
+	switch notice {
+	case copyNoticeTree:
+		m.dismissCopyFlash()
+		m.tree.status = success
+		return m, nil
+	case copyNoticeFlash:
+		return m.showCopyFlash(success, copyOKFlashDuration)
+	default:
+		m.dismissCopyFlash()
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(success)})
+		return m, nil
+	}
+}
+
+func (m *Model) dismissCopyFlash() {
+	m.copyFlashGen++
+	m.copyFlash = ""
+	m.copyFlashTree = false
+}
+
+func (m Model) showCopyFlash(text string, d time.Duration) (Model, tea.Cmd) {
+	m.copyFlashGen++
+	m.copyFlash = text
+	m.copyFlashTree = false
+	gen := m.copyFlashGen
+	return m, tea.Tick(d, func(time.Time) tea.Msg {
+		return copyFlashClearMsg{gen: gen}
+	})
+}
+
+func (m Model) showCopyFailure(text string, tree bool) (Model, tea.Cmd) {
+	m.copyFlashGen++
+	m.copyFlash = text
+	m.copyFlashTree = tree
+	if tree {
+		m.tree.status = text
+	}
+	gen := m.copyFlashGen
+	return m, tea.Tick(copyErrorFlashDuration, func(time.Time) tea.Msg {
+		return copyFlashClearMsg{gen: gen}
+	})
+}
+
 func (m Model) copySelectionOrAssistant() (tea.Model, tea.Cmd) {
 	if m.altScreen {
 		if text := m.selectedText(); text != "" {
-			m.clipOSC = copyText(text)
-			return m, nil
+			return m.copyWithNotice(text, "Copied!", copyNoticeFlash)
 		}
 	}
 	return m.copyLastAssistant()
@@ -24,9 +89,7 @@ func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("no assistant text to copy")})
 		return m, nil
 	}
-	m.clipOSC = copyText(text)
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("copied last assistant message")})
-	return m, nil
+	return m.copyWithNotice(text, "copied last assistant message", copyNoticeTranscript)
 }
 
 func (m *Model) scrollBy(delta int) {
@@ -172,7 +235,7 @@ func (m Model) handleAltScreenMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.sel.active = true
 		if m.cfg.CopyOnSelect() {
 			if text := m.selectedText(); text != "" {
-				m.clipOSC = copyText(text)
+				return m.copyWithNotice(text, "Copied!", copyNoticeFlash)
 			}
 		}
 	}

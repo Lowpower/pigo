@@ -496,6 +496,7 @@ func TestTreeSummarizeStartsAsync(t *testing.T) {
 }
 
 func TestCtrlXCopiesTreeSelection(t *testing.T) {
+	pinHeadlessClipboard(t)
 	m := treeModel(t)
 	m = submit(m, "/tree")
 	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
@@ -705,11 +706,16 @@ func TestSkillCommandsDisabled(t *testing.T) {
 }
 
 func TestCopyDequeueAndThinkingPicker(t *testing.T) {
+	pinHeadlessClipboard(t)
 	m := New(testCfg())
 	m.history = []ai.Message{{Role: ai.RoleAssistant, Content: "copy-me"}}
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlX})
 	if m.clipOSC == "" || !strings.Contains(m.clipOSC, "\x1b]52;c;") {
 		t.Fatalf("clipOSC=%q", m.clipOSC)
+	}
+	last := m.transcript[len(m.transcript)-1].rendered
+	if strings.Contains(last, "\x1b]52") || !strings.Contains(last, "copied last assistant message") {
+		t.Fatalf("transcript = %q", last)
 	}
 
 	m.queued = []queuedPrompt{{text: "queued-text"}}
