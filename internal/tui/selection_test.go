@@ -27,6 +27,7 @@ func TestUseMouseTrackingFollowsFullscreenOnly(t *testing.T) {
 }
 
 func TestFullscreenDragSelectCopiesOnRelease(t *testing.T) {
+	pinHeadlessClipboard(t)
 	m := New(fullscreenCfg())
 	m = send(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.transcript = []entry{{role: "assistant", rendered: "HELLO-SELECT"}}
@@ -40,12 +41,16 @@ func TestFullscreenDragSelectCopiesOnRelease(t *testing.T) {
 	if got := decodeOSC52(m.clipOSC); got != "HELLO-SELECT" {
 		t.Fatalf("copied %q (osc=%q)\nview=\n%s", got, m.clipOSC, m.View())
 	}
+	if !strings.Contains(m.View(), "Copied!") {
+		t.Fatal("selection copy should flash Copied!")
+	}
 	if !strings.Contains(m.View(), "\x1b[7m") {
 		t.Fatal("selection should stay highlighted after copy-on-select")
 	}
 }
 
 func TestFullscreenCopyOnSelectFalseUsesCtrlX(t *testing.T) {
+	pinHeadlessClipboard(t)
 	off := false
 	cfg := fullscreenCfg()
 	cfg.FullscreenCopyOnSelect = &off
@@ -87,6 +92,7 @@ func TestAltScreenClickLatestClearsSelection(t *testing.T) {
 }
 
 func TestFullscreenDragSelectCopiesUserAndThinking(t *testing.T) {
+	pinHeadlessClipboard(t)
 	m := New(fullscreenCfg())
 	m = send(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.transcript = []entry{

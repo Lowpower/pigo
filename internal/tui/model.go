@@ -160,6 +160,9 @@ type Model struct {
 	border        borderStatus
 	anthropicWarn bool
 	clipOSC       string
+	copyFlash     string
+	copyFlashTree bool
+	copyFlashGen  int
 	imgProto      string
 	cellWidthPx   int
 	cellHeightPx  int
@@ -459,6 +462,17 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 
 	case scopedRefreshMsg:
 		return m.handleScopedRefresh(msg)
+
+	case copyFlashClearMsg:
+		if msg.gen != m.copyFlashGen {
+			return m, nil
+		}
+		if m.copyFlashTree && m.tree.status == m.copyFlash {
+			m.tree.status = ""
+		}
+		m.copyFlash = ""
+		m.copyFlashTree = false
+		return m, nil
 
 	case tea.KeyMsg:
 		if isTermQueryLeak(msg) {
@@ -1104,7 +1118,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if text == "" {
 			return note("no assistant text to copy")
 		}
-		return note(copyText(text) + "copied last assistant message")
+		return m.copyWithNotice(text, "copied last assistant message", copyNoticeTranscript)
 	case "share":
 		if m.engine == nil || m.engine.Opts.Session == nil {
 			return note("no session to share")
@@ -1558,6 +1572,10 @@ func (m Model) viewDock() string {
 	dock.WriteString(m.widgets("belowEditor"))
 	if m.complete.active {
 		dock.WriteString(m.complete.view())
+	}
+	if m.copyFlash != "" && !m.copyFlashTree {
+		dock.WriteString(m.metaStyle.Render(m.copyFlash))
+		dock.WriteByte('\n')
 	}
 	dock.WriteString(m.footerStyle.Render(m.footerText()))
 	return dock.String()

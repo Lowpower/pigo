@@ -1,10 +1,15 @@
 package tui
 
 import (
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/Lowpower/pigo/internal/ai"
 )
 
 func stubRunClip(t *testing.T, fn func(string, time.Duration, ...string) ([]byte, bool)) {
@@ -195,6 +200,317 @@ func TestReadClipboardFilePathsSkipsNonDarwin(t *testing.T) {
 	})
 	if readClipboardFilePaths() != nil || called {
 		t.Fatalf("called=%v", called)
+	}
+}
+
+func pinHeadlessClipboard(t *testing.T) {
+	t.Helper()
+	pinClipboard(t, "linux", func(string) string { return "" })
+}
+
+func pinClipboard(t *testing.T, goos string, getenv func(string) string) {
+	t.Helper()
+	oldOS, oldEnv := clipboardGOOS, clipboardGetenv
+	clipboardGOOS = goos
+	clipboardGetenv = getenv
+	t.Cleanup(func() {
+		clipboardGOOS = oldOS
+		clipboardGetenv = oldEnv
+	})
+}
+
+func TestCopyFailureFlashNotSuccess(t *testing.T) {
+	if copyErrorFlashDuration != 5*time.Second {
+		t.Fatalf("failure flash = %s", copyErrorFlashDuration)
+	}
+	pinClipboard(t, "linux", envGet(map[string]string{"DISPLAY": ":0"}))
+	stubClipWrite(t, failClipWrite(errors.New("exit status 1")))
+	m := New(testCfg())
+	m.history = []ai.Message{{Role: ai.RoleAssistant, Content: "copy-me"}}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	if m.clipOSC != "" {
+		t.Fatalf("clipOSC = %q", m.clipOSC)
+	}
+	view := m.View()
+	if strings.Contains(view, "copied last assistant message") {
+		t.Fatalf("success leaked into view:\n%s", view)
+	}
+	if !strings.Contains(view, "install xclip or xsel, or check X11 access") || !strings.Contains(view, "exit status 1") {
+		t.Fatalf("missing failure flash:\n%s", view)
+	}
+	for _, e := range m.transcript {
+		if strings.Contains(e.rendered, "Clipboard unavailable") {
+			t.Fatalf("failure was written to the transcript: %q", e.rendered)
+		}
+	}
+	gen := m.copyFlashGen
+	m = send(m, copyFlashClearMsg{gen: gen - 1})
+	if !strings.Contains(m.View(), "exit status 1") {
+		t.Fatal("stale clear should keep the failure")
+	}
+	m = send(m, copyFlashClearMsg{gen: gen})
+	if strings.Contains(m.View(), "exit status 1") || m.copyFlash != "" {
+		t.Fatal("failure flash should clear")
+	}
+
+	m = submit(m, "/copy")
+	view = m.View()
+	if strings.Contains(view, "copied last assistant message") || !strings.Contains(view, "exit status 1") {
+		t.Fatalf("slash copy view:\n%s", view)
+	}
+}
+
+func TestTreeCopyFailureClearsStatus(t *testing.T) {
+	pinClipboard(t, "linux", envGet(map[string]string{"WAYLAND_DISPLAY": "wayland-0"}))
+	stubClipWrite(t, failClipWrite(errors.New("exit status 1")))
+	m := treeModel(t)
+	m = submit(m, "/tree")
+	m = send(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	if strings.Contains(m.tree.status, "Copied selected") {
+		t.Fatalf("status = %q", m.tree.status)
+	}
+	if !strings.Contains(m.tree.status, "install wl-clipboard (wl-copy)") || !strings.Contains(m.View(), "exit status 1") {
+		t.Fatalf("status = %q\n%s", m.tree.status, m.View())
+	}
+	kept := m.tree.status
+	m.tree.status = "Already at this point"
+	m = send(m, copyFlashClearMsg{gen: m.copyFlashGen})
+	if m.tree.status != "Already at this point" {
+		t.Fatalf("clear should leave a newer status, got %q (was %q)", m.tree.status, kept)
+	}
+	m.tree.status = kept
+	m.copyFlash = kept
+	m.copyFlashTree = true
+	m = send(m, copyFlashClearMsg{gen: m.copyFlashGen})
+	if m.tree.status != "" {
+		t.Fatalf("status = %q", m.tree.status)
+	}
+}
+
+func envGet(kv map[string]string) func(string) string {
+	return func(k string) string { return kv[k] }
+}
+
+func stubClipWrite(t *testing.T, fn func(string, time.Duration, string, ...string) error) *[]string {
+	t.Helper()
+	var cmds []string
+	old := runClipWrite
+	runClipWrite = func(name string, d time.Duration, input string, args ...string) error {
+		if d != clipWriteTimeout {
+			t.Errorf("timeout = %s", d)
+		}
+		line := name
+		if len(args) > 0 {
+			line += " " + strings.Join(args, " ")
+		}
+		cmds = append(cmds, line+"\n"+input)
+		return fn(name, d, input, args...)
+	}
+	t.Cleanup(func() { runClipWrite = old })
+	return &cmds
+}
+
+func okClipWrite(string, time.Duration, string, ...string) error { return nil }
+
+func failClipWrite(err error) func(string, time.Duration, string, ...string) error {
+	return func(string, time.Duration, string, ...string) error { return err }
+}
+
+func TestCopyWaylandStopsAtWlCopy(t *testing.T) {
+	cmds := stubClipWrite(t, okClipWrite)
+	osc, err := copyToClipboard("hello", "linux", envGet(map[string]string{"WAYLAND_DISPLAY": "wayland-0"}))
+	if err != nil || osc != "" {
+		t.Fatalf("osc=%q err=%v", osc, err)
+	}
+	if len(*cmds) != 1 || (*cmds)[0] != "wl-copy\nhello" {
+		t.Fatalf("cmds = %#v", *cmds)
+	}
+}
+
+func TestCopyWaylandFallsThroughToX11(t *testing.T) {
+	cmds := stubClipWrite(t, func(name string, _ time.Duration, input string, _ ...string) error {
+		if input != "你好" {
+			t.Fatalf("input = %q", input)
+		}
+		if name == "xsel" {
+			return nil
+		}
+		return errors.New("exit status 1")
+	})
+	env := envGet(map[string]string{"WAYLAND_DISPLAY": "wayland-0", "DISPLAY": ":0"})
+	osc, err := copyToClipboard("你好", "linux", env)
+	if err != nil || osc != "" {
+		t.Fatalf("osc=%q err=%v", osc, err)
+	}
+	want := []string{"wl-copy", "xclip -selection clipboard", "xsel --clipboard --input"}
+	if len(*cmds) != len(want) {
+		t.Fatalf("cmds = %#v", *cmds)
+	}
+	for i, prefix := range want {
+		if !strings.HasPrefix((*cmds)[i], prefix+"\n") {
+			t.Fatalf("cmd %d = %q", i, (*cmds)[i])
+		}
+	}
+}
+
+func TestCopyX11StopsAtXclip(t *testing.T) {
+	cmds := stubClipWrite(t, okClipWrite)
+	osc, err := copyToClipboard("x", "linux", envGet(map[string]string{"DISPLAY": ":0"}))
+	if err != nil || osc != "" {
+		t.Fatalf("osc=%q err=%v", osc, err)
+	}
+	if len(*cmds) != 1 || !strings.HasPrefix((*cmds)[0], "xclip -selection clipboard\n") {
+		t.Fatalf("cmds = %#v", *cmds)
+	}
+}
+
+func TestCopyDarwinAndWindowsCommands(t *testing.T) {
+	cmds := stubClipWrite(t, okClipWrite)
+	if _, err := copyToClipboard("mac", "darwin", envGet(nil)); err != nil || len(*cmds) != 1 || !strings.HasPrefix((*cmds)[0], "pbcopy\nmac") {
+		t.Fatalf("darwin cmds = %#v", *cmds)
+	}
+	*cmds = nil
+	if _, err := copyToClipboard("win", "windows", envGet(nil)); err != nil || len(*cmds) != 1 || !strings.HasPrefix((*cmds)[0], "clip\nwin") {
+		t.Fatalf("windows cmds = %#v", *cmds)
+	}
+}
+
+func TestCopyTermuxCommand(t *testing.T) {
+	cmds := stubClipWrite(t, okClipWrite)
+	_, err := copyToClipboard("t", "linux", envGet(map[string]string{"TERMUX_VERSION": "0.118"}))
+	if err != nil || len(*cmds) != 1 || !strings.HasPrefix((*cmds)[0], "termux-clipboard-set\n") {
+		t.Fatalf("cmds = %#v err=%v", *cmds, err)
+	}
+}
+
+func TestCopyDesktopFailureReportsHintAndCommandError(t *testing.T) {
+	stubClipWrite(t, failClipWrite(errors.New("exit status 1")))
+	osc, err := copyToClipboard("x", "linux", envGet(map[string]string{"WAYLAND_DISPLAY": "wayland-0"}))
+	if osc != "" || err == nil {
+		t.Fatalf("osc=%q err=%v", osc, err)
+	}
+	got := err.Error()
+	if !strings.Contains(got, "install wl-clipboard (wl-copy) or check Wayland access") || !strings.Contains(got, "exit status 1") {
+		t.Fatalf("err = %q", got)
+	}
+	osc, err = copyToClipboard("x", "linux", envGet(map[string]string{"DISPLAY": ":0"}))
+	if osc != "" || err == nil || !strings.Contains(err.Error(), "install xclip or xsel, or check X11 access") || !strings.Contains(err.Error(), "exit status 1") {
+		t.Fatalf("osc=%q err=%v", osc, err)
+	}
+	stubClipWrite(t, failClipWrite(errors.New("executable file not found")))
+	_, err = copyToClipboard("x", "linux", envGet(map[string]string{"TERMUX_VERSION": "1", "WAYLAND_DISPLAY": "wayland-0"}))
+	if err == nil || !strings.Contains(err.Error(), "install the Termux:API app and termux-api package") || !strings.Contains(err.Error(), "executable file not found") {
+		t.Fatalf("termux err = %v", err)
+	}
+	_, err = copyToClipboard("x", "darwin", envGet(nil))
+	if err == nil || !strings.HasPrefix(err.Error(), "Clipboard unavailable:") || strings.Contains(err.Error(), "wl-clipboard") {
+		t.Fatalf("darwin err = %v", err)
+	}
+}
+
+func TestCopyHeadlessEmitsOSC52(t *testing.T) {
+	cmds := stubClipWrite(t, failClipWrite(errors.New("should not run")))
+	osc, err := copyToClipboard("hello", "linux", envGet(nil))
+	if err != nil || osc != osc52("hello") {
+		t.Fatalf("osc=%q err=%v", osc, err)
+	}
+	if len(*cmds) != 0 {
+		t.Fatalf("cmds = %#v", *cmds)
+	}
+	osc, err = copyToClipboard(strings.Repeat("a", 75000), "linux", envGet(nil))
+	if err != nil || osc == "" {
+		t.Fatalf("boundary osc len=%d err=%v", len(osc), err)
+	}
+}
+
+func TestCopyOversizedHeadlessFails(t *testing.T) {
+	_, err := copyToClipboard(strings.Repeat("a", 75001), "linux", envGet(nil))
+	if err == nil || err.Error() != "Clipboard unavailable: text exceeds the OSC 52 size limit" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCopyRemoteAppendsOSC52AfterNativeSuccess(t *testing.T) {
+	stubClipWrite(t, okClipWrite)
+	osc, err := copyToClipboard("remote", "darwin", envGet(map[string]string{"SSH_CONNECTION": "1"}))
+	if err != nil || osc != osc52("remote") {
+		t.Fatalf("ssh osc=%q err=%v", osc, err)
+	}
+	osc, err = copyToClipboard("remote", "darwin", envGet(map[string]string{"PI_CLIPBOARD_OSC52": "1"}))
+	if err != nil || osc != osc52("remote") {
+		t.Fatalf("flag osc=%q err=%v", osc, err)
+	}
+	osc, err = copyToClipboard("remote", "darwin", envGet(map[string]string{"SSH_CLIENT": "1"}))
+	if err != nil || osc != osc52("remote") {
+		t.Fatalf("client osc=%q err=%v", osc, err)
+	}
+	osc, err = copyToClipboard("remote", "linux", envGet(map[string]string{
+		"MOSH_CONNECTION": "1",
+		"DISPLAY":         ":0",
+	}))
+	if err != nil || osc != osc52("remote") {
+		t.Fatalf("mosh osc=%q err=%v", osc, err)
+	}
+}
+
+func TestCopyRemoteDesktopFailureStillEmitsOSC52(t *testing.T) {
+	stubClipWrite(t, failClipWrite(errors.New("exit status 1")))
+	osc, err := copyToClipboard("via-ssh", "linux", envGet(map[string]string{
+		"DISPLAY":        ":0",
+		"SSH_CONNECTION": "1",
+	}))
+	if err != nil || osc != osc52("via-ssh") {
+		t.Fatalf("osc=%q err=%v", osc, err)
+	}
+}
+
+func TestCopyWSLPrefersWindowsTerminalOSC52(t *testing.T) {
+	stubClipWrite(t, failClipWrite(errors.New("should not run")))
+	called := false
+	old := runClipCmd
+	runClipCmd = func(string, time.Duration, ...string) ([]byte, error) {
+		called = true
+		return nil, errors.New("powershell")
+	}
+	t.Cleanup(func() { runClipCmd = old })
+	env := envGet(map[string]string{"WSL_DISTRO_NAME": "Ubuntu", "WT_SESSION": "1"})
+	osc, err := copyToClipboard("wsl", "linux", env)
+	if err != nil || osc != osc52("wsl") || called {
+		t.Fatalf("osc=%q err=%v called=%v", osc, err, called)
+	}
+}
+
+func TestCopyWSLUsesPowerShellThenHeadlessOSC52(t *testing.T) {
+	stubClipWrite(t, failClipWrite(errors.New("should not run")))
+	old := runClipCmd
+	runClipCmd = func(name string, _ time.Duration, _ ...string) ([]byte, error) {
+		if name == "wslpath" {
+			return []byte("C:\\tmp\\clip.txt\r\n"), nil
+		}
+		return []byte("ok"), nil
+	}
+	t.Cleanup(func() { runClipCmd = old })
+	env := envGet(map[string]string{"WSL_DISTRO_NAME": "Ubuntu"})
+	osc, err := copyToClipboard("你好", "linux", env)
+	if err != nil || osc != "" {
+		t.Fatalf("powershell osc=%q err=%v", osc, err)
+	}
+
+	runClipCmd = func(string, time.Duration, ...string) ([]byte, error) {
+		return nil, errors.New("powershell failed")
+	}
+	osc, err = copyToClipboard("你好", "linux", env)
+	if err != nil || osc != osc52("你好") {
+		t.Fatalf("fallback osc=%q err=%v", osc, err)
+	}
+
+	osc, err = copyToClipboard("x", "linux", envGet(map[string]string{
+		"WSL_DISTRO_NAME": "Ubuntu",
+		"DISPLAY":         ":0",
+	}))
+	if osc != "" || err == nil || !strings.Contains(err.Error(), "install xclip or xsel") || !strings.Contains(err.Error(), "powershell failed") {
+		t.Fatalf("display osc=%q err=%v", osc, err)
 	}
 }
 
