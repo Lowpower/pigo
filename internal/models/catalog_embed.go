@@ -67,7 +67,7 @@ func annotateBuiltin(m Model) Model {
 	if m.Provider == "openai" && m.ID == "gpt-6-astra" && m.Compat == nil {
 		m.Compat = &Compat{SupportsExplicitPromptCacheMode: true}
 	}
-	return applyOpenRouterReasoning(m, true)
+	return fillOpus55ThinkingLevels(applyOpenRouterReasoning(m, true))
 }
 
 // AppendGatewayWorkersAI copies the Workers AI catalog onto the AI Gateway

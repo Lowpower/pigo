@@ -78,6 +78,25 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				}
 			},
 		})
+	case "compact-id":
+		_ = ext.Serve(ext.Handler{
+			Name:   "compact-id-ext",
+			Events: []string{"session_before_compact"},
+			OnEvent: func(_ string, payload map[string]any) map[string]any {
+				id, _ := payload["firstKeptEntryId"].(string)
+				return map[string]any{"compaction": id}
+			},
+		})
+	case "compact-failed":
+		_ = ext.Serve(ext.Handler{
+			Name:   "compact-failed-ext",
+			Events: []string{"session_compact_failed"},
+			OnEvent: func(event string, payload map[string]any) map[string]any {
+				msg, _ := payload["errorMessage"].(string)
+				_ = os.WriteFile(os.Getenv("PIGO_MARK"), []byte(event+"\n"+msg), 0o644)
+				return nil
+			},
+		})
 	case "block":
 		_ = ext.Serve(ext.Handler{
 			Name:   "block-ext",

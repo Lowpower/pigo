@@ -13,6 +13,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/Lowpower/pigo/internal/models"
 )
 
 func TestResolveCodexURL(t *testing.T) {
@@ -375,6 +377,45 @@ func TestOpenAICodexRequestBodyProtocolFields(t *testing.T) {
 	reasoning, _ := bodyMap["reasoning"].(map[string]any)
 	if reasoning["effort"] != "low" || reasoning["summary"] != "auto" {
 		t.Fatalf("reasoning = %#v", bodyMap["reasoning"])
+	}
+}
+
+func TestOpenAICodexOffReasoningEffort(t *testing.T) {
+	const provider = "codex-off-wire"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: provider, DefaultAPI: "openai-codex-responses", DefaultID: "off-none",
+		Models: []models.Model{
+			{Provider: provider, ID: "off-none", API: "openai-codex-responses", ThinkingLevelMap: map[string]*string{"off": strPtrAI("none")}},
+			{Provider: provider, ID: "off-null", API: "openai-codex-responses", ThinkingLevelMap: map[string]*string{"off": nil}},
+			{Provider: provider, ID: "plain", API: "openai-codex-responses"},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(provider) })
+
+	c := &OpenAICodexClient{}
+	body := func(id, level string) map[string]any {
+		t.Helper()
+		got, _, err := c.buildRequestBody(Context{
+			Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		}, Options{Provider: provider, Model: id, Thinking: level})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	mapped := body("off-none", "off")
+	reasoning, _ := mapped["reasoning"].(map[string]any)
+	if reasoning["effort"] != "none" || reasoning["summary"] != "auto" {
+		t.Fatalf("mapped off = %#v", mapped["reasoning"])
+	}
+	if _, ok := body("off-null", "off")["reasoning"]; ok {
+		t.Fatalf("null off sent reasoning: %#v", body("off-null", "off")["reasoning"])
+	}
+	plain := body("plain", "high")
+	reasoning, _ = plain["reasoning"].(map[string]any)
+	if reasoning["effort"] != "high" || reasoning["summary"] != "auto" {
+		t.Fatalf("high = %#v", plain["reasoning"])
 	}
 }
 

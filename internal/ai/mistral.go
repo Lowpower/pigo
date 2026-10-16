@@ -93,10 +93,7 @@ func buildMistralRequest(reqCtx Context, opts Options) ([]byte, error) {
 	if opts.MaxTokens > 0 {
 		req["max_tokens"] = opts.MaxTokens
 	}
-	if effort := reasoningEffort(opts); effort != "" {
-		req["reasoning_effort"] = effort
-		req["prompt_mode"] = "reasoning"
-	}
+	applyMistralReasoning(req, opts)
 	if key := clampPromptCacheKey(opts.SessionID); key != "" {
 		req["prompt_cache_key"] = key
 	}
@@ -116,6 +113,27 @@ func buildMistralRequest(reqCtx Context, opts Options) ([]byte, error) {
 		req["tools"] = tools
 	}
 	return json.Marshal(req)
+}
+
+// applyMistralReasoning sends one reasoning field.
+// A model with a thinkingLevelMap gets reasoning_effort (including a mapped
+// off value). A reasoning model without a map gets prompt_mode. A model that
+// does not support reasoning gets neither. An unknown model keeps the effort
+// string and does not send prompt_mode.
+func applyMistralReasoning(req map[string]any, opts Options) {
+	m, ok := models.Lookup(opts.Provider, opts.Model)
+	if !ok || len(m.ThinkingLevelMap) > 0 {
+		if effort := reasoningEffort(opts); effort != "" {
+			req["reasoning_effort"] = effort
+		}
+		return
+	}
+	if m.SupportsReasoning() {
+		canonical, _ := resolvedThinking(opts)
+		if thinkingOn(canonical) {
+			req["prompt_mode"] = "reasoning"
+		}
+	}
 }
 
 func mistralWireMessages(msgs []Message) []map[string]any {

@@ -106,11 +106,11 @@ func TestRPCGetSessionStatsShape(t *testing.T) {
 }
 
 func TestRPCCompactCustomInstructions(t *testing.T) {
-	var prompt string
+	var prompts []string
 	e := &Engine{
 		Stream: func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
 			if len(req.Messages) > 0 {
-				prompt = req.Messages[len(req.Messages)-1].Content
+				prompts = append(prompts, req.Messages[len(req.Messages)-1].Content)
 			}
 			return ai.ScriptedStreamFn("## Goal\nFocus.", 0)(ctx, req, opts)
 		},
@@ -140,8 +140,17 @@ func TestRPCCompactCustomInstructions(t *testing.T) {
 	if err := e.ServeRPC(context.Background(), in, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prompt, "Additional focus: Focus on code changes") {
+	var history string
+	for _, prompt := range prompts {
+		if strings.Contains(prompt, "Additional focus: Focus on code changes") {
+			history = prompt
+		}
+	}
+	if history == "" {
 		raw, _ := json.Marshal(decodeRPCRows(t, out.String()))
-		t.Fatalf("custom instructions not in prompt %q\nout=%s", prompt, raw)
+		t.Fatalf("custom instructions not in prompts %q\nout=%s", prompts, raw)
+	}
+	if strings.Contains(prompts[len(prompts)-1], "Additional focus:") {
+		t.Fatalf("turn prefix received custom instructions:\n%s", prompts[len(prompts)-1])
 	}
 }

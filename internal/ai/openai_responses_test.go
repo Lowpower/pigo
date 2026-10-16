@@ -142,6 +142,110 @@ func TestStreamForAzureOpenAIResponses(t *testing.T) {
 	}
 }
 
+func TestResponsesReplayFunctionCallNamespace(t *testing.T) {
+	msg := Message{Assistant: &AssistantMessage{
+		Provider: "openai", API: "openai-responses", Model: "gpt",
+		Content: []*Content{{
+			Type: KindToolCall, ToolID: "c1", ToolName: "read", Namespace: "functions",
+			Arguments: map[string]any{"path": "a"},
+		}},
+	}}
+	same := responsesItemMaps(t, Context{Messages: []Message{msg}}, deferredAnchor{})
+	raw := mustJSON(t, same)
+	if !strings.Contains(raw, `"namespace":"functions"`) {
+		t.Fatalf("namespace missing: %s", raw)
+	}
+	cross := buildResponsesInput(Context{Messages: []Message{msg}}, replayTarget{
+		Provider: "other", API: "openai-responses", Model: "gpt",
+	}, deferredAnchor{})
+	got, err := json.Marshal(cross)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "namespace") {
+		t.Fatalf("cross-model replay kept namespace: %s", got)
+	}
+}
+
+func TestResponsesStreamFunctionCallNamespace(t *testing.T) {
+	_, final := collectResponsesSSE(t, sseData(
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":"","namespace":"functions"}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_a","delta":"{\"command\":\"echo a\"}"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":"{\"command\":\"echo a\"}","namespace":"functions"}}`,
+		`{"type":"response.completed","response":{"id":"resp_ns","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+	))
+	if final == nil {
+		t.Fatal("no final message")
+	}
+	calls := final.ToolCalls()
+	if len(calls) != 1 || calls[0].Namespace != "functions" || calls[0].ToolName != "bash" {
+		t.Fatalf("call = %#v", calls)
+	}
+	body, err := json.Marshal(final)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var again AssistantMessage
+	if err := json.Unmarshal(body, &again); err != nil {
+		t.Fatal(err)
+	}
+	if again.Content[0].Namespace != "functions" {
+		t.Fatalf("round trip = %#v", again.Content[0])
+	}
+}
+
+func TestOpenAIResponsesDeferredToolsRequest(t *testing.T) {
+	registerCompat(t, "resp-http", "openai-responses", &models.Compat{SupportsAdditionalTools: true})
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &payload)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(responsesFixture))
+	}))
+	defer srv.Close()
+
+	client := &OpenAIResponsesClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+	stream, err := client.StreamFn()(context.Background(), deferredContext(), Options{Provider: "resp-http", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Collect()
+	names := responseToolNames(t, payload["tools"])
+	if len(names) != 1 || names[0] != "tool_search" {
+		t.Fatalf("tools = %#v", payload["tools"])
+	}
+	input, _ := payload["input"].([]any)
+	var anchored bool
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] != "additional_tools" {
+			continue
+		}
+		anchored = true
+		tools, _ := item["tools"].([]any)
+		tool, _ := tools[0].(map[string]any)
+		if tool["name"] != "lookup" {
+			t.Fatalf("anchored = %#v", item)
+		}
+	}
+	if !anchored {
+		t.Fatalf("input = %#v", payload["input"])
+	}
+}
+
+func responseToolNames(t *testing.T, raw any) []string {
+	t.Helper()
+	tools, _ := raw.([]any)
+	var names []string
+	for _, item := range tools {
+		tool, _ := item.(map[string]any)
+		name, _ := tool["name"].(string)
+		names = append(names, name)
+	}
+	return names
+}
+
 func TestBuildResponsesInputToolPair(t *testing.T) {
 	items := buildResponsesInput(Context{Messages: []Message{
 		{Role: RoleUser, Content: "hi"},
@@ -149,7 +253,7 @@ func TestBuildResponsesInputToolPair(t *testing.T) {
 			{Type: KindToolCall, ToolID: "c1", ToolName: "read", Arguments: map[string]any{"path": "a"}},
 		}}},
 		{Role: RoleToolResult, ToolCallID: "c1", Content: "ok"},
-	}}, replayTarget{})
+	}}, replayTarget{}, deferredAnchor{})
 	if len(items) < 3 {
 		t.Fatalf("items = %d", len(items))
 	}

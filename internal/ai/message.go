@@ -51,6 +51,9 @@ type Content struct {
 	ToolID    string         `json:"id,omitempty"`
 	ToolName  string         `json:"name,omitempty"`
 	Arguments map[string]any `json:"arguments,omitempty"`
+	// Namespace is the Responses function_call namespace. Empty on other APIs
+	// and on cross-model replay.
+	Namespace string `json:"namespace,omitempty"`
 
 	// partialJSON is a streaming scratch buffer for tool-call argument deltas.
 	// It is never serialized.

@@ -79,6 +79,18 @@ func TestRegistryNullOptionalMatchesOmitted(t *testing.T) {
 	}
 }
 
+func TestRegistryBashNullTimeoutMatchesOmitted(t *testing.T) {
+	reg := Default()
+	omitted, omittedErr := reg.Execute(context.Background(), "bash", map[string]any{"command": "echo hi"})
+	withNull, nullErr := reg.Execute(context.Background(), "bash", map[string]any{"command": "echo hi", "timeout": nil})
+	if omittedErr || nullErr {
+		t.Fatalf("omitted=%q err=%v null=%q err=%v", omitted, omittedErr, withNull, nullErr)
+	}
+	if omitted != withNull {
+		t.Fatalf("null timeout = %q, omitted = %q", withNull, omitted)
+	}
+}
+
 func TestRegistryReportsMissingAndUnexpectedFields(t *testing.T) {
 	reg := Default()
 
