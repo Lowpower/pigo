@@ -638,6 +638,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 			if entry, err := e.Opts.Session.AppendCompaction(replacement, keep, tokensBefore, session.CompactionMeta{
 				SystemMessage: e.currentSystemCheckpoint(),
 				FromHook:      true,
+				Usage:         usageFromHook(hook["usage"]),
 			}); err == nil && entry != nil {
 				e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 			}
@@ -655,9 +656,10 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	e.emitSession(map[string]any{"type": "compaction_start", "reason": reason})
 	var compacted []ai.Message
 	var summary string
+	var usage ai.Usage
 	err := e.withSummarizationRetry(cctx, map[string]any{"source": "compaction", "reason": reason}, func() error {
 		var cerr error
-		compacted, summary, cerr = compaction.CompactPrepared(cctx, e.Stream, e.Opts.Config.ResolvedModel(), body, s, cut)
+		compacted, summary, usage, cerr = compaction.CompactPrepared(cctx, e.Stream, e.Opts.Config.ResolvedModel(), body, s, cut)
 		return cerr
 	})
 	if err != nil {
@@ -672,9 +674,11 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	span.SetAttribute("pigo.compaction.tokens_after", out.EstimatedTokensAfter)
 	if summary != "" && e.Opts.Session != nil {
 		files := compaction.CollectFileLists(body[:cut.Index], s.PriorRead, s.PriorModified, s.UsePriorFiles)
+		recorded := usage
 		if entry, err := e.Opts.Session.AppendCompaction(summary, keep, tokensBefore, session.CompactionMeta{
 			SystemMessage: e.currentSystemCheckpoint(),
 			Details:       files,
+			Usage:         &recorded,
 		}); err == nil && entry != nil {
 			e.emitSession(map[string]any{"type": "entry_appended", "entry": entry})
 		}
@@ -1265,6 +1269,7 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 	if s := asString(extTree["summary"]); s != "" {
 		opts.Summary = s
 		opts.FromHook = true
+		opts.Usage = usageFromHook(extTree["usage"])
 	}
 	if e.BeforeTree != nil {
 		hook := e.BeforeTree(prep)
@@ -1283,15 +1288,21 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 		if hook.Summary != "" {
 			opts.Summary = hook.Summary
 			opts.FromHook = true
+			opts.Usage = nil
+			if hook.Usage != nil {
+				u := *hook.Usage
+				opts.Usage = &u
+			}
 		}
 	}
 	if opts.Summarize && opts.Summary == "" && len(abandoned) > 0 {
 		priorRead, priorModified := branchPriorFiles(abandoned)
 		var summary string
 		var files compaction.FileLists
+		var usage ai.Usage
 		err := e.withSummarizationRetry(ctx, map[string]any{"source": "branchSummary"}, func() error {
 			var serr error
-			summary, files, serr = compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.ModelMessages(abandoned), compaction.BranchSummaryOpts{
+			summary, files, usage, serr = compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.ModelMessages(abandoned), compaction.BranchSummaryOpts{
 				CustomInstructions:  opts.CustomInstructions,
 				ReplaceInstructions: opts.ReplaceInstructions,
 				ReserveTokens:       e.Opts.Config.BranchSummaryReserveTokens(),
@@ -1310,6 +1321,10 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 		}
 		opts.Summary = summary
 		opts.Details = files.Stored()
+		if summary != compaction.NoContentSummary {
+			recorded := usage
+			opts.Usage = &recorded
+		}
 	}
 	res, err := sess.Navigate(targetID, opts)
 	if err != nil {

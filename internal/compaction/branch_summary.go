@@ -82,10 +82,16 @@ type BranchSummaryOpts struct {
 	PriorModified []string
 }
 
+// NoContentSummary is stored when a branch has no model-visible messages.
+// That path does not call the model, so its usage is zero and must not be
+// written onto the entry.
+const NoContentSummary = "No content to summarize"
+
 // GenerateBranchSummary asks the model to summarize abandoned-branch entries.
 // The returned lists include prior branch-summary files plus tool calls from
-// the messages that fit in the token budget.
-func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, opts BranchSummaryOpts) (string, FileLists, error) {
+// the messages that fit in the token budget. The usage is the summary
+// request's usage; it is zero when no request was made.
+func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, opts BranchSummaryOpts) (string, FileLists, ai.Usage, error) {
 	reserve := opts.ReserveTokens
 	if reserve <= 0 {
 		reserve = 16384
@@ -115,7 +121,7 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 		acc += n
 	}
 	if len(kept) == 0 {
-		return "No content to summarize", FileLists{}, nil
+		return NoContentSummary, FileLists{}, ai.Usage{}, nil
 	}
 
 	instructions := BranchSummaryPrompt
@@ -131,23 +137,23 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 		Messages: []ai.Message{{Role: ai.RoleUser, Content: prompt}},
 	}, modelCallOptions(opts.Provider, model, reserve))
 	if err != nil {
-		return "", FileLists{}, err
+		return "", FileLists{}, ai.Usage{}, err
 	}
 	_, final := stream.Collect()
 	if final == nil {
-		return "", FileLists{}, errors.New("branch summary produced no message")
+		return "", FileLists{}, ai.Usage{}, errors.New("branch summary produced no message")
 	}
 	if final.StopReason == ai.StopAborted {
 		if err := ctx.Err(); err != nil {
-			return "", FileLists{}, err
+			return "", FileLists{}, ai.Usage{}, err
 		}
-		return "", FileLists{}, ErrSummaryAborted
+		return "", FileLists{}, ai.Usage{}, ErrSummaryAborted
 	}
 	if final.StopReason == ai.StopError {
-		return "", FileLists{}, &SummarizeError{Cause: final.ErrorMessage}
+		return "", FileLists{}, ai.Usage{}, &SummarizeError{Cause: final.ErrorMessage}
 	}
 	if final.StopReason == ai.StopLength {
-		return "", FileLists{}, incompleteSummaryError("Branch summary")
+		return "", FileLists{}, ai.Usage{}, incompleteSummaryError("Branch summary")
 	}
 	text := strings.TrimSpace(final.Text())
 	if text == "" {
@@ -155,5 +161,5 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 	}
 	files := CollectFileLists(kept, opts.PriorRead, opts.PriorModified, true)
 	text = AppendFileSections(BranchSummaryPreamble+text, files)
-	return text, files, nil
+	return text, files, final.Usage, nil
 }

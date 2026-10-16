@@ -405,21 +405,24 @@ func incompleteSummaryError(label string) error {
 }
 
 // Summarize asks the model to summarize the given messages using StreamFn,
-// returning the assistant's text. provider is the catalog id used to attach
-// samplingParams; an empty provider leaves those fields unset. previousSummary
-// selects the update prompt and is sent in a <previous-summary> block.
-// reserveTokens sets the output budget; 0 uses DefaultSettings.
-func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra, provider, previousSummary string, reserveTokens int) (string, error) {
+// returning the assistant's text and the usage of that request. provider is
+// the catalog id used to attach samplingParams; an empty provider leaves those
+// fields unset. previousSummary selects the update prompt and is sent in a
+// <previous-summary> block. reserveTokens sets the output budget; 0 uses
+// DefaultSettings. A successful call returns final.Usage even when every
+// counter is zero.
+func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra, provider, previousSummary string, reserveTokens int) (string, ai.Usage, error) {
 	return completeSummary(ctx, sf, model, provider, reserveTokens, summaryUserContent(toSummarize, previousSummary, extra))
 }
 
 // SummarizeTurnPrefix checkpoints the kept turn's dropped prefix. It does not
-// receive the previous summary or custom instructions.
-func SummarizeTurnPrefix(ctx context.Context, sf ai.StreamFn, model string, prefix []ai.Message, provider string, reserveTokens int) (string, error) {
+// receive the previous summary or custom instructions. The usage is that
+// request's usage.
+func SummarizeTurnPrefix(ctx context.Context, sf ai.StreamFn, model string, prefix []ai.Message, provider string, reserveTokens int) (string, ai.Usage, error) {
 	return completeSummary(ctx, sf, model, provider, reserveTokens, turnPrefixUserContent(prefix))
 }
 
-func completeSummary(ctx context.Context, sf ai.StreamFn, model, provider string, reserveTokens int, userContent string) (string, error) {
+func completeSummary(ctx context.Context, sf ai.StreamFn, model, provider string, reserveTokens int, userContent string) (string, ai.Usage, error) {
 	req := ai.Context{
 		System: SummarizationSystemPrompt,
 		Messages: []ai.Message{{
@@ -429,84 +432,106 @@ func completeSummary(ctx context.Context, sf ai.StreamFn, model, provider string
 	}
 	stream, err := sf(ctx, req, modelCallOptions(provider, model, reserveTokens))
 	if err != nil {
-		return "", err
+		return "", ai.Usage{}, err
 	}
 	_, final := stream.Collect()
 	if final == nil {
-		return "", errors.New("compaction: summarization produced no message")
+		return "", ai.Usage{}, errors.New("compaction: summarization produced no message")
 	}
 	if final.StopReason == ai.StopAborted {
-		return "", ErrSummarizeAborted
+		return "", ai.Usage{}, ErrSummarizeAborted
 	}
 	if final.StopReason == ai.StopError {
-		return "", &SummarizeError{Cause: final.ErrorMessage}
+		return "", ai.Usage{}, &SummarizeError{Cause: final.ErrorMessage}
 	}
 	if final.StopReason == ai.StopLength {
-		return "", incompleteSummaryError("Summarization")
+		return "", ai.Usage{}, incompleteSummaryError("Summarization")
 	}
 	summary := final.Text()
 	if summary == "" {
-		return "", errors.New("compaction: summarization produced empty text")
+		return "", ai.Usage{}, errors.New("compaction: summarization produced empty text")
 	}
-	return summary, nil
+	return summary, final.Usage, nil
 }
 
 // Compact summarizes older messages and returns the compacted message list (a
-// single summary message followed by the recent tail) plus the summary. When
-// nothing needs summarizing it returns the input unchanged with an empty summary.
-func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, s Settings) ([]ai.Message, string, error) {
+// single summary message followed by the recent tail), the summary, and the
+// usage of the summary request. A split turn sums both summary requests.
+// When nothing needs summarizing it returns the input unchanged with an empty
+// summary and zero usage.
+func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, s Settings) ([]ai.Message, string, ai.Usage, error) {
 	cut, err := FindCutPoint(msgs, s.KeepRecentTokens)
 	if err != nil {
-		return msgs, "", err
+		return msgs, "", ai.Usage{}, err
 	}
 	return CompactPrepared(ctx, sf, model, msgs, s, cut)
 }
 
 // CompactPrepared summarizes using a cut already chosen by FindCutPoint.
-func CompactPrepared(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, s Settings, cut CutPoint) ([]ai.Message, string, error) {
+func CompactPrepared(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, s Settings, cut CutPoint) ([]ai.Message, string, ai.Usage, error) {
 	if cut.Skip || (cut.Index <= 0 && !cut.Split) {
-		return msgs, "", nil
+		return msgs, "", ai.Usage{}, nil
 	}
 	if cut.Index < 0 || cut.Index > len(msgs) {
-		return msgs, "", ErrNoLegalCut
+		return msgs, "", ai.Usage{}, ErrNoLegalCut
 	}
 	var summary string
+	var usage ai.Usage
 	var err error
 	if cut.Split && cut.TurnStart >= 0 && cut.TurnStart < cut.Index {
-		summary, err = summarizeSplit(ctx, sf, model, msgs, s, cut)
+		summary, usage, err = summarizeSplit(ctx, sf, model, msgs, s, cut)
 	} else if cut.Index <= 0 {
-		return msgs, "", nil
+		return msgs, "", ai.Usage{}, nil
 	} else {
-		summary, err = Summarize(ctx, sf, model, msgs[:cut.Index], s.CustomInstructions, s.Provider, s.PreviousSummary, s.ReserveTokens)
+		summary, usage, err = Summarize(ctx, sf, model, msgs[:cut.Index], s.CustomInstructions, s.Provider, s.PreviousSummary, s.ReserveTokens)
 	}
 	if err != nil {
-		return msgs, "", err
+		return msgs, "", ai.Usage{}, err
 	}
 	files := CollectFileLists(msgs[:cut.Index], s.PriorRead, s.PriorModified, s.UsePriorFiles)
 	summary = AppendFileSections(summary, files)
 	compacted := make([]ai.Message, 0, len(msgs)-cut.Index+1)
 	compacted = append(compacted, ai.Message{Role: ai.RoleUser, Content: SummaryPrefix + summary + SummarySuffix})
 	compacted = append(compacted, msgs[cut.Index:]...)
-	return compacted, summary, nil
+	return compacted, summary, usage, nil
 }
 
-func summarizeSplit(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, s Settings, cut CutPoint) (string, error) {
+func summarizeSplit(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, s Settings, cut CutPoint) (string, ai.Usage, error) {
 	history := s.PreviousSummary
 	if history == "" {
 		history = NoPriorHistory
 	}
+	var usage ai.Usage
 	if hist := msgs[:cut.TurnStart]; len(hist) > 0 {
+		var histUsage ai.Usage
 		var err error
-		history, err = Summarize(ctx, sf, model, hist, s.CustomInstructions, s.Provider, s.PreviousSummary, s.ReserveTokens)
+		history, histUsage, err = Summarize(ctx, sf, model, hist, s.CustomInstructions, s.Provider, s.PreviousSummary, s.ReserveTokens)
 		if err != nil {
-			return "", err
+			return "", ai.Usage{}, err
 		}
+		usage = addSummaryUsage(usage, histUsage)
 	}
-	prefix, err := SummarizeTurnPrefix(ctx, sf, model, msgs[cut.TurnStart:cut.Index], s.Provider, s.ReserveTokens)
+	prefix, prefixUsage, err := SummarizeTurnPrefix(ctx, sf, model, msgs[cut.TurnStart:cut.Index], s.Provider, s.ReserveTokens)
 	if err != nil {
-		return "", err
+		return "", ai.Usage{}, err
 	}
-	return history + SplitTurnJoiner + prefix, nil
+	return history + SplitTurnJoiner + prefix, addSummaryUsage(usage, prefixUsage), nil
+}
+
+func addSummaryUsage(a, b ai.Usage) ai.Usage {
+	a.Input += b.Input
+	a.Output += b.Output
+	a.CacheRead += b.CacheRead
+	a.CacheWrite += b.CacheWrite
+	a.CacheWrite1h += b.CacheWrite1h
+	a.Reasoning += b.Reasoning
+	a.TotalTokens += b.TotalTokens
+	a.Cost.Input += b.Cost.Input
+	a.Cost.Output += b.Cost.Output
+	a.Cost.CacheRead += b.Cost.CacheRead
+	a.Cost.CacheWrite += b.Cost.CacheWrite
+	a.Cost.Total += b.Cost.Total
+	return a
 }
 
 func turnPrefixUserContent(msgs []ai.Message) string {

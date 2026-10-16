@@ -64,6 +64,23 @@ func asString(v any) string {
 	return s
 }
 
+// usageFromHook decodes an extension usage object. A missing or undecodable
+// value is nil, so the summary is left out of session totals.
+func usageFromHook(v any) *ai.Usage {
+	if v == nil {
+		return nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var u ai.Usage
+	if json.Unmarshal(raw, &u) != nil {
+		return nil
+	}
+	return &u
+}
+
 func asMap(v any) map[string]any {
 	m, _ := v.(map[string]any)
 	return m
