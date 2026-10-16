@@ -214,6 +214,13 @@ func TestExtensionCompactionMarksFromHook(t *testing.T) {
 	if !entry.FromHook || entry.Summary != "HOOK SUMMARY" || len(entry.Details) != 0 {
 		t.Fatalf("entry = %+v", entry)
 	}
+	if entry.Usage != nil {
+		t.Fatalf("hook summary without usage was counted: %+v", entry.Usage)
+	}
+	stats := session.CollectStats(sess, nil, 0, "", nil)
+	if stats.Cost != 0 || stats.Tokens.Input != 0 || stats.Tokens.Output != 0 {
+		t.Fatalf("stats = %+v", stats)
+	}
 }
 
 func TestBranchSummaryWritesAccumulatedFiles(t *testing.T) {
@@ -228,12 +235,12 @@ func TestBranchSummaryWritesAccumulatedFiles(t *testing.T) {
 	if _, err := sess.AppendMessage("user", map[string]any{"role": "user", "content": "side"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sess.AppendBranchSummary("old", "hooked", true, map[string]any{"readFiles": []string{"skip.go"}}); err != nil {
+	if _, err := sess.AppendBranchSummary("old", "hooked", true, map[string]any{"readFiles": []string{"skip.go"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sess.AppendBranchSummary("old", "nested", false, map[string]any{
 		"readFiles": []string{"h.go"}, "modifiedFiles": []string{"m.go"},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	appendToolAssistant(t, sess, toolUse("read", "f.go"), toolUse("edit", "g.go"))
@@ -284,6 +291,9 @@ func TestHookBranchSummaryOmitsFileDetails(t *testing.T) {
 	entry := lastBranchSummary(t, sess)
 	if !entry.FromHook || entry.Summary != "ext branch" || len(entry.Details) != 0 {
 		t.Fatalf("entry = %+v", entry)
+	}
+	if entry.Usage != nil {
+		t.Fatalf("hook branch summary without usage was counted: %+v", entry.Usage)
 	}
 }
 

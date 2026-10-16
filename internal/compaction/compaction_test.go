@@ -193,7 +193,7 @@ func TestCompactReplacesOldWithSummary(t *testing.T) {
 	summarizer := ai.ScriptedStreamFn("## Goal\nFinish pigo. Done.", 0)
 
 	before := EstimateContextTokens(msgs)
-	compacted, summary, err := Compact(context.Background(), summarizer, "test", msgs, DefaultSettings())
+	compacted, summary, _, err := Compact(context.Background(), summarizer, "test", msgs, DefaultSettings())
 	if err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestCompactPassesCustomInstructions(t *testing.T) {
 	}
 	s := DefaultSettings()
 	s.CustomInstructions = "Focus on code changes"
-	if _, _, err := Compact(context.Background(), sf, "test", msgs, s); err != nil {
+	if _, _, _, err := Compact(context.Background(), sf, "test", msgs, s); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(prompt, "Additional focus: Focus on code changes") {
@@ -250,7 +250,7 @@ func TestSummarizeUpdatePromptIncludesPreviousSummary(t *testing.T) {
 		prior = append([]ai.Message(nil), req.Messages...)
 		return ai.ScriptedStreamFn("## Goal\nUpdated.", 0)(ctx, req, opts)
 	}
-	summary, err := Summarize(context.Background(), sf, "test", msgs, "Keep the API", "prov", "OLD GOAL", 0)
+	summary, _, err := Summarize(context.Background(), sf, "test", msgs, "Keep the API", "prov", "OLD GOAL", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestSummarizeWithoutPreviousUsesInitialPrompt(t *testing.T) {
 		return ai.ScriptedStreamFn("## Goal\nFirst.", 0)(ctx, req, opts)
 	}
 	msgs := []ai.Message{{Role: ai.RoleUser, Content: "hello"}}
-	if _, err := Summarize(context.Background(), sf, "test", msgs, "", "", "", 0); err != nil {
+	if _, _, err := Summarize(context.Background(), sf, "test", msgs, "", "", "", 0); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(prompt, "<previous-summary>") || strings.Contains(prompt, "PRESERVE all existing information") {
@@ -343,7 +343,7 @@ func TestCompactAppendsFileSections(t *testing.T) {
 		{Role: ai.RoleUser, Content: strings.Repeat("z", 80)},
 	}
 	s := Settings{KeepRecentTokens: 20, PreviousSummary: "OLD"}
-	compacted, summary, err := Compact(context.Background(), ai.ScriptedStreamFn("## Goal\nNext.", 0), "test", msgs, s)
+	compacted, summary, _, err := Compact(context.Background(), ai.ScriptedStreamFn("## Goal\nNext.", 0), "test", msgs, s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,12 +377,15 @@ func toolCall(name string, path any) *ai.Content {
 
 func TestCompactNoopWhenSmall(t *testing.T) {
 	msgs := makeMessages(3, 100)
-	compacted, summary, err := Compact(context.Background(), ai.ScriptedStreamFn("x", 0), "test", msgs, DefaultSettings())
+	compacted, summary, usage, err := Compact(context.Background(), ai.ScriptedStreamFn("x", 0), "test", msgs, DefaultSettings())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if summary != "" || len(compacted) != len(msgs) {
 		t.Errorf("small conversation should be unchanged; summary=%q len=%d", summary, len(compacted))
+	}
+	if usage != (ai.Usage{}) {
+		t.Errorf("skipped summary usage = %+v, want zero", usage)
 	}
 }
 
@@ -403,7 +406,7 @@ func TestGenerateBranchSummaryPrependsPreamble(t *testing.T) {
 		{Role: ai.RoleUser, Content: "try something"},
 		{Role: ai.RoleAssistant, Content: "did it"},
 	}
-	got, _, err := GenerateBranchSummary(context.Background(), ai.ScriptedStreamFn("## Goal\nExplore.", 0), "test", msgs, BranchSummaryOpts{})
+	got, _, _, err := GenerateBranchSummary(context.Background(), ai.ScriptedStreamFn("## Goal\nExplore.", 0), "test", msgs, BranchSummaryOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +490,7 @@ func captureBranchSummaryPrompt(t *testing.T, msgs []ai.Message, opts BranchSumm
 		prompt = req.Messages[0].Content
 		return ai.ScriptedStreamFn("## Goal\nExplore.", 0)(ctx, req, streamOpts)
 	}
-	if _, _, err := GenerateBranchSummary(context.Background(), sf, "test", msgs, opts); err != nil {
+	if _, _, _, err := GenerateBranchSummary(context.Background(), sf, "test", msgs, opts); err != nil {
 		t.Fatal(err)
 	}
 	if prompt == "" {
@@ -509,7 +512,7 @@ func TestGenerateBranchSummaryFiles(t *testing.T) {
 		PriorRead:     []string{"kept.go"},
 		PriorModified: []string{"old.go"},
 	}
-	got, files, err := GenerateBranchSummary(context.Background(), ai.ScriptedStreamFn("## Goal\nExplore.", 0), "test", msgs, opts)
+	got, files, _, err := GenerateBranchSummary(context.Background(), ai.ScriptedStreamFn("## Goal\nExplore.", 0), "test", msgs, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +597,7 @@ func TestSummarizeRequestShape(t *testing.T) {
 		return ai.ScriptedStreamFn("## Goal\nDone.", 0)(ctx, gotReq, gotOpts)
 	}
 	msgs := []ai.Message{{Role: ai.RoleUser, Content: "hello"}}
-	if _, err := Summarize(context.Background(), sf, "small", msgs, "", "sum-cap", "", 16384); err != nil {
+	if _, _, err := Summarize(context.Background(), sf, "small", msgs, "", "sum-cap", "", 16384); err != nil {
 		t.Fatal(err)
 	}
 	if req.System != SummarizationSystemPrompt {
@@ -613,7 +616,7 @@ func TestSummarizeRequestShape(t *testing.T) {
 		t.Fatalf("maxTokens = %d, want model cap 4096", opts.MaxTokens)
 	}
 
-	if _, err := Summarize(context.Background(), sf, "missing", msgs, "", "sum-cap", "", 16384); err != nil {
+	if _, _, err := Summarize(context.Background(), sf, "missing", msgs, "", "sum-cap", "", 16384); err != nil {
 		t.Fatal(err)
 	}
 	if opts.MaxTokens != 13107 {
@@ -629,7 +632,7 @@ func TestSummarizeStopLengthIsFailure(t *testing.T) {
 			Content:    []*ai.Content{{Type: ai.KindText, Text: "partial summary"}},
 		}), nil
 	}
-	text, err := Summarize(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "hello"}}, "", "", "", 0)
+	text, _, err := Summarize(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "hello"}}, "", "", "", 0)
 	if text != "" {
 		t.Fatalf("text = %q, want empty", text)
 	}
@@ -651,7 +654,7 @@ func TestGenerateBranchSummarySerializesToolResults(t *testing.T) {
 		assistantTools(toolCall("bash", "script.sh")),
 		{Role: ai.RoleToolResult, Content: strings.Repeat("z", toolResultMaxChars+25)},
 	}
-	if _, _, err := GenerateBranchSummary(context.Background(), sf, "test", msgs, BranchSummaryOpts{ReserveTokens: 100}); err != nil {
+	if _, _, _, err := GenerateBranchSummary(context.Background(), sf, "test", msgs, BranchSummaryOpts{ReserveTokens: 100}); err != nil {
 		t.Fatal(err)
 	}
 	prompt := req.Messages[0].Content
@@ -683,7 +686,7 @@ func TestGenerateBranchSummaryStopLengthIsFailure(t *testing.T) {
 			Content:    []*ai.Content{{Type: ai.KindText, Text: "partial branch"}},
 		}), nil
 	}
-	text, files, err := GenerateBranchSummary(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "x"}}, BranchSummaryOpts{})
+	text, files, _, err := GenerateBranchSummary(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "x"}}, BranchSummaryOpts{})
 	if text != "" || len(files.ReadFiles) != 0 || len(files.ModifiedFiles) != 0 {
 		t.Fatalf("text=%q files=%+v", text, files)
 	}
@@ -696,8 +699,89 @@ func TestGenerateBranchSummaryAbort(t *testing.T) {
 	sf := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
 		return ai.EmitMessage(ctx, &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopAborted}), nil
 	}
-	_, _, err := GenerateBranchSummary(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "x"}}, BranchSummaryOpts{})
+	_, _, _, err := GenerateBranchSummary(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "x"}}, BranchSummaryOpts{})
 	if !errors.Is(err, ErrSummaryAborted) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSummarizeReturnsRequestUsage(t *testing.T) {
+	want := ai.Usage{
+		Input: 9, Output: 4, CacheRead: 2, CacheWrite: 1, TotalTokens: 16,
+		Cost: ai.UsageCost{Input: 0.1, Output: 0.2, Total: 0.3},
+	}
+	sf := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		return ai.EmitMessage(ctx, &ai.AssistantMessage{
+			Role:       ai.RoleAssistant,
+			StopReason: ai.StopStop,
+			Usage:      want,
+			Content:    []*ai.Content{{Type: ai.KindText, Text: "summary text"}},
+		}), nil
+	}
+	text, got, err := Summarize(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "hello"}}, "", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "summary text" || got != want {
+		t.Fatalf("text=%q usage=%+v", text, got)
+	}
+
+	// ScriptedStreamFn records one output token per word.
+	scripted, usage, err := Summarize(context.Background(), ai.ScriptedStreamFn("two words", 0), "test", []ai.Message{{Role: ai.RoleUser, Content: "hello"}}, "", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scripted != "two words" || usage.Output != 2 || usage.TotalTokens != 2 {
+		t.Fatalf("scripted=%q usage=%+v", scripted, usage)
+	}
+}
+
+func TestCompactReturnsSummarizerUsage(t *testing.T) {
+	want := ai.Usage{Input: 20, Output: 6, TotalTokens: 26, Cost: ai.UsageCost{Total: 1.25}}
+	sf := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		return ai.EmitMessage(ctx, &ai.AssistantMessage{
+			Role:       ai.RoleAssistant,
+			StopReason: ai.StopStop,
+			Usage:      want,
+			Content:    []*ai.Content{{Type: ai.KindText, Text: "## Goal\nDone."}},
+		}), nil
+	}
+	msgs := makeMessages(30, 4000)
+	_, summary, got, err := Compact(context.Background(), sf, "test", msgs, DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "Goal") || got != want {
+		t.Fatalf("summary=%q usage=%+v", summary, got)
+	}
+}
+
+func TestGenerateBranchSummaryReturnsRequestUsage(t *testing.T) {
+	want := ai.Usage{Input: 15, Output: 3, TotalTokens: 18, Cost: ai.UsageCost{Total: 0.5}}
+	sf := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		return ai.EmitMessage(ctx, &ai.AssistantMessage{
+			Role:       ai.RoleAssistant,
+			StopReason: ai.StopStop,
+			Usage:      want,
+			Content:    []*ai.Content{{Type: ai.KindText, Text: "## Goal\nExplore."}},
+		}), nil
+	}
+	text, _, got, err := GenerateBranchSummary(context.Background(), sf, "test", []ai.Message{{Role: ai.RoleUser, Content: "hello"}}, BranchSummaryOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "Explore") || got != want {
+		t.Fatalf("text=%q usage=%+v", text, got)
+	}
+}
+
+func TestGenerateBranchSummaryNoContentHasZeroUsage(t *testing.T) {
+	msgs := []ai.Message{{Role: ai.RoleToolResult, Content: "only a tool result"}}
+	text, files, got, err := GenerateBranchSummary(context.Background(), ai.ScriptedStreamFn("should not run", 0), "test", msgs, BranchSummaryOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != NoContentSummary || got != (ai.Usage{}) || len(files.ReadFiles) != 0 {
+		t.Fatalf("text=%q usage=%+v files=%+v", text, got, files)
 	}
 }

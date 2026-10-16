@@ -50,6 +50,34 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				return map[string]any{"compaction": "HOOK SUMMARY"}
 			},
 		})
+	case "compact-usage":
+		_ = ext.Serve(ext.Handler{
+			Name:   "compact-usage-ext",
+			Events: []string{"session_before_compact"},
+			OnEvent: func(string, map[string]any) map[string]any {
+				return map[string]any{
+					"compaction": "HOOK SUMMARY",
+					"usage": map[string]any{
+						"input": 11, "output": 4, "totalTokens": 15,
+						"cost": map[string]any{"input": 0.1, "output": 0.2, "total": 0.3},
+					},
+				}
+			},
+		})
+	case "tree-usage":
+		_ = ext.Serve(ext.Handler{
+			Name:   "tree-usage-ext",
+			Events: []string{"session_before_tree"},
+			OnEvent: func(string, map[string]any) map[string]any {
+				return map[string]any{
+					"summary": "EXT BRANCH",
+					"usage": map[string]any{
+						"input": 8, "output": 2, "totalTokens": 10,
+						"cost": map[string]any{"total": 0.4},
+					},
+				}
+			},
+		})
 	case "block":
 		_ = ext.Serve(ext.Handler{
 			Name:   "block-ext",

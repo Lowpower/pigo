@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/theme"
 )
 
@@ -225,6 +226,51 @@ type stubToolRenderer struct{}
 func (stubToolRenderer) RenderCall(string, string, any) string { return "<div>CALL</div>" }
 func (stubToolRenderer) RenderResult(string, string, []map[string]any, any, bool) (string, string) {
 	return "<div>COL</div>", "<div>EXP</div>"
+}
+
+func TestExportHTMLEmbedsSummaryUsage(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	compactionUsage := ai.Usage{Input: 40, Output: 8, TotalTokens: 48, Cost: ai.UsageCost{Input: 0.2, Output: 0.1, Total: 0.3}}
+	if _, err := m.AppendCompaction("sum", "", 10, CompactionMeta{Usage: &compactionUsage}); err != nil {
+		t.Fatal(err)
+	}
+	branchUsage := ai.Usage{Input: 5, Output: 1, TotalTokens: 6, Cost: ai.UsageCost{Total: 0.05}}
+	if _, err := m.AppendBranchSummary("from", "branch", false, nil, &branchUsage); err != nil {
+		t.Fatal(err)
+	}
+	html, err := RenderHTML(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(html, "addUsage(entry.usage)") {
+		t.Fatal("export stats do not add compaction or branch summary usage")
+	}
+	data := decodeSessionData(t, html)
+	entries, _ := data["entries"].([]any)
+	var sawCompaction, sawBranch bool
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		usage, _ := entry["usage"].(map[string]any)
+		switch entry["type"] {
+		case "compaction":
+			sawCompaction = true
+			if usage["input"] != float64(40) || usage["output"] != float64(8) {
+				t.Fatalf("compaction usage = %v", usage)
+			}
+			cost, _ := usage["cost"].(map[string]any)
+			if cost["total"] != 0.3 {
+				t.Fatalf("compaction cost = %v", cost)
+			}
+		case "branch_summary":
+			sawBranch = true
+			if usage["input"] != float64(5) || usage["output"] != float64(1) {
+				t.Fatalf("branch usage = %v", usage)
+			}
+		}
+	}
+	if !sawCompaction || !sawBranch {
+		t.Fatalf("embedded entries missing summary usage: compaction=%v branch=%v", sawCompaction, sawBranch)
+	}
 }
 
 func TestExportHTMLHiddenCustomMessageToggle(t *testing.T) {

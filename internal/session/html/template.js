@@ -1333,6 +1333,20 @@
         const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
         const models = new Set();
 
+        function addUsage(usage) {
+          if (!usage) return;
+          tokens.input += usage.input || 0;
+          tokens.output += usage.output || 0;
+          tokens.cacheRead += usage.cacheRead || 0;
+          tokens.cacheWrite += usage.cacheWrite || 0;
+          if (usage.cost) {
+            cost.input += usage.cost.input || 0;
+            cost.output += usage.cost.output || 0;
+            cost.cacheRead += usage.cost.cacheRead || 0;
+            cost.cacheWrite += usage.cost.cacheWrite || 0;
+          }
+        }
+
         for (const entry of entryList) {
           if (entry.type === 'message') {
             const msg = entry.message;
@@ -1340,25 +1354,16 @@
             if (msg.role === 'assistant') {
               assistantMessages++;
               if (msg.model) models.add(msg.provider ? `${msg.provider}/${msg.model}` : msg.model);
-              if (msg.usage) {
-                tokens.input += msg.usage.input || 0;
-                tokens.output += msg.usage.output || 0;
-                tokens.cacheRead += msg.usage.cacheRead || 0;
-                tokens.cacheWrite += msg.usage.cacheWrite || 0;
-                if (msg.usage.cost) {
-                  cost.input += msg.usage.cost.input || 0;
-                  cost.output += msg.usage.cost.output || 0;
-                  cost.cacheRead += msg.usage.cost.cacheRead || 0;
-                  cost.cacheWrite += msg.usage.cost.cacheWrite || 0;
-                }
-              }
+              addUsage(msg.usage);
               toolCalls += msg.content.filter(c => c.type === 'toolCall').length;
             }
             if (msg.role === 'toolResult') toolResults++;
           } else if (entry.type === 'compaction') {
             compactions++;
+            addUsage(entry.usage);
           } else if (entry.type === 'branch_summary') {
             branchSummaries++;
+            addUsage(entry.usage);
           } else if (entry.type === 'custom_message') {
             customMessages++;
           }

@@ -302,11 +302,13 @@ func incompleteSummaryError(label string) error {
 }
 
 // Summarize asks the model to summarize the given messages using StreamFn,
-// returning the assistant's text. provider is the catalog id used to attach
-// samplingParams; an empty provider leaves those fields unset. previousSummary
-// selects the update prompt and is sent in a <previous-summary> block.
-// reserveTokens sets the output budget; 0 uses DefaultSettings.
-func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra, provider, previousSummary string, reserveTokens int) (string, error) {
+// returning the assistant's text and the usage of that request. provider is
+// the catalog id used to attach samplingParams; an empty provider leaves those
+// fields unset. previousSummary selects the update prompt and is sent in a
+// <previous-summary> block. reserveTokens sets the output budget; 0 uses
+// DefaultSettings. A successful call returns final.Usage even when every
+// counter is zero.
+func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []ai.Message, extra, provider, previousSummary string, reserveTokens int) (string, ai.Usage, error) {
 	req := ai.Context{
 		System: SummarizationSystemPrompt,
 		Messages: []ai.Message{{
@@ -316,46 +318,47 @@ func Summarize(ctx context.Context, sf ai.StreamFn, model string, toSummarize []
 	}
 	stream, err := sf(ctx, req, modelCallOptions(provider, model, reserveTokens))
 	if err != nil {
-		return "", err
+		return "", ai.Usage{}, err
 	}
 	_, final := stream.Collect()
 	if final == nil {
-		return "", errors.New("compaction: summarization produced no message")
+		return "", ai.Usage{}, errors.New("compaction: summarization produced no message")
 	}
 	if final.StopReason == ai.StopAborted {
-		return "", ErrSummarizeAborted
+		return "", ai.Usage{}, ErrSummarizeAborted
 	}
 	if final.StopReason == ai.StopError {
-		return "", &SummarizeError{Cause: final.ErrorMessage}
+		return "", ai.Usage{}, &SummarizeError{Cause: final.ErrorMessage}
 	}
 	if final.StopReason == ai.StopLength {
-		return "", incompleteSummaryError("Summarization")
+		return "", ai.Usage{}, incompleteSummaryError("Summarization")
 	}
 	summary := final.Text()
 	if summary == "" {
-		return "", errors.New("compaction: summarization produced empty text")
+		return "", ai.Usage{}, errors.New("compaction: summarization produced empty text")
 	}
-	return summary, nil
+	return summary, final.Usage, nil
 }
 
 // Compact summarizes older messages and returns the compacted message list (a
-// single summary message followed by the recent tail) plus the summary. When
-// nothing needs summarizing it returns the input unchanged with an empty summary.
-func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, s Settings) ([]ai.Message, string, error) {
+// single summary message followed by the recent tail), the summary, and the
+// usage of the summary request. When nothing needs summarizing it returns the
+// input unchanged with an empty summary and zero usage.
+func Compact(ctx context.Context, sf ai.StreamFn, model string, msgs []ai.Message, s Settings) ([]ai.Message, string, ai.Usage, error) {
 	cut := FindCutIndex(msgs, s.KeepRecentTokens)
 	if cut <= 0 {
-		return msgs, "", nil
+		return msgs, "", ai.Usage{}, nil
 	}
-	summary, err := Summarize(ctx, sf, model, msgs[:cut], s.CustomInstructions, s.Provider, s.PreviousSummary, s.ReserveTokens)
+	summary, usage, err := Summarize(ctx, sf, model, msgs[:cut], s.CustomInstructions, s.Provider, s.PreviousSummary, s.ReserveTokens)
 	if err != nil {
-		return msgs, "", err
+		return msgs, "", ai.Usage{}, err
 	}
 	files := CollectFileLists(msgs[:cut], s.PriorRead, s.PriorModified, s.UsePriorFiles)
 	summary = AppendFileSections(summary, files)
 	compacted := make([]ai.Message, 0, len(msgs)-cut+1)
 	compacted = append(compacted, ai.Message{Role: ai.RoleUser, Content: SummaryPrefix + summary + SummarySuffix})
 	compacted = append(compacted, msgs[cut:]...)
-	return compacted, summary, nil
+	return compacted, summary, usage, nil
 }
 
 func summaryUserContent(msgs []ai.Message, previous, extra string) string {

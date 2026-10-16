@@ -16,7 +16,8 @@ type NavigateOpts struct {
 	Label               string
 	Summary             string // precomputed summary text; empty skips branch_summary
 	FromHook            bool
-	Details             any // optional branch_summary details; omitted when nil
+	Details             any       // optional branch_summary details; omitted when nil
+	Usage               *ai.Usage // usage of the summary request; nil is not counted
 }
 
 // NavigateResult is the outcome of Navigate.
@@ -41,9 +42,12 @@ type TreePrep struct {
 }
 
 // TreeHookResult is returned by BeforeTree. Cancel skips navigation.
+// Usage is the cost of an extension-supplied summary. Nil means the summary
+// has no usage and is left out of session totals.
 type TreeHookResult struct {
 	Cancel              bool
 	Summary             string
+	Usage               *ai.Usage
 	CustomInstructions  string
 	ReplaceInstructions *bool
 	Label               *string
@@ -120,7 +124,7 @@ func (m *Manager) Navigate(targetID string, opts NavigateOpts) (NavigateResult, 
 		if from == "" {
 			from = "root"
 		}
-		sum, err := m.AppendBranchSummary(from, opts.Summary, opts.FromHook, opts.Details)
+		sum, err := m.AppendBranchSummary(from, opts.Summary, opts.FromHook, opts.Details, opts.Usage)
 		if err != nil {
 			return NavigateResult{}, err
 		}
@@ -172,8 +176,9 @@ func (m *Manager) AppendLabel(targetID, label string) (*Entry, error) {
 }
 
 // AppendBranchSummary writes a branch_summary child of the current leaf.
-// A nil details value omits the field.
-func (m *Manager) AppendBranchSummary(fromID, summary string, fromHook bool, details any) (*Entry, error) {
+// A nil details value omits the field. A nil usage value omits usage, so
+// session totals do not count that summary.
+func (m *Manager) AppendBranchSummary(fromID, summary string, fromHook bool, details any, usage *ai.Usage) (*Entry, error) {
 	e := &Entry{
 		Type:      "branch_summary",
 		ID:        newUUID(),
@@ -181,6 +186,7 @@ func (m *Manager) AppendBranchSummary(fromID, summary string, fromHook bool, det
 		FromID:    fromID,
 		Summary:   summary,
 		FromHook:  fromHook,
+		Usage:     usage,
 		role:      "assistant",
 	}
 	if details != nil {
