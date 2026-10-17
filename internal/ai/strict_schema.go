@@ -2,6 +2,106 @@ package ai
 
 import "sort"
 
+// anthropicStrictSchemaUnsupported reports whether schema contains a keyword
+// Anthropic strict tool use rejects. The whole tool then stays non-strict.
+func anthropicStrictSchemaUnsupported(schema map[string]any) bool {
+	return walkAnthropicStrictSchema(schema)
+}
+
+func walkAnthropicStrictSchema(schema map[string]any) bool {
+	if schema == nil {
+		return false
+	}
+	for key, value := range schema {
+		if anthropicStrictKeywordUnsupported(key, value) {
+			return true
+		}
+	}
+	if props, ok := schema["properties"].(map[string]any); ok {
+		for _, prop := range props {
+			if child, ok := prop.(map[string]any); ok && walkAnthropicStrictSchema(child) {
+				return true
+			}
+		}
+	}
+	for _, key := range []string{"items", "additionalProperties", "not", "if", "then", "else", "contains"} {
+		switch child := schema[key].(type) {
+		case map[string]any:
+			if walkAnthropicStrictSchema(child) {
+				return true
+			}
+		default:
+			if walkAnthropicStrictList(child) {
+				return true
+			}
+		}
+	}
+	for _, key := range []string{"anyOf", "oneOf", "allOf", "prefixItems"} {
+		if walkAnthropicStrictList(schema[key]) {
+			return true
+		}
+	}
+	return false
+}
+
+func walkAnthropicStrictList(v any) bool {
+	switch list := v.(type) {
+	case []any:
+		for _, item := range list {
+			if child, ok := item.(map[string]any); ok && walkAnthropicStrictSchema(child) {
+				return true
+			}
+		}
+	case []map[string]any:
+		for _, child := range list {
+			if walkAnthropicStrictSchema(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func anthropicStrictKeywordUnsupported(key string, value any) bool {
+	switch key {
+	case "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+		"maxItems", "uniqueItems", "minContains", "maxContains", "minProperties", "maxProperties":
+		return true
+	case "minItems":
+		return !schemaNumberIsZeroOrOne(value)
+	case "format":
+		s, ok := value.(string)
+		if !ok {
+			return true
+		}
+		switch s {
+		case "date-time", "time", "date", "duration", "email", "hostname", "uri", "ipv4", "ipv6", "uuid":
+			return false
+		default:
+			return true
+		}
+	default:
+		return false
+	}
+}
+
+func schemaNumberIsZeroOrOne(v any) bool {
+	switch n := v.(type) {
+	case int:
+		return n == 0 || n == 1
+	case int32:
+		return n == 0 || n == 1
+	case int64:
+		return n == 0 || n == 1
+	case float32:
+		return n == 0 || n == 1
+	case float64:
+		return n == 0 || n == 1
+	default:
+		return false
+	}
+}
+
 // strictToolParameters copies schema and closes it for OpenAI strict function
 // calling. Every object gets additionalProperties false and lists all of its
 // properties in required. Properties that were optional become nullable. The

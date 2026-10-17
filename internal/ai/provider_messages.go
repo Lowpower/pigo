@@ -9,16 +9,16 @@ import (
 // shape. Assistant tool calls become tool_use blocks; toolResult becomes a user
 // message with tool_result.
 func AnthropicWireMessages(msgs []Message) []map[string]any {
-	return anthropicWireMessages(msgs, false, nil, nil, "")
+	return anthropicWireMessages(msgs, false, nil, nil, "", false)
 }
 
-func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]struct{}, levels map[int]string, provider string) []map[string]any {
+func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]struct{}, levels map[int]string, provider string, allowEmptySignature bool) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	loaded := map[string]struct{}{}
 	for i := 0; i < len(msgs); i++ {
 		m := msgs[i]
 		if m.Assistant != nil {
-			blocks := anthropicContent(m.Assistant)
+			blocks := anthropicContent(m.Assistant, allowEmptySignature)
 			if len(blocks) == 0 {
 				continue
 			}
@@ -167,7 +167,7 @@ func anthropicUserContent(m Message) any {
 	return blocks
 }
 
-func anthropicContent(msg *AssistantMessage) []map[string]any {
+func anthropicContent(msg *AssistantMessage, allowEmptySignature bool) []map[string]any {
 	blocks := make([]map[string]any, 0, len(msg.Content))
 	for _, c := range msg.Content {
 		switch c.Type {
@@ -193,7 +193,15 @@ func anthropicContent(msg *AssistantMessage) []map[string]any {
 				continue
 			}
 			if !hasSig {
-				blocks = append(blocks, map[string]any{"type": "text", "text": c.Thinking})
+				if allowEmptySignature {
+					blocks = append(blocks, map[string]any{
+						"type":      "thinking",
+						"thinking":  c.Thinking,
+						"signature": "",
+					})
+				} else {
+					blocks = append(blocks, map[string]any{"type": "text", "text": c.Thinking})
+				}
 				continue
 			}
 			blocks = append(blocks, map[string]any{

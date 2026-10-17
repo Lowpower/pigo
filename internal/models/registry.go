@@ -369,6 +369,7 @@ func mergeCompat(base, extra *Compat) *Compat {
 	if extra.ForceAdaptiveThinking != nil {
 		out.ForceAdaptiveThinking = cloneBool(extra.ForceAdaptiveThinking)
 	}
+	mergeAnthropicCompat(&out, extra)
 	if extra.AllowedFallbackModels != nil {
 		out.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
 	}
@@ -402,6 +403,31 @@ func cloneCompatPointers(out, extra *Compat) {
 	out.VercelGatewayRouting = cloneVercelRouting(extra.VercelGatewayRouting)
 	out.ZaiToolStream = cloneBool(extra.ZaiToolStream)
 	out.SupportsThinkingTokenBudget = cloneBool(extra.SupportsThinkingTokenBudget)
+	out.SupportsEagerToolInputStreaming = cloneBool(extra.SupportsEagerToolInputStreaming)
+	out.SupportsCacheControlOnTools = cloneBool(extra.SupportsCacheControlOnTools)
+	out.SupportsTemperature = cloneBool(extra.SupportsTemperature)
+	out.AllowEmptySignature = cloneBool(extra.AllowEmptySignature)
+	out.SupportsStrictTools = cloneBool(extra.SupportsStrictTools)
+}
+
+// mergeAnthropicCompat overlays Anthropic Messages switches that extra sets.
+// An unset pointer leaves the catalog value, including an explicit false.
+func mergeAnthropicCompat(out, extra *Compat) {
+	if extra.SupportsEagerToolInputStreaming != nil {
+		out.SupportsEagerToolInputStreaming = cloneBool(extra.SupportsEagerToolInputStreaming)
+	}
+	if extra.SupportsCacheControlOnTools != nil {
+		out.SupportsCacheControlOnTools = cloneBool(extra.SupportsCacheControlOnTools)
+	}
+	if extra.SupportsTemperature != nil {
+		out.SupportsTemperature = cloneBool(extra.SupportsTemperature)
+	}
+	if extra.AllowEmptySignature != nil {
+		out.AllowEmptySignature = cloneBool(extra.AllowEmptySignature)
+	}
+	if extra.SupportsStrictTools != nil {
+		out.SupportsStrictTools = cloneBool(extra.SupportsStrictTools)
+	}
 }
 
 // mergeOpenAICompat overlays Chat Completions switches that extra sets.

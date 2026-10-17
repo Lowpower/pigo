@@ -477,6 +477,84 @@ func TestOpenAICatalogUsesResponsesAPI(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONReadsAnthropicCompatFlags(t *testing.T) {
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("ant-flags-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "ant-flags-json": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://example.invalid/v1",
+      "models": [
+        {"id": "on", "compat": {
+          "supportsEagerToolInputStreaming": true,
+          "supportsCacheControlOnTools": true,
+          "supportsTemperature": true,
+          "allowEmptySignature": true,
+          "supportsStrictTools": true
+        }},
+        {"id": "off", "compat": {
+          "supportsEagerToolInputStreaming": false,
+          "supportsCacheControlOnTools": false,
+          "supportsTemperature": false,
+          "allowEmptySignature": false,
+          "supportsStrictTools": false
+        }},
+        {"id": "unset"}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	on, ok := Lookup("ant-flags-json", "on")
+	if !ok || on.Compat == nil {
+		t.Fatalf("on = %+v ok=%v", on, ok)
+	}
+	assertCompatBool(t, on.Compat.SupportsEagerToolInputStreaming, true)
+	assertCompatBool(t, on.Compat.SupportsCacheControlOnTools, true)
+	assertCompatBool(t, on.Compat.SupportsTemperature, true)
+	assertCompatBool(t, on.Compat.AllowEmptySignature, true)
+	assertCompatBool(t, on.Compat.SupportsStrictTools, true)
+
+	off, ok := Lookup("ant-flags-json", "off")
+	if !ok || off.Compat == nil {
+		t.Fatalf("off = %+v ok=%v", off, ok)
+	}
+	assertCompatBool(t, off.Compat.SupportsEagerToolInputStreaming, false)
+	assertCompatBool(t, off.Compat.SupportsCacheControlOnTools, false)
+	assertCompatBool(t, off.Compat.SupportsTemperature, false)
+	assertCompatBool(t, off.Compat.AllowEmptySignature, false)
+	assertCompatBool(t, off.Compat.SupportsStrictTools, false)
+
+	unset, ok := Lookup("ant-flags-json", "unset")
+	if !ok {
+		t.Fatal("unset missing")
+	}
+	if unset.Compat != nil && (unset.Compat.SupportsEagerToolInputStreaming != nil ||
+		unset.Compat.SupportsCacheControlOnTools != nil ||
+		unset.Compat.SupportsTemperature != nil ||
+		unset.Compat.AllowEmptySignature != nil ||
+		unset.Compat.SupportsStrictTools != nil) {
+		t.Fatalf("unset compat = %+v", unset.Compat)
+	}
+}
+
+func assertCompatBool(t *testing.T, got *bool, want bool) {
+	t.Helper()
+	if got == nil || *got != want {
+		t.Fatalf("bool = %v, want %v", got, want)
+	}
+}
+
 func TestLoadUserJSONStripsBOM(t *testing.T) {
 	t.Cleanup(ClearOverlays)
 	path := filepath.Join(t.TempDir(), "models.json")
