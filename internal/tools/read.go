@@ -52,15 +52,15 @@ func (t readTool) Execute(_ context.Context, args map[string]any) (string, bool)
 		return err.Error(), true
 	}
 	if mime := sniffImageMIME(data); mime != "" {
-		processed, ok := processImage(data, mime, t.autoResize, t.imageResize())
+		norm, status := normalizeImage(data, mime, t.autoResize, t.imageResize())
 		note := ""
 		if t.imageCapable != nil && !t.imageCapable() {
 			note = "\n[Current model does not support images. The image will be omitted from this request.]"
 		}
-		if !ok {
+		if status != normOK {
 			return "Read image file [" + mime + "]\n[Image omitted: could not be converted to a supported inline image format.]" + note, false
 		}
-		return encodeImageResult(imageReadNote(processed.mimeType)+note, processed), false
+		return encodeImageResult(imageReadNote(norm.processed.mimeType)+note, norm.processed), false
 	}
 
 	allLines := strings.Split(string(data), "\n")

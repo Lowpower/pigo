@@ -64,17 +64,109 @@ func decodeImage(data []byte, mime string) (image.Image, error) {
 	}
 }
 
+func decodeConfig(data []byte, mime string) (image.Config, error) {
+	r := bytes.NewReader(data)
+	switch mime {
+	case "image/png":
+		return png.DecodeConfig(r)
+	case "image/jpeg":
+		return jpeg.DecodeConfig(r)
+	case "image/gif":
+		return gif.DecodeConfig(r)
+	case "image/webp":
+		return webp.DecodeConfig(r)
+	case "image/bmp":
+		return bmp.DecodeConfig(r)
+	default:
+		cfg, _, err := image.DecodeConfig(r)
+		return cfg, err
+	}
+}
+
 type processedImage struct {
 	data     string
 	mimeType string
 	hints    []string
 }
 
-func processImage(data []byte, mime string, autoResize bool, profile *models.ImageResize) (processedImage, bool) {
+type normStatus int
+
+const (
+	normOK normStatus = iota
+	normUndecodable
+	normUnfit
+)
+
+type normalizedImage struct {
+	processed processedImage
+	unchanged bool
+}
+
+// normalizeImage is the shared path for read and user attachments.
+// Bytes that need no resize and no format conversion are returned unchanged,
+// including their EXIF orientation tag. Scaling or conversion bakes that
+// orientation into the pixels first. Limits are checked against the oriented
+// dimensions. normUnfit means the image decoded but could not be fit under
+// maxBytes; normUndecodable means it could not be decoded.
+func normalizeImage(data []byte, mime string, autoResize bool, profile *models.ImageResize) (normalizedImage, normStatus) {
+	if mime == "" {
+		mime = sniffImageMIME(data)
+	}
+	if mime == "" {
+		return normalizedImage{}, normUndecodable
+	}
+	orient := exifOrientation(data)
+	convert := mime == "image/bmp"
+	if !autoResize && !convert {
+		return keepOriginalImage(data, mime), normOK
+	}
+	if autoResize && !convert {
+		cfg, err := decodeConfig(data, mime)
+		if err != nil {
+			return normalizedImage{}, normUndecodable
+		}
+		w, h := cfg.Width, cfg.Height
+		if orientationSwapsAxes(orient) {
+			w, h = h, w
+		}
+		maxW, maxH, _, maxBytes := resizeLimits(profile)
+		overEdge := w > maxW || h > maxH
+		overBytes := maxBytes > 0 && base64.StdEncoding.EncodedLen(len(data)) >= maxBytes
+		if !overEdge && !overBytes {
+			return keepOriginalImage(data, mime), normOK
+		}
+	}
 	img, err := decodeImage(data, mime)
 	if err != nil {
+		return normalizedImage{}, normUndecodable
+	}
+	img = applyOrientation(img, orient)
+	processed, ok := encodeNormalized(img, mime, autoResize, profile)
+	if !ok {
+		return normalizedImage{}, normUnfit
+	}
+	return normalizedImage{processed: processed}, normOK
+}
+
+func keepOriginalImage(data []byte, mime string) normalizedImage {
+	return normalizedImage{
+		unchanged: true,
+		processed: processedImage{
+			data:     base64.StdEncoding.EncodeToString(data),
+			mimeType: mime,
+		},
+	}
+}
+
+func processImage(data []byte, mime string, autoResize bool, profile *models.ImageResize) (processedImage, bool) {
+	out, status := normalizeImage(data, mime, autoResize, profile)
+	if status != normOK {
 		return processedImage{}, false
 	}
+	return out.processed, true
+}
+
+func encodeNormalized(img image.Image, mime string, autoResize bool, profile *models.ImageResize) (processedImage, bool) {
 	outMIME := mime
 	var hints []string
 	if mime == "image/bmp" {
@@ -254,13 +346,10 @@ func FitUserImages(text string, images []ai.ImageContent, autoResize bool, profi
 	if len(images) == 0 {
 		return text, images
 	}
-	if !autoResize {
-		return convertBMPAttachments(text, images)
-	}
 	out := make([]ai.ImageContent, 0, len(images))
 	var hints []string
 	for _, img := range images {
-		fitted, h, ok := FitImageContent(img, profile)
+		fitted, h, ok := fitAttachment(img, autoResize, profile)
 		if !ok {
 			continue
 		}
@@ -277,44 +366,13 @@ func FitUserImages(text string, images []ai.ImageContent, autoResize bool, profi
 	return text + "\n" + note, out
 }
 
-// convertBMPAttachments turns BMP attachments into PNG without scaling.
-// Other images keep their original bytes when auto-resize is off.
-func convertBMPAttachments(text string, images []ai.ImageContent) (string, []ai.ImageContent) {
-	out := make([]ai.ImageContent, len(images))
-	copy(out, images)
-	var hints []string
-	for i, img := range images {
-		raw, err := base64.StdEncoding.DecodeString(img.Data)
-		if err != nil {
-			continue
-		}
-		mime := img.MimeType
-		if mime == "" {
-			mime = sniffImageMIME(raw)
-		}
-		if mime != "image/bmp" {
-			continue
-		}
-		processed, ok := processImage(raw, mime, false, nil)
-		if !ok {
-			continue
-		}
-		out[i] = ai.ImageContent{Type: "image", Data: processed.data, MimeType: processed.mimeType}
-		hints = append(hints, processed.hints...)
-	}
-	if len(hints) == 0 {
-		return text, out
-	}
-	note := strings.Join(hints, "\n")
-	if strings.TrimSpace(text) == "" {
-		return note, out
-	}
-	return text + "\n" + note, out
-}
-
 // FitImageContent resizes one base64 image. ok is false only when the image
 // decoded but could not be fit under maxBytes. Undecodable payloads are kept.
 func FitImageContent(img ai.ImageContent, profile *models.ImageResize) (ai.ImageContent, []string, bool) {
+	return fitAttachment(img, true, profile)
+}
+
+func fitAttachment(img ai.ImageContent, autoResize bool, profile *models.ImageResize) (ai.ImageContent, []string, bool) {
 	raw, err := base64.StdEncoding.DecodeString(img.Data)
 	if err != nil {
 		return img, nil, true
@@ -323,33 +381,17 @@ func FitImageContent(img ai.ImageContent, profile *models.ImageResize) (ai.Image
 	if mime == "" {
 		mime = sniffImageMIME(raw)
 	}
-	if mime != "image/bmp" {
-		within, decoded := imageWithinLimits(raw, mime, profile)
-		if !decoded || within {
-			return img, nil, true
-		}
+	norm, status := normalizeImage(raw, mime, autoResize, profile)
+	if status == normUndecodable || (status != normOK && !autoResize) {
+		return img, nil, true
 	}
-	processed, ok := processImage(raw, mime, true, profile)
-	if !ok {
+	if status != normOK {
 		return img, nil, false
 	}
-	return ai.ImageContent{Type: "image", Data: processed.data, MimeType: processed.mimeType}, processed.hints, true
-}
-
-func imageWithinLimits(data []byte, mime string, profile *models.ImageResize) (within, decoded bool) {
-	img, err := decodeImage(data, mime)
-	if err != nil {
-		return false, false
+	if norm.unchanged {
+		return img, nil, true
 	}
-	maxW, maxH, _, maxBytes := resizeLimits(profile)
-	b := img.Bounds()
-	if b.Dx() > maxW || b.Dy() > maxH {
-		return false, true
-	}
-	if maxBytes > 0 && base64.StdEncoding.EncodedLen(len(data)) >= maxBytes {
-		return false, true
-	}
-	return true, true
+	return ai.ImageContent{Type: "image", Data: norm.processed.data, MimeType: norm.processed.mimeType}, norm.processed.hints, true
 }
 
 // NormalizeToolResultImages resizes image blocks in a tool result before the
