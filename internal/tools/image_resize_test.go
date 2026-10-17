@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/color"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 
@@ -285,4 +286,289 @@ func TestProcessImageMaxBytesTooSmallFails(t *testing.T) {
 	if ok {
 		t.Fatal("expected failure under 1-byte limit")
 	}
+}
+
+func TestProcessImageAppliesEXIFOrientation(t *testing.T) {
+	raw := jpegWithAPP1(t, wideSplitJPEG(t), exifAPP1(6))
+	assertResizedOrientation(t, raw)
+}
+
+func TestProcessImageEXIFAfterNonEXIFAPP1(t *testing.T) {
+	raw := jpegWithAPP1(t, wideSplitJPEG(t), xmpAPP1(), exifAPP1(6))
+	assertResizedOrientation(t, raw)
+}
+
+func TestNormalizeImageKeepsUnderLimitBytes(t *testing.T) {
+	samples := [][]byte{
+		solidJPEG(t, 32, 24, 90),
+		multiFrameGIF(t),
+		jpegWithAPP1(t, solidJPEG(t, 32, 16, 90), exifAPP1(6)),
+	}
+	for _, raw := range samples {
+		mime := sniffImageMIME(raw)
+		got, ok := processImage(raw, mime, true, nil)
+		if !ok {
+			t.Fatalf("%s process", mime)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(got.data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(decoded, raw) {
+			t.Fatalf("%s bytes changed (%d -> %d)", mime, len(raw), len(decoded))
+		}
+		if len(got.hints) != 0 {
+			t.Fatalf("%s hints = %v", mime, got.hints)
+		}
+		b64 := base64.StdEncoding.EncodeToString(raw)
+		text, images := FitUserImages("look", []ai.ImageContent{{Type: "image", Data: b64, MimeType: mime}}, true, nil)
+		if text != "look" || len(images) != 1 || images[0].Data != b64 {
+			t.Fatalf("%s attachment changed", mime)
+		}
+		ext := ".jpg"
+		if mime == "image/gif" {
+			ext = ".gif"
+		}
+		dir := t.TempDir()
+		file := filepath.Join(dir, "img"+ext)
+		if err := os.WriteFile(file, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out, isErr := run(t, readTool{autoResize: true}, map[string]any{"path": file})
+		if isErr {
+			t.Fatalf("read %s: %s", mime, out)
+		}
+		if !strings.Contains(out, b64) {
+			t.Fatalf("read re-encoded %s", mime)
+		}
+	}
+}
+
+func TestExifOrientationSkipsNonEXIFAPP1(t *testing.T) {
+	body := solidJPEG(t, 8, 4, 80)
+	if got := exifOrientation(jpegWithAPP1(t, body, exifAPP1(6))); got != 6 {
+		t.Fatalf("exif = %d", got)
+	}
+	if got := exifOrientation(jpegWithAPP1(t, body, xmpAPP1(), exifAPP1(6))); got != 6 {
+		t.Fatalf("xmp then exif = %d", got)
+	}
+	if got := exifOrientation(jpegWithAPP1(t, body, xmpAPP1())); got != 1 {
+		t.Fatalf("xmp only = %d", got)
+	}
+	if got := exifOrientation(webpWithEXIF(junkChunk(), 8)); got != 8 {
+		t.Fatalf("webp after junk = %d", got)
+	}
+	if got := exifOrientation(webpWithEXIF(nil, 3)); got != 3 {
+		t.Fatalf("webp = %d", got)
+	}
+}
+
+func TestApplyOrientation(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	src.Set(0, 0, color.RGBA{R: 1, A: 255})
+	src.Set(1, 0, color.RGBA{R: 2, A: 255})
+	src.Set(0, 1, color.RGBA{R: 3, A: 255})
+	src.Set(1, 1, color.RGBA{R: 4, A: 255})
+	cases := []struct {
+		orient int
+		want   [4]uint8
+	}{
+		{1, [4]uint8{1, 2, 3, 4}},
+		{2, [4]uint8{2, 1, 4, 3}},
+		{3, [4]uint8{4, 3, 2, 1}},
+		{4, [4]uint8{3, 4, 1, 2}},
+		{5, [4]uint8{1, 3, 2, 4}},
+		{6, [4]uint8{3, 1, 4, 2}},
+		{7, [4]uint8{4, 2, 3, 1}},
+		{8, [4]uint8{2, 4, 1, 3}},
+	}
+	for _, tc := range cases {
+		got := applyOrientation(src, tc.orient)
+		b := got.Bounds()
+		if b.Dx() != 2 || b.Dy() != 2 {
+			t.Fatalf("orient %d bounds %v", tc.orient, b)
+		}
+		i := 0
+		for y := 0; y < 2; y++ {
+			for x := 0; x < 2; x++ {
+				r, _, _, _ := got.At(b.Min.X+x, b.Min.Y+y).RGBA()
+				if uint8(r>>8) != tc.want[i] {
+					t.Fatalf("orient %d pixel %d = %d, want %d", tc.orient, i, r>>8, tc.want[i])
+				}
+				i++
+			}
+		}
+	}
+}
+
+func assertResizedOrientation(t *testing.T, raw []byte) {
+	t.Helper()
+	maxW, maxH, q := 1000, 100, 95
+	profile := &models.ImageResize{MaxWidth: &maxW, MaxHeight: &maxH, JPEGQuality: &q}
+	got, ok := processImage(raw, "image/jpeg", true, profile)
+	if !ok {
+		t.Fatal("process")
+	}
+	if !strings.Contains(strings.Join(got.hints, "\n"), "resized from 80x200 to 40x100") {
+		t.Fatalf("hints = %v", got.hints)
+	}
+	assertPortraitColors(t, got.data)
+
+	b64 := base64.StdEncoding.EncodeToString(raw)
+	text, images := FitUserImages("look", []ai.ImageContent{{Type: "image", Data: b64, MimeType: "image/jpeg"}}, true, profile)
+	if len(images) != 1 || images[0].Data != got.data {
+		t.Fatal("attachment path diverged")
+	}
+	if !strings.Contains(text, "resized from 80x200 to 40x100") {
+		t.Fatalf("text = %q", text)
+	}
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "phone.jpg")
+	if err := os.WriteFile(file, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, isErr := run(t, readTool{
+		autoResize: true,
+		resize: func() *models.ImageResize {
+			return profile
+		},
+	}, map[string]any{"path": file})
+	if isErr {
+		t.Fatalf("read: %s", out)
+	}
+	if !strings.Contains(out, got.data) {
+		t.Fatal("read path diverged")
+	}
+}
+
+func assertPortraitColors(t *testing.T, b64 string) {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := img.Bounds()
+	if b.Dx() != 40 || b.Dy() != 100 {
+		t.Fatalf("bounds = %v", b)
+	}
+	if !mostlyRed(img.At(20, 15)) {
+		r, g, b := channel8(img.At(20, 15))
+		t.Fatalf("top = %d,%d,%d", r, g, b)
+	}
+	if !mostlyBlue(img.At(20, 85)) {
+		r, g, b := channel8(img.At(20, 85))
+		t.Fatalf("bottom = %d,%d,%d", r, g, b)
+	}
+}
+
+func mostlyRed(c color.Color) bool {
+	r, _, b := channel8(c)
+	return r > 200 && b < 80
+}
+
+func mostlyBlue(c color.Color) bool {
+	r, _, b := channel8(c)
+	return b > 200 && r < 80
+}
+
+func channel8(c color.Color) (r, g, b int) {
+	rr, gg, bb, _ := c.RGBA()
+	return int(rr >> 8), int(gg >> 8), int(bb >> 8)
+}
+
+func wideSplitJPEG(t *testing.T) []byte {
+	t.Helper()
+	const w, h = 200, 80
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			c := color.RGBA{R: 255, A: 255}
+			if x >= w/2 {
+				c = color.RGBA{B: 255, A: 255}
+			}
+			img.Set(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func multiFrameGIF(t *testing.T) []byte {
+	t.Helper()
+	pal := color.Palette{color.Black, color.White, color.RGBA{R: 255, A: 255}}
+	a := image.NewPaletted(image.Rect(0, 0, 4, 4), pal)
+	b := image.NewPaletted(image.Rect(0, 0, 4, 4), pal)
+	b.SetColorIndex(1, 1, 2)
+	var buf bytes.Buffer
+	if err := gif.EncodeAll(&buf, &gif.GIF{Image: []*image.Paletted{a, b}, Delay: []int{5, 5}}); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func jpegWithAPP1(t *testing.T, jpeg []byte, segs ...[]byte) []byte {
+	t.Helper()
+	if len(jpeg) < 2 || jpeg[0] != 0xff || jpeg[1] != 0xd8 {
+		t.Fatal("not a jpeg")
+	}
+	var buf bytes.Buffer
+	buf.Write(jpeg[:2])
+	for _, seg := range segs {
+		buf.Write(seg)
+	}
+	buf.Write(jpeg[2:])
+	return buf.Bytes()
+}
+
+func app1Segment(payload []byte) []byte {
+	length := len(payload) + 2
+	out := []byte{0xff, 0xe1, byte(length >> 8), byte(length)}
+	return append(out, payload...)
+}
+
+func exifTIFF(orient int) []byte {
+	return []byte{
+		'I', 'I', 0x2a, 0x00,
+		0x08, 0x00, 0x00, 0x00,
+		0x01, 0x00,
+		0x12, 0x01,
+		0x03, 0x00,
+		0x01, 0x00, 0x00, 0x00,
+		byte(orient), 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00,
+	}
+}
+
+func exifAPP1(orient int) []byte {
+	return app1Segment(append([]byte("Exif\x00\x00"), exifTIFF(orient)...))
+}
+
+func xmpAPP1() []byte {
+	payload := append([]byte("http://ns.adobe.com/xap/1.0/\x00"), []byte("<x:xmpmeta/>")...)
+	return app1Segment(payload)
+}
+
+func junkChunk() []byte {
+	return []byte{'J', 'U', 'N', 'K', 4, 0, 0, 0, 'x', 'x', 'x', 'x'}
+}
+
+func webpWithEXIF(before []byte, orient int) []byte {
+	payload := append([]byte("Exif\x00\x00"), exifTIFF(orient)...)
+	chunk := []byte{'E', 'X', 'I', 'F', byte(len(payload)), byte(len(payload) >> 8), byte(len(payload) >> 16), byte(len(payload) >> 24)}
+	chunk = append(chunk, payload...)
+	if len(payload)%2 == 1 {
+		chunk = append(chunk, 0)
+	}
+	body := append(append([]byte{}, before...), chunk...)
+	riffSize := 4 + len(body)
+	out := []byte{'R', 'I', 'F', 'F', byte(riffSize), byte(riffSize >> 8), byte(riffSize >> 16), byte(riffSize >> 24), 'W', 'E', 'B', 'P'}
+	return append(out, body...)
 }
