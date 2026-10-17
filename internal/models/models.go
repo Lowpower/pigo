@@ -123,6 +123,15 @@ type Compat struct {
 	// A non-empty list is sent as `fallbacks`. Nil or empty omits the field.
 	AllowedFallbackModels []FallbackModel `json:"allowedFallbackModels,omitempty"`
 
+	// Anthropic Messages wire switches. Nil means unset and the request
+	// builder uses pi's default: eager streaming, tool cache, and temperature
+	// on; empty signatures and strict tools off. False overrides a builtin true.
+	SupportsEagerToolInputStreaming *bool `json:"supportsEagerToolInputStreaming,omitempty"`
+	SupportsCacheControlOnTools     *bool `json:"supportsCacheControlOnTools,omitempty"`
+	SupportsTemperature             *bool `json:"supportsTemperature,omitempty"`
+	AllowEmptySignature             *bool `json:"allowEmptySignature,omitempty"`
+	SupportsStrictTools             *bool `json:"supportsStrictTools,omitempty"`
+
 	// OpenAI Chat Completions wire switches. Nil or empty means unset:
 	// the request builder fills provider and baseUrl defaults.
 	SupportsStore                               *bool                 `json:"supportsStore,omitempty"`

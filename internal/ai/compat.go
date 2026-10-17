@@ -111,6 +111,46 @@ func supportsMaxOutputTokens(opts Options) bool {
 	return *c.SupportsMaxOutputTokens
 }
 
+// supportsEagerToolInputStreaming defaults to true. False omits
+// eager_input_streaming and sends the legacy fine-grained tool-streaming beta
+// when the request includes tools.
+func supportsEagerToolInputStreaming(opts Options) bool {
+	return compatDefault(lookupCompat(opts), func(c *models.Compat) *bool { return c.SupportsEagerToolInputStreaming }, true)
+}
+
+// supportsCacheControlOnTools defaults to true. False keeps cache_control off
+// tool definitions. System and user breakpoints are unchanged.
+func supportsCacheControlOnTools(opts Options) bool {
+	return compatDefault(lookupCompat(opts), func(c *models.Compat) *bool { return c.SupportsCacheControlOnTools }, true)
+}
+
+// supportsTemperature defaults to true. False omits temperature.
+func supportsTemperature(opts Options) bool {
+	return compatDefault(lookupCompat(opts), func(c *models.Compat) *bool { return c.SupportsTemperature }, true)
+}
+
+// allowEmptySignature defaults to false. True replays an empty thinking
+// signature as signature: "" instead of downgrading the block to text.
+func allowEmptySignature(opts Options) bool {
+	return compatDefault(lookupCompat(opts), func(c *models.Compat) *bool { return c.AllowEmptySignature }, false)
+}
+
+// supportsStrictTools defaults to false. True allows Anthropic strict tool schemas.
+func supportsStrictTools(opts Options) bool {
+	return compatDefault(lookupCompat(opts), func(c *models.Compat) *bool { return c.SupportsStrictTools }, false)
+}
+
+func compatDefault(c *models.Compat, field func(*models.Compat) *bool, whenUnset bool) bool {
+	if c == nil || field == nil {
+		return whenUnset
+	}
+	v := field(c)
+	if v == nil {
+		return whenUnset
+	}
+	return *v
+}
+
 func isOpenCodeProvider(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "opencode", "opencode-go":

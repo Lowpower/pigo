@@ -69,7 +69,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		for k, v := range c.Headers {
 			httpReq.Header.Set(k, v)
 		}
-		applyAnthropicAuth(httpReq, c.APIKey, midConvoBetas(opts)...)
+		applyAnthropicAuth(httpReq, c.APIKey, anthropicExtraBetas(opts, len(reqCtx.Tools) > 0)...)
 		if opts.SessionID != "" && sendAnthropicSessionAffinity(opts) {
 			httpReq.Header.Set("x-session-affinity", opts.SessionID)
 		}
@@ -130,7 +130,7 @@ func applyAnthropicAuth(req *http.Request, apiKey string, extraBetas ...string) 
 		req.Header.Set("x-api-key", apiKey)
 	}
 	if req.Header.Get("anthropic-beta") == "" {
-		betas := "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+		betas := "interleaved-thinking-2025-05-14"
 		if oauth {
 			betas = "claude-code-20250219,oauth-2025-04-20," + betas
 		}
@@ -161,6 +161,19 @@ func firstHeader(req *http.Request, name string) string {
 
 func isAnthropicOAuthToken(key string) bool {
 	return strings.Contains(key, "sk-ant-oat")
+}
+
+const fineGrainedToolStreamingBeta = "fine-grained-tool-streaming-2025-05-14"
+
+// anthropicExtraBetas adds the legacy tool-streaming beta only when tools are
+// present and eager input streaming is off. A caller-supplied anthropic-beta
+// header is left in place; these values are appended.
+func anthropicExtraBetas(opts Options, hasTools bool) []string {
+	betas := midConvoBetas(opts)
+	if hasTools && !supportsEagerToolInputStreaming(opts) {
+		betas = append(betas, fineGrainedToolStreamingBeta)
+	}
+	return betas
 }
 
 func newOutputMessage(model, provider string) *AssistantMessage {
@@ -203,10 +216,11 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		levels = map[int]string{}
 	}
 	var msgs []map[string]any
+	emptySig := allowEmptySignature(opts)
 	if enabled {
-		msgs = anthropicWireMessages(replayed, true, deferredNameSet(deferred), levels, provider)
+		msgs = anthropicWireMessages(replayed, true, deferredNameSet(deferred), levels, provider, emptySig)
 	} else {
-		msgs = anthropicWireMessages(replayed, false, nil, levels, provider)
+		msgs = anthropicWireMessages(replayed, false, nil, levels, provider, emptySig)
 	}
 	if midConvoEffortTurn(opts) {
 		msgs = insertThinkingLevelMessages(msgs, levels, activeMidConvoEffort(opts))
@@ -232,17 +246,16 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		req["system"] = []map[string]any{sys}
 	}
 	if len(immediate) > 0 || len(deferred) > 0 {
-		tools := anthropicToolDefs(immediate, false)
-		tools = append(tools, anthropicToolDefs(deferred, true)...)
-		if len(tools) > 0 {
-			if cc := anthropicCacheControl(opts); cc != nil {
-				tools[len(tools)-1]["cache_control"] = cc
-			}
+		tools := anthropicToolDefs(immediate, false, opts)
+		if cc := anthropicCacheControl(opts); cc != nil && supportsCacheControlOnTools(opts) && len(tools) > 0 {
+			tools[len(tools)-1]["cache_control"] = cc
 		}
+		tools = append(tools, anthropicToolDefs(deferred, true, opts)...)
 		req["tools"] = tools
 		req["tool_choice"] = map[string]any{"type": "auto"}
 	}
 	applyAnthropicThinking(req, opts, maxTokens)
+	applyAnthropicTemperature(req, opts)
 	if fb := anthropicFallbacks(opts); len(fb) > 0 {
 		req["fallbacks"] = fb
 	}
@@ -358,16 +371,32 @@ func anthropicFallbacks(opts Options) []map[string]any {
 	return out
 }
 
-func anthropicToolDefs(tools []Tool, deferLoading bool) []map[string]any {
+func anthropicToolDefs(tools []Tool, deferLoading bool, opts Options) []map[string]any {
 	if len(tools) == 0 {
 		return nil
 	}
+	eager := supportsEagerToolInputStreaming(opts)
+	strictOK := supportsStrictTools(opts)
 	out := make([]map[string]any, 0, len(tools))
 	for _, t := range tools {
+		schema := t.Parameters
+		strict := false
+		if strictOK && toolStrict(t) && !anthropicStrictSchemaUnsupported(t.Parameters) {
+			if closed := strictToolParameters(t.Parameters); closed != nil {
+				schema = closed
+				strict = true
+			}
+		}
 		tool := map[string]any{
 			"name":         t.Name,
 			"description":  t.Description,
-			"input_schema": t.Parameters,
+			"input_schema": schema,
+		}
+		if eager {
+			tool["eager_input_streaming"] = true
+		}
+		if strict {
+			tool["strict"] = true
 		}
 		if deferLoading {
 			tool["defer_loading"] = true
@@ -375,6 +404,42 @@ func anthropicToolDefs(tools []Tool, deferLoading bool) []map[string]any {
 		out = append(out, tool)
 	}
 	return out
+}
+
+func applyAnthropicTemperature(req map[string]any, opts Options) {
+	if !supportsTemperature(opts) || midConvoEffort(opts) {
+		return
+	}
+	canonical, _ := resolvedThinking(opts)
+	if thinkingOn(canonical) {
+		return
+	}
+	temp, ok := anthropicTemperature(opts)
+	if !ok {
+		return
+	}
+	req["temperature"] = temp
+}
+
+// anthropicTemperature is the temperature sampling field for this request.
+// Caller SamplingParams override the catalog value. Other sampling keys stay off
+// the Anthropic body.
+func anthropicTemperature(opts Options) (any, bool) {
+	var base map[string]any
+	if opts.Provider != "" && opts.Model != "" {
+		if m, ok := models.Lookup(opts.Provider, opts.Model); ok {
+			base = m.SamplingParams
+		}
+	}
+	merged := models.MergeSamplingParams(base, opts.SamplingParams)
+	if len(merged) == 0 {
+		return nil, false
+	}
+	v, ok := merged["temperature"]
+	if !ok || v == nil {
+		return nil, false
+	}
+	return v, true
 }
 
 func anthropicCacheControl(opts Options) map[string]any {

@@ -506,3 +506,88 @@ func TestOverlayMergesSamplingParams(t *testing.T) {
 		t.Fatalf("empty object cleared params: %#v ok=%v", kept.SamplingParams, ok)
 	}
 }
+
+func TestOverlayMergesAnthropicCompatFlags(t *testing.T) {
+	on := true
+	off := false
+	RegisterProvider(ProviderSpec{
+		ID: "ant-compat-merge", DefaultAPI: "anthropic-messages", DefaultID: "m",
+		Models: []Model{
+			{
+				Provider: "ant-compat-merge", ID: "m",
+				Compat: &Compat{
+					ThinkingFormat:                  "keep",
+					SupportsEagerToolInputStreaming: &on,
+					SupportsCacheControlOnTools:     &on,
+					SupportsTemperature:             &on,
+					AllowEmptySignature:             &on,
+					SupportsStrictTools:             &on,
+				},
+			},
+			{
+				Provider: "ant-compat-merge", ID: "keep",
+				Compat: &Compat{
+					SupportsEagerToolInputStreaming: &on,
+					SupportsCacheControlOnTools:     &on,
+					SupportsTemperature:             &on,
+					AllowEmptySignature:             &on,
+					SupportsStrictTools:             &on,
+				},
+			},
+		},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("ant-compat-merge")
+	})
+	SetUserOverlay("ant-compat-merge", []Model{{
+		ID: "m",
+		Compat: &Compat{
+			SupportsEagerToolInputStreaming: &off,
+			SupportsCacheControlOnTools:     &off,
+			SupportsTemperature:             &off,
+			AllowEmptySignature:             &off,
+			SupportsStrictTools:             &off,
+		},
+	}})
+	m, ok := Lookup("ant-compat-merge", "m")
+	if !ok || m.Compat == nil {
+		t.Fatalf("compat = %+v ok=%v", m.Compat, ok)
+	}
+	if m.Compat.ThinkingFormat != "keep" {
+		t.Fatalf("thinking format lost: %+v", m.Compat)
+	}
+	if m.Compat.SupportsEagerToolInputStreaming == nil || *m.Compat.SupportsEagerToolInputStreaming {
+		t.Fatalf("eager = %v", m.Compat.SupportsEagerToolInputStreaming)
+	}
+	if m.Compat.SupportsCacheControlOnTools == nil || *m.Compat.SupportsCacheControlOnTools {
+		t.Fatalf("tool cache = %v", m.Compat.SupportsCacheControlOnTools)
+	}
+	if m.Compat.SupportsTemperature == nil || *m.Compat.SupportsTemperature {
+		t.Fatalf("temperature = %v", m.Compat.SupportsTemperature)
+	}
+	if m.Compat.AllowEmptySignature == nil || *m.Compat.AllowEmptySignature {
+		t.Fatalf("empty signature = %v", m.Compat.AllowEmptySignature)
+	}
+	if m.Compat.SupportsStrictTools == nil || *m.Compat.SupportsStrictTools {
+		t.Fatalf("strict tools = %v", m.Compat.SupportsStrictTools)
+	}
+
+	SetUserOverlay("ant-compat-merge", []Model{{
+		ID:     "keep",
+		Compat: &Compat{SupportsStrictTools: &off},
+	}})
+	kept, ok := Lookup("ant-compat-merge", "keep")
+	if !ok || kept.Compat == nil {
+		t.Fatalf("kept = %+v ok=%v", kept.Compat, ok)
+	}
+	if kept.Compat.SupportsStrictTools == nil || *kept.Compat.SupportsStrictTools {
+		t.Fatalf("strict tools = %v", kept.Compat.SupportsStrictTools)
+	}
+	if kept.Compat.SupportsEagerToolInputStreaming == nil || !*kept.Compat.SupportsEagerToolInputStreaming ||
+		kept.Compat.SupportsCacheControlOnTools == nil || !*kept.Compat.SupportsCacheControlOnTools ||
+		kept.Compat.SupportsTemperature == nil || !*kept.Compat.SupportsTemperature ||
+		kept.Compat.AllowEmptySignature == nil || !*kept.Compat.AllowEmptySignature {
+		t.Fatalf("unset overlay cleared flags: %+v", kept.Compat)
+	}
+}
