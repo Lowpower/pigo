@@ -854,14 +854,15 @@ func decodeAnthropicRequest(t *testing.T, body []byte) map[string]any {
 }
 
 func TestGoogleContentsReplayThoughtSignaturesAndImages(t *testing.T) {
+	target := googleReplayTarget("gemini-3-flash")
 	got := googleContents(Context{Messages: []Message{
 		{Role: RoleUser, Content: "look", Images: []ImageContent{{Type: "image", Data: "QQ==", MimeType: "image/png"}}},
-		{Assistant: &AssistantMessage{Content: []*Content{
+		googleAssistant(target, []*Content{
 			{Type: KindThinking, Thinking: "hmm", ThinkingSignature: "tsig"},
 			{Type: KindText, Text: "yo", TextSignature: "xsig"},
 			{Type: KindToolCall, ToolID: "1", ToolName: "read", Arguments: map[string]any{"p": "a"}, ThinkingSignature: "csig"},
-		}}},
-	}}, replayTarget{})
+		}),
+	}}, target)
 	if len(got) != 3 {
 		t.Fatalf("len=%d", len(got))
 	}
@@ -881,8 +882,11 @@ func TestGoogleContentsReplayThoughtSignaturesAndImages(t *testing.T) {
 		t.Fatalf("tool part = %#v", got[1].Parts[2])
 	}
 	fr := got[2].Parts[0].FunctionResponse
-	if fr == nil || fr.ID != "1" || fr.Response["output"] != "No result provided" {
+	if fr == nil || fr.ID != "1" || fr.Response["error"] != noResultProvided {
 		t.Fatalf("orphan result = %#v", got[2].Parts[0])
+	}
+	if _, ok := fr.Response["output"]; ok {
+		t.Fatalf("orphan output = %#v", fr.Response)
 	}
 }
 

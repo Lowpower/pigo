@@ -287,51 +287,159 @@ func mapGoogleFinishReason(reason genai.FinishReason, finishMessage string, tool
 
 func googleContents(reqCtx Context, target replayTarget) []*genai.Content {
 	var out []*genai.Content
+	// Gemini < 3 cannot nest images in functionResponse.parts. Those image
+	// turns are held until the current run of function responses ends, so a
+	// parallel batch stays in one user content.
+	var pendingImages []*genai.Content
+	flushToolImages := func() {
+		if len(pendingImages) == 0 {
+			return
+		}
+		out = append(out, pendingImages...)
+		pendingImages = nil
+	}
 	msgs := transformMessages(reqCtx.Messages, target, func(id string, _ *AssistantMessage) string {
 		return normalizeGoogleToolCallID(id, target.Model)
 	})
 	for _, m := range msgs {
 		if m.Assistant != nil {
-			var parts []*genai.Part
-			for _, c := range m.Assistant.Content {
-				switch c.Type {
-				case KindText:
-					parts = append(parts, &genai.Part{Text: c.Text, ThoughtSignature: []byte(c.TextSignature)})
-				case KindThinking:
-					parts = append(parts, &genai.Part{Text: c.Thinking, Thought: true, ThoughtSignature: []byte(c.ThinkingSignature)})
-				case KindToolCall:
-					parts = append(parts, &genai.Part{
-						FunctionCall:     &genai.FunctionCall{ID: c.ToolID, Name: c.ToolName, Args: c.Arguments},
-						ThoughtSignature: []byte(c.ThinkingSignature),
-					})
-				}
-			}
-			out = append(out, &genai.Content{Role: string(genai.RoleModel), Parts: parts})
+			flushToolImages()
+			out = append(out, googleAssistantContent(m.Assistant, target))
 			continue
 		}
 		if m.Role == RoleToolResult || m.ToolCallID != "" {
-			parts := []*genai.Part{{
-				FunctionResponse: &genai.FunctionResponse{ID: m.ToolCallID, Name: m.ToolName, Response: map[string]any{"output": m.Content}},
-			}}
-			parts = append(parts, googleImageParts(m)...)
-			out = append(out, &genai.Content{Role: string(genai.RoleUser), Parts: parts})
+			part, imageTurn := googleToolResultPart(m, target)
+			if imageTurn != nil {
+				pendingImages = append(pendingImages, imageTurn)
+			}
+			if last := googleLastFunctionResponseContent(out); last != nil {
+				last.Parts = append(last.Parts, part)
+			} else {
+				out = append(out, &genai.Content{Role: string(genai.RoleUser), Parts: []*genai.Part{part}})
+			}
 			continue
 		}
-		var role genai.Role = genai.RoleUser
-		if m.Role == RoleAssistant {
-			role = genai.RoleModel
-		}
-		parts := []*genai.Part{}
-		if m.Content != "" {
-			parts = append(parts, &genai.Part{Text: m.Content})
-		}
-		parts = append(parts, googleImageParts(m)...)
-		if len(parts) == 0 {
-			parts = []*genai.Part{{Text: m.Content}}
-		}
-		out = append(out, &genai.Content{Role: string(role), Parts: parts})
+		flushToolImages()
+		out = append(out, googlePlainContent(m))
 	}
+	flushToolImages()
 	return out
+}
+
+func googleAssistantContent(m *AssistantMessage, target replayTarget) *genai.Content {
+	includeID := requiresGoogleToolCallID(target.Model)
+	var parts []*genai.Part
+	for _, c := range m.Content {
+		if c == nil {
+			continue
+		}
+		switch c.Type {
+		case KindText:
+			parts = append(parts, &genai.Part{Text: c.Text, ThoughtSignature: []byte(c.TextSignature)})
+		case KindThinking:
+			parts = append(parts, &genai.Part{Text: c.Thinking, Thought: true, ThoughtSignature: []byte(c.ThinkingSignature)})
+		case KindToolCall:
+			call := &genai.FunctionCall{Name: c.ToolName, Args: c.Arguments}
+			if includeID {
+				call.ID = c.ToolID
+			}
+			parts = append(parts, &genai.Part{FunctionCall: call, ThoughtSignature: []byte(c.ThinkingSignature)})
+		}
+	}
+	return &genai.Content{Role: string(genai.RoleModel), Parts: parts}
+}
+
+func googleToolResultPart(m Message, target replayTarget) (*genai.Part, *genai.Content) {
+	text, imgs := googleToolResultBody(m)
+	if text == "" && len(imgs) > 0 {
+		text = "(see attached image)"
+	}
+	key := "output"
+	if m.IsError {
+		key = "error"
+	}
+	fr := &genai.FunctionResponse{Name: m.ToolName, Response: map[string]any{key: text}}
+	if requiresGoogleToolCallID(target.Model) {
+		fr.ID = m.ToolCallID
+	}
+	var imageTurn *genai.Content
+	if len(imgs) > 0 {
+		if supportsGoogleMultimodalFunctionResponse(target.Model) {
+			fr.Parts = googleFunctionResponseParts(imgs)
+		} else {
+			imageTurn = googleToolImageTurn(imgs)
+		}
+	}
+	return &genai.Part{FunctionResponse: fr}, imageTurn
+}
+
+func googleToolResultBody(m Message) (string, []ImageContent) {
+	text, imgs := ParseToolContent(m.Content)
+	if len(imgs) == 0 && len(m.Images) > 0 {
+		return m.Content, m.Images
+	}
+	return text, imgs
+}
+
+// supportsGoogleMultimodalFunctionResponse reports whether tool images belong
+// inside functionResponse.parts. Gemini before 3 needs a separate user turn.
+// Models that are not Gemini (Cloud Code Assist Claude, gpt-oss) follow pi
+// and keep the images nested.
+func supportsGoogleMultimodalFunctionResponse(modelID string) bool {
+	major, ok := geminiMajorVersion(modelID)
+	if !ok {
+		return true
+	}
+	return major >= 3
+}
+
+func googleFunctionResponseParts(imgs []ImageContent) []*genai.FunctionResponsePart {
+	parts := make([]*genai.FunctionResponsePart, 0, len(imgs))
+	for _, img := range imgs {
+		parts = append(parts, genai.NewFunctionResponsePartFromBytes(decodeImageData(img.Data), img.MimeType))
+	}
+	return parts
+}
+
+func googleToolImageTurn(imgs []ImageContent) *genai.Content {
+	parts := make([]*genai.Part, 0, 1+len(imgs))
+	parts = append(parts, &genai.Part{Text: "Tool result image:"})
+	for _, img := range imgs {
+		parts = append(parts, &genai.Part{InlineData: &genai.Blob{MIMEType: img.MimeType, Data: decodeImageData(img.Data)}})
+	}
+	return &genai.Content{Role: string(genai.RoleUser), Parts: parts}
+}
+
+func googleLastFunctionResponseContent(contents []*genai.Content) *genai.Content {
+	if len(contents) == 0 {
+		return nil
+	}
+	last := contents[len(contents)-1]
+	if last == nil || last.Role != string(genai.RoleUser) {
+		return nil
+	}
+	for _, part := range last.Parts {
+		if part != nil && part.FunctionResponse != nil {
+			return last
+		}
+	}
+	return nil
+}
+
+func googlePlainContent(m Message) *genai.Content {
+	var role genai.Role = genai.RoleUser
+	if m.Role == RoleAssistant {
+		role = genai.RoleModel
+	}
+	parts := []*genai.Part{}
+	if m.Content != "" {
+		parts = append(parts, &genai.Part{Text: m.Content})
+	}
+	parts = append(parts, googleImageParts(m)...)
+	if len(parts) == 0 {
+		parts = []*genai.Part{{Text: m.Content}}
+	}
+	return &genai.Content{Role: string(role), Parts: parts}
 }
 
 // applyGoogleUsage splits Gemini usage. PromptTokenCount includes cached
@@ -351,11 +459,15 @@ func googleImageParts(m Message) []*genai.Part {
 	}
 	var parts []*genai.Part
 	for _, img := range imgs {
-		data, err := base64.StdEncoding.DecodeString(img.Data)
-		if err != nil {
-			data = []byte(img.Data)
-		}
-		parts = append(parts, &genai.Part{InlineData: &genai.Blob{MIMEType: img.MimeType, Data: data}})
+		parts = append(parts, &genai.Part{InlineData: &genai.Blob{MIMEType: img.MimeType, Data: decodeImageData(img.Data)}})
 	}
 	return parts
+}
+
+func decodeImageData(data string) []byte {
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return []byte(data)
+	}
+	return decoded
 }

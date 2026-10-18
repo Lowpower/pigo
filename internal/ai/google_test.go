@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"net/http"
@@ -33,6 +34,180 @@ func TestGoogleContentsRolesAndTools(t *testing.T) {
 	if got[2].Parts[0].FunctionResponse == nil {
 		t.Fatal("missing function response")
 	}
+}
+
+func TestGoogleContentsMergesParallelToolResults(t *testing.T) {
+	target := googleReplayTarget("gemini-3-flash")
+	got := googleContents(Context{Messages: []Message{
+		{Role: RoleUser, Content: "do both"},
+		googleAssistant(target, []*Content{
+			{Type: KindToolCall, ToolID: "call_a", ToolName: "read", Arguments: map[string]any{"path": "a"}},
+			{Type: KindToolCall, ToolID: "call_b", ToolName: "bash", Arguments: map[string]any{"command": "ls"}},
+		}),
+		{Role: RoleToolResult, ToolCallID: "call_a", ToolName: "read", Content: "file"},
+		{Role: RoleToolResult, ToolCallID: "call_b", ToolName: "bash", Content: "boom", IsError: true},
+		googleAssistant(target, []*Content{
+			{Type: KindToolCall, ToolID: "call_c", ToolName: "read", Arguments: map[string]any{"path": "c"}},
+		}),
+		{Role: RoleToolResult, ToolCallID: "call_c", ToolName: "read", Content: "later"},
+	}}, target)
+	if len(got) != 5 {
+		t.Fatalf("len = %d", len(got))
+	}
+	if got[1].Parts[0].FunctionCall.ID != "call_a" || got[1].Parts[1].FunctionCall.ID != "call_b" {
+		t.Fatalf("call ids = %#v %#v", got[1].Parts[0].FunctionCall, got[1].Parts[1].FunctionCall)
+	}
+	if len(got[2].Parts) != 2 {
+		t.Fatalf("merged parts = %#v", got[2].Parts)
+	}
+	ok := got[2].Parts[0].FunctionResponse
+	bad := got[2].Parts[1].FunctionResponse
+	if ok == nil || ok.ID != "call_a" || ok.Name != "read" || ok.Response["output"] != "file" {
+		t.Fatalf("success = %#v", ok)
+	}
+	if _, exists := ok.Response["error"]; exists {
+		t.Fatalf("success error key = %#v", ok.Response)
+	}
+	if bad == nil || bad.ID != "call_b" || bad.Name != "bash" || bad.Response["error"] != "boom" {
+		t.Fatalf("error = %#v", bad)
+	}
+	if _, exists := bad.Response["output"]; exists {
+		t.Fatalf("error output key = %#v", bad.Response)
+	}
+	if got[4].Parts[0].FunctionResponse == nil || got[4].Parts[0].FunctionResponse.ID != "call_c" || len(got[4].Parts) != 1 {
+		t.Fatalf("next turn = %#v", got[4].Parts)
+	}
+}
+
+func TestGoogleContentsGemini3NestsToolImages(t *testing.T) {
+	target := googleReplayTarget("gemini-3-flash")
+	withText := `{"content":[{"type":"text","text":"see"},{"type":"image","data":"QQ==","mimeType":"image/png"}]}`
+	imageOnly := `{"content":[{"type":"image","data":"QQ==","mimeType":"image/jpeg"}]}`
+	got := googleContents(Context{Messages: []Message{
+		{Role: RoleUser, Content: "look"},
+		googleAssistant(target, []*Content{
+			{Type: KindToolCall, ToolID: "call_a", ToolName: "read", Arguments: map[string]any{"path": "a"}},
+			{Type: KindToolCall, ToolID: "call_b", ToolName: "snap", Arguments: map[string]any{}},
+		}),
+		{Role: RoleToolResult, ToolCallID: "call_a", ToolName: "read", Content: withText},
+		{Role: RoleToolResult, ToolCallID: "call_b", ToolName: "snap", Content: imageOnly, IsError: true},
+	}}, target)
+	if len(got) != 3 {
+		t.Fatalf("len = %d", len(got))
+	}
+	if len(got[2].Parts) != 2 {
+		t.Fatalf("parts = %#v", got[2].Parts)
+	}
+	first := got[2].Parts[0].FunctionResponse
+	if first == nil || first.Response["output"] != "see" || len(first.Parts) != 1 || first.Parts[0].InlineData == nil {
+		t.Fatalf("nested = %#v", first)
+	}
+	if first.Parts[0].InlineData.MIMEType != "image/png" || !bytes.Equal(first.Parts[0].InlineData.Data, []byte("A")) {
+		t.Fatalf("image = %#v", first.Parts[0].InlineData)
+	}
+	if got[2].Parts[0].InlineData != nil {
+		t.Fatalf("sibling image = %#v", got[2].Parts[0])
+	}
+	second := got[2].Parts[1].FunctionResponse
+	if second == nil || second.Response["error"] != "(see attached image)" || len(second.Parts) != 1 {
+		t.Fatalf("image only = %#v", second)
+	}
+	if second.Parts[0].InlineData == nil || second.Parts[0].InlineData.MIMEType != "image/jpeg" {
+		t.Fatalf("jpeg = %#v", second.Parts)
+	}
+}
+
+func TestGoogleContentsLegacyGeminiSeparatesToolImages(t *testing.T) {
+	target := googleReplayTarget("gemini-2.5-flash")
+	got := googleContents(Context{Messages: []Message{
+		{Role: RoleUser, Content: "look"},
+		googleAssistant(target, []*Content{
+			{Type: KindToolCall, ToolID: "call_a", ToolName: "read", Arguments: map[string]any{"path": "a"}},
+			{Type: KindToolCall, ToolID: "call_b", ToolName: "snap", Arguments: map[string]any{}},
+		}),
+		{Role: RoleToolResult, ToolCallID: "call_a", ToolName: "read", Content: "file", Images: []ImageContent{{Type: "image", Data: "QQ==", MimeType: "image/png"}}},
+		{Role: RoleToolResult, ToolCallID: "call_b", ToolName: "snap", Content: "nope", IsError: true, Images: []ImageContent{{Type: "image", Data: "QQ==", MimeType: "image/jpeg"}}},
+		{Role: RoleUser, Content: "thanks"},
+	}}, target)
+	if len(got) != 6 {
+		t.Fatalf("len = %d", len(got))
+	}
+	if got[1].Parts[0].FunctionCall.ID != "" || got[1].Parts[1].FunctionCall.ID != "" {
+		t.Fatalf("call ids = %#v %#v", got[1].Parts[0].FunctionCall, got[1].Parts[1].FunctionCall)
+	}
+	if len(got[2].Parts) != 2 {
+		t.Fatalf("merged = %#v", got[2].Parts)
+	}
+	for i, part := range got[2].Parts {
+		fr := part.FunctionResponse
+		if fr == nil || fr.ID != "" || len(fr.Parts) != 0 || part.InlineData != nil {
+			t.Fatalf("response %d = %#v", i, part)
+		}
+	}
+	if got[2].Parts[0].FunctionResponse.Response["output"] != "file" || got[2].Parts[1].FunctionResponse.Response["error"] != "nope" {
+		t.Fatalf("bodies = %#v %#v", got[2].Parts[0].FunctionResponse, got[2].Parts[1].FunctionResponse)
+	}
+	want := []string{"image/png", "image/jpeg"}
+	for i, mime := range want {
+		content := got[3+i]
+		if content.Role != "user" || len(content.Parts) != 2 || content.Parts[0].Text != "Tool result image:" {
+			t.Fatalf("image turn %d = %#v", i, content)
+		}
+		blob := content.Parts[1].InlineData
+		if blob == nil || blob.MIMEType != mime || !bytes.Equal(blob.Data, []byte("A")) {
+			t.Fatalf("image %d = %#v", i, blob)
+		}
+	}
+	if got[5].Parts[0].Text != "thanks" {
+		t.Fatalf("trailing user = %#v", got[5])
+	}
+}
+
+func TestGoogleContentsToolIDsFollowModel(t *testing.T) {
+	cases := []struct {
+		model  string
+		wantID bool
+	}{
+		{model: "gemini-3-flash", wantID: true},
+		{model: "gemini-2.5-flash", wantID: false},
+		{model: "claude-sonnet-4-5", wantID: true},
+		{model: "gpt-oss-120b", wantID: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			target := googleReplayTarget(tc.model)
+			got := googleContents(Context{Messages: []Message{
+				googleAssistant(target, []*Content{
+					{Type: KindToolCall, ToolID: "call_a", ToolName: "read", Arguments: map[string]any{"path": "a"}},
+				}),
+				{Role: RoleToolResult, ToolCallID: "call_a", ToolName: "read", Content: "ok"},
+			}}, target)
+			call := got[0].Parts[0].FunctionCall
+			resp := got[1].Parts[0].FunctionResponse
+			if call == nil || resp == nil {
+				t.Fatalf("parts = %#v / %#v", got[0].Parts, got[1].Parts)
+			}
+			if tc.wantID {
+				if call.ID != "call_a" || resp.ID != "call_a" {
+					t.Fatalf("ids = %q %q", call.ID, resp.ID)
+				}
+				return
+			}
+			if call.ID != "" || resp.ID != "" {
+				t.Fatalf("ids = %q %q", call.ID, resp.ID)
+			}
+		})
+	}
+}
+
+func googleReplayTarget(model string) replayTarget {
+	return replayTarget{Provider: "google", API: "google-generative-ai", Model: model}
+}
+
+func googleAssistant(target replayTarget, content []*Content) Message {
+	return Message{Assistant: &AssistantMessage{
+		Provider: target.Provider, API: target.API, Model: target.Model, Content: content,
+	}}
 }
 
 func TestGoogleVertexClientConfig(t *testing.T) {
