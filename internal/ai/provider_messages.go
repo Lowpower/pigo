@@ -399,9 +399,25 @@ func openaiAssistant(msg *AssistantMessage, w openAIWireOpts) map[string]any {
 	if len(toolCalls) > 0 {
 		out["tool_calls"] = toolCalls
 	}
+	if details := openAIReasoningDetails(msg); len(details) > 0 {
+		out["reasoning_details"] = details
+	}
 	if w.emptyReasoning {
 		if _, ok := out["reasoning_content"]; !ok {
 			out["reasoning_content"] = ""
+		}
+	}
+	return out
+}
+
+func openAIReasoningDetails(msg *AssistantMessage) []any {
+	var out []any
+	for _, c := range msg.Content {
+		if c == nil || c.Type != KindThinking {
+			continue
+		}
+		for _, detail := range parseOpenAIReasoningDetails(c.ThinkingSignature) {
+			out = append(out, detail)
 		}
 	}
 	return out
