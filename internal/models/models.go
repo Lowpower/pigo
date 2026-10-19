@@ -125,7 +125,11 @@ type Compat struct {
 
 	// OpenAI Chat Completions wire switches. Nil or empty means unset:
 	// the request builder fills provider and baseUrl defaults.
-	SupportsStore                               *bool                 `json:"supportsStore,omitempty"`
+	SupportsStore *bool `json:"supportsStore,omitempty"`
+	// SupportsFinishReason reports whether a Chat Completions stream includes
+	// finish_reason. Nil means the provider does (the strict default). False
+	// infers stop or toolUse when the stream ends without one.
+	SupportsFinishReason                        *bool                 `json:"supportsFinishReason,omitempty"`
 	SupportsUsageInStreaming                    *bool                 `json:"supportsUsageInStreaming,omitempty"`
 	SupportsDeveloperRole                       *bool                 `json:"supportsDeveloperRole,omitempty"`
 	MaxTokensField                              string                `json:"maxTokensField,omitempty"`

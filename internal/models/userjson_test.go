@@ -220,6 +220,56 @@ func TestLoadUserJSONReadsOpenAICompatFlags(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONAppliesProviderFinishReason(t *testing.T) {
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("finish-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "finish-json": {
+      "api": "openai-completions",
+      "baseUrl": "https://example.invalid/v1",
+      "compat": {
+        "supportsFinishReason": false,
+        "supportsStore": false
+      },
+      "models": [
+        {"id": "inherit"},
+        {"id": "strict", "compat": {"supportsFinishReason": true, "thinkingFormat": "keep"}},
+        {"id": "infer", "compat": {"supportsFinishReason": false}}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	inherit, ok := Lookup("finish-json", "inherit")
+	if !ok || inherit.Compat == nil || inherit.Compat.SupportsFinishReason == nil || *inherit.Compat.SupportsFinishReason {
+		t.Fatalf("inherit = %+v ok=%v, want supportsFinishReason=false", inherit.Compat, ok)
+	}
+	if inherit.Compat.SupportsStore != nil {
+		t.Fatalf("provider supportsStore should stay unset, got %v", inherit.Compat.SupportsStore)
+	}
+	strict, ok := Lookup("finish-json", "strict")
+	if !ok || strict.Compat == nil || strict.Compat.SupportsFinishReason == nil || !*strict.Compat.SupportsFinishReason {
+		t.Fatalf("strict = %+v ok=%v, want supportsFinishReason=true", strict.Compat, ok)
+	}
+	if strict.Compat.ThinkingFormat != "keep" {
+		t.Fatalf("thinking format = %q", strict.Compat.ThinkingFormat)
+	}
+	infer, ok := Lookup("finish-json", "infer")
+	if !ok || infer.Compat == nil || infer.Compat.SupportsFinishReason == nil || *infer.Compat.SupportsFinishReason {
+		t.Fatalf("infer = %+v ok=%v, want supportsFinishReason=false", infer.Compat, ok)
+	}
+}
+
 func TestLoadUserJSONReadsSupportsMaxOutputTokens(t *testing.T) {
 	t.Cleanup(func() {
 		ClearOverlays()

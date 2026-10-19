@@ -352,6 +352,86 @@ func TestOpenAICompletionsCatalogCost(t *testing.T) {
 	}
 }
 
+func TestStreamOpenAIMissingFinishReason(t *testing.T) {
+	textOnly := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n"
+	withTool := "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]}}]}\n\ndata: [DONE]\n"
+	withReason := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n"
+
+	t.Run("default missing is an error", func(t *testing.T) {
+		_, final := StreamOpenAIReader(context.Background(), strings.NewReader(textOnly), "gpt-test").Collect()
+		if final == nil || final.StopReason != StopError || !strings.Contains(final.ErrorMessage, "Stream ended without finish_reason") {
+			t.Fatalf("final = %+v", final)
+		}
+		if !IsRetryableAssistantError(final) {
+			t.Fatalf("error should be retryable: %q", final.ErrorMessage)
+		}
+	})
+
+	t.Run("default missing tool call is an error", func(t *testing.T) {
+		events, final := StreamOpenAIReader(context.Background(), strings.NewReader(withTool), "gpt-test").Collect()
+		if final == nil || final.StopReason != StopError {
+			t.Fatalf("stop = %v, want error", final)
+		}
+		if !strings.Contains(final.ErrorMessage, "Stream ended without finish_reason") {
+			t.Fatalf("error = %q", final.ErrorMessage)
+		}
+		if len(events) == 0 || events[len(events)-1].Type != EventError {
+			t.Fatalf("last event = %v", events)
+		}
+	})
+
+	t.Run("normal stream still stops", func(t *testing.T) {
+		events, final := StreamOpenAIReader(context.Background(), strings.NewReader(withReason), "gpt-test").Collect()
+		if final == nil || final.StopReason != StopStop || final.Text() != "hi" {
+			t.Fatalf("final = %+v", final)
+		}
+		if events[len(events)-1].Type != EventDone {
+			t.Fatalf("last event = %s", events[len(events)-1].Type)
+		}
+	})
+
+	off := false
+	on := true
+	for _, tc := range []struct {
+		name     string
+		compat   *models.Compat
+		body     string
+		wantStop StopReason
+	}{
+		{name: "flag false infers stop", compat: &models.Compat{SupportsFinishReason: &off}, body: textOnly, wantStop: StopStop},
+		{name: "flag false infers tool use", compat: &models.Compat{SupportsFinishReason: &off}, body: withTool, wantStop: StopToolUse},
+		{name: "flag true stays strict", compat: &models.Compat{SupportsFinishReason: &on}, body: textOnly, wantStop: StopError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const provider = "finish-reason"
+			models.RegisterProvider(models.ProviderSpec{
+				ID: provider, DefaultAPI: "openai-completions", DefaultID: "m",
+				Models: []models.Model{{Provider: provider, ID: "m", API: "openai-completions", Compat: tc.compat}},
+			})
+			t.Cleanup(func() { models.UnregisterProvider(provider) })
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			t.Cleanup(srv.Close)
+			client := &OpenAICompletionsClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+			stream, err := client.StreamFn()(context.Background(), Context{
+				Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			}, Options{Provider: provider, Model: "m"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, final := stream.Collect()
+			if final == nil || final.StopReason != tc.wantStop {
+				t.Fatalf("stop = %v, want %s", final, tc.wantStop)
+			}
+			if tc.wantStop == StopError && !strings.Contains(final.ErrorMessage, "Stream ended without finish_reason") {
+				t.Fatalf("error = %q", final.ErrorMessage)
+			}
+		})
+	}
+}
+
 func eventTypes(events []Event) []EventType {
 	out := make([]EventType, len(events))
 	for i, e := range events {

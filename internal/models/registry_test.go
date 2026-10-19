@@ -281,6 +281,42 @@ func TestOverlayMergesOpenAICompatFlags(t *testing.T) {
 	}
 }
 
+func TestOverlayKeepsSupportsFinishReason(t *testing.T) {
+	off := false
+	on := true
+	RegisterProvider(ProviderSpec{
+		ID: "finish-merge", DefaultAPI: "openai-completions", DefaultID: "m",
+		Models: []Model{{
+			Provider: "finish-merge", ID: "m",
+			Compat: &Compat{ThinkingFormat: "keep", SupportsFinishReason: &on},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("finish-merge")
+	})
+	SetUserOverlay("finish-merge", []Model{{
+		ID:     "m",
+		Compat: &Compat{SupportsFinishReason: &off},
+	}})
+	m, ok := Lookup("finish-merge", "m")
+	if !ok || m.Compat == nil || m.Compat.SupportsFinishReason == nil || *m.Compat.SupportsFinishReason {
+		t.Fatalf("supportsFinishReason = %+v ok=%v", m.Compat, ok)
+	}
+	if m.Compat.ThinkingFormat != "keep" {
+		t.Fatalf("thinking format lost: %+v", m.Compat)
+	}
+
+	SetUserOverlay("finish-merge", []Model{{
+		ID:     "m",
+		Compat: &Compat{SupportsFinishReason: &on},
+	}})
+	m, ok = Lookup("finish-merge", "m")
+	if !ok || m.Compat == nil || m.Compat.SupportsFinishReason == nil || !*m.Compat.SupportsFinishReason {
+		t.Fatalf("re-overlay supportsFinishReason = %+v ok=%v", m.Compat, ok)
+	}
+}
+
 func TestOverlayMergesImageResizeOntoExistingModel(t *testing.T) {
 	height := 800
 	quality := 70

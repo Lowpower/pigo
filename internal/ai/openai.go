@@ -68,10 +68,11 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 
 		s := NewEventStream(16)
 		out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "openai-completions", Provider: chatProvider(opts), Model: opts.Model, StopReason: StopPending}
+		finishReason := resolveOpenAICompat(opts, c.BaseURL).supportsFinishReason
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamOpenAISSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, catalogCost(opts))
+			streamOpenAISSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, catalogCost(opts), finishReason)
 		}()
 		return s, nil
 	}
@@ -83,7 +84,7 @@ func StreamOpenAIReader(ctx context.Context, r io.Reader, model string) *EventSt
 	out := &AssistantMessage{Role: RoleAssistant, Content: []*Content{}, API: "openai-completions", Provider: "openai", Model: model, StopReason: StopPending}
 	go func() {
 		defer s.end()
-		streamOpenAISSE(ctx, r, out, s, nil, nil)
+		streamOpenAISSE(ctx, r, out, s, nil, nil, true)
 	}()
 	return s
 }
@@ -246,7 +247,7 @@ func openAICacheCounts(u oaiUsage) (read, write int) {
 	return read, write
 }
 
-func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), cost *models.Cost) {
+func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), cost *models.Cost, supportsFinishReason bool) {
 	if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 		return
 	}
@@ -311,12 +312,18 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 		}
 	}
 
-	// If the provider never sent finish_reason, infer from content (compat).
+	// A missing finish_reason is an error unless the model opts out.
+	// Opt-out providers infer stop or toolUse from whatever arrived.
 	if out.StopReason == StopPending {
-		if len(out.ToolCalls()) > 0 {
-			out.StopReason = StopToolUse
+		if !supportsFinishReason {
+			if len(out.ToolCalls()) > 0 {
+				out.StopReason = StopToolUse
+			} else {
+				out.StopReason = StopStop
+			}
 		} else {
-			out.StopReason = StopStop
+			finishError(ctx, out, s, "Stream ended without finish_reason")
+			return
 		}
 	}
 	switch out.StopReason {

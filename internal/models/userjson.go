@@ -19,6 +19,7 @@ type userProvider struct {
 	API     string  `json:"api"`
 	APIKey  string  `json:"apiKey"`
 	OAuth   string  `json:"oauth"`
+	Compat  *Compat `json:"compat"`
 	Models  []Model `json:"models"`
 }
 
@@ -62,6 +63,7 @@ func LoadUserJSON(path string) error {
 			if m.BaseURL == "" {
 				m.BaseURL = p.BaseURL
 			}
+			m.Compat = applyProviderFinishReason(p.Compat, m.Compat)
 			models = append(models, m)
 		}
 		if oauth == "radius" {
@@ -100,4 +102,23 @@ func LoadUserJSON(path string) error {
 		_ = os.Chmod(path, 0o600)
 	}
 	return nil
+}
+
+// applyProviderFinishReason copies a provider-level supportsFinishReason onto
+// a listed model when the model does not set the field itself. Other provider
+// compat fields stay unused.
+func applyProviderFinishReason(provider, model *Compat) *Compat {
+	if provider == nil || provider.SupportsFinishReason == nil {
+		return model
+	}
+	if model == nil {
+		return &Compat{SupportsFinishReason: cloneBool(provider.SupportsFinishReason)}
+	}
+	if model.SupportsFinishReason != nil {
+		return model
+	}
+	copied := *model
+	cloneCompatPointers(&copied, model)
+	copied.SupportsFinishReason = cloneBool(provider.SupportsFinishReason)
+	return &copied
 }

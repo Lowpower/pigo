@@ -21,6 +21,7 @@ func TestIsRetryableAssistantError(t *testing.T) {
 		"EAI_AGAIN api.example.com",
 		"getaddrinfo failed for api.example.com",
 		"OpenAI Responses stream ended before a terminal response event",
+		"Stream ended without finish_reason",
 		"429 too many requests",
 		"network_error",
 		"Provider finish_reason: network_error",
