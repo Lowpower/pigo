@@ -14,7 +14,8 @@ import (
 )
 
 // This file streams OpenAI Chat Completions SSE: text, reasoning_content
-// thinking, tool-call streaming, finish_reason mapping, and usage.
+// thinking, assistant-level reasoning_details, tool-call streaming,
+// finish_reason mapping, and usage.
 
 // OpenAICompletionsClient talks to an OpenAI-compatible /v1/chat/completions
 // endpoint. BaseURL and APIKey are configurable; auth is Bearer.
@@ -194,10 +195,11 @@ func buildOpenAIRequestAt(reqCtx Context, opts Options, baseURL string) ([]byte,
 type oaiChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content          string `json:"content"`
-			ReasoningContent string `json:"reasoning_content"`
-			Reasoning        string `json:"reasoning"`
-			ReasoningText    string `json:"reasoning_text"`
+			Content          string          `json:"content"`
+			ReasoningContent string          `json:"reasoning_content"`
+			Reasoning        string          `json:"reasoning"`
+			ReasoningText    string          `json:"reasoning_text"`
+			ReasoningDetails json.RawMessage `json:"reasoning_details"`
 			ToolCalls        []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
@@ -254,6 +256,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 	textIdx := -1            // position of the text block in out.Content (-1 = none yet)
 	thinkIdx := -1           // position of the thinking block in out.Content (-1 = none yet)
 	toolPos := map[int]int{} // openai tool_call index -> position in out.Content
+	var reasoningDetails []map[string]any
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
@@ -268,7 +271,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 		if payload == "[DONE]" {
 			return true
 		}
-		return handleOpenAIChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, s, observe, cost)
+		return handleOpenAIChunk(ctx, payload, out, &textIdx, &thinkIdx, toolPos, &reasoningDetails, s, observe, cost)
 	}
 
 	for scanner.Scan() {
@@ -327,7 +330,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 	}
 }
 
-func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, s *EventStream, observe func([]byte), cost *models.Cost) bool {
+func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessage, textIdx, thinkIdx *int, toolPos map[int]int, reasoningDetails *[]map[string]any, s *EventStream, observe func([]byte), cost *models.Cost) bool {
 	var chunk oaiChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return true
@@ -345,12 +348,8 @@ func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessag
 	choice := chunk.Choices[0]
 
 	if delta := firstReasoningDelta(choice.Delta.ReasoningContent, choice.Delta.Reasoning, choice.Delta.ReasoningText); delta != "" {
-		if *thinkIdx < 0 {
-			out.Content = append(out.Content, &Content{Type: KindThinking, ThinkingSignature: "reasoning_content"})
-			*thinkIdx = len(out.Content) - 1
-			if !s.push(ctx, Event{Type: EventThinkingStart, ContentIndex: *thinkIdx, Partial: out}) {
-				return false
-			}
+		if !ensureOpenAIThinking(ctx, out, thinkIdx, s) {
+			return false
 		}
 		out.Content[*thinkIdx].Thinking += delta
 		if !s.push(ctx, Event{Type: EventThinkingDelta, ContentIndex: *thinkIdx, Delta: delta, Partial: out}) {
@@ -370,6 +369,19 @@ func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessag
 		if !s.push(ctx, Event{Type: EventTextDelta, ContentIndex: *textIdx, Delta: choice.Delta.Content, Partial: out}) {
 			return false
 		}
+	}
+
+	// reasoning_details are replay metadata. Read them before tool calls so an
+	// encrypted entry in the same chunk is kept, not dropped because the tool
+	// call has not been seen yet.
+	if incoming := decodeOpenAIReasoningDetails(choice.Delta.ReasoningDetails); len(incoming) > 0 {
+		if !ensureOpenAIThinking(ctx, out, thinkIdx, s) {
+			return false
+		}
+		for _, detail := range incoming {
+			*reasoningDetails = appendOpenAIReasoningDetail(*reasoningDetails, detail)
+		}
+		assignReasoningDetailsSignature(out.Content[*thinkIdx], *reasoningDetails)
 	}
 
 	for _, tc := range choice.Delta.ToolCalls {
@@ -403,6 +415,139 @@ func handleOpenAIChunk(ctx context.Context, payload string, out *AssistantMessag
 		out.StopReason, out.ErrorMessage = mapOpenAIFinishReason(*choice.FinishReason)
 	}
 	return true
+}
+
+func ensureOpenAIThinking(ctx context.Context, out *AssistantMessage, thinkIdx *int, s *EventStream) bool {
+	if *thinkIdx >= 0 {
+		return true
+	}
+	out.Content = append(out.Content, &Content{Type: KindThinking, ThinkingSignature: "reasoning_content"})
+	*thinkIdx = len(out.Content) - 1
+	return s.push(ctx, Event{Type: EventThinkingStart, ContentIndex: *thinkIdx, Partial: out})
+}
+
+// decodeOpenAIReasoningDetails reads an assistant-level reasoning_details
+// array. Non-objects are skipped. A missing or non-array value yields nil so
+// the rest of the chunk still streams.
+func decodeOpenAIReasoningDetails(raw json.RawMessage) []map[string]any {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] != '[' {
+		return nil
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		item = bytes.TrimSpace(item)
+		if len(item) == 0 || item[0] != '{' {
+			continue
+		}
+		var detail map[string]any
+		if err := json.Unmarshal(item, &detail); err != nil || len(detail) == 0 {
+			continue
+		}
+		out = append(out, detail)
+	}
+	return out
+}
+
+// appendOpenAIReasoningDetail merges consecutive reasoning.text or
+// reasoning.summary deltas. Encrypted and other entries stay discrete so
+// their order matches the stream.
+func appendOpenAIReasoningDetail(details []map[string]any, detail map[string]any) []map[string]any {
+	if len(details) > 0 {
+		last := details[len(details)-1]
+		dtype, _ := detail["type"].(string)
+		ltype, _ := last["type"].(string)
+		switch {
+		case dtype == "reasoning.text" && ltype == "reasoning.text":
+			last["text"] = detailString(last, "text") + detailString(detail, "text")
+			fillBlankDetailString(last, detail, "signature")
+			fillMissingCommonReasoningFields(last, detail)
+			return details
+		case dtype == "reasoning.summary" && ltype == "reasoning.summary":
+			last["summary"] = detailString(last, "summary") + detailString(detail, "summary")
+			fillMissingCommonReasoningFields(last, detail)
+			return details
+		}
+	}
+	return append(details, cloneReasoningDetail(detail))
+}
+
+func fillMissingCommonReasoningFields(target, source map[string]any) {
+	if _, ok := presentDetailField(target, "id"); !ok {
+		if v, ok := presentDetailField(source, "id"); ok {
+			target["id"] = v
+		}
+	}
+	fillBlankDetailString(target, source, "format")
+	if _, ok := presentDetailField(target, "index"); !ok {
+		if v, ok := presentDetailField(source, "index"); ok {
+			target["index"] = v
+		}
+	}
+}
+
+func fillBlankDetailString(target, source map[string]any, key string) {
+	if !blankDetailString(target, key) {
+		return
+	}
+	if s := detailString(source, key); s != "" {
+		target[key] = s
+	}
+}
+
+func presentDetailField(m map[string]any, key string) (any, bool) {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return nil, false
+	}
+	return v, true
+}
+
+func blankDetailString(m map[string]any, key string) bool {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return true
+	}
+	s, isString := v.(string)
+	return isString && s == ""
+}
+
+func detailString(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
+}
+
+func cloneReasoningDetail(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func assignReasoningDetailsSignature(block *Content, details []map[string]any) {
+	if block == nil || len(details) == 0 {
+		return
+	}
+	raw, err := json.Marshal(details)
+	if err != nil {
+		return
+	}
+	block.ThinkingSignature = string(raw)
+}
+
+// parseOpenAIReasoningDetails returns a stored reasoning_details array.
+// Legacy signatures such as "reasoning_content" are not arrays and yield nil.
+func parseOpenAIReasoningDetails(sig string) []map[string]any {
+	sig = strings.TrimSpace(sig)
+	if !strings.HasPrefix(sig, "[") {
+		return nil
+	}
+	return decodeOpenAIReasoningDetails([]byte(sig))
 }
 
 func firstReasoningDelta(fields ...string) string {
