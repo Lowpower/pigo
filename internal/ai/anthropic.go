@@ -58,6 +58,13 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 			return nil, err
 		}
 		body = transformRequestBody(opts, body)
+		oauth := anthropicOAuth(c.APIKey, c.Headers)
+		if oauth {
+			body, err = applyClaudeCodeWire(body, opts)
+			if err != nil {
+				return nil, err
+			}
+		}
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(body))
 		if err != nil {
@@ -97,10 +104,17 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 		if midConvoEffortTurn(opts) {
 			out.ProviderThinkingLevel = activeMidConvoEffort(opts)
 		}
+		var restoreTool func(string) string
+		if oauth {
+			tools := reqCtx.Tools
+			restoreTool = func(name string) string {
+				return fromClaudeCodeName(name, tools)
+			}
+		}
 		go func() {
 			defer s.end()
 			defer func() { _ = resp.Body.Close() }()
-			streamAnthropicSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, newAnthropicPricing(opts))
+			streamAnthropicSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, newAnthropicPricing(opts), restoreTool)
 		}()
 		return s, nil
 	}
@@ -114,7 +128,7 @@ func StreamAnthropicReader(ctx context.Context, r io.Reader, model string, cost 
 	out := newOutputMessage(model, "anthropic")
 	go func() {
 		defer s.end()
-		streamAnthropicSSE(ctx, r, out, s, nil, anthropicPricing{requested: cost, active: cost})
+		streamAnthropicSSE(ctx, r, out, s, nil, anthropicPricing{requested: cost, active: cost}, nil)
 	}()
 	return s
 }
@@ -128,6 +142,9 @@ func applyAnthropicAuth(req *http.Request, apiKey string, extraBetas ...string) 
 	}
 	if authz == "" && apiKey != "" {
 		req.Header.Set("x-api-key", apiKey)
+	}
+	if oauth {
+		applyClaudeCodeHeaders(req.Header)
 	}
 	if req.Header.Get("anthropic-beta") == "" {
 		betas := "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
@@ -530,7 +547,7 @@ func (p *anthropicPricing) cost() *models.Cost {
 
 // streamAnthropicSSE reads Anthropic SSE from r and pushes AssistantMessageEvents
 // onto s, building out in place. It does not close s (the caller does).
-func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), price anthropicPricing) {
+func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s *EventStream, observe func([]byte), price anthropicPricing, restoreTool func(string) string) {
 	if !s.push(ctx, Event{Type: EventStart, Partial: out}) {
 		return
 	}
@@ -548,7 +565,7 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 		}
 		payload := data.String()
 		data.Reset()
-		return handleAnthropicEvent(ctx, payload, out, pos, &transformations, s, observe, &price)
+		return handleAnthropicEvent(ctx, payload, out, pos, &transformations, s, observe, &price, restoreTool)
 	}
 
 	for scanner.Scan() {
@@ -588,7 +605,7 @@ func streamAnthropicSSE(ctx context.Context, r io.Reader, out *AssistantMessage,
 	}
 }
 
-func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, transformations *[]InputTransformation, s *EventStream, observe func([]byte), price *anthropicPricing) bool {
+func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMessage, pos map[int]int, transformations *[]InputTransformation, s *EventStream, observe func([]byte), price *anthropicPricing, restoreTool func(string) string) bool {
 	var ev anthropicSSE
 	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 		return true // ignore unparseable keepalive/comment payloads
@@ -635,7 +652,11 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 			if args == nil {
 				args = map[string]any{}
 			}
-			block = &Content{Type: KindToolCall, ToolID: cb.ID, ToolName: cb.Name, Arguments: args}
+			name := cb.Name
+			if restoreTool != nil {
+				name = restoreTool(name)
+			}
+			block = &Content{Type: KindToolCall, ToolID: cb.ID, ToolName: name, Arguments: args}
 		case "tool_reference":
 			// Request-side load marker; Fireworks may echo it. Skip so later
 			// tool_use blocks keep their stream indexes.

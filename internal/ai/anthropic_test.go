@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -595,5 +596,287 @@ func TestAnthropicCatalogAndFallbackCost(t *testing.T) {
 		if math.Abs(u.Cost.Total-90) > 1e-9 {
 			t.Fatalf("cost=%+v, want opus total 90", u.Cost)
 		}
+	})
+}
+
+func claudeCodeIdentityContext() Context {
+	return Context{
+		System: "pigo system",
+		Messages: []Message{
+			{Role: RoleUser, Content: "hi"},
+			{Assistant: &AssistantMessage{Content: []*Content{
+				{Type: KindToolCall, ToolID: "tu_read", ToolName: "read", Arguments: map[string]any{"path": "a"}},
+				{Type: KindToolCall, ToolID: "tu_bash", ToolName: "bash", Arguments: map[string]any{"command": "ls"}},
+				{Type: KindToolCall, ToolID: "tu_search", ToolName: "tool_search", Arguments: map[string]any{}},
+			}}},
+			{Role: RoleToolResult, ToolCallID: "tu_read", ToolName: "read", Content: "file"},
+			{Role: RoleToolResult, ToolCallID: "tu_bash", ToolName: "bash", Content: "ok"},
+			{Role: RoleToolResult, ToolCallID: "tu_search", ToolName: "tool_search", Content: "found", AddedToolNames: []string{"grep"}},
+		},
+		Tools: []Tool{
+			{Name: "read", Description: "read", Parameters: map[string]any{"type": "object"}},
+			{Name: "bash", Description: "bash", Parameters: map[string]any{"type": "object"}},
+			{Name: "tool_search", Description: "search", Parameters: map[string]any{"type": "object"}},
+			{Name: "grep", Description: "grep", Parameters: map[string]any{"type": "object"}},
+		},
+	}
+}
+
+func claudeCodeToolSSE(names ...string) string {
+	var b strings.Builder
+	b.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-test\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n")
+	for i, name := range names {
+		fmt.Fprintf(&b, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":%d,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tu_%d\",\"name\":%q,\"input\":{}}}\n\n", i, i, name)
+		fmt.Fprintf(&b, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":%d}\n\n", i)
+	}
+	b.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":2}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n")
+	return b.String()
+}
+
+func captureAnthropicRequest(t *testing.T, client *AnthropicClient, reqCtx Context, opts Options, sse string) (map[string]any, http.Header, *AssistantMessage) {
+	t.Helper()
+	var body []byte
+	var header http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header = r.Header.Clone()
+		var err error
+		body, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(sse))
+	}))
+	t.Cleanup(srv.Close)
+	client.BaseURL = srv.URL
+	client.HTTPClient = srv.Client()
+	stream, err := client.StreamFn()(context.Background(), reqCtx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("request body: %v\n%s", err, body)
+	}
+	return req, header, final
+}
+
+func anthropicWireNames(req map[string]any) (tools, uses, refs []string) {
+	for _, raw := range anySlice(req["tools"]) {
+		tool, _ := raw.(map[string]any)
+		tools = append(tools, jsonString(tool["name"]))
+	}
+	for _, raw := range anySlice(req["messages"]) {
+		msg, _ := raw.(map[string]any)
+		collectAnthropicNames(msg["content"], &uses, &refs)
+	}
+	return tools, uses, refs
+}
+
+func collectAnthropicNames(content any, uses, refs *[]string) {
+	for _, raw := range anySlice(content) {
+		block, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch block["type"] {
+		case "tool_use":
+			*uses = append(*uses, jsonString(block["name"]))
+		case "tool_reference":
+			*refs = append(*refs, jsonString(block["tool_name"]))
+		case "tool_result":
+			collectAnthropicNames(block["content"], uses, refs)
+		}
+	}
+}
+
+func jsonString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func systemBlocks(t *testing.T, req map[string]any) []map[string]any {
+	t.Helper()
+	raw, ok := req["system"].([]any)
+	if !ok {
+		t.Fatalf("system = %#v", req["system"])
+	}
+	out := make([]map[string]any, len(raw))
+	for i, item := range raw {
+		block, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("system[%d] = %#v", i, item)
+		}
+		out[i] = block
+	}
+	return out
+}
+
+func TestAnthropicOAuthClaudeCodeIdentity(t *testing.T) {
+	const identity = "You are Claude Code, Anthropic's official CLI for Claude."
+	reqCtx := claudeCodeIdentityContext()
+	opts := Options{Provider: "fireworks", Model: "claude-test"}
+	sse := claudeCodeToolSSE("Read", "Bash", "tool_search", "UnknownTool")
+
+	req, hdr, final := captureAnthropicRequest(t, &AnthropicClient{APIKey: "sk-ant-oat-xyz"}, reqCtx, opts, sse)
+	if hdr.Get("User-Agent") != "claude-cli/2.1.280" {
+		t.Errorf("User-Agent = %q", hdr.Get("User-Agent"))
+	}
+	if hdr.Get("x-app") != "cli" {
+		t.Errorf("x-app = %q", hdr.Get("x-app"))
+	}
+	if hdr.Get("anthropic-dangerous-direct-browser-access") != "true" {
+		t.Errorf("browser access = %q", hdr.Get("anthropic-dangerous-direct-browser-access"))
+	}
+	if !strings.Contains(hdr.Get("anthropic-beta"), "oauth-2025-04-20") {
+		t.Errorf("beta = %q", hdr.Get("anthropic-beta"))
+	}
+
+	sys := systemBlocks(t, req)
+	if len(sys) != 2 {
+		t.Fatalf("system = %#v", req["system"])
+	}
+	if sys[0]["text"] != identity {
+		t.Errorf("system[0] = %#v", sys[0])
+	}
+	if sys[1]["text"] != "pigo system" {
+		t.Errorf("system[1] = %#v", sys[1])
+	}
+	if _, ok := sys[0]["cache_control"]; !ok {
+		t.Errorf("identity missing cache_control: %#v", sys[0])
+	}
+	if _, ok := sys[1]["cache_control"]; !ok {
+		t.Errorf("pigo system missing cache_control: %#v", sys[1])
+	}
+
+	tools, uses, refs := anthropicWireNames(req)
+	if fmt.Sprint(tools) != "[Read Bash tool_search Grep]" {
+		t.Errorf("tools = %v", tools)
+	}
+	if fmt.Sprint(uses) != "[Read Bash tool_search]" {
+		t.Errorf("tool_use = %v", uses)
+	}
+	if fmt.Sprint(refs) != "[Grep]" {
+		t.Errorf("tool_reference = %v", refs)
+	}
+
+	if final == nil {
+		t.Fatal("no final message")
+	}
+	var got []string
+	for _, call := range final.ToolCalls() {
+		got = append(got, call.ToolName)
+	}
+	if fmt.Sprint(got) != "[read bash tool_search UnknownTool]" {
+		t.Errorf("restored tools = %v", got)
+	}
+	if reqCtx.Tools[0].Name != "read" || reqCtx.Messages[1].Assistant.Content[0].ToolName != "read" {
+		t.Fatalf("session tool names changed: %#v", reqCtx)
+	}
+
+	t.Run("keeps caller user agent", func(t *testing.T) {
+		_, hdr, _ := captureAnthropicRequest(t, &AnthropicClient{
+			APIKey:  "sk-ant-oat-xyz",
+			Headers: map[string]string{"User-Agent": "custom-ua"},
+		}, Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "claude-test"}, anthropicFixture)
+		if hdr.Get("User-Agent") != "custom-ua" {
+			t.Errorf("User-Agent = %q", hdr.Get("User-Agent"))
+		}
+		if hdr.Get("x-app") != "cli" {
+			t.Errorf("x-app = %q", hdr.Get("x-app"))
+		}
+	})
+
+	t.Run("authorization header token", func(t *testing.T) {
+		req, hdr, _ := captureAnthropicRequest(t, &AnthropicClient{
+			Headers: map[string]string{"Authorization": "Bearer sk-ant-oat-from-header"},
+		}, Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "claude-test"}, anthropicFixture)
+		if hdr.Get("Authorization") != "Bearer sk-ant-oat-from-header" {
+			t.Errorf("Authorization = %q", hdr.Get("Authorization"))
+		}
+		if hdr.Get("x-api-key") != "" {
+			t.Errorf("x-api-key = %q", hdr.Get("x-api-key"))
+		}
+		if hdr.Get("User-Agent") != "claude-cli/2.1.280" || hdr.Get("x-app") != "cli" {
+			t.Errorf("headers UA=%q x-app=%q", hdr.Get("User-Agent"), hdr.Get("x-app"))
+		}
+		sys := systemBlocks(t, req)
+		if len(sys) != 1 || sys[0]["text"] != identity {
+			t.Fatalf("system = %#v", req["system"])
+		}
+	})
+
+	t.Run("cache retention none skips cache control", func(t *testing.T) {
+		req, _, _ := captureAnthropicRequest(t, &AnthropicClient{APIKey: "sk-ant-oat-xyz"}, Context{
+			System:   "pigo system",
+			Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		}, Options{Model: "claude-test", CacheRetention: "none"}, anthropicFixture)
+		for i, block := range systemBlocks(t, req) {
+			if _, ok := block["cache_control"]; ok {
+				t.Fatalf("system[%d] has cache_control: %#v", i, block)
+			}
+		}
+	})
+
+	t.Run("identity without pigo system", func(t *testing.T) {
+		req, _, _ := captureAnthropicRequest(t, &AnthropicClient{APIKey: "sk-ant-oat-xyz"}, Context{
+			Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		}, Options{Model: "claude-test"}, anthropicFixture)
+		sys := systemBlocks(t, req)
+		if len(sys) != 1 || sys[0]["text"] != identity {
+			t.Fatalf("system = %#v", req["system"])
+		}
+		if _, ok := sys[0]["cache_control"]; !ok {
+			t.Fatalf("identity missing cache_control: %#v", sys[0])
+		}
+	})
+}
+
+func TestAnthropicNonOAuthSkipsClaudeCodeIdentity(t *testing.T) {
+	reqCtx := claudeCodeIdentityContext()
+	opts := Options{Provider: "fireworks", Model: "claude-test"}
+	sse := claudeCodeToolSSE("Read", "tool_search")
+
+	check := func(t *testing.T, client *AnthropicClient) {
+		t.Helper()
+		req, hdr, final := captureAnthropicRequest(t, client, reqCtx, opts, sse)
+		if strings.HasPrefix(hdr.Get("User-Agent"), "claude-cli/") {
+			t.Errorf("User-Agent = %q", hdr.Get("User-Agent"))
+		}
+		if hdr.Get("x-app") != "" || hdr.Get("anthropic-dangerous-direct-browser-access") != "" {
+			t.Errorf("identity headers = %q %q", hdr.Get("x-app"), hdr.Get("anthropic-dangerous-direct-browser-access"))
+		}
+		if strings.Contains(hdr.Get("anthropic-beta"), "oauth-2025-04-20") {
+			t.Errorf("beta = %q", hdr.Get("anthropic-beta"))
+		}
+		sys := systemBlocks(t, req)
+		if len(sys) != 1 || sys[0]["text"] != "pigo system" {
+			t.Fatalf("system = %#v", req["system"])
+		}
+		tools, uses, refs := anthropicWireNames(req)
+		if fmt.Sprint(tools) != "[read bash tool_search grep]" {
+			t.Errorf("tools = %v", tools)
+		}
+		if fmt.Sprint(uses) != "[read bash tool_search]" {
+			t.Errorf("tool_use = %v", uses)
+		}
+		if fmt.Sprint(refs) != "[grep]" {
+			t.Errorf("tool_reference = %v", refs)
+		}
+		var got []string
+		for _, call := range final.ToolCalls() {
+			got = append(got, call.ToolName)
+		}
+		if fmt.Sprint(got) != "[Read tool_search]" {
+			t.Errorf("response tools = %v", got)
+		}
+	}
+
+	t.Run("api key", func(t *testing.T) {
+		check(t, &AnthropicClient{APIKey: "sk-ant-api-key"})
+	})
+	t.Run("bearer auth token", func(t *testing.T) {
+		check(t, &AnthropicClient{Headers: map[string]string{"Authorization": "Bearer auth-tok"}})
 	})
 }
