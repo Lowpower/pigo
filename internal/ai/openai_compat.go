@@ -11,6 +11,7 @@ const minAnswerTokens = 1024
 // resolvedOpenAICompat is the provider and baseUrl default after explicit model.compat overrides.
 type resolvedOpenAICompat struct {
 	supportsStore                    bool
+	supportsFinishReason             bool
 	supportsUsageInStreaming         bool
 	supportsDeveloperRole            bool
 	maxTokensField                   string
@@ -53,6 +54,7 @@ func resolveOpenAICompat(opts Options, baseURL string) resolvedOpenAICompat {
 	}
 	c := model.Compat
 	out.supportsStore = boolOr(c.SupportsStore, out.supportsStore)
+	out.supportsFinishReason = boolOr(c.SupportsFinishReason, out.supportsFinishReason)
 	out.supportsUsageInStreaming = boolOr(c.SupportsUsageInStreaming, out.supportsUsageInStreaming)
 	out.supportsDeveloperRole = boolOr(c.SupportsDeveloperRole, out.supportsDeveloperRole)
 	if field := strings.TrimSpace(c.MaxTokensField); field != "" {
@@ -132,6 +134,7 @@ func detectOpenAICompat(provider, modelID, baseURL string) resolvedOpenAICompat 
 	}
 	return resolvedOpenAICompat{
 		supportsStore:            !nonStandard,
+		supportsFinishReason:     true,
 		supportsUsageInStreaming: true,
 		supportsDeveloperRole:    developer,
 		maxTokensField:           field,

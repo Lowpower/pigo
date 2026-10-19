@@ -393,6 +393,7 @@ func cloneCompatPointers(out, extra *Compat) {
 	out.ForceAdaptiveThinking = cloneBool(extra.ForceAdaptiveThinking)
 	out.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
 	out.SupportsStore = cloneBool(extra.SupportsStore)
+	out.SupportsFinishReason = cloneBool(extra.SupportsFinishReason)
 	out.SupportsUsageInStreaming = cloneBool(extra.SupportsUsageInStreaming)
 	out.SupportsDeveloperRole = cloneBool(extra.SupportsDeveloperRole)
 	out.RequiresToolResultName = cloneBool(extra.RequiresToolResultName)
@@ -435,6 +436,9 @@ func mergeAnthropicCompat(out, extra *Compat) {
 func mergeOpenAICompat(out, extra *Compat) {
 	if extra.SupportsStore != nil {
 		out.SupportsStore = cloneBool(extra.SupportsStore)
+	}
+	if extra.SupportsFinishReason != nil {
+		out.SupportsFinishReason = cloneBool(extra.SupportsFinishReason)
 	}
 	if extra.SupportsUsageInStreaming != nil {
 		out.SupportsUsageInStreaming = cloneBool(extra.SupportsUsageInStreaming)
