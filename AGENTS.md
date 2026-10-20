@@ -11,7 +11,10 @@ New work is tracked as **GitHub issues**.
   1.27 and `golangci-lint`. It is idempotent.
 - The environment is repo-managed via `.cursor/environment.json` (runs the install
   script). A fresh Cloud Agent reproduces the whole toolchain automatically.
-- Cloud Agent VMs may include a sibling checkout under `~/deps`. That tree is
+- `.cursor/install.sh` also checks out the behaviour reference
+  [earendil-works/pi](https://github.com/earendil-works/pi) into `~/deps/pi`,
+  **pinned to `v1.3.0`** (`PI_REF_TAG`). The pin is frozen for the first pigo
+  release: do not bump it, and do not compare against pi `main`. That tree is
   never imported. Do not copy names, URLs, or comments from it into this
   repository.
 

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Idempotent Cloud Agent setup for pigo.
-# Installs the Go 1.27 toolchain and golangci-lint, then refreshes module deps
-# and builds.
+# Installs the Go 1.27 toolchain and golangci-lint, checks out the pinned
+# behaviour reference (earendil-works/pi, read-only, never imported) under
+# ~/deps/pi, then refreshes module deps and builds.
 set -euo pipefail
 
 GO_VERSION="1.27.0"
+# Frozen for the first pigo release. Do not bump without a decision in an issue.
+PI_REF_TAG="v1.3.0"
+PI_REF_DIR="${HOME}/deps/pi"
 GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
 GO_INSTALL_DIR="/usr/local/go127"
 
@@ -31,6 +35,21 @@ if ! command -v golangci-lint >/dev/null 2>&1; then
     | sudo sh -s -- -b /usr/local/bin
 fi
 echo "Using $(golangci-lint version 2>/dev/null || echo 'golangci-lint (version unavailable)')"
+
+# --- behaviour reference: earendil-works/pi pinned to ${PI_REF_TAG} ---
+if [ ! -d "${PI_REF_DIR}/.git" ]; then
+  echo "Cloning pi ${PI_REF_TAG} into ${PI_REF_DIR}..."
+  mkdir -p "$(dirname "${PI_REF_DIR}")"
+  git -c advice.detachedHead=false clone --quiet --depth 1 --branch "${PI_REF_TAG}" \
+    https://github.com/earendil-works/pi.git "${PI_REF_DIR}" \
+    || echo "warning: could not clone pi reference (continuing without it)"
+elif [ "$(git -C "${PI_REF_DIR}" describe --tags --exact-match 2>/dev/null)" != "${PI_REF_TAG}" ]; then
+  echo "Resetting pi reference to ${PI_REF_TAG}..."
+  { git -C "${PI_REF_DIR}" fetch --quiet --depth 1 origin "refs/tags/${PI_REF_TAG}:refs/tags/${PI_REF_TAG}" \
+      && git -C "${PI_REF_DIR}" checkout --quiet "${PI_REF_TAG}"; } \
+    || echo "warning: could not reset pi reference (continuing)"
+fi
+echo "pi reference: $(git -C "${PI_REF_DIR}" describe --tags --exact-match 2>/dev/null || echo 'unavailable') at ${PI_REF_DIR}"
 
 # --- project dependencies & build ---
 go mod download
