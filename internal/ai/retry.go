@@ -31,6 +31,7 @@ var nonRetryableProviderLimitError = buildProviderErrorPattern([]string{
 var retryableProviderError = buildProviderErrorPattern([]string{
 	"overloaded",
 	"rate.?limit",
+	"throttl",
 	"too many requests",
 	"currently experiencing high demand",
 	"429",

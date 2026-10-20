@@ -911,7 +911,7 @@ func TestBedrockMessagesReplayReasoningAndImages(t *testing.T) {
 			{Type: KindThinking, Thinking: "plan", ThinkingSignature: "sig"},
 			{Type: KindText, Text: "yo"},
 		}}},
-	}}, replayTarget{})
+	}}, replayTarget{}, bedrockWire{})
 	if len(got) != 2 {
 		t.Fatalf("len=%d", len(got))
 	}

@@ -3,11 +3,15 @@ package ai
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
@@ -89,18 +93,16 @@ func (c *BedrockClient) StreamFn() StreamFn {
 			return errorStreamProvider(opts.Model, "bedrock-converse-stream", err.Error()), nil
 		}
 		client := bedrockruntime.NewFromConfig(awsCfg)
+		name := bedrockCatalogName(opts)
+		wire := bedrockWire{ModelName: name, CacheRetention: opts.CacheRetention}
 		input := &bedrockruntime.ConverseStreamInput{
 			ModelId: aws.String(opts.Model),
 			Messages: bedrockMessages(reqCtx, replayTarget{
 				Provider: recordedProvider(opts, "amazon-bedrock"),
 				API:      "bedrock-converse-stream",
 				Model:    opts.Model,
-			}),
-		}
-		if reqCtx.System != "" {
-			input.System = []types.SystemContentBlock{
-				&types.SystemContentBlockMemberText{Value: reqCtx.System},
-			}
+			}, wire),
+			System: bedrockSystemBlocks(reqCtx.System, opts.Model, name, opts.CacheRetention),
 		}
 		if len(reqCtx.Tools) > 0 {
 			tools := make([]types.Tool, 0, len(reqCtx.Tools))
@@ -115,9 +117,7 @@ func (c *BedrockClient) StreamFn() StreamFn {
 			}
 			input.ToolConfig = &types.ToolConfiguration{Tools: tools}
 		}
-		if opts.MaxTokens > 0 {
-			input.InferenceConfig = &types.InferenceConfiguration{MaxTokens: aws.Int32(int32(opts.MaxTokens))}
-		}
+		input.InferenceConfig = bedrockInferenceConfig(recordedProvider(opts, "amazon-bedrock"), opts.Model, name, opts.MaxTokens)
 		if fields := bedrockThinkingFields(opts); fields != nil {
 			input.AdditionalModelRequestFields = document.NewLazyDocument(fields)
 		}
@@ -134,7 +134,7 @@ func (c *BedrockClient) StreamFn() StreamFn {
 			}
 			resp, err := client.ConverseStream(ctx, input)
 			if err != nil {
-				finishError(ctx, out, s, err.Error())
+				finishBedrockError(ctx, out, s, err)
 				return
 			}
 			processBedrockStream(ctx, resp.GetStream(), out, s, opts.OnProviderStreamEvent, catalogCost(opts))
@@ -158,20 +158,40 @@ func bedrockThinkingFields(opts Options) map[string]any {
 	return map[string]any{"thinking": map[string]any{"type": "adaptive"}}
 }
 
-func bedrockMessages(reqCtx Context, target replayTarget) []types.Message {
+const bedrockEmptyText = "<empty>"
+
+// bedrockWire carries the catalog name and cache setting used to build a
+// Converse request. Model id stays on replayTarget.
+type bedrockWire struct {
+	ModelName      string
+	CacheRetention string
+}
+
+func bedrockCatalogName(opts Options) string {
+	m, ok := models.Lookup(recordedProvider(opts, "amazon-bedrock"), opts.Model)
+	if !ok {
+		return ""
+	}
+	return m.Name
+}
+
+func bedrockMessages(reqCtx Context, target replayTarget, wire bedrockWire) []types.Message {
 	var out []types.Message
-	for _, m := range transformMessages(reqCtx.Messages, target, normalizeSanitizedToolCallID) {
+	msgs := transformMessages(reqCtx.Messages, target, normalizeSanitizedToolCallID)
+	for i := 0; i < len(msgs); i++ {
+		m := msgs[i]
 		if m.Assistant != nil {
 			var blocks []types.ContentBlock
 			for _, c := range m.Assistant.Content {
 				switch c.Type {
 				case KindText:
-					if strings.TrimSpace(c.Text) == "" {
-						continue
+					if block := bedrockTextBlock(c.Text, false); block != nil {
+						blocks = append(blocks, block)
 					}
-					blocks = append(blocks, &types.ContentBlockMemberText{Value: c.Text})
 				case KindThinking:
-					blocks = append(blocks, bedrockReasoningBlock(c))
+					if block := bedrockReasoningBlock(c, bedrockIsClaude(target.Model, wire.ModelName)); block != nil {
+						blocks = append(blocks, block)
+					}
 				case KindToolCall:
 					blocks = append(blocks, &types.ContentBlockMemberToolUse{Value: types.ToolUseBlock{
 						ToolUseId: aws.String(c.ToolID),
@@ -186,20 +206,14 @@ func bedrockMessages(reqCtx Context, target replayTarget) []types.Message {
 			out = append(out, types.Message{Role: types.ConversationRoleAssistant, Content: blocks})
 			continue
 		}
-		if m.Role == RoleToolResult || m.ToolCallID != "" {
-			content := []types.ToolResultContentBlock{&types.ToolResultContentBlockMemberText{Value: m.Content}}
-			for _, img := range m.Images {
-				if b := bedrockImageBlock(img); b != nil {
-					content = append(content, &types.ToolResultContentBlockMemberImage{Value: b.Value})
-				}
+		if bedrockIsToolResult(m) {
+			var blocks []types.ContentBlock
+			for i < len(msgs) && bedrockIsToolResult(msgs[i]) {
+				blocks = append(blocks, bedrockToolResultBlock(msgs[i]))
+				i++
 			}
-			out = append(out, types.Message{
-				Role: types.ConversationRoleUser,
-				Content: []types.ContentBlock{&types.ContentBlockMemberToolResult{Value: types.ToolResultBlock{
-					ToolUseId: aws.String(m.ToolCallID),
-					Content:   content,
-				}}},
-			})
+			i--
+			out = append(out, types.Message{Role: types.ConversationRoleUser, Content: blocks})
 			continue
 		}
 		role := types.ConversationRoleUser
@@ -207,8 +221,8 @@ func bedrockMessages(reqCtx Context, target replayTarget) []types.Message {
 			role = types.ConversationRoleAssistant
 		}
 		blocks := []types.ContentBlock{}
-		if m.Content != "" {
-			blocks = append(blocks, &types.ContentBlockMemberText{Value: m.Content})
+		if block := bedrockTextBlock(m.Content, false); block != nil {
+			blocks = append(blocks, block)
 		}
 		for _, img := range m.Images {
 			if b := bedrockImageBlock(img); b != nil {
@@ -216,14 +230,259 @@ func bedrockMessages(reqCtx Context, target replayTarget) []types.Message {
 			}
 		}
 		if len(blocks) == 0 {
-			blocks = []types.ContentBlock{&types.ContentBlockMemberText{Value: m.Content}}
+			blocks = []types.ContentBlock{bedrockTextBlock(bedrockEmptyText, true)}
 		}
 		out = append(out, types.Message{Role: role, Content: blocks})
+	}
+	if cp := bedrockCachePoint(target.Model, wire.ModelName, wire.CacheRetention); cp != nil && len(out) > 0 {
+		last := &out[len(out)-1]
+		if last.Role == types.ConversationRoleUser {
+			last.Content = append(last.Content, &types.ContentBlockMemberCachePoint{Value: *cp})
+		}
 	}
 	return out
 }
 
-func bedrockReasoningBlock(c *Content) types.ContentBlock {
+func bedrockSystemBlocks(system, modelID, modelName, retention string) []types.SystemContentBlock {
+	if system == "" {
+		return nil
+	}
+	blocks := []types.SystemContentBlock{&types.SystemContentBlockMemberText{Value: system}}
+	if cp := bedrockCachePoint(modelID, modelName, retention); cp != nil {
+		blocks = append(blocks, &types.SystemContentBlockMemberCachePoint{Value: *cp})
+	}
+	return blocks
+}
+
+func bedrockCachePoint(modelID, modelName, retention string) *types.CachePointBlock {
+	if bedrockCacheOff(retention) || !bedrockSupportsPromptCaching(modelID, modelName) {
+		return nil
+	}
+	cp := &types.CachePointBlock{Type: types.CachePointTypeDefault}
+	if strings.EqualFold(strings.TrimSpace(retention), "long") {
+		cp.Ttl = types.CacheTTLOneHour
+	}
+	return cp
+}
+
+func bedrockCacheOff(retention string) bool {
+	return strings.EqualFold(strings.TrimSpace(retention), "none")
+}
+
+func bedrockSupportsPromptCaching(modelID, modelName string) bool {
+	cands := bedrockMatchCandidates(modelID, modelName)
+	hasClaude := false
+	for _, s := range cands {
+		if strings.Contains(s, "claude") {
+			hasClaude = true
+			break
+		}
+	}
+	if !hasClaude {
+		return os.Getenv("AWS_BEDROCK_FORCE_CACHE") == "1"
+	}
+	for _, s := range cands {
+		if strings.Contains(s, "fable-5") || strings.Contains(s, "opus-5") || strings.Contains(s, "sonnet-5") || strings.Contains(s, "haiku-5") {
+			return true
+		}
+		if strings.Contains(s, "-4-") || strings.Contains(s, "claude-3-7-sonnet") || strings.Contains(s, "claude-3-5-haiku") {
+			return true
+		}
+	}
+	return false
+}
+
+func bedrockMatchCandidates(modelID, modelName string) []string {
+	var out []string
+	for _, v := range []string{modelID, modelName} {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		lower := strings.ToLower(v)
+		out = append(out, lower, bedrockHyphenate(lower))
+	}
+	return out
+}
+
+func bedrockHyphenate(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range s {
+		if r == ' ' || r == '_' || r == '.' || r == ':' || r == '\t' || r == '\n' {
+			if !dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			dash = true
+			continue
+		}
+		dash = false
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func bedrockIsClaude(modelID, modelName string) bool {
+	id := strings.ToLower(modelID)
+	name := strings.ToLower(modelName)
+	if strings.Contains(id, "anthropic.claude") || strings.Contains(id, "anthropic/claude") {
+		return true
+	}
+	return strings.Contains(name, "anthropic.claude") || strings.Contains(name, "anthropic/claude") || strings.Contains(name, "claude")
+}
+
+func bedrockIsToolResult(m Message) bool {
+	return m.Assistant == nil && (m.Role == RoleToolResult || m.ToolCallID != "")
+}
+
+func bedrockTextBlock(text string, required bool) types.ContentBlock {
+	if strings.TrimSpace(text) == "" {
+		if !required {
+			return nil
+		}
+		text = bedrockEmptyText
+	}
+	return &types.ContentBlockMemberText{Value: text}
+}
+
+func bedrockToolResultBlock(m Message) types.ContentBlock {
+	var content []types.ToolResultContentBlock
+	if strings.TrimSpace(m.Content) != "" {
+		content = append(content, &types.ToolResultContentBlockMemberText{Value: m.Content})
+	}
+	for _, img := range m.Images {
+		if b := bedrockImageBlock(img); b != nil {
+			content = append(content, &types.ToolResultContentBlockMemberImage{Value: b.Value})
+		}
+	}
+	if len(content) == 0 {
+		content = append(content, &types.ToolResultContentBlockMemberText{Value: bedrockEmptyText})
+	}
+	status := types.ToolResultStatusSuccess
+	if m.IsError {
+		status = types.ToolResultStatusError
+	}
+	return &types.ContentBlockMemberToolResult{Value: types.ToolResultBlock{
+		ToolUseId: aws.String(m.ToolCallID),
+		Content:   content,
+		Status:    status,
+	}}
+}
+
+var bedrockErrorPrefixes = map[string]string{
+	"InternalServerException":     "Internal server error",
+	"ModelStreamErrorException":   "Model stream error",
+	"ValidationException":         "Validation error",
+	"ThrottlingException":         "Throttling error",
+	"ServiceUnavailableException": "Service unavailable",
+}
+
+func finishBedrockError(ctx context.Context, out *AssistantMessage, s *EventStream, err error) {
+	if d := bedrockFailureDiagnostic(err); d != nil {
+		out.Diagnostics = append(out.Diagnostics, *d)
+	}
+	finishError(ctx, out, s, formatBedrockError(err))
+}
+
+func bedrockFailureDiagnostic(err error) *AssistantDiagnostic {
+	if err == nil {
+		return nil
+	}
+	details := DiagnosticDetails{}
+	if status, ok := bedrockHTTPStatus(err); ok {
+		details.Status = status
+	}
+	if code := bedrockErrorCode(err); code != "" {
+		details.ErrorCode = code
+	}
+	if id := bedrockRequestID(err); id != "" {
+		details.RequestID = id
+	}
+	if details.Status == 0 && details.ErrorCode == "" && details.RequestID == "" {
+		return nil
+	}
+	return &AssistantDiagnostic{
+		Type:      "bedrock_response_failure",
+		Timestamp: time.Now().UnixMilli(),
+		Details:   &details,
+	}
+}
+
+func bedrockHTTPStatus(err error) (int, bool) {
+	var wrapped *awshttp.ResponseError
+	if errors.As(err, &wrapped) {
+		if wrapped == nil || wrapped.ResponseError == nil || wrapped.Response == nil || wrapped.Response.Response == nil {
+			return 0, false
+		}
+		if wrapped.Response.StatusCode == 0 {
+			return 0, false
+		}
+		return wrapped.Response.StatusCode, true
+	}
+	var coder interface{ HTTPStatusCode() int }
+	if !errors.As(err, &coder) || coder == nil || coder.HTTPStatusCode() == 0 {
+		return 0, false
+	}
+	return coder.HTTPStatusCode(), true
+}
+
+func bedrockRequestID(err error) string {
+	var ider interface{ ServiceRequestID() string }
+	if !errors.As(err, &ider) || ider == nil {
+		return ""
+	}
+	id := strings.TrimSpace(ider.ServiceRequestID())
+	if id == "" || len(id) > 200 {
+		return ""
+	}
+	return id
+}
+
+func formatBedrockError(err error) string {
+	if err == nil {
+		return ""
+	}
+	core := bedrockErrorCore(err)
+	code := bedrockErrorCode(err)
+	if code == "" {
+		return core
+	}
+	prefix, ok := bedrockErrorPrefixes[code]
+	if !ok {
+		prefix = code
+	}
+	return prefix + ": " + core
+}
+
+func bedrockErrorCode(err error) string {
+	var coded interface{ ErrorCode() string }
+	if errors.As(err, &coded) && coded != nil {
+		return coded.ErrorCode()
+	}
+	return ""
+}
+
+func bedrockErrorCore(err error) string {
+	var withMessage interface{ ErrorMessage() string }
+	if errors.As(err, &withMessage) && withMessage != nil {
+		if msg := withMessage.ErrorMessage(); msg != "" {
+			return msg
+		}
+	}
+	return err.Error()
+}
+
+func bedrockInferenceConfig(provider, modelID, modelName string, maxTokens int) *types.InferenceConfiguration {
+	if maxTokens <= 0 && bedrockIsClaude(modelID, modelName) {
+		maxTokens = models.MaxTokens(provider, modelID)
+	}
+	if maxTokens <= 0 {
+		return nil
+	}
+	return &types.InferenceConfiguration{MaxTokens: aws.Int32(int32(maxTokens))}
+}
+
+func bedrockReasoningBlock(c *Content, claude bool) types.ContentBlock {
 	if c.Redacted {
 		data, err := base64.StdEncoding.DecodeString(c.ThinkingSignature)
 		if err != nil {
@@ -233,8 +492,14 @@ func bedrockReasoningBlock(c *Content) types.ContentBlock {
 			Value: &types.ReasoningContentBlockMemberRedactedContent{Value: data},
 		}
 	}
+	if strings.TrimSpace(c.Thinking) == "" {
+		return nil
+	}
+	if claude && strings.TrimSpace(c.ThinkingSignature) == "" {
+		return &types.ContentBlockMemberText{Value: c.Thinking}
+	}
 	text := types.ReasoningTextBlock{Text: aws.String(c.Thinking)}
-	if c.ThinkingSignature != "" {
+	if claude {
 		text.Signature = aws.String(c.ThinkingSignature)
 	}
 	return &types.ContentBlockMemberReasoningContent{
@@ -386,7 +651,7 @@ func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseSt
 		}
 	}
 	if err := stream.Err(); err != nil && out.StopReason != StopError {
-		finishError(ctx, out, s, err.Error())
+		finishBedrockError(ctx, out, s, err)
 		return
 	}
 	for i, c := range out.Content {
