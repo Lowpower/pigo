@@ -2,6 +2,7 @@ package ai
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/Lowpower/pigo/internal/models"
@@ -17,7 +18,7 @@ func TestBedrockMessagesToolPair(t *testing.T) {
 			{Type: KindToolCall, ToolID: "1", ToolName: "read", Arguments: map[string]any{"path": "a"}},
 		}}},
 		{Role: RoleToolResult, ToolCallID: "1", ToolName: "read", Content: "ok"},
-	}}, replayTarget{})
+	}}, replayTarget{}, bedrockWire{})
 	if len(got) != 3 {
 		t.Fatalf("len = %d", len(got))
 	}
@@ -29,6 +30,366 @@ func TestBedrockMessagesToolPair(t *testing.T) {
 	}
 	if _, ok := got[2].Content[0].(*types.ContentBlockMemberToolResult); !ok {
 		t.Fatalf("want tool result, got %T", got[2].Content[0])
+	}
+}
+
+func TestBedrockMessagesMergesParallelToolResults(t *testing.T) {
+	got := bedrockMessages(Context{Messages: []Message{
+		{Role: RoleUser, Content: "hi"},
+		{Assistant: &AssistantMessage{Content: []*Content{
+			{Type: KindToolCall, ToolID: "a", ToolName: "read", Arguments: map[string]any{"path": "a"}},
+			{Type: KindToolCall, ToolID: "b", ToolName: "bash", Arguments: map[string]any{"cmd": "ls"}},
+		}}},
+		{Role: RoleToolResult, ToolCallID: "a", ToolName: "read", Content: "file"},
+		{Role: RoleToolResult, ToolCallID: "b", ToolName: "bash", Content: "boom", IsError: true},
+		{Role: RoleUser, Content: "next"},
+	}}, replayTarget{}, bedrockWire{})
+	if len(got) != 4 {
+		t.Fatalf("len = %d, want user + assistant + one tool user + follow-up", len(got))
+	}
+	if got[2].Role != types.ConversationRoleUser || len(got[2].Content) != 2 {
+		t.Fatalf("merged tool message = role %s blocks %d", got[2].Role, len(got[2].Content))
+	}
+	first := bedrockToolResult(t, got[2].Content[0])
+	second := bedrockToolResult(t, got[2].Content[1])
+	if aws.ToString(first.ToolUseId) != "a" || first.Status != types.ToolResultStatusSuccess {
+		t.Fatalf("first result = %+v", first)
+	}
+	if aws.ToString(second.ToolUseId) != "b" || second.Status != types.ToolResultStatusError {
+		t.Fatalf("second result = %+v", second)
+	}
+	if got[3].Role != types.ConversationRoleUser || len(got[3].Content) != 1 {
+		t.Fatalf("follow-up user = role %s blocks %d", got[3].Role, len(got[3].Content))
+	}
+}
+
+func TestBedrockMessagesOmitsBlankText(t *testing.T) {
+	png := ImageContent{Type: "image", Data: "QQ==", MimeType: "image/png"}
+	got := bedrockMessages(Context{Messages: []Message{
+		{Role: RoleUser, Content: "   "},
+		{Role: RoleUser, Content: "  ", Images: []ImageContent{png}},
+		{Assistant: &AssistantMessage{Content: []*Content{
+			{Type: KindText, Text: " \n"},
+			{Type: KindToolCall, ToolID: "1", ToolName: "read", Arguments: map[string]any{}},
+		}}},
+		{Role: RoleToolResult, ToolCallID: "1", ToolName: "read", Content: " \t"},
+	}}, replayTarget{}, bedrockWire{})
+	if len(got) != 4 {
+		t.Fatalf("len = %d", len(got))
+	}
+	if text := bedrockText(t, got[0].Content[0]); text != "<empty>" || len(got[0].Content) != 1 {
+		t.Fatalf("blank user = %q blocks %d", text, len(got[0].Content))
+	}
+	if _, ok := got[1].Content[0].(*types.ContentBlockMemberImage); !ok || len(got[1].Content) != 1 {
+		t.Fatalf("blank user with image = %#v", got[1].Content)
+	}
+	if len(got[2].Content) != 1 {
+		t.Fatalf("assistant blocks = %d, blank text should be omitted", len(got[2].Content))
+	}
+	if _, ok := got[2].Content[0].(*types.ContentBlockMemberToolUse); !ok {
+		t.Fatalf("assistant block = %T", got[2].Content[0])
+	}
+	tr := bedrockToolResult(t, got[3].Content[0])
+	if len(tr.Content) != 1 || bedrockToolText(t, tr.Content[0]) != "<empty>" {
+		t.Fatalf("blank tool result = %#v", tr.Content)
+	}
+}
+
+func bedrockText(t *testing.T, block types.ContentBlock) string {
+	t.Helper()
+	tb, ok := block.(*types.ContentBlockMemberText)
+	if !ok {
+		t.Fatalf("content %T", block)
+	}
+	return tb.Value
+}
+
+func bedrockToolText(t *testing.T, block types.ToolResultContentBlock) string {
+	t.Helper()
+	tb, ok := block.(*types.ToolResultContentBlockMemberText)
+	if !ok {
+		t.Fatalf("tool content %T", block)
+	}
+	return tb.Value
+}
+
+func bedrockToolResult(t *testing.T, block types.ContentBlock) types.ToolResultBlock {
+	t.Helper()
+	tr, ok := block.(*types.ContentBlockMemberToolResult)
+	if !ok {
+		t.Fatalf("content %T", block)
+	}
+	return tr.Value
+}
+
+func TestFormatBedrockErrorThrottling(t *testing.T) {
+	err := fakeBedrockError{
+		code:      "ThrottlingException",
+		message:   "Too many tokens, please wait before trying again.",
+		status:    429,
+		requestID: "req-123",
+	}
+	msg := formatBedrockError(err)
+	assistant := errorAssistant(msg)
+	if IsContextOverflow(assistant, 0) {
+		t.Fatalf("throttling classified as overflow: %q", msg)
+	}
+	if !IsRetryableAssistantError(assistant) {
+		t.Fatalf("throttling not retryable: %q", msg)
+	}
+	if msg != "Throttling error: Too many tokens, please wait before trying again." {
+		t.Fatalf("message = %q", msg)
+	}
+
+	service := formatBedrockError(fakeBedrockError{code: "ServiceUnavailableException", message: "unavailable"})
+	if service != "Service unavailable: unavailable" || !IsRetryableAssistantError(errorAssistant(service)) {
+		t.Fatalf("service = %q", service)
+	}
+	internal := formatBedrockError(fakeBedrockError{code: "InternalServerException", message: "boom"})
+	if internal != "Internal server error: boom" || !IsRetryableAssistantError(errorAssistant(internal)) {
+		t.Fatalf("internal = %q", internal)
+	}
+	validation := formatBedrockError(fakeBedrockError{code: "ValidationException", message: "bad request"})
+	if validation != "Validation error: bad request" || IsRetryableAssistantError(errorAssistant(validation)) {
+		t.Fatalf("validation = %q", validation)
+	}
+	stream := formatBedrockError(fakeBedrockError{code: "ModelStreamErrorException", message: "stream broke"})
+	if stream != "Model stream error: stream broke" {
+		t.Fatalf("stream = %q", stream)
+	}
+	unknown := formatBedrockError(fakeBedrockError{code: "ConflictException", message: "conflict"})
+	if unknown != "ConflictException: conflict" {
+		t.Fatalf("unknown code = %q", unknown)
+	}
+	plain := formatBedrockError(errString("dial tcp: connection refused"))
+	if plain != "dial tcp: connection refused" {
+		t.Fatalf("plain = %q", plain)
+	}
+}
+
+type fakeBedrockError struct {
+	code, message, requestID string
+	status                   int
+}
+
+func (e fakeBedrockError) Error() string {
+	if e.code == "" {
+		return e.message
+	}
+	return e.code + ": " + e.message
+}
+
+func (e fakeBedrockError) ErrorCode() string        { return e.code }
+func (e fakeBedrockError) ErrorMessage() string     { return e.message }
+func (e fakeBedrockError) HTTPStatusCode() int      { return e.status }
+func (e fakeBedrockError) ServiceRequestID() string { return e.requestID }
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
+
+func TestBedrockCachePoints(t *testing.T) {
+	t.Setenv("AWS_BEDROCK_FORCE_CACHE", "")
+	ctx := Context{System: "rules", Messages: []Message{
+		{Role: RoleUser, Content: "hi"},
+		{Assistant: &AssistantMessage{Content: []*Content{
+			{Type: KindToolCall, ToolID: "a", ToolName: "read"},
+			{Type: KindToolCall, ToolID: "b", ToolName: "bash"},
+		}}},
+		{Role: RoleToolResult, ToolCallID: "a", Content: "file"},
+		{Role: RoleToolResult, ToolCallID: "b", Content: "ok"},
+	}}
+	id := "anthropic.claude-sonnet-4-6"
+	name := "Claude Sonnet 4.6"
+
+	sys := bedrockSystemBlocks("rules", id, name, "short")
+	shortPoint := bedrockSystemCachePoint(t, sys)
+	if shortPoint.Type != types.CachePointTypeDefault || shortPoint.Ttl != "" {
+		t.Fatalf("short system cache = %+v", shortPoint)
+	}
+	msgs := bedrockMessages(ctx, replayTarget{Model: id}, bedrockWire{ModelName: name, CacheRetention: "short"})
+	last := msgs[len(msgs)-1]
+	if last.Role != types.ConversationRoleUser || len(last.Content) != 3 {
+		t.Fatalf("last message blocks = %d role %s", len(last.Content), last.Role)
+	}
+	if _, ok := last.Content[0].(*types.ContentBlockMemberToolResult); !ok {
+		t.Fatalf("cache point nested or missing tool result: %T", last.Content[0])
+	}
+	userPoint := bedrockContentCachePoint(t, last.Content[2])
+	if userPoint.Ttl != "" {
+		t.Fatalf("short user ttl = %q", userPoint.Ttl)
+	}
+
+	longSys := bedrockSystemBlocks("rules", id, name, "long")
+	if bedrockSystemCachePoint(t, longSys).Ttl != types.CacheTTLOneHour {
+		t.Fatal("long system cache missing 1h ttl")
+	}
+	longMsgs := bedrockMessages(ctx, replayTarget{Model: id}, bedrockWire{ModelName: name, CacheRetention: "long"})
+	longLast := longMsgs[len(longMsgs)-1]
+	if bedrockContentCachePoint(t, longLast.Content[len(longLast.Content)-1]).Ttl != types.CacheTTLOneHour {
+		t.Fatal("long user cache missing 1h ttl")
+	}
+
+	if len(bedrockSystemBlocks("rules", id, name, "none")) != 1 {
+		t.Fatal("none should keep system text only")
+	}
+	noneMsgs := bedrockMessages(ctx, replayTarget{Model: id}, bedrockWire{ModelName: name, CacheRetention: "none"})
+	noneLast := noneMsgs[len(noneMsgs)-1]
+	if _, ok := noneLast.Content[len(noneLast.Content)-1].(*types.ContentBlockMemberCachePoint); ok {
+		t.Fatal("none wrote a user cache point")
+	}
+
+	if len(bedrockSystemBlocks("rules", "amazon.nova-lite-v1:0", "Nova Lite", "short")) != 1 {
+		t.Fatal("nova should not get a cache point")
+	}
+	if len(bedrockSystemBlocks("rules", "anthropic.claude-3-opus-20240229-v1:0", "Claude 3 Opus", "short")) != 1 {
+		t.Fatal("claude 3 opus should not get a cache point")
+	}
+	if len(bedrockSystemBlocks("rules", "anthropic.claude-3-5-haiku-20241022-v1:0", "Claude 3.5 Haiku", "short")) != 2 {
+		t.Fatal("claude 3.5 haiku should cache")
+	}
+	if bedrockSystemBlocks("", id, name, "short") != nil {
+		t.Fatal("empty system should stay empty")
+	}
+
+	arn := "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc"
+	if len(bedrockSystemBlocks("rules", arn, "Claude Sonnet 4.6", "")) != 2 {
+		t.Fatal("inference profile name should enable cache points")
+	}
+	if len(bedrockSystemBlocks("rules", arn, "", "short")) != 1 {
+		t.Fatal("arn without a claude name should not cache")
+	}
+	t.Setenv("AWS_BEDROCK_FORCE_CACHE", "1")
+	if len(bedrockSystemBlocks("rules", arn, "", "short")) != 2 {
+		t.Fatal("FORCE_CACHE should enable cache points for an unnamed profile")
+	}
+	if len(bedrockSystemBlocks("rules", "anthropic.claude-3-opus-20240229-v1:0", "Claude 3 Opus", "short")) != 1 {
+		t.Fatal("FORCE_CACHE should not override an unsupported claude")
+	}
+}
+
+func bedrockSystemCachePoint(t *testing.T, blocks []types.SystemContentBlock) types.CachePointBlock {
+	t.Helper()
+	if len(blocks) != 2 {
+		t.Fatalf("system blocks = %d", len(blocks))
+	}
+	cp, ok := blocks[1].(*types.SystemContentBlockMemberCachePoint)
+	if !ok {
+		t.Fatalf("system[1] = %T", blocks[1])
+	}
+	return cp.Value
+}
+
+func bedrockContentCachePoint(t *testing.T, block types.ContentBlock) types.CachePointBlock {
+	t.Helper()
+	cp, ok := block.(*types.ContentBlockMemberCachePoint)
+	if !ok {
+		t.Fatalf("content %T", block)
+	}
+	return cp.Value
+}
+
+func TestBedrockInferenceConfig(t *testing.T) {
+	const id = "anthropic.claude-sonnet-4-6"
+	want := int32(models.MaxTokens("amazon-bedrock", id))
+	cfg := bedrockInferenceConfig("amazon-bedrock", id, "Claude Sonnet 4.6", 0)
+	if cfg == nil || aws.ToInt32(cfg.MaxTokens) != want || want <= 0 {
+		t.Fatalf("claude default = %+v, catalog %d", cfg, want)
+	}
+	explicit := bedrockInferenceConfig("amazon-bedrock", id, "Claude Sonnet 4.6", 50)
+	if explicit == nil || aws.ToInt32(explicit.MaxTokens) != 50 {
+		t.Fatalf("explicit = %+v", explicit)
+	}
+	if bedrockInferenceConfig("amazon-bedrock", "amazon.nova-lite-v1:0", "Nova Lite", 0) != nil {
+		t.Fatal("nova should omit max tokens when unset")
+	}
+	nova := bedrockInferenceConfig("amazon-bedrock", "amazon.nova-lite-v1:0", "Nova Lite", 20)
+	if nova == nil || aws.ToInt32(nova.MaxTokens) != 20 {
+		t.Fatalf("nova explicit = %+v", nova)
+	}
+	arn := "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc"
+	if bedrockInferenceConfig("amazon-bedrock", arn, "Claude Sonnet 4.6", 0) != nil {
+		t.Fatal("unnamed catalog arn has no output cap to send")
+	}
+}
+
+func TestBedrockReasoningSignature(t *testing.T) {
+	claude := replayTarget{Provider: "amazon-bedrock", API: "bedrock-converse-stream", Model: "anthropic.claude-sonnet-4-6"}
+	wire := bedrockWire{ModelName: "Claude Sonnet 4.6"}
+	signed := bedrockThinkingMessage(t, claude, wire, &Content{Type: KindThinking, Thinking: "plan", ThinkingSignature: "sig"})
+	reasoning, ok := signed.(*types.ContentBlockMemberReasoningContent)
+	if !ok {
+		t.Fatalf("signed claude = %T", signed)
+	}
+	text, ok := reasoning.Value.(*types.ReasoningContentBlockMemberReasoningText)
+	if !ok || aws.ToString(text.Value.Text) != "plan" || aws.ToString(text.Value.Signature) != "sig" {
+		t.Fatalf("signed text = %+v", reasoning.Value)
+	}
+
+	plain := bedrockThinkingMessage(t, claude, wire, &Content{Type: KindThinking, Thinking: "plan"})
+	if tb, ok := plain.(*types.ContentBlockMemberText); !ok || tb.Value != "plan" {
+		t.Fatalf("unsigned claude = %T %#v", plain, plain)
+	}
+
+	nova := replayTarget{Provider: "amazon-bedrock", API: "bedrock-converse-stream", Model: "amazon.nova-lite-v1:0"}
+	novaBlock := bedrockThinkingMessage(t, nova, bedrockWire{ModelName: "Nova Lite"}, &Content{Type: KindThinking, Thinking: "plan", ThinkingSignature: "sig"})
+	novaReasoning, ok := novaBlock.(*types.ContentBlockMemberReasoningContent)
+	if !ok {
+		t.Fatalf("nova = %T", novaBlock)
+	}
+	novaText, ok := novaReasoning.Value.(*types.ReasoningContentBlockMemberReasoningText)
+	if !ok || aws.ToString(novaText.Value.Text) != "plan" || novaText.Value.Signature != nil {
+		t.Fatalf("nova text = %+v", novaReasoning.Value)
+	}
+
+	dropped := bedrockMessages(Context{Messages: []Message{{Assistant: &AssistantMessage{
+		Provider: claude.Provider, API: claude.API, Model: claude.Model,
+		Content: []*Content{{Type: KindThinking, Thinking: "  ", ThinkingSignature: "sig"}},
+	}}}}, claude, wire)
+	if len(dropped) != 0 {
+		t.Fatalf("blank thinking messages = %d", len(dropped))
+	}
+}
+
+func bedrockThinkingMessage(t *testing.T, target replayTarget, wire bedrockWire, block *Content) types.ContentBlock {
+	t.Helper()
+	got := bedrockMessages(Context{Messages: []Message{{Assistant: &AssistantMessage{
+		Provider: target.Provider, API: target.API, Model: target.Model,
+		Content: []*Content{block},
+	}}}}, target, wire)
+	if len(got) != 1 || len(got[0].Content) != 1 {
+		t.Fatalf("messages = %d", len(got))
+	}
+	return got[0].Content[0]
+}
+
+func TestBedrockFailureDiagnostic(t *testing.T) {
+	err := fakeBedrockError{
+		code:      "ThrottlingException",
+		message:   "Too many tokens, please wait before trying again.",
+		status:    429,
+		requestID: "req-123",
+	}
+	diag := bedrockFailureDiagnostic(err)
+	if diag == nil || diag.Type != "bedrock_response_failure" || diag.Timestamp == 0 || diag.Details == nil {
+		t.Fatalf("diagnostic = %+v", diag)
+	}
+	if diag.Details.Status != 429 || diag.Details.ErrorCode != "ThrottlingException" || diag.Details.RequestID != "req-123" {
+		t.Fatalf("details = %+v", diag.Details)
+	}
+	if formatBedrockError(err) != "Throttling error: Too many tokens, please wait before trying again." {
+		t.Fatal("diagnostic must leave the retryable error message intact")
+	}
+
+	trimmed := bedrockFailureDiagnostic(fakeBedrockError{status: 500, requestID: "  req  "})
+	if trimmed == nil || trimmed.Details.Status != 500 || trimmed.Details.RequestID != "req" || trimmed.Details.ErrorCode != "" {
+		t.Fatalf("trimmed = %+v", trimmed)
+	}
+	if bedrockFailureDiagnostic(fakeBedrockError{requestID: strings.Repeat("a", 201)}) != nil {
+		t.Fatal("over-long request id should be dropped")
+	}
+	if bedrockFailureDiagnostic(errString("dial tcp: connection refused")) != nil {
+		t.Fatal("plain error should not grow a diagnostic")
 	}
 }
 

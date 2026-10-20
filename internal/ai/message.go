@@ -116,6 +116,11 @@ type InputTransformation struct {
 // DiagnosticDetails is the payload of an assistant diagnostic.
 type DiagnosticDetails struct {
 	Transformations []InputTransformation `json:"transformations,omitempty"`
+	// Status, ErrorCode, and RequestID are Bedrock failure metadata. They stay
+	// off errorMessage so overflow and retry matching keep seeing the prefix.
+	Status    int    `json:"status,omitempty"`
+	ErrorCode string `json:"errorCode,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
 }
 
 // AssistantDiagnostic is one persisted provider diagnostic on an assistant message.
