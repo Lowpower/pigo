@@ -93,13 +93,16 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 			name, _ := payload["toolName"].(string)
 			errFlag, _ := payload["isError"].(bool)
 			out = append(out, ai.Message{
-				Role:           ai.RoleToolResult,
-				Content:        content,
-				Images:         images,
-				ToolCallID:     id,
-				ToolName:       name,
-				IsError:        errFlag,
-				AddedToolNames: stringSlice(payload["addedToolNames"]),
+				Role:              ai.RoleToolResult,
+				Content:           content,
+				Images:            images,
+				ToolCallID:        id,
+				ToolName:          name,
+				IsError:           errFlag,
+				AddedToolNames:    stringSlice(payload["addedToolNames"]),
+				StructuredContent: rawField(e.Message, "structuredContent"),
+				Usage:             usageFromAny(payload["usage"]),
+				NestedCalls:       nestedFromAny(payload["nestedCalls"]),
 			})
 		default:
 			content, images := parseUserContent(payload["content"])
@@ -107,6 +110,54 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 		}
 	}
 	return out
+}
+
+func rawField(msg json.RawMessage, key string) json.RawMessage {
+	if len(msg) == 0 {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(msg, &obj) != nil {
+		return nil
+	}
+	raw, ok := obj[key]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
+}
+
+func usageFromAny(v any) *ai.Usage {
+	if v == nil {
+		return nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var u ai.Usage
+	if json.Unmarshal(raw, &u) != nil {
+		return nil
+	}
+	return &u
+}
+
+func nestedFromAny(v any) *ai.NestedToolCalls {
+	if v == nil {
+		return nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var n ai.NestedToolCalls
+	if json.Unmarshal(raw, &n) != nil {
+		return nil
+	}
+	if n.Calls == nil && !n.Complete {
+		return nil
+	}
+	return &n
 }
 
 func stringSlice(v any) []string {

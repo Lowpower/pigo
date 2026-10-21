@@ -9,7 +9,7 @@ import (
 func (e *Engine) promptSections() prompt.SectionSet {
 	var toolDefs []ai.Tool
 	if e.Tools != nil {
-		toolDefs = e.providerTools()
+		toolDefs = e.durableTools()
 	}
 	return prompt.Collect(prompt.Options{
 		Cwd:              e.Opts.Cwd,
@@ -32,7 +32,7 @@ func (e *Engine) syncSystem(force string) string {
 	built := e.promptSections()
 	var tools []ai.Tool
 	if e.Tools != nil {
-		tools = e.providerTools()
+		tools = e.durableTools()
 	}
 	if e.Opts.Session == nil {
 		if force != "" {
@@ -108,7 +108,7 @@ func (e *Engine) currentSystemCheckpoint() *session.SystemMessage {
 			return &msg
 		}
 	}
-	msg := session.CheckpointSystem("", e.promptSections().Map(), e.providerTools())
+	msg := session.CheckpointSystem("", e.promptSections().Map(), e.durableTools())
 	return &msg
 }
 
@@ -116,7 +116,7 @@ func (e *Engine) requestTools() ([]ai.Tool, bool) {
 	if e.Opts.Session != nil {
 		st := session.ReplaySystem(e.Opts.Session.GetBranch(""))
 		if st.Declared {
-			return st.Tools, true
+			return e.applyTurn(st.Tools), true
 		}
 	}
 	if e.Tools == nil {

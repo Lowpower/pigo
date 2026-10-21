@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
@@ -31,6 +32,13 @@ type Message struct {
 	// toolResult. Providers with native deferred loading use them as the
 	// load point; others ignore the field.
 	AddedToolNames []string `json:"addedToolNames,omitempty"`
+	// StructuredContent is optional tool-result data alongside Content.
+	// It may be an object, array, scalar, or JSON null.
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+	// Usage is token usage attributed to this tool result, including nested calls.
+	Usage *Usage `json:"usage,omitempty"`
+	// NestedCalls records executeTool calls made while this tool ran.
+	NestedCalls *NestedToolCalls `json:"nestedCalls,omitempty"`
 	// Images are extra user-message blocks. Empty for text-only.
 	Images []ImageContent `json:"images,omitempty"`
 	// Tools is set on a synthetic leading system message so a context handler
@@ -67,6 +75,10 @@ type Tool struct {
 	Description         string               `json:"description"`
 	Parameters          map[string]any       `json:"parameters"`
 	ConstrainedSampling *ConstrainedSampling `json:"constrainedSampling,omitempty"`
+	// Annotations and OutputSchema are carried for extensions. Provider
+	// request builders do not encode them.
+	Annotations  map[string]any `json:"annotations,omitempty"`
+	OutputSchema map[string]any `json:"outputSchema,omitempty"`
 }
 
 // Context is the request context passed to a StreamFn (system prompt, messages,

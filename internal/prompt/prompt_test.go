@@ -323,6 +323,24 @@ func TestCollectSectionsAreNamedAndOrdered(t *testing.T) {
 	}
 }
 
+func TestCollectIncludesGuidelinesAndSkipsHiddenToolList(t *testing.T) {
+	got := Collect(Options{
+		Tools: []ai.Tool{
+			{Name: "direct", Description: "direct tool"},
+		},
+		IncludeToolHints: true,
+		Guidelines:       "USE THE DIRECT TOOL",
+		Skills:           []skills.Skill{{Name: "demo", Description: "Do the demo", FilePath: "/tmp/SKILL.md"}},
+	})
+	text := got.Render()
+	if !strings.Contains(text, "USE THE DIRECT TOOL") || !strings.Contains(text, "direct tool") {
+		t.Fatalf("prompt=%s", text)
+	}
+	if got.Get(SectionSkills) != "" {
+		t.Fatalf("skills should be absent without read or bash: %q", got.Get(SectionSkills))
+	}
+}
+
 func TestBuildInjectsSkillsWithBashOnly(t *testing.T) {
 	got := Build(Options{
 		Skills: []skills.Skill{{Name: "demo", Description: "Do the demo", FilePath: "/tmp/SKILL.md"}},

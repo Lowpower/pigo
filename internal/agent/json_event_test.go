@@ -58,9 +58,9 @@ func TestToJSONToolCallStartIncludesIDAndName(t *testing.T) {
 	msg := &ai.AssistantMessage{
 		Role: ai.RoleAssistant,
 		Content: []*ai.Content{{
-			Type:     ai.KindToolCall,
-			ToolID:   "call_1",
-			ToolName: "bash",
+			Type:      ai.KindToolCall,
+			ToolID:    "call_1",
+			ToolName:  "bash",
 			Arguments: map[string]any{"command": "ls"},
 		}},
 	}
@@ -78,6 +78,27 @@ func TestToJSONToolCallStartIncludesIDAndName(t *testing.T) {
 	}
 	if _, ok := ame["partial"]; ok {
 		t.Fatalf("partial leaked: %s", raw)
+	}
+}
+
+func TestToJSONNestedToolEventIncludesParent(t *testing.T) {
+	got, err := ToJSON(Event{
+		Type:             EventToolStart,
+		ToolCallID:       "call-1/1",
+		ParentToolCallID: "call-1",
+		ToolName:         "child",
+		Args:             map[string]any{"k": "v"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(got)
+	var payload map[string]any
+	if json.Unmarshal(raw, &payload) != nil {
+		t.Fatal(string(raw))
+	}
+	if payload["parentToolCallId"] != "call-1" || payload["toolCallId"] != "call-1/1" {
+		t.Fatalf("payload=%v", payload)
 	}
 }
 

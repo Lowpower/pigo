@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -39,6 +40,13 @@ type ToolCall struct {
 // themselves live in internal/tools; the loop is tool-agnostic.
 type ToolExecutor interface {
 	Execute(ctx context.Context, call ToolCall) (result string, isError bool)
+}
+
+// ResultMeta is extra tool-result data the executor recorded for one call.
+type ResultMeta struct {
+	Usage      *ai.Usage
+	Nested     *ai.NestedToolCalls
+	Structured json.RawMessage
 }
 
 // ToolFunc adapts a function to ToolExecutor.
@@ -86,6 +94,13 @@ type Config struct {
 	// ToolAddedNames, if set, is consulted after each tool execution so
 	// deferred-loading providers can stamp addedToolNames on the result.
 	ToolAddedNames func(call ToolCall) []string
+	// ToolResultMeta, if set, supplies usage, nested calls, and structured
+	// content for the tool result message.
+	ToolResultMeta func(call ToolCall) ResultMeta
+	// PrepareTurn runs before each provider call.
+	PrepareTurn func()
+	// TurnSystem may append turn-only text to the system prompt.
+	TurnSystem func(base string) string
 	// NextTools, if set, replaces Context.Tools before each provider call so
 	// newly activated tools are visible on the following turn.
 	NextTools func() []ai.Tool
@@ -183,6 +198,12 @@ func runLoop(ctx context.Context, sf ai.StreamFn, reqCtx ai.Context, exec ToolEx
 			}
 
 			aiCtx := ai.Context{System: reqCtx.System, Messages: toAIMessages(transcript), Tools: reqCtx.Tools}
+			if cfg.PrepareTurn != nil {
+				cfg.PrepareTurn()
+			}
+			if cfg.TurnSystem != nil {
+				aiCtx.System = cfg.TurnSystem(aiCtx.System)
+			}
 			if cfg.NextTools != nil {
 				aiCtx.Tools = cfg.NextTools()
 			}
@@ -359,6 +380,7 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 					Result:     partial,
 				})
 			})
+			execCtx = WithToolEmitter(execCtx, emit)
 			out, isError = exec.Execute(execCtx, c)
 		} else {
 			out, isError = fmt.Sprintf("no executor for tool %q", c.Name), true
@@ -367,6 +389,12 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 			span.RecordError(errToolFailed)
 		}
 		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: isError, AddedToolNames: toolAddedNames(cfg, c)}
+		if cfg.ToolResultMeta != nil {
+			meta := cfg.ToolResultMeta(c)
+			results[i].Usage = meta.Usage
+			results[i].NestedCalls = meta.Nested
+			results[i].Structured = meta.Structured
+		}
 		return emit(Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: isError})
 	}
 
@@ -437,7 +465,11 @@ func msgFromAI(m ai.Message) Msg {
 		}
 		return Msg{Role: RoleAssistant, Text: text, Assistant: m.Assistant}
 	case m.Role == RoleToolResult || m.Role == ai.RoleToolResult || m.ToolCallID != "":
-		return Msg{Role: RoleToolResult, Text: m.Content, ToolCallID: m.ToolCallID, ToolName: m.ToolName, IsError: m.IsError, AddedToolNames: append([]string(nil), m.AddedToolNames...)}
+		return Msg{
+			Role: RoleToolResult, Text: m.Content, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
+			IsError: m.IsError, AddedToolNames: append([]string(nil), m.AddedToolNames...),
+			Usage: m.Usage, NestedCalls: m.NestedCalls, Structured: append(json.RawMessage(nil), m.StructuredContent...),
+		}
 	default:
 		return Msg{Role: RoleUser, Text: m.Content, Images: m.Images}
 	}
@@ -472,12 +504,15 @@ func MessagesFromTranscript(transcript []Msg) []ai.Message {
 			})
 		case RoleToolResult:
 			out = append(out, ai.Message{
-				Role:           ai.RoleToolResult,
-				Content:        m.Text,
-				ToolCallID:     m.ToolCallID,
-				ToolName:       m.ToolName,
-				IsError:        m.IsError,
-				AddedToolNames: append([]string(nil), m.AddedToolNames...),
+				Role:              ai.RoleToolResult,
+				Content:           m.Text,
+				ToolCallID:        m.ToolCallID,
+				ToolName:          m.ToolName,
+				IsError:           m.IsError,
+				AddedToolNames:    append([]string(nil), m.AddedToolNames...),
+				Usage:             m.Usage,
+				NestedCalls:       m.NestedCalls,
+				StructuredContent: append(json.RawMessage(nil), m.Structured...),
 			})
 		default:
 			out = append(out, ai.Message{Role: ai.RoleUser, Content: m.Text, Images: m.Images})

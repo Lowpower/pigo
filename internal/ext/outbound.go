@@ -107,6 +107,22 @@ func UI(method string, args map[string]any) (map[string]any, error) {
 	return m.Args, nil
 }
 
+// ExecuteTool asks the host to run another tool on behalf of parentToolCallID.
+// Tool failures come back as isError. err is set only when the host call itself fails.
+func ExecuteTool(name string, args map[string]any, parentToolCallID string) (text string, isError bool, err error) {
+	res, err := HostCall("executeTool", map[string]any{
+		"name":             name,
+		"args":             args,
+		"parentToolCallId": parentToolCallID,
+	})
+	if err != nil {
+		return "", true, err
+	}
+	text, _ = res["content"].(string)
+	isError, _ = res["isError"].(bool)
+	return text, isError, nil
+}
+
 // HostCall invokes a host method (session, runtime, or extra UI).
 func HostCall(name string, args map[string]any) (map[string]any, error) {
 	id := newID()

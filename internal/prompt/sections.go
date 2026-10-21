@@ -10,6 +10,7 @@ const (
 	SectionPreamble       = "preamble"
 	SectionAppend         = "append"
 	SectionTools          = "tools"
+	SectionGuidelines     = "guidelines"
 	SectionProjectContext = "project_context"
 	SectionSkills         = "skills"
 	SectionCwd            = "cwd"
@@ -21,6 +22,7 @@ var SectionOrder = []string{
 	SectionPreamble,
 	SectionAppend,
 	SectionTools,
+	SectionGuidelines,
 	SectionProjectContext,
 	SectionSkills,
 	SectionCwd,

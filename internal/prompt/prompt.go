@@ -21,6 +21,8 @@ type Options struct {
 	Skills           []skills.Skill
 	Tools            []ai.Tool
 	IncludeToolHints bool
+	// Guidelines is turn-only tool guidance. It is omitted when empty.
+	Guidelines string
 }
 
 // Build returns the system prompt.
@@ -58,6 +60,9 @@ func Collect(opts Options) SectionSet {
 			}
 			s.Set(SectionTools, b.String())
 		}
+	}
+	if g := strings.TrimSpace(opts.Guidelines); g != "" {
+		s.Set(SectionGuidelines, g)
 	}
 	var appends []string
 	for _, a := range appendParts {

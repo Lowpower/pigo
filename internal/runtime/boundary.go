@@ -223,6 +223,9 @@ func agentMsgFromAI(m ai.Message) agent.Msg {
 			ToolName:       m.ToolName,
 			IsError:        m.IsError,
 			AddedToolNames: append([]string(nil), m.AddedToolNames...),
+			Usage:          m.Usage,
+			NestedCalls:    m.NestedCalls,
+			Structured:     append(json.RawMessage(nil), m.StructuredContent...),
 		}
 	default:
 		return agent.Msg{Role: agent.RoleUser, Text: m.Content, Images: m.Images}
