@@ -243,6 +243,30 @@ func TestRestoreAIMessagesToolResultBlocks(t *testing.T) {
 	}
 }
 
+func TestRestoreToolResultKeepsNestedUsageAndStructuredContent(t *testing.T) {
+	raw := []byte(`{"role":"toolResult","toolCallId":"c1","toolName":"parent","content":"ok","isError":false,"usage":{"input":3,"output":4,"cacheRead":0,"cacheWrite":0,"totalTokens":7,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"nestedCalls":{"calls":[{"id":"c1/1","name":"child","status":"ok"}],"complete":true},"structuredContent":null}`)
+	msgs := RestoreAIMessages([]Entry{{Type: "message", Message: raw}})
+	if len(msgs) != 1 {
+		t.Fatalf("len=%d", len(msgs))
+	}
+	got := msgs[0]
+	if got.Usage == nil || got.Usage.Input != 3 || got.Usage.TotalTokens != 7 {
+		t.Fatalf("usage=%+v", got.Usage)
+	}
+	if got.NestedCalls == nil || !got.NestedCalls.Complete || len(got.NestedCalls.Calls) != 1 || got.NestedCalls.Calls[0].ID != "c1/1" {
+		t.Fatalf("nested=%+v", got.NestedCalls)
+	}
+	if string(got.StructuredContent) != "null" {
+		t.Fatalf("structured=%s", got.StructuredContent)
+	}
+
+	old := []byte(`{"role":"toolResult","toolCallId":"c1","toolName":"bash","content":"hello","isError":false}`)
+	msgs = RestoreAIMessages([]Entry{{Type: "message", Message: old}})
+	if msgs[0].Content != "hello" || msgs[0].Usage != nil || msgs[0].NestedCalls != nil || len(msgs[0].StructuredContent) != 0 {
+		t.Fatalf("old message = %+v", msgs[0])
+	}
+}
+
 func TestRestoreAIMessagesBashExecution(t *testing.T) {
 	m := New(t.TempDir(), t.TempDir())
 	code := 0

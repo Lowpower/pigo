@@ -46,11 +46,20 @@ func Flag(name string) (any, bool) {
 }
 
 // ToolDef is a tool an extension exposes.
+// Fn is the text result. Run, when set, is used instead and may also return
+// structured content and usage.
 type ToolDef struct {
-	Name        string
-	Description string
-	Schema      map[string]any
-	Fn          func(ctx context.Context, args map[string]any) (string, bool)
+	Name         string
+	Description  string
+	Schema       map[string]any
+	Exposure     string
+	Namespace    string
+	Aliases      []string
+	Annotations  map[string]any
+	OutputSchema map[string]any
+	ReachesTools []string
+	Fn           func(ctx context.Context, args map[string]any) (string, bool)
+	Run          func(ctx context.Context, args map[string]any) ToolResult
 }
 
 // Handler describes an extension: tools, commands, flags, events, and optional hooks.
@@ -67,6 +76,9 @@ type Handler struct {
 	OnRefreshModels func() []map[string]any
 	OnStream        func(req map[string]any, emit func(event string, payload map[string]any), abort <-chan struct{})
 	OnHostEvent     func(name string, args map[string]any) map[string]any
+	// PrepareLoadout narrows the model-visible names for one turn.
+	// A nil names slice leaves the set unchanged. An empty slice clears it.
+	PrepareLoadout func(visible []string) (names []string, guidelines string)
 }
 
 // Serve runs an extension over stdin/stdout. It is the entrypoint an extension
@@ -115,6 +127,8 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 		byTool[t.Name] = t
 		if err := protocol.WriteMessage(out, protocol.Message{
 			Type: protocol.TypeRegisterTool, Name: t.Name, Description: t.Description, Schema: t.Schema,
+			Exposure: t.Exposure, Namespace: t.Namespace, Aliases: t.Aliases,
+			Annotations: t.Annotations, OutputSchema: t.OutputSchema, ReachesTools: t.ReachesTools,
 		}); err != nil {
 			return err
 		}
@@ -180,6 +194,11 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 			return err
 		}
 	}
+	if h.PrepareLoadout != nil {
+		if err := protocol.WriteMessage(out, protocol.Message{Type: protocol.TypeRegisterLoadout}); err != nil {
+			return err
+		}
+	}
 	if err := protocol.WriteMessage(out, protocol.Message{Type: protocol.TypeInitialized}); err != nil {
 		return err
 	}
@@ -199,13 +218,47 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 			id := m.ID
 			name := m.Name
 			args := m.Args
+			callID := m.ToolCallID
 			t, ok := byTool[name]
 			go func() {
-				result, isErr := "unknown tool: "+name, true
+				result := ToolResult{Text: "unknown tool: " + name, IsError: true}
 				if ok {
-					result, isErr = t.Fn(context.Background(), args)
+					ctx := WithToolCallID(context.Background(), callID)
+					if t.Run != nil {
+						result = t.Run(ctx, args)
+					} else if t.Fn != nil {
+						text, isErr := t.Fn(ctx, args)
+						result = ToolResult{Text: text, IsError: isErr}
+					}
 				}
-				_ = writeOut(protocol.Message{Type: protocol.TypeToolResult, ID: id, Result: result, IsError: isErr})
+				msg := protocol.Message{
+					Type: protocol.TypeToolResult, ID: id, Result: result.Text, IsError: result.IsError,
+					StructuredContent: append(json.RawMessage(nil), result.Structured...),
+					Usage:             usageToMap(result.Usage),
+				}
+				_ = writeOut(msg)
+			}()
+		case protocol.TypePrepareLoadout:
+			id := m.ID
+			visible := payloadStringSlice(m.Payload, "names")
+			go func() {
+				var names []string
+				guidelines := ""
+				if h.PrepareLoadout != nil {
+					names, guidelines = h.PrepareLoadout(visible)
+				}
+				payload := map[string]any{}
+				if names != nil {
+					listed := make([]any, len(names))
+					for i, name := range names {
+						listed[i] = name
+					}
+					payload["names"] = listed
+				}
+				if guidelines != "" {
+					payload["guidelines"] = guidelines
+				}
+				_ = writeOut(protocol.Message{Type: protocol.TypePrepareLoadoutResult, ID: id, Payload: payload})
 			}()
 		case protocol.TypeCommand:
 			if c, ok := byCmd[m.Name]; ok && c.Fn != nil {

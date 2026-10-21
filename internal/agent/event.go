@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/Lowpower/pigo/internal/ai"
 )
@@ -24,10 +25,13 @@ type Msg struct {
 	Assistant *ai.AssistantMessage `json:"assistant,omitempty"`
 
 	// RoleToolResult metadata.
-	ToolCallID     string   `json:"toolCallId,omitempty"`
-	ToolName       string   `json:"toolName,omitempty"`
-	IsError        bool     `json:"isError,omitempty"`
-	AddedToolNames []string `json:"addedToolNames,omitempty"`
+	ToolCallID     string              `json:"toolCallId,omitempty"`
+	ToolName       string              `json:"toolName,omitempty"`
+	IsError        bool                `json:"isError,omitempty"`
+	AddedToolNames []string            `json:"addedToolNames,omitempty"`
+	Usage          *ai.Usage           `json:"usage,omitempty"`
+	NestedCalls    *ai.NestedToolCalls `json:"nestedCalls,omitempty"`
+	Structured     json.RawMessage     `json:"structuredContent,omitempty"`
 
 	// Images are user-message attachments.
 	Images []ai.ImageContent `json:"images,omitempty"`
@@ -60,11 +64,12 @@ type Event struct {
 	AIEvent *ai.Event
 
 	// tool_execution_start / tool_execution_update / tool_execution_end.
-	ToolCallID string
-	ToolName   string
-	Args       map[string]any
-	Result     string
-	IsError    bool
+	ToolCallID       string
+	ParentToolCallID string
+	ToolName         string
+	Args             map[string]any
+	Result           string
+	IsError          bool
 
 	// turn_end: the tool results produced this turn.
 	ToolResults []Msg

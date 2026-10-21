@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"testing"
 )
@@ -56,6 +57,56 @@ func TestFrameRoundTrip(t *testing.T) {
 	}
 	if _, err := ReadMessage(&buf); err != io.EOF {
 		t.Errorf("expected EOF after draining, got %v", err)
+	}
+}
+
+func TestRegisterToolOptionalFieldsRoundTrip(t *testing.T) {
+	msg := Message{
+		Type: TypeRegisterTool, Name: "lookup", Description: "find",
+		Schema:       map[string]any{"type": "object"},
+		Exposure:     "deferred",
+		Namespace:    "docs",
+		Aliases:      []string{"find"},
+		Annotations:  map[string]any{"readOnly": true},
+		OutputSchema: map[string]any{"type": "object"},
+		ReachesTools: []string{"read"},
+	}
+	var buf bytes.Buffer
+	if err := WriteMessage(&buf, msg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadMessage(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Exposure != "deferred" || got.Namespace != "docs" || len(got.Aliases) != 1 || got.Aliases[0] != "find" {
+		t.Fatalf("tool = %+v", got)
+	}
+	if got.Annotations["readOnly"] != true || len(got.ReachesTools) != 1 || got.ReachesTools[0] != "read" {
+		t.Fatalf("meta = %+v", got)
+	}
+}
+
+func TestToolResultStructuredContentRoundTrip(t *testing.T) {
+	cases := []json.RawMessage{
+		json.RawMessage("null"),
+		json.RawMessage("1"),
+		json.RawMessage(`["a"]`),
+		json.RawMessage(`{"ok":true}`),
+	}
+	for _, raw := range cases {
+		msg := Message{Type: TypeToolResult, ID: "1", Result: "text", StructuredContent: raw}
+		var buf bytes.Buffer
+		if err := WriteMessage(&buf, msg); err != nil {
+			t.Fatal(err)
+		}
+		got, err := ReadMessage(&buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got.StructuredContent) != string(raw) || got.Result != "text" {
+			t.Fatalf("got %s result %q, want %s", got.StructuredContent, got.Result, raw)
+		}
 	}
 }
 

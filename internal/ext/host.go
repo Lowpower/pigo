@@ -40,9 +40,43 @@ type Options struct {
 }
 
 type registeredTool struct {
-	name        string
-	description string
-	schema      map[string]any
+	name         string
+	description  string
+	schema       map[string]any
+	exposure     string
+	namespace    string
+	aliases      []string
+	annotations  map[string]any
+	outputSchema map[string]any
+	reachesTools []string
+}
+
+// ToolInfo is one registered extension tool, including fields the model list
+// does not send.
+type ToolInfo struct {
+	Name         string
+	Description  string
+	Schema       map[string]any
+	Exposure     string
+	Namespace    string
+	Aliases      []string
+	Annotations  map[string]any
+	OutputSchema map[string]any
+	ReachesTools []string
+}
+
+func (t registeredTool) info() ToolInfo {
+	return ToolInfo{
+		Name:         t.name,
+		Description:  t.description,
+		Schema:       t.schema,
+		Exposure:     NormalizeExposure(t.exposure),
+		Namespace:    t.namespace,
+		Aliases:      append([]string(nil), t.aliases...),
+		Annotations:  t.annotations,
+		OutputSchema: t.outputSchema,
+		ReachesTools: append([]string(nil), t.reachesTools...),
+	}
 }
 
 // Host is the host side of one extension subprocess.
@@ -59,20 +93,21 @@ type Host struct {
 
 	writeMu sync.Mutex
 
-	mu             sync.Mutex
-	tools          []registeredTool
-	commands       []RegisteredCommand
-	shortcuts      []RegisteredShortcut
-	flags          map[string]registeredFlag
-	unknown        []UnknownFlag
-	claimedUnknown map[string]bool
-	subscribed     map[string]bool
-	providers      []registeredProvider
-	pending        map[string]chan protocol.Message
-	streamCh       map[string]chan protocol.Message
-	closed         bool
-	waitErr        error
-	waitDone       chan struct{}
+	mu              sync.Mutex
+	tools           []registeredTool
+	commands        []RegisteredCommand
+	shortcuts       []RegisteredShortcut
+	flags           map[string]registeredFlag
+	unknown         []UnknownFlag
+	claimedUnknown  map[string]bool
+	subscribed      map[string]bool
+	preparesLoadout bool
+	providers       []registeredProvider
+	pending         map[string]chan protocol.Message
+	streamCh        map[string]chan protocol.Message
+	closed          bool
+	waitErr         error
+	waitDone        chan struct{}
 
 	providerHook    func(id string, args map[string]any, drop bool)
 	activeToolsHook func([]string)
@@ -184,7 +219,16 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 				break
 			}
 			h.mu.Lock()
-			h.tools = append(h.tools, registeredTool{name: m.Name, description: m.Description, schema: m.Schema})
+			h.tools = append(h.tools, registeredTool{
+				name: m.Name, description: m.Description, schema: m.Schema,
+				exposure: m.Exposure, namespace: m.Namespace, aliases: append([]string(nil), m.Aliases...),
+				annotations: m.Annotations, outputSchema: m.OutputSchema,
+				reachesTools: append([]string(nil), m.ReachesTools...),
+			})
+			h.mu.Unlock()
+		case protocol.TypeRegisterLoadout:
+			h.mu.Lock()
+			h.preparesLoadout = true
 			h.mu.Unlock()
 		case protocol.TypeRegisterCommand:
 			h.mu.Lock()
@@ -237,7 +281,7 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 			h.replyFlag(m.ID, m.Name)
 		case protocol.TypeInitialized:
 			signalReady(nil)
-		case protocol.TypeToolResult, protocol.TypeEventResult, protocol.TypeOAuthResult, protocol.TypeRefreshModelsResult, protocol.TypeHostEventResult:
+		case protocol.TypeToolResult, protocol.TypeEventResult, protocol.TypeOAuthResult, protocol.TypeRefreshModelsResult, protocol.TypeHostEventResult, protocol.TypePrepareLoadoutResult:
 			h.deliverPending(m)
 		case protocol.TypeStreamEvent:
 			h.deliverStream(m)
@@ -354,9 +398,79 @@ func (h *Host) Tools() []ai.Tool {
 	defer h.mu.Unlock()
 	out := make([]ai.Tool, 0, len(h.tools))
 	for _, t := range h.tools {
-		out = append(out, ai.Tool{Name: t.name, Description: t.description, Parameters: t.schema})
+		out = append(out, ai.Tool{
+			Name: t.name, Description: t.description, Parameters: t.schema,
+			Annotations: t.annotations, OutputSchema: t.outputSchema,
+		})
 	}
 	return out
+}
+
+// ToolInfos returns registration metadata for every tool.
+func (h *Host) ToolInfos() []ToolInfo {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]ToolInfo, 0, len(h.tools))
+	for _, t := range h.tools {
+		out = append(out, t.info())
+	}
+	return out
+}
+
+// ToolByName returns the tool registered under name.
+func (h *Host) ToolByName(name string) (ToolInfo, bool) {
+	if h == nil {
+		return ToolInfo{}, false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, t := range h.tools {
+		if t.name == name {
+			return t.info(), true
+		}
+	}
+	return ToolInfo{}, false
+}
+
+// Lookup finds a tool by name, or by alias when no tool uses that name.
+func (h *Host) Lookup(name string) (ToolInfo, bool) {
+	if h == nil || name == "" {
+		return ToolInfo{}, false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var alias *registeredTool
+	for i := range h.tools {
+		t := &h.tools[i]
+		if t.name == name {
+			return t.info(), true
+		}
+		if alias == nil {
+			for _, a := range t.aliases {
+				if a == name {
+					alias = t
+					break
+				}
+			}
+		}
+	}
+	if alias != nil {
+		return alias.info(), true
+	}
+	return ToolInfo{}, false
+}
+
+// PreparesLoadout reports whether the extension registered prepare_loadout.
+func (h *Host) PreparesLoadout() bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.preparesLoadout
 }
 
 // Name is the spawn label (usually argv0).
@@ -518,22 +632,30 @@ func (h *Host) HasTool(name string) bool {
 // CallTool sends a tool call to the extension and waits for its result. It is
 // safe for the agent's ToolExecutor: CallTool(ctx, name, args) -> (result, isError).
 func (h *Host) CallTool(ctx context.Context, name string, args map[string]any) (string, bool) {
+	res := h.CallToolFull(ctx, name, args)
+	return res.Text, res.IsError
+}
+
+// CallToolFull is CallTool plus structured content and usage.
+func (h *Host) CallToolFull(ctx context.Context, name string, args map[string]any) ToolResult {
 	id := newID()
 	ch := make(chan protocol.Message, 1)
 
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
-		return "extension is not running", true
+		return ToolResult{Text: "extension is not running", IsError: true}
 	}
 	h.pending[id] = ch
 	h.mu.Unlock()
 
-	if err := h.send(protocol.Message{Type: protocol.TypeToolCall, ID: id, Name: name, Args: args}); err != nil {
+	if err := h.send(protocol.Message{
+		Type: protocol.TypeToolCall, ID: id, Name: name, Args: args, ToolCallID: ToolCallID(ctx),
+	}); err != nil {
 		h.mu.Lock()
 		delete(h.pending, id)
 		h.mu.Unlock()
-		return err.Error(), true
+		return ToolResult{Text: err.Error(), IsError: true}
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, h.callTimeout)
@@ -541,14 +663,72 @@ func (h *Host) CallTool(ctx context.Context, name string, args map[string]any) (
 	select {
 	case m, ok := <-ch:
 		if !ok {
-			return "extension exited during tool call", true
+			return ToolResult{Text: "extension exited during tool call", IsError: true}
 		}
-		return m.Result, m.IsError
+		return toolResultFromMessage(m)
 	case <-callCtx.Done():
 		h.mu.Lock()
 		delete(h.pending, id)
 		h.mu.Unlock()
-		return "extension tool call timed out: " + callCtx.Err().Error(), true
+		return ToolResult{Text: "extension tool call timed out: " + callCtx.Err().Error(), IsError: true}
+	}
+}
+
+// PrepareLoadout asks an extension that registered the capability to narrow
+// the visible tool set for this turn. constrained is false when names were omitted.
+func (h *Host) PrepareLoadout(ctx context.Context, visible []string) (names []string, guidelines string, constrained bool, err error) {
+	if h == nil || !h.PreparesLoadout() {
+		return nil, "", false, nil
+	}
+	id := newID()
+	ch := make(chan protocol.Message, 1)
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return nil, "", false, errors.New("ext: extension closed")
+	}
+	h.pending[id] = ch
+	timeout := h.callTimeout
+	h.mu.Unlock()
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	listed := make([]any, len(visible))
+	for i, name := range visible {
+		listed[i] = name
+	}
+	if err = h.send(protocol.Message{
+		Type: protocol.TypePrepareLoadout, ID: id, Payload: map[string]any{"names": listed},
+	}); err != nil {
+		h.mu.Lock()
+		delete(h.pending, id)
+		h.mu.Unlock()
+		return nil, "", false, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	select {
+	case m, ok := <-ch:
+		if !ok {
+			return nil, "", false, errors.New("ext: extension closed")
+		}
+		if m.Payload == nil {
+			return nil, "", false, nil
+		}
+		guidelines, _ = m.Payload["guidelines"].(string)
+		raw, ok := m.Payload["names"]
+		if !ok {
+			return nil, guidelines, false, nil
+		}
+		return stringSliceAny(raw), guidelines, true, nil
+	case <-callCtx.Done():
+		h.mu.Lock()
+		delete(h.pending, id)
+		h.mu.Unlock()
+		return nil, "", false, callCtx.Err()
 	}
 }
 

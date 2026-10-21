@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/Lowpower/pigo/internal/ai"
@@ -30,14 +31,16 @@ func ToJSON(ev Event) (any, error) {
 	case EventMessageUpdate:
 		return messageUpdateJSON(ev)
 	case EventToolStart:
-		return map[string]any{
+		out := map[string]any{
 			"type":       "tool_execution_start",
 			"toolCallId": ev.ToolCallID,
 			"toolName":   ev.ToolName,
 			"args":       ev.Args,
-		}, nil
+		}
+		putParent(out, ev.ParentToolCallID)
+		return out, nil
 	case EventToolUpdate:
-		return map[string]any{
+		out := map[string]any{
 			"type":       "tool_execution_update",
 			"toolCallId": ev.ToolCallID,
 			"toolName":   ev.ToolName,
@@ -45,15 +48,19 @@ func ToJSON(ev Event) (any, error) {
 			"partialResult": map[string]any{
 				"content": []map[string]any{{"type": "text", "text": ev.Result}},
 			},
-		}, nil
+		}
+		putParent(out, ev.ParentToolCallID)
+		return out, nil
 	case EventToolEnd:
-		return map[string]any{
+		out := map[string]any{
 			"type":       "tool_execution_end",
 			"toolCallId": ev.ToolCallID,
 			"toolName":   ev.ToolName,
 			"result":     ev.Result,
 			"isError":    ev.IsError,
-		}, nil
+		}
+		putParent(out, ev.ParentToolCallID)
+		return out, nil
 	case EventAgentEnd:
 		msgs := make([]any, 0, len(ev.Messages))
 		for _, m := range ev.Messages {
@@ -149,6 +156,12 @@ func assistantJSON(m *ai.AssistantMessage) any {
 	return m
 }
 
+func putParent(out map[string]any, parent string) {
+	if parent != "" {
+		out["parentToolCallId"] = parent
+	}
+}
+
 func toolResultsJSON(results []Msg) []any {
 	out := make([]any, 0, len(results))
 	for _, m := range results {
@@ -174,6 +187,18 @@ func msgJSON(m Msg) any {
 		}
 		if len(m.AddedToolNames) > 0 {
 			out["addedToolNames"] = m.AddedToolNames
+		}
+		if m.Usage != nil {
+			out["usage"] = m.Usage
+		}
+		if m.NestedCalls != nil {
+			out["nestedCalls"] = m.NestedCalls
+		}
+		if len(m.Structured) > 0 {
+			var v any
+			if json.Unmarshal(m.Structured, &v) == nil {
+				out["structuredContent"] = v
+			}
 		}
 		return out
 	default:

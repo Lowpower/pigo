@@ -3,6 +3,7 @@ package runtime
 import (
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
+	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/session"
 )
 
@@ -29,6 +30,14 @@ func (e *Engine) bindExtensionHooks() {
 // added names; a shrink or replace returns nil.
 func (e *Engine) SetActiveTools(names []string) []string {
 	e.mu.Lock()
+	for _, n := range names {
+		if e.exposureOf(n) == ext.ExposureDeferred {
+			if e.loadedDeferred == nil {
+				e.loadedDeferred = map[string]bool{}
+			}
+			e.loadedDeferred[n] = true
+		}
+	}
 	changed, added := e.applyActiveToolsLocked(names)
 	snapshot := e.activeSnapshotLocked()
 	sess := e.Opts.Session
@@ -51,9 +60,14 @@ func (e *Engine) applyActiveToolsLocked(names []string) (changed bool, added []s
 	}
 	want := map[string]bool{}
 	for _, n := range names {
-		if registered[n] {
-			want[n] = true
+		if !registered[n] {
+			continue
 		}
+		switch e.exposureOf(n) {
+		case ext.ExposureHidden, ext.ExposureCodeMode:
+			continue
+		}
+		want[n] = true
 	}
 	next := make([]string, 0, len(want))
 	for _, n := range order {
@@ -108,16 +122,7 @@ func (e *Engine) activeSnapshotLocked() []string {
 }
 
 func (e *Engine) providerTools() []ai.Tool {
-	if e.Tools == nil {
-		return nil
-	}
-	e.mu.Lock()
-	names := e.activeToolNames
-	if names != nil {
-		names = append([]string(nil), names...)
-	}
-	e.mu.Unlock()
-	return e.Tools.AIToolsNamed(names)
+	return e.applyTurn(e.durableTools())
 }
 
 func (e *Engine) noteAddedTools(callID string, names []string) {

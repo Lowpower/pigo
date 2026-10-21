@@ -182,6 +182,8 @@ func (e *Engine) HandleHostCall(h *ext.Host, name string, args map[string]any) m
 		return map[string]any{"names": e.activeToolNamesCopy()}
 	case "getAllTools":
 		return map[string]any{"tools": e.allToolInfo()}
+	case "executeTool":
+		return e.executeNested(context.Background(), argString(args, "parentToolCallId"), argString(args, "name"), asStringMap(args["args"]))
 	case "setActiveTools":
 		added := e.SetActiveTools(argStringSlice(args["names"]))
 		if added == nil {

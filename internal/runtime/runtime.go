@@ -97,8 +97,16 @@ type Engine struct {
 	steer      []ai.Message
 	follow     []ai.Message
 	compacting bool
-	// activeToolNames is the provider-facing subset of Tools. nil means all.
+	// activeToolNames is the session whitelist. nil means the default
+	// model-visible set, not every registered name.
 	activeToolNames []string
+	loadedDeferred  map[string]bool
+	turnNarrow      bool
+	turnNames       []string
+	turnGuidelines  string
+	nested          map[string]*nestedScope
+	resultMeta      map[string]agent.ResultMeta
+	toolEmit        func(agent.Event) bool
 	addedByCall     map[string][]string
 
 	onSessionEvent func(any)
@@ -870,7 +878,12 @@ func (t extTool) Name() string           { return t.name }
 func (t extTool) Description() string    { return t.desc }
 func (t extTool) Schema() map[string]any { return t.schema }
 func (t extTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
-	return t.host.CallTool(ctx, t.name, args)
+	res := t.host.CallToolFull(ctx, t.name, args)
+	if box := ext.OutcomeBox(ctx); box != nil {
+		box.Structured = res.Structured
+		box.Usage = res.Usage
+	}
+	return res.Text, res.IsError
 }
 
 func filterTools(reg *tools.Registry, allow, deny []string) *tools.Registry {
@@ -964,8 +977,23 @@ func (e *Engine) Executor() agent.ToolExecutor {
 		e.DispatchEvent(ctx, "tool_execution_start", map[string]any{
 			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
 		})
+		e.bindToolEmit(ctx)
+		e.openNested(ctx, c.ID)
+		box := &ext.ToolResult{}
+		callCtx := ext.WithOutcome(ext.WithToolCallID(ctx, c.ID), box)
 		before := e.activeSnapshot()
-		result, isErr := e.Tools.Execute(ctx, c.Name, c.Args)
+		result, isErr := e.Tools.Execute(callCtx, c.Name, c.Args)
+		snap := e.finishNested(c.ID)
+		usage := box.Usage
+		if snap.usage != nil {
+			if usage == nil {
+				usage = snap.usage
+			} else {
+				sum := ai.AddUsage(*usage, *snap.usage)
+				usage = &sum
+			}
+		}
+		e.storeResultMeta(c.ID, agent.ResultMeta{Usage: usage, Nested: snap.calls, Structured: box.Structured})
 		if added := addedNames(before, e.activeSnapshot()); len(added) > 0 {
 			e.noteAddedTools(c.ID, added)
 		}
@@ -1169,6 +1197,9 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 			return e.onTurnBoundary(ctx, ev, transcript)
 		},
 		ToolAddedNames: e.toolAddedNames,
+		ToolResultMeta: e.takeResultMeta,
+		PrepareTurn:    func() { e.prepareTurnLoadout(ctx) },
+		TurnSystem:     func(base string) string { return e.appendGuidelines(base) },
 		NextTools: func() []ai.Tool {
 			tools, _ := e.requestTools()
 			return tools
@@ -1455,6 +1486,15 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 			}
 			if len(msg.AddedToolNames) > 0 {
 				payload["addedToolNames"] = msg.AddedToolNames
+			}
+			if msg.Usage != nil {
+				payload["usage"] = msg.Usage
+			}
+			if msg.NestedCalls != nil {
+				payload["nestedCalls"] = msg.NestedCalls
+			}
+			if len(msg.Structured) > 0 {
+				payload["structuredContent"] = json.RawMessage(msg.Structured)
 			}
 			entry, err = e.Opts.Session.AppendMessage("toolResult", payload)
 		default:
