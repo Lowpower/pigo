@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,18 +24,21 @@ const (
 )
 
 type loginState struct {
-	phase    loginPhase
-	title    string
-	lines    []string
-	options  []loginOption
-	selected int
-	input    string
-	secret   bool
-	reply    chan string
-	inbox    chan tea.Msg
-	cancel   context.CancelFunc
-	authType string
-	provider string
+	phase      loginPhase
+	title      string
+	lines      []string
+	options    []loginOption
+	selected   int
+	input      string
+	secret     bool
+	reply      chan string
+	inbox      chan tea.Msg
+	cancel     context.CancelFunc
+	authType   string
+	provider   string
+	authURL    string
+	copyHint   string
+	copyFailed bool
 }
 
 type loginOption struct {
@@ -174,6 +178,9 @@ func waitLogin(ch <-chan tea.Msg) tea.Cmd {
 }
 
 func (m Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.login.authURL != "" && m.keyIs(msg, "app.message.copy") {
+		return m.copyLoginAuthURL()
+	}
 	switch m.login.phase {
 	case loginPickType, loginPickProvider:
 		switch msg.String() {
@@ -277,8 +284,17 @@ func (m Model) cancelLogin() (tea.Model, tea.Cmd) {
 func (m Model) handleLoginMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
 	case loginEventMsg:
-		line := formatLoginEvent(v.ev)
-		m.login.lines = append(m.login.lines, line)
+		if v.ev.Type == auth.EventAuthURL {
+			if v.ev.URL != "" {
+				m.login.authURL = v.ev.URL
+				m.login.copyHint = ""
+				m.login.copyFailed = false
+			}
+			return m, waitLogin(m.login.inbox)
+		}
+		if line := formatLoginEvent(v.ev); line != "" {
+			m.login.lines = append(m.login.lines, line)
+		}
 		return m, waitLogin(m.login.inbox)
 	case loginPromptMsg:
 		m.login.phase = loginPrompting
@@ -338,7 +354,7 @@ func (m *Model) maybeWarnRadiusCatalog(provider string) {
 func formatLoginEvent(ev auth.Event) string {
 	switch ev.Type {
 	case auth.EventAuthURL:
-		return "Open: " + ev.URL
+		return ""
 	case auth.EventDeviceCode:
 		return fmt.Sprintf("Code %s — %s", ev.UserCode, ev.VerificationURI)
 	case auth.EventProgress, auth.EventInfo:
@@ -352,6 +368,10 @@ func (m Model) loginView() string {
 	var b strings.Builder
 	b.WriteString(m.titleStyle.Render(m.login.title))
 	b.WriteString("\n\n")
+	if block := m.loginAuthBlock(); block != "" {
+		b.WriteString(block)
+		b.WriteString("\n")
+	}
 	for _, line := range m.login.lines {
 		b.WriteString(m.metaStyle.Render(line))
 		b.WriteString("\n")
@@ -379,4 +399,54 @@ func (m Model) loginView() string {
 	}
 	b.WriteString("\n" + m.footerStyle.Render("Esc cancel"))
 	return b.String()
+}
+
+func (m Model) copyLoginAuthURL() (tea.Model, tea.Cmd) {
+	osc, err := copyToClipboard(m.login.authURL, clipboardGOOS, clipboardGetenv)
+	if err != nil {
+		m.clipOSC = ""
+		m.login.copyHint = err.Error()
+		m.login.copyFailed = true
+		return m, nil
+	}
+	m.clipOSC = osc
+	m.login.copyHint = "Copied URL to clipboard"
+	m.login.copyFailed = false
+	return m, nil
+}
+
+func (m Model) loginAuthBlock() string {
+	url := m.login.authURL
+	if url == "" {
+		return ""
+	}
+	shown := m.titleStyle.Render(url)
+	click := m.metaStyle.Render(loginClickHint())
+	if m.cfg.HyperlinksEnabled(true) {
+		shown = osc8(shown, url)
+		click = osc8(click, url)
+	}
+	suffix := m.login.copyHint
+	if suffix == "" {
+		suffix = startupKeyHint(m.keys, "app.message.copy", "to copy")
+	}
+	suffixStyle := m.metaStyle
+	if m.login.copyFailed {
+		suffixStyle = m.errStyle
+	}
+	var b strings.Builder
+	b.WriteString(shown)
+	b.WriteString("\n")
+	b.WriteString(click)
+	b.WriteString(m.metaStyle.Render(" • "))
+	b.WriteString(suffixStyle.Render(suffix))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func loginClickHint() string {
+	if runtime.GOOS == "darwin" {
+		return "Cmd+click to open"
+	}
+	return "Ctrl+click to open"
 }
