@@ -27,10 +27,21 @@ func TestIsRetryableAssistantError(t *testing.T) {
 		"Provider finish_reason: network_error",
 		"520 status code (no body)",
 		"The system is currently experiencing high demand and cannot process your request. Your request exceeds the maximum usage size allowed during peak load...",
+		"Unable to forward upstream stream",
+		"The service is temporarily unavailable",
+		"The upstream provider returned an error",
+		"server_busy",
+		"servers are currently busy",
+		"Selected model is at capacity",
+		"The pending stream has been canceled",
 	}
 	for _, msg := range retryable {
-		if !IsRetryableAssistantError(errorAssistant(msg)) {
+		assistant := errorAssistant(msg)
+		if !IsRetryableAssistantError(assistant) {
 			t.Errorf("want retryable: %q", msg)
+		}
+		if IsContextOverflow(assistant, 0) {
+			t.Errorf("retryable error classified as overflow: %q", msg)
 		}
 	}
 
@@ -70,6 +81,16 @@ func TestIsContextOverflow(t *testing.T) {
 	}
 	if !IsContextOverflow(errorAssistant(`400 {"code":"1261","message":"Prompt too long"}`), 0) {
 		t.Fatal("zai prompt too long should match")
+	}
+	exceeds := errorAssistant(`400 {"code":"1261","message":"Prompt exceeds max length"}`)
+	if !IsContextOverflow(exceeds, 0) {
+		t.Fatal("zai prompt exceeds max length should match")
+	}
+	if IsRetryableAssistantError(exceeds) {
+		t.Fatal("zai overflow should not be retryable")
+	}
+	if !IsContextOverflow(errorAssistant("Prompt exceeds max length"), 0) {
+		t.Fatal("bare zai overflow should match")
 	}
 	bodyless := &AssistantMessage{Role: RoleAssistant, StopReason: StopError, ErrorMessage: "400 status code (no body)"}
 	if IsContextOverflow(bodyless, 0) {

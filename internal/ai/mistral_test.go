@@ -259,3 +259,30 @@ func TestMistralCatalogCost(t *testing.T) {
 		t.Fatalf("free cost = %+v, want zeros", u.Cost)
 	}
 }
+
+func TestMistralFinishReasonErrorIsRetryable(t *testing.T) {
+	const body = "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"error\"}]}\n\ndata: [DONE]\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	client := &MistralClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}
+	stream, err := client.StreamFn()(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "codestral-latest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := stream.Collect()
+	if final == nil || final.StopReason != StopError || final.ErrorMessage != "Provider stopped with: error (server error)" {
+		t.Fatalf("final=%+v", final)
+	}
+	if !IsRetryableAssistantError(final) {
+		t.Fatal("finish_reason error should be retryable")
+	}
+	if IsContextOverflow(final, 0) {
+		t.Fatal("finish_reason error is not overflow")
+	}
+}
