@@ -68,6 +68,10 @@ OSC 8 hyperlinks and true color still follow the settings below.
 `PIGO_*` wins over `PI_*` and over `settings.json`. See
 [environment.md](environment.md) and [settings.md](settings.md).
 
+Herdr (`TERM_PROGRAM=herdr`, outside tmux and screen) is OSC 8 capable.
+Markdown links there use the same OSC 8 sequence as file paths when
+hyperlinks are enabled. Other terminals keep glamour's link text.
+
 `terminal.showTerminalProgress` emits OSC 9;4 when enabled.
 `terminal.clearOnShrink` clears on a smaller size.
 
