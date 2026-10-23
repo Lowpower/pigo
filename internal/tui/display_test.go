@@ -38,6 +38,93 @@ func TestHyperlinksOffSkipsOSC8(t *testing.T) {
 	}
 }
 
+func TestHerdrMarkdownUsesOSC8(t *testing.T) {
+	m := New(testCfg())
+	m.termLinks = true
+	got := m.renderMarkdown("See [the file](diff1.txt) and <https://example.com/a>.")
+	wantFile := osc8("the file", "diff1.txt")
+	wantURL := osc8("https://example.com/a", "https://example.com/a")
+	if !strings.Contains(got, wantFile) {
+		t.Fatalf("missing file link %q\n%s", wantFile, got)
+	}
+	if !strings.Contains(got, wantURL) {
+		t.Fatalf("missing autolink %q\n%s", wantURL, got)
+	}
+	if strings.Contains(got, "](diff1.txt)") || strings.Contains(got, "<https://example.com/a>") {
+		t.Fatalf("raw markdown left in output:\n%s", got)
+	}
+	titled := m.renderMarkdown("[a](https://example.com/b \"title\")")
+	if !strings.Contains(titled, osc8("a", "https://example.com/b")) {
+		t.Fatalf("title leaked into the destination:\n%s", titled)
+	}
+	if strings.Contains(titled, "title") {
+		t.Fatalf("title was shown:\n%s", titled)
+	}
+	img := m.renderMarkdown("![pic](pic.png)")
+	if strings.Contains(img, "\x1b]8;;") {
+		t.Fatalf("image became a hyperlink:\n%s", img)
+	}
+}
+
+func TestOtherTerminalsKeepGlamourLinks(t *testing.T) {
+	m := New(testCfg())
+	m.termLinks = false
+	got := m.renderMarkdown("See [the file](diff1.txt).")
+	if strings.Contains(got, "\x1b]8;;") {
+		t.Fatalf("OSC 8 on a non-Herdr terminal:\n%s", got)
+	}
+	if !strings.Contains(got, "diff1.txt") {
+		t.Fatalf("href dropped:\n%s", got)
+	}
+}
+
+func TestHerdrMarkdownRespectsHyperlinksOff(t *testing.T) {
+	m := New(testCfg())
+	m.termLinks = true
+	m.cfg.Terminal.Hyperlinks = false
+	got := m.renderMarkdown("See [the file](diff1.txt).")
+	if strings.Contains(got, "\x1b]8;;") {
+		t.Fatalf("OSC 8 while hyperlinks are off:\n%s", got)
+	}
+}
+
+func TestHerdrMarkdownSkipsCode(t *testing.T) {
+	m := New(testCfg())
+	m.termLinks = true
+	got := m.renderMarkdown("Use `[the file](diff1.txt)` or\n\n```\n[the file](diff1.txt)\n```\n")
+	if strings.Contains(got, "\x1b]8;;") {
+		t.Fatalf("code became a hyperlink:\n%s", got)
+	}
+}
+
+func TestWrapDisplayKeepsOSC8Intact(t *testing.T) {
+	body := "see " + osc8("diff1.txt", "diff1.txt") + " " + strings.Repeat("word ", 20)
+	got := wrapDisplay(body, 16)
+	if !strings.Contains(got, "\n") {
+		t.Fatal("expected a wrap")
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Count(line, "\x1b]8;;")%2 != 0 {
+			t.Fatalf("split OSC 8 sequence:\n%q", line)
+		}
+	}
+	if !strings.Contains(got, "\x1b]8;;diff1.txt\x1b\\") {
+		t.Fatalf("lost the link:\n%q", got)
+	}
+	split := wrapDisplay(osc8("abcdefghij", "https://example.com/abcdefghij"), 4)
+	for _, line := range strings.Split(split, "\n") {
+		if line == "" {
+			continue
+		}
+		if strings.Count(line, "\x1b]8;;")%2 != 0 {
+			t.Fatalf("split OSC 8 sequence:\n%q", line)
+		}
+		if !strings.Contains(line, "https://example.com/abcdefghij") {
+			t.Fatalf("wrapped line lost the destination:\n%q", line)
+		}
+	}
+}
+
 func TestIndentMarkdownCodeBlocks(t *testing.T) {
 	src := "hello\n```\nfoo\n```\n"
 	got := indentMarkdownCodeBlocks(src, "\t")

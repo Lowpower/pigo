@@ -16,7 +16,82 @@ func wrapDisplay(s string, width int) string {
 	if width <= 0 || s == "" || isImageProtocol(s) || keepOneLine(s) {
 		return s
 	}
+	if strings.Contains(s, "\x1b]8;") {
+		return wrapOSC8(s, width)
+	}
 	return wrap.String(s, width)
+}
+
+// wrapOSC8 wraps on visible cells and keeps OSC 8 sequences intact. A break
+// inside an open link closes it and reopens it on the next line.
+func wrapOSC8(s string, width int) string {
+	var b strings.Builder
+	col := 0
+	open := ""
+	for s != "" {
+		if s[0] == 0x1b {
+			n := skipEscape(s)
+			if n < 1 {
+				n = 1
+			}
+			seq := s[:n]
+			if _, closed, ok := osc8State(seq); ok {
+				if closed {
+					open = ""
+				} else {
+					open = seq
+				}
+			}
+			b.WriteString(seq)
+			s = s[n:]
+			continue
+		}
+		if s[0] == '\n' {
+			writeOSC8Break(&b, open)
+			col = 0
+			s = s[1:]
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s)
+		w := runewidth.RuneWidth(r)
+		if col > 0 && col+w > width {
+			writeOSC8Break(&b, open)
+			col = 0
+			if r == ' ' || r == '\t' {
+				s = s[size:]
+				continue
+			}
+		}
+		b.WriteRune(r)
+		col += w
+		s = s[size:]
+	}
+	return b.String()
+}
+
+func writeOSC8Break(b *strings.Builder, open string) {
+	if open != "" {
+		b.WriteString("\x1b]8;;\x1b\\")
+	}
+	b.WriteByte('\n')
+	if open != "" {
+		b.WriteString(open)
+	}
+}
+
+// osc8State reports whether seq is an OSC 8 open or close.
+func osc8State(seq string) (uri string, closed bool, ok bool) {
+	if !strings.HasPrefix(seq, "\x1b]8;") {
+		return "", false, false
+	}
+	body := strings.TrimPrefix(seq, "\x1b]8;")
+	body = strings.TrimSuffix(body, "\x1b\\")
+	body = strings.TrimSuffix(body, "\a")
+	_, uri, found := strings.Cut(body, ";")
+	if !found {
+		return "", false, false
+	}
+	return uri, uri == "", true
 }
 
 // keepOneLine leaves a line whose visible text is a single URL unwrapped.

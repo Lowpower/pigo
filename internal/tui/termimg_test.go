@@ -59,6 +59,35 @@ func TestDetectImageProtocol(t *testing.T) {
 	}
 }
 
+func TestDetectCapabilitiesHyperlinks(t *testing.T) {
+	cases := []struct {
+		name  string
+		env   map[string]string
+		image string
+		links bool
+	}{
+		{name: "herdr", env: map[string]string{"TERM_PROGRAM": "herdr", "TERM": "xterm-256color"}, image: protoKitty, links: true},
+		{name: "herdr mixed case", env: map[string]string{"TERM_PROGRAM": "Herdr"}, image: protoKitty, links: true},
+		{name: "herdr leaked kitty", env: map[string]string{"TERM_PROGRAM": "herdr", "KITTY_WINDOW_ID": "1"}, image: protoKitty, links: true},
+		{name: "herdr leaked ghostty", env: map[string]string{"TERM_PROGRAM": "herdr", "GHOSTTY_RESOURCES_DIR": "/usr/share/ghostty"}, image: protoKitty, links: true},
+		{name: "herdr in tmux", env: map[string]string{"TERM_PROGRAM": "herdr", "TMUX": "/tmp/tmux"}, image: "", links: false},
+		{name: "herdr term screen", env: map[string]string{"TERM_PROGRAM": "herdr", "TERM": "screen-256color"}, image: "", links: false},
+		{name: "kitty", env: map[string]string{"TERM_PROGRAM": "kitty"}, image: protoKitty, links: false},
+		{name: "ghostty leak", env: map[string]string{"GHOSTTY_RESOURCES_DIR": "/usr/share/ghostty"}, image: protoKitty, links: false},
+		{name: "iterm", env: map[string]string{"TERM_PROGRAM": "iTerm.app"}, image: protoITerm, links: false},
+		{name: "vscode", env: map[string]string{"TERM_PROGRAM": "vscode"}, image: "", links: false},
+		{name: "unknown", env: map[string]string{}, image: "", links: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := detectCapabilities(envOf(tc.env))
+			if got.images != tc.image || got.hyperlinks != tc.links {
+				t.Fatalf("got images=%q hyperlinks=%v want images=%q hyperlinks=%v", got.images, got.hyperlinks, tc.image, tc.links)
+			}
+		})
+	}
+}
+
 func pngHeader(w, h int) string {
 	b := make([]byte, 24)
 	copy(b, []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})

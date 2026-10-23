@@ -164,6 +164,7 @@ type Model struct {
 	copyFlashTree bool
 	copyFlashGen  int
 	imgProto      string
+	termLinks     bool // Herdr: Markdown links use OSC 8 when hyperlinks are on
 	cellWidthPx   int
 	cellHeightPx  int
 	altScreen     bool
@@ -199,11 +200,13 @@ type Model struct {
 
 // New builds the interactive model from the resolved config.
 func New(cfg config.Config) Model {
+	caps := detectCapabilities(os.Getenv)
 	m := Model{
 		cfg:          cfg,
 		editor:       newPromptEditor(),
 		keys:         keys.NewManager(config.DefaultConfigDir()),
-		imgProto:     cfg.ImageProtocol(detectImageProtocol(os.Getenv)),
+		imgProto:     cfg.ImageProtocol(caps.images),
+		termLinks:    caps.hyperlinks,
 		cellWidthPx:  kittyCellWidthPx,
 		cellHeightPx: kittyCellHeightPx,
 		altScreen:    useAltScreen(cfg),
@@ -1818,6 +1821,10 @@ func (m Model) mermaidOpts(streaming bool) mermaidOpts {
 	return mermaidOpts{mode: m.cfg.MermaidMode(), width: m.mermaidWidth(), streaming: streaming}
 }
 
+func (m Model) markdownOSC8() bool {
+	return m.termLinks && m.cfg.HyperlinksEnabled(true)
+}
+
 func (m Model) renderMarkdown(s string) string {
 	if m.engine != nil && !strings.Contains(s, "\x1b") {
 		s = m.engine.TransformMarkdown(s, "assistant", false)
@@ -1825,14 +1832,18 @@ func (m Model) renderMarkdown(s string) string {
 	s = indentMarkdownCodeBlocks(s, m.cfg.CodeBlockIndent())
 	s = transformMermaid(s, m.mermaidOpts(false))
 	s = transformLatexJoins(s)
+	var subs map[rune]string
+	if m.markdownOSC8() {
+		s, subs = placeholderMarkdownLinks(s)
+	}
 	if m.glam == nil {
-		return s
+		return restoreMarkdownLinks(s, subs)
 	}
 	out, err := m.glam.Render(s)
 	if err != nil {
-		return s
+		return restoreMarkdownLinks(s, subs)
 	}
-	return strings.TrimRight(out, "\n")
+	return strings.TrimRight(restoreMarkdownLinks(out, subs), "\n")
 }
 
 // Run starts the interactive TUI. It requires a TTY.

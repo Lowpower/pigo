@@ -31,36 +31,56 @@ type contentBlock struct {
 	MimeType string `json:"mimeType"`
 }
 
-func detectImageProtocol(getenv func(string) string) string {
+// terminalCapabilities is the auto-detected image protocol and whether
+// Markdown should use OSC 8. Hyperlinks are true only for Herdr; other
+// terminals keep their current link rendering.
+type terminalCapabilities struct {
+	images     string
+	hyperlinks bool
+}
+
+func detectCapabilities(getenv func(string) string) terminalCapabilities {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
+	var caps terminalCapabilities
 	term := strings.ToLower(getenv("TERM"))
 	if getenv("TMUX") != "" || strings.HasPrefix(term, "tmux") || strings.HasPrefix(term, "screen") {
-		return ""
+		return caps
 	}
 	program := strings.ToLower(getenv("TERM_PROGRAM"))
-	// Herdr supports Kitty graphics. Check it before Kitty and Ghostty so
-	// leaked outer-terminal variables stay on this branch.
+	// Herdr supports Kitty graphics and OSC 8. Check it before Kitty and
+	// Ghostty so leaked outer-terminal variables stay on this branch.
 	if program == "herdr" {
-		return protoKitty
+		caps.images = protoKitty
+		caps.hyperlinks = true
+		return caps
 	}
 	if getenv("KITTY_WINDOW_ID") != "" || program == "kitty" {
-		return protoKitty
+		caps.images = protoKitty
+		return caps
 	}
 	if program == "ghostty" || strings.Contains(term, "ghostty") || getenv("GHOSTTY_RESOURCES_DIR") != "" {
-		return protoKitty
+		caps.images = protoKitty
+		return caps
 	}
 	if getenv("WEZTERM_PANE") != "" || program == "wezterm" {
-		return protoKitty
+		caps.images = protoKitty
+		return caps
 	}
 	if program == "warpterminal" || getenv("WARP_SESSION_ID") != "" || getenv("WARP_TERMINAL_SESSION_UUID") != "" {
-		return protoKitty
+		caps.images = protoKitty
+		return caps
 	}
 	if getenv("ITERM_SESSION_ID") != "" || program == "iterm.app" {
-		return protoITerm
+		caps.images = protoITerm
+		return caps
 	}
-	return ""
+	return caps
+}
+
+func detectImageProtocol(getenv func(string) string) string {
+	return detectCapabilities(getenv).images
 }
 
 // chooseLessDistortedCellCount picks ceil or ceil-1, whichever changes the
