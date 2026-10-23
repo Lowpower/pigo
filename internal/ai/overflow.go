@@ -7,6 +7,7 @@ import (
 
 var overflowPatterns = compileAll([]string{
 	`prompt (?:is )?too long`,
+	`prompt exceeds max length`,
 	`request_too_large`,
 	`input is too long for requested model`,
 	`exceeds the context window`,

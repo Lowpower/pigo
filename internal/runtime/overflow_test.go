@@ -20,6 +20,7 @@ func TestPrintJSONOverflowCompactsAndRetriesOnce(t *testing.T) {
 		wantWillRetry bool
 	}{
 		{"provider error", errorReply("prompt is too long: 300000 tokens > 200000 maximum"), true},
+		{"zai exceeds max length", errorReply(`400 {"code":"1261","message":"Prompt exceeds max length"}`), true},
 		{"stop length", func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
 			return ai.EmitMessage(ctx, &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,

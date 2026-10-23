@@ -3,6 +3,10 @@ package ai
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -137,4 +141,199 @@ func TestWrapProviderRetryDoesNotRetryAfterText(t *testing.T) {
 	if atomic.LoadInt32(&n) != 1 {
 		t.Fatalf("calls=%d", n)
 	}
+}
+
+func TestProviderRetryDelay(t *testing.T) {
+	now := time.Date(2026, 10, 21, 7, 0, 0, 0, time.UTC)
+	maxDelay := 60 * time.Second
+
+	both := http.Header{}
+	both.Set("Retry-After-Ms", "1500")
+	both.Set("Retry-After", "9")
+	delay, err := providerRetryDelay(both, 0, maxDelay, now, "boom")
+	if err != nil || delay != 1500*time.Millisecond {
+		t.Fatalf("retry-after-ms precedence: delay=%s err=%v", delay, err)
+	}
+
+	seconds := http.Header{}
+	seconds.Set("Retry-After", "2")
+	delay, err = providerRetryDelay(seconds, 0, maxDelay, now, "boom")
+	if err != nil || delay != 2*time.Second {
+		t.Fatalf("retry-after seconds: delay=%s err=%v", delay, err)
+	}
+
+	dated := http.Header{}
+	dated.Set("Retry-After", now.Add(2*time.Second).UTC().Format(http.TimeFormat))
+	delay, err = providerRetryDelay(dated, 0, maxDelay, now, "boom")
+	if err != nil || delay != 2*time.Second {
+		t.Fatalf("retry-after date: delay=%s err=%v", delay, err)
+	}
+
+	bad := http.Header{}
+	bad.Set("Retry-After", "not-a-date")
+	delay, err = providerRetryDelay(bad, 0, maxDelay, now, "boom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delay < 375*time.Millisecond || delay > 500*time.Millisecond {
+		t.Fatalf("unparseable date backoff=%s", delay)
+	}
+
+	tooLong := http.Header{}
+	tooLong.Set("Retry-After", "120")
+	_, err = providerRetryDelay(tooLong, 0, maxDelay, now, "openai API error 429: rate limit")
+	const want = "Server requested 120s retry delay (max: 60s). openai API error 429: rate limit"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err=%v", err)
+	}
+
+	delay, err = providerRetryDelay(tooLong, 0, 0, now, "boom")
+	if err != nil || delay != 120*time.Second {
+		t.Fatalf("zero max should not cap server delay: delay=%s err=%v", delay, err)
+	}
+
+	past := http.Header{}
+	past.Set("Retry-After", now.Add(-5*time.Second).UTC().Format(http.TimeFormat))
+	delay, err = providerRetryDelay(past, 0, maxDelay, now, "boom")
+	if err != nil || delay != 0 {
+		t.Fatalf("past date delay=%s err=%v", delay, err)
+	}
+}
+
+func TestApplyHTTPRetry(t *testing.T) {
+	h := http.Header{}
+	if !applyHTTPRetry(http.StatusTooManyRequests, h, true, false) ||
+		!applyHTTPRetry(http.StatusRequestTimeout, h, true, false) ||
+		!applyHTTPRetry(http.StatusConflict, h, true, false) ||
+		!applyHTTPRetry(http.StatusServiceUnavailable, h, true, false) {
+		t.Fatal("408, 409, 429, and 5xx should retry")
+	}
+	if applyHTTPRetry(http.StatusBadRequest, h, true, false) {
+		t.Fatal("400 without a retryable message should not retry")
+	}
+	if !applyHTTPRetry(http.StatusBadRequest, h, true, true) {
+		t.Fatal("400 with a retryable message should retry")
+	}
+	h.Set("X-Should-Retry", "false")
+	if applyHTTPRetry(http.StatusTooManyRequests, h, true, true) {
+		t.Fatal("x-should-retry false should win")
+	}
+	h.Set("X-Should-Retry", "true")
+	if !applyHTTPRetry(http.StatusBadRequest, h, true, false) {
+		t.Fatal("x-should-retry true should force a retry")
+	}
+	if !applyHTTPRetry(http.StatusOK, h, true, true) {
+		t.Fatal("2xx should ignore x-should-retry and keep the message classification")
+	}
+	h.Set("X-Should-Retry", "false")
+	if !applyHTTPRetry(http.StatusOK, h, true, true) {
+		t.Fatal("2xx should ignore x-should-retry false")
+	}
+	if applyHTTPRetry(http.StatusInternalServerError, nil, false, false) {
+		t.Fatal("a response that was not observed should not retry by status")
+	}
+}
+
+func TestWrapProviderRetryHonorsRetryAfter(t *testing.T) {
+	const ok = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n"
+	t.Run("seconds", func(t *testing.T) {
+		var calls int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if atomic.AddInt32(&calls, 1) == 1 {
+				w.Header().Set("Retry-After", "2")
+				http.Error(w, "rate limit", http.StatusTooManyRequests)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, ok)
+		}))
+		defer srv.Close()
+
+		fn := WrapProviderRetry((&OpenAICompletionsClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}).StreamFn(), ProviderRetry{
+			MaxRetries: 2,
+			MaxDelay:   60 * time.Second,
+		})
+		start := time.Now()
+		stream, err := fn(context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "gpt-4o"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, final := stream.Collect()
+		elapsed := time.Since(start)
+		if final == nil || final.StopReason != StopStop || final.Text() != "ok" {
+			t.Fatalf("final=%+v", final)
+		}
+		if atomic.LoadInt32(&calls) != 2 {
+			t.Fatalf("calls=%d", calls)
+		}
+		if elapsed < 1800*time.Millisecond || elapsed > 4*time.Second {
+			t.Fatalf("elapsed=%s", elapsed)
+		}
+	})
+
+	t.Run("unparseable date", func(t *testing.T) {
+		var calls int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if atomic.AddInt32(&calls, 1) == 1 {
+				w.Header().Set("Retry-After", "not-a-date")
+				http.Error(w, "rate limit", http.StatusTooManyRequests)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, ok)
+		}))
+		defer srv.Close()
+
+		fn := WrapProviderRetry((&OpenAICompletionsClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}).StreamFn(), ProviderRetry{
+			MaxRetries: 2,
+			MaxDelay:   60 * time.Second,
+		})
+		start := time.Now()
+		stream, err := fn(context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "gpt-4o"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, final := stream.Collect()
+		elapsed := time.Since(start)
+		if final == nil || final.StopReason != StopStop {
+			t.Fatalf("final=%+v", final)
+		}
+		if atomic.LoadInt32(&calls) != 2 {
+			t.Fatalf("calls=%d", calls)
+		}
+		if elapsed < 300*time.Millisecond || elapsed > 1500*time.Millisecond {
+			t.Fatalf("elapsed=%s", elapsed)
+		}
+	})
+
+	t.Run("exceeds max", func(t *testing.T) {
+		var calls int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			atomic.AddInt32(&calls, 1)
+			w.Header().Set("Retry-After", "120")
+			http.Error(w, "rate limit", http.StatusTooManyRequests)
+		}))
+		defer srv.Close()
+
+		fn := WrapProviderRetry((&OpenAICompletionsClient{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()}).StreamFn(), ProviderRetry{
+			MaxRetries: 2,
+			MaxDelay:   60 * time.Second,
+		})
+		start := time.Now()
+		stream, err := fn(context.Background(), Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}}, Options{Model: "gpt-4o"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, final := stream.Collect()
+		elapsed := time.Since(start)
+		if final == nil || !strings.Contains(final.ErrorMessage, "Server requested 120s retry delay (max: 60s)") {
+			t.Fatalf("final=%+v", final)
+		}
+		if atomic.LoadInt32(&calls) != 1 {
+			t.Fatalf("calls=%d", calls)
+		}
+		if elapsed > time.Second {
+			t.Fatalf("waited %s", elapsed)
+		}
+	})
 }
