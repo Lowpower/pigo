@@ -60,7 +60,7 @@ OSC 8 hyperlinks and true color still follow the settings below.
 | --- | --- | --- |
 | `PIGO_HYPERLINKS` / `settings.terminal.hyperlinks` | `on` / `off` / `auto` | `auto` (on for a TTY) |
 | `PIGO_TRUE_COLOR` / `settings.terminal.trueColor` | `on` / `off` / `auto` | `auto` |
-| `PIGO_IMAGE_PROTOCOL` / `settings.terminal.images` | `kitty`, `iterm2`, `off`, `auto` | auto-detect (Kitty, Ghostty, WezTerm, Warp → kitty; iTerm → iterm2) |
+| `PIGO_IMAGE_PROTOCOL` / `settings.terminal.images` | `kitty`, `iterm2`, `off`, `auto` | auto-detect (Herdr, Kitty, Ghostty, WezTerm, Warp → kitty; iTerm → iterm2) |
 | `--tui-mode` / `settings.tuiMode` | `regular` / `fullscreen` | `regular` |
 | `settings.terminal.showImages` | bool | TUI image display |
 | `settings.terminal.imageWidthCells` | int | 60 |
