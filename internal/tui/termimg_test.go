@@ -42,6 +42,13 @@ func TestDetectImageProtocol(t *testing.T) {
 		{name: "iterm program", env: map[string]string{"TERM_PROGRAM": "iTerm.app"}, want: protoITerm},
 		{name: "vscode", env: map[string]string{"TERM_PROGRAM": "vscode"}, want: ""},
 		{name: "windows terminal", env: map[string]string{"WT_SESSION": "s", "TERM": "xterm-256color"}, want: ""},
+		{name: "herdr", env: map[string]string{"TERM_PROGRAM": "herdr", "TERM": "xterm-256color"}, want: protoKitty},
+		{name: "herdr mixed case", env: map[string]string{"TERM_PROGRAM": "Herdr"}, want: protoKitty},
+		{name: "herdr leaked kitty", env: map[string]string{"TERM_PROGRAM": "herdr", "KITTY_WINDOW_ID": "1"}, want: protoKitty},
+		{name: "herdr leaked ghostty", env: map[string]string{"TERM_PROGRAM": "herdr", "GHOSTTY_RESOURCES_DIR": "/usr/share/ghostty"}, want: protoKitty},
+		{name: "herdr in tmux", env: map[string]string{"TERM_PROGRAM": "herdr", "TMUX": "/tmp/tmux"}, want: ""},
+		{name: "herdr term tmux", env: map[string]string{"TERM_PROGRAM": "herdr", "TERM": "tmux-256color"}, want: ""},
+		{name: "herdr term screen", env: map[string]string{"TERM_PROGRAM": "herdr", "TERM": "screen-256color"}, want: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -275,6 +282,22 @@ func TestRenderInlineImageCapsWidthToTerminal(t *testing.T) {
 	got := m.renderInlineImage(ai.ImageContent{Type: "image", Data: pngHeader(400, 900), MimeType: "image/png"})
 	if !strings.Contains(got, "C=1,c=13,r=15;") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestHerdrDetectionRendersKittySequence(t *testing.T) {
+	proto := detectImageProtocol(envOf(map[string]string{
+		"TERM_PROGRAM": "herdr",
+		"TERM":         "xterm-256color",
+	}))
+	m := New(testCfg())
+	m.imgProto = proto
+	got := m.renderInlineImage(ai.ImageContent{Type: "image", Data: png1x1, MimeType: "image/png"})
+	if !strings.Contains(got, "\x1b_Ga=T,f=100,") {
+		t.Fatalf("missing kitty sequence: %q", got)
+	}
+	if strings.Contains(got, "1337") {
+		t.Fatalf("iterm sequence leaked: %q", got)
 	}
 }
 

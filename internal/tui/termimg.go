@@ -40,6 +40,11 @@ func detectImageProtocol(getenv func(string) string) string {
 		return ""
 	}
 	program := strings.ToLower(getenv("TERM_PROGRAM"))
+	// Herdr supports Kitty graphics. Check it before Kitty and Ghostty so
+	// leaked outer-terminal variables stay on this branch.
+	if program == "herdr" {
+		return protoKitty
+	}
 	if getenv("KITTY_WINDOW_ID") != "" || program == "kitty" {
 		return protoKitty
 	}
