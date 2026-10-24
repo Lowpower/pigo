@@ -63,8 +63,9 @@ func serveCallback(ctx context.Context, ln net.Listener, path, expectedState str
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if errVal := q.Get("error"); errVal != "" {
-			writeOAuthHTML(w, 400, oauthErrorHTML("Authentication did not complete.", "Error: "+errVal))
-			cs.finish("", "", fmt.Errorf("oauth error: %s", errVal))
+			err := authorizationError(q)
+			writeOAuthHTML(w, 400, oauthErrorHTML("Authentication did not complete.", err.Error()))
+			cs.finish("", "", err)
 			return
 		}
 		code := q.Get("code")
@@ -99,6 +100,14 @@ func (cs *callbackServer) URL(path string) string {
 	return "http://" + cs.ln.Addr().String() + path
 }
 
+func (cs *callbackServer) boundPort() (int, error) {
+	ta, ok := cs.ln.Addr().(*net.TCPAddr)
+	if !ok || ta == nil || ta.Port == 0 {
+		return 0, fmt.Errorf("oauth callback server did not bind to tcp")
+	}
+	return ta.Port, nil
+}
+
 func (cs *callbackServer) finish(code, state string, err error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
@@ -128,22 +137,40 @@ func (cs *callbackServer) Close() {
 	}
 }
 
-func parseAuthInput(input string) (code, state string) {
+func parseAuthInput(input string) (code, state string, err error) {
 	value := strings.TrimSpace(input)
 	if value == "" {
-		return "", ""
+		return "", "", nil
 	}
-	if u, err := url.Parse(value); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
-		return u.Query().Get("code"), u.Query().Get("state")
+	if u, parseErr := url.Parse(value); parseErr == nil && (u.Scheme == "http" || u.Scheme == "https") {
+		if err := authorizationError(u.Query()); err != nil {
+			return "", "", err
+		}
+		return u.Query().Get("code"), u.Query().Get("state"), nil
 	}
 	if i := strings.IndexByte(value, '#'); i >= 0 {
-		return value[:i], value[i+1:]
+		return value[:i], value[i+1:], nil
 	}
-	if strings.Contains(value, "code=") {
+	if strings.Contains(value, "code=") || strings.Contains(value, "error=") {
 		q, _ := url.ParseQuery(value)
-		return q.Get("code"), q.Get("state")
+		if err := authorizationError(q); err != nil {
+			return "", "", err
+		}
+		return q.Get("code"), q.Get("state"), nil
 	}
-	return value, ""
+	return value, "", nil
+}
+
+func authorizationError(q url.Values) error {
+	code := q.Get("error")
+	if code == "" {
+		return nil
+	}
+	desc := q.Get("error_description")
+	if desc == "" || desc == code {
+		return fmt.Errorf("oauth error: %s", code)
+	}
+	return fmt.Errorf("oauth error: %s: %s", code, desc)
 }
 
 func openBrowser(target string) {

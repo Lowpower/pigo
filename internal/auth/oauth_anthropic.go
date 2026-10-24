@@ -44,11 +44,17 @@ func (anthropicOAuth) Login(ix Interaction) (Credential, error) {
 	host := callbackHost()
 	srv, err := startCallback(ctx, host, anthropicPort, anthropicPath, verifier)
 	if err != nil {
-		return Credential{}, err
+		srv, err = startCallback(ctx, host, 0, anthropicPath, verifier)
+		if err != nil {
+			return Credential{}, err
+		}
 	}
 	defer srv.Close()
-
-	redirect := fmt.Sprintf("http://localhost:%d%s", anthropicPort, anthropicPath)
+	port, err := srv.boundPort()
+	if err != nil {
+		return Credential{}, err
+	}
+	redirect := fmt.Sprintf("http://localhost:%d%s", port, anthropicPath)
 	q := url.Values{
 		"code":                  {"true"},
 		"client_id":             {anthropicClientID},
@@ -85,7 +91,12 @@ func (anthropicOAuth) Login(ix Interaction) (Credential, error) {
 			srv.Cancel()
 			return
 		}
-		code, state := parseAuthInput(input)
+		code, state, err := parseAuthInput(input)
+		if err != nil {
+			ch <- result{err: err}
+			srv.Cancel()
+			return
+		}
 		ch <- result{code, state, nil}
 		srv.Cancel()
 	}()

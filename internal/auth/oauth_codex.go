@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 )
 
-const openaiCodexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+const (
+	openaiCodexClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
+	openaiCodexCallbackPort = 1455
+)
 
 var (
 	openaiCodexAuthURL   = "https://auth.openai.com/oauth/authorize"
@@ -58,8 +63,11 @@ func (openaiCodexOAuth) loginBrowser(ctx context.Context, ix Interaction) (Crede
 		return Credential{}, err
 	}
 	state := randomHex(16)
-	srv, err := startCallback(ctx, callbackHost(), 1455, "/auth/callback", state)
+	srv, err := startCallback(ctx, callbackHost(), openaiCodexCallbackPort, "/auth/callback", state)
 	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return Credential{}, fmt.Errorf("openai codex callback port %d is already in use: %w", openaiCodexCallbackPort, err)
+		}
 		return Credential{}, err
 	}
 	defer srv.Close()
@@ -252,7 +260,15 @@ func waitCodeOrPaste(ix Interaction, srv *callbackServer, placeholder string) (c
 				srv.Cancel()
 				return
 			}
-			c, st := parseAuthInput(input)
+			c, st, e := parseAuthInput(input)
+			if e != nil {
+				ch <- struct {
+					code, state string
+					err         error
+				}{err: e}
+				srv.Cancel()
+				return
+			}
 			ch <- struct {
 				code, state string
 				err         error

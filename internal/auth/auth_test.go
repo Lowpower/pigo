@@ -162,6 +162,100 @@ func TestModifyRefreshOnce(t *testing.T) {
 	}
 }
 
+func TestRefreshPersistsRotatedTokenWhenCallerCancels(t *testing.T) {
+	dir := t.TempDir()
+	s := Open(dir)
+	_, err := s.Modify("anthropic", func(*Credential) (*Credential, error) {
+		return &Credential{Type: TypeOAuth, Access: "old", Refresh: "old-refresh", Expires: 1}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	p := Provider{
+		ID: "anthropic",
+		OAuth: staticOAuth{
+			refresh: func(ctx context.Context, c Credential) (Credential, error) {
+				close(started)
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return Credential{}, ctx.Err()
+				}
+				c.Access = "new"
+				c.Refresh = "new-refresh"
+				c.Expires = time.Now().UnixMilli() + time.Hour.Milliseconds()
+				return c, nil
+			},
+			toAuth: func(c Credential) (ModelAuth, error) {
+				return ModelAuth{APIKey: c.Access}, nil
+			},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := Resolve(ctx, s, p, ResolveOpts{})
+		errCh <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh did not start")
+	}
+	cancel()
+	time.Sleep(30 * time.Millisecond)
+	close(release)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("refresh did not finish")
+	}
+	got, ok, err := s.Read("anthropic")
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if got.Refresh != "new-refresh" || got.Access != "new" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestRefreshFailureKeepsStoredToken(t *testing.T) {
+	dir := t.TempDir()
+	s := Open(dir)
+	_, err := s.Modify("anthropic", func(*Credential) (*Credential, error) {
+		return &Credential{Type: TypeOAuth, Access: "old", Refresh: "old-refresh", Expires: 1}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := Provider{
+		ID: "anthropic",
+		OAuth: staticOAuth{
+			refresh: func(context.Context, Credential) (Credential, error) {
+				return Credential{}, context.Canceled
+			},
+			toAuth: func(c Credential) (ModelAuth, error) {
+				return ModelAuth{APIKey: c.Access}, nil
+			},
+		},
+	}
+	if _, err := Resolve(context.Background(), s, p, ResolveOpts{}); err == nil {
+		t.Fatal("expected refresh error")
+	}
+	got, ok, err := s.Read("anthropic")
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if got.Refresh != "old-refresh" || got.Access != "old" {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestCheckNoRefresh(t *testing.T) {
 	dir := t.TempDir()
 	s := Open(dir)
