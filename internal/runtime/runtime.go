@@ -1882,6 +1882,9 @@ func boundStream(agentDir, provider, transport string) ai.StreamFn {
 	return func(ctx context.Context, reqCtx ai.Context, opts ai.Options) (*ai.EventStream, error) {
 		res, err := auth.Resolve(ctx, store, p, auth.ResolveOpts{})
 		if err != nil {
+			if auth.IsFederationError(err) {
+				return nil, err
+			}
 			return stream("", "", nil)(ctx, reqCtx, opts)
 		}
 		if res == nil {
