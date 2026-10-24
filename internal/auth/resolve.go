@@ -18,6 +18,17 @@ const (
 
 // Resolve derives request auth for a provider.
 func Resolve(ctx context.Context, s *Store, p Provider, opts ResolveOpts) (*Result, error) {
+	res, err := resolve(ctx, s, p, opts)
+	if err != nil || res == nil || res.Source != federationSource {
+		return res, err
+	}
+	if res.Auth.APIKey != "" || len(res.Auth.Headers) > 0 {
+		return res, nil
+	}
+	return applyAnthropicFederation(ctx, res)
+}
+
+func resolve(ctx context.Context, s *Store, p Provider, opts ResolveOpts) (*Result, error) {
 	if k := ProcessAPIKey(p.ID); k != "" && p.APIKey != nil {
 		return resolveAPIKey(p, &Credential{Type: TypeAPIKey, Key: k, Env: opts.Env})
 	}
@@ -137,6 +148,9 @@ func resolveAPIKeyInner(p Provider, cred *Credential) (*Result, error) {
 				return r, nil
 			}
 		}
+	}
+	if key == "" && anthropicFederationConfigured(p.ID) {
+		return &Result{Source: federationSource}, nil
 	}
 	if key == "" {
 		return nil, nil
