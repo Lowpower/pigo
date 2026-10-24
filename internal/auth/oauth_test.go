@@ -2,8 +2,13 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -132,12 +137,201 @@ func TestCopilotBaseURLFromToken(t *testing.T) {
 }
 
 func TestParseAuthInput(t *testing.T) {
-	code, state := parseAuthInput("http://localhost:53692/callback?code=abc&state=ver")
-	if code != "abc" || state != "ver" {
-		t.Fatalf("%s %s", code, state)
+	code, state, err := parseAuthInput("http://localhost:53692/callback?code=abc&state=ver")
+	if err != nil || code != "abc" || state != "ver" {
+		t.Fatalf("%s %s %v", code, state, err)
 	}
-	code, state = parseAuthInput("abc#ver")
-	if code != "abc" || state != "ver" {
-		t.Fatalf("hash %s %s", code, state)
+	code, state, err = parseAuthInput("abc#ver")
+	if err != nil || code != "abc" || state != "ver" {
+		t.Fatalf("hash %s %s %v", code, state, err)
+	}
+	_, _, err = parseAuthInput("http://localhost/callback?error=access_denied&error_description=nope")
+	if err == nil || !strings.Contains(err.Error(), "access_denied") || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAnthropicLoginFallsBackWhenPreferredPortTaken(t *testing.T) {
+	blocker, err := net.Listen("tcp", "127.0.0.1:53692")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = blocker.Close() })
+
+	var exchangedRedirect string
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			RedirectURI string `json:"redirect_uri"`
+			Code        string `json:"code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		if body.Code != "browser-code" {
+			t.Errorf("code = %q", body.Code)
+		}
+		exchangedRedirect = body.RedirectURI
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access","refresh_token":"refresh","expires_in":3600}`))
+	}))
+	t.Cleanup(tokenSrv.Close)
+	old := anthropicTokenURL
+	anthropicTokenURL = tokenSrv.URL
+	t.Cleanup(func() { anthropicTokenURL = old })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var redirect string
+	cred, err := anthropicOAuth{}.Login(Interaction{
+		Ctx: ctx,
+		Notify: func(ev Event) {
+			if ev.Type != EventAuthURL {
+				return
+			}
+			authURL, err := url.Parse(ev.URL)
+			if err != nil {
+				t.Errorf("auth url: %v", err)
+				return
+			}
+			redirect = authURL.Query().Get("redirect_uri")
+			cb, err := url.Parse(redirect)
+			if err != nil {
+				t.Errorf("redirect: %v", err)
+				return
+			}
+			q := cb.Query()
+			q.Set("code", "browser-code")
+			q.Set("state", authURL.Query().Get("state"))
+			cb.RawQuery = q.Encode()
+			cb.Host = net.JoinHostPort("127.0.0.1", cb.Port())
+			resp, err := http.Get(cb.String())
+			if err != nil {
+				t.Errorf("callback: %v", err)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("callback status %d", resp.StatusCode)
+			}
+		},
+		Prompt: func(Prompt) (string, error) {
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ru, err := url.Parse(redirect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ru.Hostname() != "localhost" || ru.Path != "/callback" || ru.Port() == "" || ru.Port() == "53692" {
+		t.Fatalf("redirect = %s", redirect)
+	}
+	if exchangedRedirect != redirect {
+		t.Fatalf("exchanged %s want %s", exchangedRedirect, redirect)
+	}
+	if cred.Access != "access" || cred.Refresh != "refresh" {
+		t.Fatalf("%+v", cred)
+	}
+}
+
+func TestCodexLoginFailsWhenCallbackPortTaken(t *testing.T) {
+	blocker, err := net.Listen("tcp", "127.0.0.1:1455")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = blocker.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	opened := false
+	_, err = openaiCodexOAuth{}.Login(Interaction{
+		Ctx: ctx,
+		Notify: func(ev Event) {
+			if ev.Type == EventAuthURL {
+				opened = true
+			}
+		},
+	})
+	if err == nil {
+		t.Fatal("expected port in use")
+	}
+	if !strings.Contains(err.Error(), "callback port 1455 is already in use") {
+		t.Fatalf("error = %v", err)
+	}
+	if opened {
+		t.Fatal("opened browser")
+	}
+}
+
+func TestOAuthErrorCallbackEndsLogin(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("token exchange should not run")
+	}))
+	t.Cleanup(tokenSrv.Close)
+	old := anthropicTokenURL
+	anthropicTokenURL = tokenSrv.URL
+	t.Cleanup(func() { anthropicTokenURL = old })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := anthropicOAuth{}.Login(Interaction{
+		Ctx: ctx,
+		Notify: func(ev Event) {
+			if ev.Type != EventAuthURL {
+				return
+			}
+			authURL, err := url.Parse(ev.URL)
+			if err != nil {
+				t.Errorf("auth url: %v", err)
+				return
+			}
+			cb, err := url.Parse(authURL.Query().Get("redirect_uri"))
+			if err != nil {
+				t.Errorf("redirect: %v", err)
+				return
+			}
+			q := url.Values{}
+			q.Set("error", "access_denied")
+			q.Set("error_description", "nope")
+			cb.RawQuery = q.Encode()
+			cb.Host = net.JoinHostPort("127.0.0.1", cb.Port())
+			resp, err := http.Get(cb.String())
+			if err != nil {
+				t.Errorf("callback: %v", err)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			_, _ = io.Copy(io.Discard, resp.Body)
+		},
+		Prompt: func(Prompt) (string, error) {
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "access_denied") || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPastedOAuthErrorEndsLogin(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := anthropicOAuth{}.Login(Interaction{
+		Ctx:    ctx,
+		Notify: func(Event) {},
+		Prompt: func(Prompt) (string, error) {
+			return "http://localhost:53692/callback?error=access_denied&error_description=nope", nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "access_denied") || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("error = %v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("login waited %s", time.Since(start))
 	}
 }

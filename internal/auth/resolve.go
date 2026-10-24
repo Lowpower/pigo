@@ -75,7 +75,9 @@ func resolveStoredOAuth(ctx context.Context, s *Store, p Provider, stored Creden
 			if !expiresSoon(*current) {
 				return nil, nil
 			}
-			rctx, cancel := context.WithTimeout(ctx, oauthRefreshTimeout)
+			// Once refresh starts, the provider may already have rotated the
+			// refresh token. Finish and persist it even if the caller cancels.
+			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthRefreshTimeout)
 			defer cancel()
 			next, err := p.OAuth.Refresh(rctx, *current)
 			if err != nil {
