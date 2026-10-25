@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"math"
 	"sort"
 	"strings"
 )
@@ -62,10 +63,24 @@ type modelsDevLimit struct {
 }
 
 type modelsDevCost struct {
-	Input      float64 `json:"input"`
-	Output     float64 `json:"output"`
-	CacheRead  float64 `json:"cache_read"`
-	CacheWrite float64 `json:"cache_write"`
+	Input      float64             `json:"input"`
+	Output     float64             `json:"output"`
+	CacheRead  float64             `json:"cache_read"`
+	CacheWrite float64             `json:"cache_write"`
+	Tiers      []modelsDevCostTier `json:"tiers"`
+}
+
+type modelsDevCostTier struct {
+	Input      *float64          `json:"input"`
+	Output     *float64          `json:"output"`
+	CacheRead  *float64          `json:"cache_read"`
+	CacheWrite *float64          `json:"cache_write"`
+	Tier       *modelsDevTierRef `json:"tier"`
+}
+
+type modelsDevTierRef struct {
+	Type string   `json:"type"`
+	Size *float64 `json:"size"`
 }
 
 type modelsDevModalities struct {
@@ -112,6 +127,7 @@ func FromDev(providerID, api string, raw []byte) ([]Model, error) {
 				Output:     src.Cost.Output,
 				CacheRead:  src.Cost.CacheRead,
 				CacheWrite: src.Cost.CacheWrite,
+				Tiers:      contextCostTiers(src.Cost),
 			}
 		}
 		if effort := effortValues(src.ReasoningOptions); effort != nil {
@@ -120,6 +136,46 @@ func FromDev(providerID, api string, raw []byte) ([]Model, error) {
 		out = append(out, m)
 	}
 	return out, nil
+}
+
+// contextCostTiers keeps models.dev context brackets. A rate the bracket omits
+// stays at the base price. Other bracket types are dropped. Explicit 0 is kept.
+func contextCostTiers(src *modelsDevCost) []CostTier {
+	if src == nil {
+		return nil
+	}
+	var out []CostTier
+	for _, tier := range src.Tiers {
+		if tier.Tier == nil || tier.Tier.Type != "context" {
+			continue
+		}
+		above, ok := wholeTokenCount(tier.Tier.Size)
+		if !ok {
+			continue
+		}
+		out = append(out, CostTier{
+			InputTokensAbove: above,
+			Input:            rateOr(tier.Input, src.Input),
+			Output:           rateOr(tier.Output, src.Output),
+			CacheRead:        rateOr(tier.CacheRead, src.CacheRead),
+			CacheWrite:       rateOr(tier.CacheWrite, src.CacheWrite),
+		})
+	}
+	return out
+}
+
+func rateOr(explicit *float64, base float64) float64 {
+	if explicit == nil {
+		return base
+	}
+	return *explicit
+}
+
+func wholeTokenCount(size *float64) (int, bool) {
+	if size == nil || math.IsNaN(*size) || math.IsInf(*size, 0) || *size != math.Trunc(*size) {
+		return 0, false
+	}
+	return int(*size), true
 }
 
 func skipModelsDev(src modelsDevModel) bool {

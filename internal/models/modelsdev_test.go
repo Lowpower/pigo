@@ -84,6 +84,65 @@ func TestModelsFromDevMapsLimitsCostInputAndEffort(t *testing.T) {
 	}
 }
 
+func TestModelsFromDevMapsContextCostTiers(t *testing.T) {
+	raw := []byte(`{
+		"gemini": {
+			"id": "gemini",
+			"name": "Gemini",
+			"limit": {"context": 1000000, "output": 8192},
+			"cost": {
+				"input": 2,
+				"output": 12,
+				"cache_read": 0.2,
+				"cache_write": 0.375,
+				"tiers": [
+					{"output": 18, "tier": {"type": "context", "size": 200000}},
+					{"input": 9, "tier": {"type": "time", "size": 1}},
+					{"input": 1, "tier": {"type": "context"}}
+				]
+			},
+			"modalities": {"input": ["text"], "output": ["text"]}
+		},
+		"zero-tier": {
+			"id": "zero-tier",
+			"name": "Zero",
+			"cost": {
+				"input": 1,
+				"output": 2,
+				"cache_read": 0.3,
+				"cache_write": 4,
+				"tiers": [
+					{"input": 0, "cache_read": 0, "tier": {"type": "context", "size": 10}}
+				]
+			},
+			"modalities": {"output": ["text"]}
+		}
+	}`)
+	got, err := FromDev("google", "google-generative-ai", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d", len(got))
+	}
+	gemini := got[0]
+	if gemini.Cost == nil || len(gemini.Cost.Tiers) != 1 {
+		t.Fatalf("cost = %+v", gemini.Cost)
+	}
+	tier := gemini.Cost.Tiers[0]
+	if tier.InputTokensAbove != 200000 || tier.Input != 2 || tier.Output != 18 || tier.CacheRead != 0.2 || tier.CacheWrite != 0.375 {
+		t.Fatalf("tier = %+v", tier)
+	}
+	zero := got[1].Cost
+	if zero == nil || len(zero.Tiers) != 1 {
+		t.Fatalf("zero cost = %+v", zero)
+	}
+	z := zero.Tiers[0]
+	if z.InputTokensAbove != 10 || z.Input != 0 || z.Output != 2 || z.CacheRead != 0 || z.CacheWrite != 4 {
+		t.Fatalf("explicit zero should not inherit, tier = %+v", z)
+	}
+}
+
 func TestModelsDevProviderID(t *testing.T) {
 	id, ok := DevProviderID("together")
 	if !ok || id != "togetherai" {
