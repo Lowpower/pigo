@@ -16,6 +16,7 @@ import (
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
+	"github.com/Lowpower/pigo/internal/codemode"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/migrate"
 	"github.com/Lowpower/pigo/internal/models"
@@ -29,6 +30,7 @@ import (
 )
 
 func main() {
+	codemode.DispatchWorker()
 	defer func() {
 		rec := recover()
 		if rec == nil {
