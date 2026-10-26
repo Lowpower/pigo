@@ -9,32 +9,26 @@ import (
 
 func TestMaxWorkersEnv(t *testing.T) {
 	t.Setenv("PIGO_CODEMODE_MAX_WORKERS", "")
-	t.Setenv("PI_CODEMODE_MAX_WORKERS", "")
-	if maxWorkers() != 2 {
-		t.Fatalf("default %d", maxWorkers())
-	}
 	t.Setenv("PI_CODEMODE_MAX_WORKERS", "4")
-	if maxWorkers() != 4 {
-		t.Fatalf("pi %d", maxWorkers())
+	if maxWorkers() != 2 {
+		t.Fatalf("pi env changed the limit to %d", maxWorkers())
 	}
 	t.Setenv("PIGO_CODEMODE_MAX_WORKERS", "1")
 	if maxWorkers() != 1 {
-		t.Fatalf("pigo should win, got %d", maxWorkers())
+		t.Fatalf("pigo %d", maxWorkers())
 	}
 	t.Setenv("PIGO_CODEMODE_MAX_WORKERS", "nope")
-	if maxWorkers() != 4 {
-		t.Fatalf("invalid pigo falls through, got %d", maxWorkers())
+	if maxWorkers() != 2 {
+		t.Fatalf("invalid pigo %d", maxWorkers())
 	}
-	t.Setenv("PI_CODEMODE_MAX_WORKERS", "0")
 	t.Setenv("PIGO_CODEMODE_MAX_WORKERS", "-3")
 	if maxWorkers() != 2 {
-		t.Fatalf("invalid both %d", maxWorkers())
+		t.Fatalf("negative pigo %d", maxWorkers())
 	}
 }
 
 func TestReserveQueuesInOrder(t *testing.T) {
 	t.Setenv("PIGO_CODEMODE_MAX_WORKERS", "1")
-	t.Setenv("PI_CODEMODE_MAX_WORKERS", "9")
 
 	release1, err := reserve(context.Background(), time.Second)
 	if err != nil {

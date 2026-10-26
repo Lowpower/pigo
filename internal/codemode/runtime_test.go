@@ -223,7 +223,6 @@ func TestQueueWaitsUntilExit(t *testing.T) {
 
 func TestQueueWaitExpires(t *testing.T) {
 	t.Setenv("PIGO_CODEMODE_MAX_WORKERS", "1")
-	t.Setenv("PI_CODEMODE_MAX_WORKERS", "8")
 	workerSpawns.Store(0)
 	h := newHold()
 	defer h.releaseAll()
@@ -283,31 +282,33 @@ func TestCancelWhileQueued(t *testing.T) {
 	}
 }
 
-func TestPigoWorkerLimitOverridesPi(t *testing.T) {
-	t.Setenv("PIGO_CODEMODE_MAX_WORKERS", "1")
-	t.Setenv("PI_CODEMODE_MAX_WORKERS", "8")
+func TestPiWorkerEnvIsIgnored(t *testing.T) {
+	t.Setenv("PIGO_CODEMODE_MAX_WORKERS", "")
+	t.Setenv("PI_CODEMODE_MAX_WORKERS", "1")
 	workerSpawns.Store(0)
 	h := newHold()
 	defer h.releaseAll()
-	done := make(chan error, 1)
-	go func() {
-		_, err := Run(context.Background(), `host.echo("hold")`, h.hosts())
-		done <- err
-	}()
-	h.waitEntered(t, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		_, _ = Run(ctx, `host.echo("late")`, h.hosts())
-	}()
-	waitQueued(t, 1)
-	if workerSpawns.Load() != 1 {
-		t.Fatalf("spawns %d, PIGO=1 did not override PI=8", workerSpawns.Load())
+	errc := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := Run(context.Background(), `host.echo("hold")`, h.hosts())
+			errc <- err
+		}()
 	}
-	cancel()
+	h.waitEntered(t, 2)
+	if workerSpawns.Load() != 2 {
+		t.Fatalf("spawns %d, PI_CODEMODE_MAX_WORKERS limited pigo", workerSpawns.Load())
+	}
 	h.releaseAll()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	wg.Wait()
+	close(errc)
+	for err := range errc {
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

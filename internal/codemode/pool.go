@@ -39,13 +39,10 @@ var (
 	poolWait   []ticket
 )
 
-// maxWorkers is read when a slot is handed out. PIGO_CODEMODE_MAX_WORKERS wins
-// over PI_CODEMODE_MAX_WORKERS. Anything that is not a positive integer is ignored.
+// maxWorkers is read when a slot is handed out. Only PIGO_CODEMODE_MAX_WORKERS
+// is consulted. Anything that is not a positive integer is ignored.
 func maxWorkers() int {
 	if n, ok := positiveInt(os.Getenv("PIGO_CODEMODE_MAX_WORKERS")); ok {
-		return n
-	}
-	if n, ok := positiveInt(os.Getenv("PI_CODEMODE_MAX_WORKERS")); ok {
 		return n
 	}
 	return defaultMaxWorkers
