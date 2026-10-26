@@ -52,13 +52,13 @@ func TestQuietStartupHidesHeaderAndResources(t *testing.T) {
 	on := true
 	m.cfg.QuietStartupFlag = &on
 	m.engine = &runtime.Engine{
-		Skills: []skills.Skill{{Name: "demo", FilePath: "/tmp/skill/SKILL.md"}},
+		Skills: []skills.Skill{{Name: "quiet-marker", FilePath: "/tmp/skill/SKILL.md"}},
 	}
 	view := m.View()
 	if strings.Contains(view, "look up its docs") {
 		t.Fatalf("quiet startup still showed header:\n%s", view)
 	}
-	if strings.Contains(view, "[Skills]") || strings.Contains(view, "demo") {
+	if strings.Contains(view, "[Skills]") || strings.Contains(view, "quiet-marker") {
 		t.Fatalf("quiet startup still showed skills:\n%s", view)
 	}
 }
