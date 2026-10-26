@@ -59,15 +59,48 @@ func applyEmbeddedCatalog() error {
 	return nil
 }
 
+// openAIMidConvoEffortModels are the GPT-6 ids that accept configuration_update
+// on the OpenAI Responses API. pi v1.3.0 stamps the same set.
+var openAIMidConvoEffortModels = map[string]struct{}{
+	"gpt-6-astra": {},
+	"gpt-6-luna":  {},
+	"gpt-6-sol":   {},
+	"gpt-6.1-sol": {},
+}
+
 // annotateBuiltin keeps pigo policy that models.dev does not publish.
 func annotateBuiltin(m Model) Model {
 	if m.Provider == "anthropic" && m.PromptCache == nil {
 		m.PromptCache = anthropicPromptCache()
 	}
-	if m.Provider == "openai" && m.ID == "gpt-6-astra" && m.Compat == nil {
-		m.Compat = &Compat{SupportsExplicitPromptCacheMode: true}
+	bare := m.Compat == nil
+	if openAIMidConvoEffort(m) {
+		if m.Compat == nil {
+			m.Compat = &Compat{}
+		}
+		m.Compat.SupportsMidConvoEffort = true
+	}
+	if m.Provider == "openai" && m.ID == "gpt-6-astra" && bare {
+		if m.Compat == nil {
+			m.Compat = &Compat{}
+		}
+		m.Compat.SupportsExplicitPromptCacheMode = true
 	}
 	return fillOpus55ThinkingLevels(applyOpenRouterReasoning(m, true))
+}
+
+// openAIMidConvoEffort reports whether this builtin row should keep the prompt
+// cache across thinking-level changes. Only the openai provider's Responses
+// models are marked; Azure, Codex, and proxies stay off.
+func openAIMidConvoEffort(m Model) bool {
+	if m.Provider != "openai" {
+		return false
+	}
+	if m.API != "" && m.API != "openai-responses" {
+		return false
+	}
+	_, ok := openAIMidConvoEffortModels[m.ID]
+	return ok
 }
 
 // AppendGatewayWorkersAI copies the Workers AI catalog onto the AI Gateway

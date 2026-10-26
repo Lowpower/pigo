@@ -102,7 +102,7 @@ func responsesItemMaps(t *testing.T, ctx Context, anchor deferredAnchor) []map[s
 	t.Helper()
 	raw, err := json.Marshal(buildResponsesInput(ctx, replayTarget{
 		Provider: "openai", API: "openai-responses", Model: "gpt",
-	}, anchor))
+	}, anchor, ""))
 	if err != nil {
 		t.Fatal(err)
 	}

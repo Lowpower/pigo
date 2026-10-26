@@ -44,7 +44,7 @@ func applySamplingParams(dst map[string]any, params map[string]any) {
 
 // applyResponsesSampling merges sampling fields into extra, then attaches them
 // to the typed Responses request. Keys already written by the client stay put.
-func applyResponsesSampling(params *responses.ResponseNewParams, extra map[string]any, reqCtx Context, opts Options) {
+func applyResponsesSampling(params *responses.ResponseNewParams, extra map[string]any, reqCtx Context, opts Options, keepReasoning bool) {
 	if params == nil {
 		return
 	}
@@ -66,7 +66,7 @@ func applyResponsesSampling(params *responses.ResponseNewParams, extra map[strin
 	if clampPromptCacheKey(opts.SessionID) != "" {
 		skip["prompt_cache_key"] = true
 	}
-	if reasoningEffort(opts) != "" {
+	if keepReasoning || reasoningEffort(opts) != "" {
 		skip["reasoning"] = true
 		skip["include"] = true
 	}
