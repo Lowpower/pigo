@@ -33,4 +33,8 @@ Settings keys can also be overridden by matching `PIGO_` env vars via Viper
 (`PIGO_THEME`, `PIGO_THINKING`, …).
 
 Provider API keys use the provider's own env names (`ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, …). See [auth.md](auth.md).
+`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, …). Anthropic workload identity uses
+`ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, and
+`ANTHROPIC_IDENTITY_TOKEN_FILE` (optional `ANTHROPIC_SERVICE_ACCOUNT_ID` and
+`ANTHROPIC_WORKSPACE_ID`). Those credentials are not written to `auth.json`.
+See [auth.md](auth.md).
