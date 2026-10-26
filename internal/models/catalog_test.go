@@ -2,6 +2,48 @@ package models
 
 import "testing"
 
+func TestEmbeddedCatalogPromptCostTiers(t *testing.T) {
+	ClearOverlays()
+	t.Cleanup(ClearOverlays)
+
+	sol, ok := Lookup("amazon-bedrock", "global.openai.gpt-6-sol")
+	if !ok || sol.Cost == nil || len(sol.Cost.Tiers) != 1 {
+		t.Fatalf("gpt-6-sol cost = %+v ok=%v", sol.Cost, ok)
+	}
+	tier := sol.Cost.Tiers[0]
+	if tier.InputTokensAbove != 272000 || tier.Input != 4 || tier.Output != 15 || tier.CacheRead != 0.4 || tier.CacheWrite != 5 {
+		t.Fatalf("gpt-6-sol tier = %+v", tier)
+	}
+
+	flat, ok := Lookup("amazon-bedrock", "openai.gpt-5.4")
+	if !ok || flat.Cost == nil || len(flat.Cost.Tiers) != 0 {
+		t.Fatalf("bedrock gpt-5.4 should stay untiered: %+v ok=%v", flat.Cost, ok)
+	}
+
+	haiku, ok := Lookup("opencode", "claude-haiku-5-5")
+	if !ok || haiku.Cost == nil || len(haiku.Cost.Tiers) != 1 {
+		t.Fatalf("opencode haiku cost = %+v ok=%v", haiku.Cost, ok)
+	}
+	h := haiku.Cost.Tiers[0]
+	if h.InputTokensAbove != 100000 || h.Input != 0.5 || h.Output != 2.5 || h.CacheRead != 0.05 || h.CacheWrite != 0.625 {
+		t.Fatalf("opencode haiku tier = %+v", h)
+	}
+
+	gemini, ok := Lookup("google", "gemini-3.1-pro-preview")
+	if !ok || gemini.Cost == nil || len(gemini.Cost.Tiers) != 1 {
+		t.Fatalf("gemini cost = %+v ok=%v", gemini.Cost, ok)
+	}
+	g := gemini.Cost.Tiers[0]
+	if g.InputTokensAbove != 200000 || g.Input != 4 || g.Output != 18 || g.CacheRead != 0.4 || g.CacheWrite != 0 {
+		t.Fatalf("gemini tier = %+v", g)
+	}
+
+	gateway, ok := Lookup("vercel-ai-gateway", "openai/gpt-5.4")
+	if !ok || gateway.Cost == nil || len(gateway.Cost.Tiers) != 1 || gateway.Cost.Tiers[0].InputTokensAbove != 271999 {
+		t.Fatalf("vercel gpt-5.4 tier = %+v ok=%v", gateway.Cost, ok)
+	}
+}
+
 func TestEmbeddedCatalogDefaults(t *testing.T) {
 	ClearOverlays()
 	t.Cleanup(ClearOverlays)

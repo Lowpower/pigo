@@ -168,11 +168,25 @@ type FallbackModel struct {
 }
 
 // Cost is catalog pricing in dollars per million tokens.
+// Tiers are optional prompt-length rates. A request uses the base rates when
+// no tier threshold is exceeded.
 type Cost struct {
-	Input      float64 `json:"input,omitempty"`
-	Output     float64 `json:"output,omitempty"`
-	CacheRead  float64 `json:"cacheRead,omitempty"`
-	CacheWrite float64 `json:"cacheWrite,omitempty"`
+	Input      float64    `json:"input,omitempty"`
+	Output     float64    `json:"output,omitempty"`
+	CacheRead  float64    `json:"cacheRead,omitempty"`
+	CacheWrite float64    `json:"cacheWrite,omitempty"`
+	Tiers      []CostTier `json:"tiers,omitempty"`
+}
+
+// CostTier is a request-wide price used when total input exceeds InputTokensAbove.
+// Total input is uncached input plus cache read and cache write. Rates are
+// dollars per million tokens and are not filled in from the base cost at runtime.
+type CostTier struct {
+	InputTokensAbove int     `json:"inputTokensAbove,omitempty"`
+	Input            float64 `json:"input,omitempty"`
+	Output           float64 `json:"output,omitempty"`
+	CacheRead        float64 `json:"cacheRead,omitempty"`
+	CacheWrite       float64 `json:"cacheWrite,omitempty"`
 }
 
 // Spec is a model plus optional thinking override (--models sonnet:high).
