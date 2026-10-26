@@ -119,7 +119,7 @@ func (c *OpenAICodexClient) buildRequestBody(reqCtx Context, opts Options) (map[
 			Provider: recordedProvider(opts, "openai-codex"),
 			API:      "openai-codex-responses",
 			Model:    opts.Model,
-		}, codexAnchor),
+		}, codexAnchor, ""),
 		"text":                map[string]any{"verbosity": "low"},
 		"include":             []string{"reasoning.encrypted_content"},
 		"tool_choice":         "auto",

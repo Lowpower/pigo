@@ -29,12 +29,7 @@ type OpenAIResponsesClient struct {
 // StreamFn returns a StreamFn bound to this client.
 func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
-		base := strings.TrimRight(c.BaseURL, "/")
-		if base == "" {
-			base = "https://api.openai.com/v1"
-		} else if !strings.HasSuffix(base, "/v1") && !strings.Contains(base, "/v1/") {
-			base += "/v1"
-		}
+		base := responsesBaseURL(c.BaseURL)
 		optsList := []option.RequestOption{
 			option.WithAPIKey(c.APIKey),
 			option.WithBaseURL(base + "/"),
@@ -60,6 +55,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			apiID = "openai-responses"
 		}
 		provider := recordedProvider(opts, "openai")
+		updateEffort := responsesConfigurationEffort(opts, c.APIKey, c.BaseURL)
 		responsesAnchor, listedTools := responsesDeferred(reqCtx, opts)
 		params := responses.ResponseNewParams{
 			Model: shared.ResponsesModel(opts.Model),
@@ -68,7 +64,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 					Provider: provider,
 					API:      apiID,
 					Model:    opts.Model,
-				}, responsesAnchor),
+				}, responsesAnchor, updateEffort),
 			},
 			Store: param.NewOpt(false),
 		}
@@ -92,7 +88,15 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 		if cacheOpts := promptCacheOptions(opts); cacheOpts != nil {
 			extra["prompt_cache_options"] = cacheOpts
 		}
-		if effort := reasoningEffort(opts); effort != "" {
+		if updateEffort != "" {
+			// configuration_update items carry the real level. A fixed top-level
+			// effort keeps the cached prefix when the level changes.
+			params.Reasoning = shared.ReasoningParam{
+				Effort:  shared.ReasoningEffort(configurationUpdateRequestEffort),
+				Summary: shared.ReasoningSummaryAuto,
+			}
+			params.Include = []responses.ResponseIncludable{responses.ResponseIncludableReasoningEncryptedContent}
+		} else if effort := reasoningEffort(opts); effort != "" {
 			params.Reasoning = shared.ReasoningParam{
 				Effort:  shared.ReasoningEffort(effort),
 				Summary: shared.ReasoningSummaryAuto,
@@ -107,13 +111,14 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 			}
 			params.Tools = tools
 		}
-		applyResponsesSampling(&params, extra, reqCtx, opts)
+		applyResponsesSampling(&params, extra, reqCtx, opts, updateEffort != "")
 
 		stream := client.Responses.NewStreaming(ctx, params)
 		s := NewEventStream(16)
 		out := &AssistantMessage{
 			Role: RoleAssistant, Content: []*Content{}, API: apiID,
 			Provider: provider, Model: opts.Model, StopReason: StopPending,
+			ProviderThinkingLevel: updateEffort,
 		}
 		go func() {
 			defer s.end()
@@ -141,27 +146,39 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 	}
 }
 
-func buildResponsesInput(reqCtx Context, target replayTarget, anchor deferredAnchor) responses.ResponseInputParam {
+// configurationUpdateRequestEffort is the frozen reasoning.effort while
+// configuration_update items carry the thinking level. pi v1.3.0 uses medium.
+const configurationUpdateRequestEffort = "medium"
+
+func buildResponsesInput(reqCtx Context, target replayTarget, anchor deferredAnchor, configurationEffort string) responses.ResponseInputParam {
 	var items responses.ResponseInputParam
 	loaded := map[string]struct{}{}
 	for _, m := range transformMessages(reqCtx.Messages, target, normalizeResponsesToolCallID) {
 		if m.Assistant != nil {
+			var output responses.ResponseInputParam
 			for _, c := range m.Assistant.Content {
 				switch c.Type {
 				case KindText:
 					if strings.TrimSpace(c.Text) != "" {
-						items = append(items, responses.ResponseInputItemParamOfMessage(c.Text, responses.EasyInputMessageRoleAssistant))
+						output = append(output, responses.ResponseInputItemParamOfMessage(c.Text, responses.EasyInputMessageRoleAssistant))
 					}
 				case KindThinking:
 					if c.ThinkingSignature != "" {
 						item := responses.ResponseInputItemParamOfReasoning("rsn_"+c.ThinkingSignature[:min(len(c.ThinkingSignature), 8)], nil)
 						item.OfReasoning.EncryptedContent = param.NewOpt(c.ThinkingSignature)
-						items = append(items, item)
+						output = append(output, item)
 					}
 				case KindToolCall:
-					items = append(items, responsesFunctionCallItem(c))
+					output = append(output, responsesFunctionCallItem(c))
 				}
 			}
+			if len(output) == 0 {
+				continue
+			}
+			if configurationEffort != "" && sameReplayModel(m.Assistant, target) && m.Assistant.ProviderThinkingLevel != "" {
+				items = append(items, responsesConfigurationUpdate(m.Assistant.ProviderThinkingLevel))
+			}
+			items = append(items, output...)
 			continue
 		}
 		if m.Role == RoleToolResult || m.ToolCallID != "" {
@@ -192,7 +209,74 @@ func buildResponsesInput(reqCtx Context, target replayTarget, anchor deferredAnc
 		}
 		items = append(items, responsesUserImageMessage(m.Content, m.Images))
 	}
+	if configurationEffort != "" {
+		items = append(items, responsesConfigurationUpdate(configurationEffort))
+	}
 	return items
+}
+
+func responsesConfigurationUpdate(effort string) responses.ResponseInputItemUnionParam {
+	return param.Override[responses.ResponseInputItemUnionParam](map[string]any{
+		"type":      "configuration_update",
+		"reasoning": map[string]any{"effort": effort},
+	})
+}
+
+func sameReplayModel(msg *AssistantMessage, target replayTarget) bool {
+	return msg != nil && msg.Provider == target.Provider && msg.API == target.API && msg.Model == target.Model
+}
+
+// responsesBaseURL is the Responses API root, with /v1 appended when missing.
+func responsesBaseURL(raw string) string {
+	base := strings.TrimRight(raw, "/")
+	if base == "" {
+		return "https://api.openai.com/v1"
+	}
+	if !strings.HasSuffix(base, "/v1") && !strings.Contains(base, "/v1/") {
+		base += "/v1"
+	}
+	return base
+}
+
+// responsesChatGPTSignIn matches pi v1.3.0: an openai request to the official
+// API whose credential is not an sk- key. Sign in with ChatGPT (#389) rejects
+// configuration_update items, so that path keeps reasoning.effort.
+func responsesChatGPTSignIn(provider, baseURL, apiKey string) bool {
+	if provider != "openai" || responsesBaseURL(baseURL) != "https://api.openai.com/v1" {
+		return false
+	}
+	return apiKey != "" && !strings.HasPrefix(apiKey, "sk-")
+}
+
+// responsesConfigurationEffort is the effort written into configuration_update
+// items. Empty means the level stays on reasoning.effort. A null thinking-level
+// map entry (minimal) falls back to the canonical name, matching pi's ??.
+func responsesConfigurationEffort(opts Options, apiKey, baseURL string) string {
+	if !midConvoEffort(opts) || responsesChatGPTSignIn(opts.Provider, baseURL, apiKey) {
+		return ""
+	}
+	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	if level == "" || level == "off" {
+		return ""
+	}
+	if m, ok := models.Lookup(opts.Provider, opts.Model); ok {
+		if mapped, present := m.ThinkingLevelMap[level]; present {
+			// A null map entry is unsupported on the ordinary effort field.
+			// configuration_update still sends the canonical name (pi's ??).
+			if mapped == nil || strings.TrimSpace(*mapped) == "" {
+				return level
+			}
+			return strings.TrimSpace(*mapped)
+		}
+	}
+	canonical, wire := resolvedThinking(opts)
+	if canonical == "" || canonical == "off" {
+		return ""
+	}
+	if wire != "" {
+		return wire
+	}
+	return canonical
 }
 
 func responsesFunctionCallItem(c *Content) responses.ResponseInputItemUnionParam {

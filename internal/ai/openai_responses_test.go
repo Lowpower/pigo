@@ -157,7 +157,7 @@ func TestResponsesReplayFunctionCallNamespace(t *testing.T) {
 	}
 	cross := buildResponsesInput(Context{Messages: []Message{msg}}, replayTarget{
 		Provider: "other", API: "openai-responses", Model: "gpt",
-	}, deferredAnchor{})
+	}, deferredAnchor{}, "")
 	got, err := json.Marshal(cross)
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +253,7 @@ func TestBuildResponsesInputToolPair(t *testing.T) {
 			{Type: KindToolCall, ToolID: "c1", ToolName: "read", Arguments: map[string]any{"path": "a"}},
 		}}},
 		{Role: RoleToolResult, ToolCallID: "c1", Content: "ok"},
-	}}, replayTarget{}, deferredAnchor{})
+	}}, replayTarget{}, deferredAnchor{}, "")
 	if len(items) < 3 {
 		t.Fatalf("items = %d", len(items))
 	}

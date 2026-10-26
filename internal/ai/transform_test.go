@@ -56,7 +56,7 @@ func TestTransformAnthropicThinkingToResponses(t *testing.T) {
 	items := buildResponsesInput(Context{Messages: []Message{
 		{Assistant: asst},
 		{Role: RoleToolResult, ToolCallID: "toolu_abc|xyz", Content: "ok"},
-	}}, replayTarget{Provider: "openai", API: "openai-responses", Model: "gpt-4o"}, deferredAnchor{})
+	}}, replayTarget{Provider: "openai", API: "openai-responses", Model: "gpt-4o"}, deferredAnchor{}, "")
 	raw, err := json.Marshal(items)
 	if err != nil {
 		t.Fatal(err)
