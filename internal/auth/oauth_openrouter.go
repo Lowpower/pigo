@@ -63,7 +63,12 @@ func (openrouterOAuth) Login(ix Interaction) (Credential, error) {
 			srv.Cancel()
 			return
 		}
-		code, _ := parseAuthInput(input)
+		code, _, err := parseAuthInput(input)
+		if err != nil {
+			ch <- result{err: err}
+			srv.Cancel()
+			return
+		}
 		ch <- result{code, nil}
 		srv.Cancel()
 	}()
