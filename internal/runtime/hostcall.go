@@ -268,12 +268,17 @@ func (e *Engine) HandleHostCall(h *ext.Host, name string, args map[string]any) m
 	case "exec":
 		return e.doExec(args)
 	case "model.list", "model.getAll":
-		return map[string]any{"models": modelsToAny(models.Catalog())}
+		return map[string]any{"models": modelsToAny(e.mergeVirtual(models.Catalog()))}
 	case "model.getAvailable":
 		ids := auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))
-		return map[string]any{"models": modelsToAny(models.Available(ids))}
+		return map[string]any{"models": modelsToAny(e.mergeVirtual(models.Available(ids)))}
 	case "model.find":
-		m, ok := models.Lookup(argString(args, "provider"), argString(args, "id"))
+		provider := argString(args, "provider")
+		id := argString(args, "id")
+		if vm, ok := e.lookupVirtual(provider, id); ok {
+			return map[string]any{"model": modelToAny(vm.model())}
+		}
+		m, ok := models.Lookup(provider, id)
 		if !ok {
 			return map[string]any{}
 		}
@@ -587,23 +592,30 @@ func (e *Engine) applyExtModel(provider, id string) bool {
 	if provider == "" || id == "" {
 		return false
 	}
-	store := auth.Open(e.Opts.AgentDir)
-	ok := false
-	for _, p := range auth.AuthenticatedIDs(store) {
-		if p == provider {
-			ok = true
-			break
+	if vm, virt := e.lookupVirtual(provider, id); virt {
+		if !e.virtualSelectable(vm) {
+			return false
 		}
-	}
-	if !ok {
-		return false
+	} else {
+		store := auth.Open(e.Opts.AgentDir)
+		ok := false
+		for _, p := range auth.AuthenticatedIDs(store) {
+			if p == provider {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
 	}
 	e.Provider = provider
 	e.Opts.Config.Provider = provider
 	e.Opts.Config.Model = id
 	if fn := e.bindStream(provider); fn != nil {
-		e.Stream = fn
+		e.assignBaseStream(fn)
 	}
+	e.wrapVirtualRoute()
 	if e.Opts.Session != nil {
 		_, _ = e.Opts.Session.AppendModelChange(provider, id)
 	}
@@ -622,8 +634,7 @@ func (e *Engine) doHostModelStream(h *ext.Host, name string, args map[string]any
 	}
 	provider, modelID, caller := hostSamplingArgs(e, args)
 	req := ai.Context{System: argString(args, "system"), Messages: msgs}
-	sf := e.Stream
-	es, err := sf(context.Background(), req, ai.Options{
+	es, err := e.directStream()(context.Background(), req, ai.Options{
 		Model:           modelID,
 		Provider:        provider,
 		Thinking:        e.Opts.Config.Thinking,

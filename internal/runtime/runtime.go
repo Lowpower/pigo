@@ -123,12 +123,18 @@ type Engine struct {
 	retryAttempt  int
 	compactCancel context.CancelFunc
 
-	extCommands       []extCommand
-	extProviderIDs    map[string]bool
-	providerBackup    map[string]providerBackup
-	extStreams        map[string]ai.StreamFn
-	stopAfterTools    bool
-	overflowAttempted bool
+	extCommands        []extCommand
+	extProviderIDs     map[string]bool
+	providerBackup     map[string]providerBackup
+	extStreams         map[string]ai.StreamFn
+	virtuals           map[string]virtualModel
+	routeStates        map[string]map[string]any
+	pendingRouteReason string
+	pendingFailed      *ai.AssistantMessage
+	routerOn           bool
+	baseStream         ai.StreamFn
+	stopAfterTools     bool
+	overflowAttempted  bool
 	// preambleAnchor is the built preamble last compared against the session.
 	// While it is unchanged, a forced preamble in the session stays in place.
 	preambleAnchor string
@@ -307,6 +313,8 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 			return inner(ctx, req, opt)
 		}
 	}
+	e.applyVirtualModels()
+	e.wrapVirtualRoute()
 	e.DispatchEvent(ctx, "session_start", map[string]any{
 		"sessionId": e.sessionID(),
 		"cwd":       e.Opts.Cwd,
@@ -467,6 +475,9 @@ func (e *Engine) recordEntry(entry *session.Entry, err error) {
 func (e *Engine) currentModel() models.Model {
 	provider := e.Provider
 	id := e.Opts.Config.ResolvedModel()
+	if vm, ok := e.lookupVirtual(provider, id); ok {
+		return vm.model()
+	}
 	if m, ok := models.Lookup(provider, id); ok {
 		return m
 	}
@@ -522,6 +533,9 @@ func (e *Engine) ContextWindow() int {
 	if e.Opts.Config.ContextWindow > 0 {
 		return e.Opts.Config.ContextWindow
 	}
+	if vm, ok := e.lookupVirtual(e.activeProvider(), e.Opts.Config.ResolvedModel()); ok && vm.ContextWindow > 0 {
+		return vm.ContextWindow
+	}
 	if m, ok := models.Lookup(e.activeProvider(), e.Opts.Config.ResolvedModel()); ok && m.ContextWindow > 0 {
 		return m.ContextWindow
 	}
@@ -533,7 +547,11 @@ func (e *Engine) maxTokens() int {
 	if provider == "" {
 		provider = e.Opts.Config.ResolvedProvider()
 	}
-	return models.MaxTokens(provider, e.Opts.Config.ResolvedModel())
+	id := e.Opts.Config.ResolvedModel()
+	if vm, ok := e.lookupVirtual(provider, id); ok && vm.MaxTokens > 0 {
+		return vm.MaxTokens
+	}
+	return models.MaxTokens(provider, id)
 }
 
 // CompactResult is the outcome of a manual or threshold compaction.
@@ -667,7 +685,7 @@ func (e *Engine) runCompaction(ctx context.Context, reason string, msgs []ai.Mes
 	var usage ai.Usage
 	err := e.withSummarizationRetry(cctx, map[string]any{"source": "compaction", "reason": reason}, func() error {
 		var cerr error
-		compacted, summary, usage, cerr = compaction.CompactPrepared(cctx, e.Stream, e.Opts.Config.ResolvedModel(), body, s, cut)
+		compacted, summary, usage, cerr = compaction.CompactPrepared(cctx, e.directStream(), e.Opts.Config.ResolvedModel(), body, s, cut)
 		return cerr
 	})
 	if err != nil {
@@ -1333,7 +1351,7 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 		var usage ai.Usage
 		err := e.withSummarizationRetry(ctx, map[string]any{"source": "branchSummary"}, func() error {
 			var serr error
-			summary, files, usage, serr = compaction.GenerateBranchSummary(ctx, e.Stream, e.Opts.Config.ResolvedModel(), session.ModelMessages(abandoned), compaction.BranchSummaryOpts{
+			summary, files, usage, serr = compaction.GenerateBranchSummary(ctx, e.directStream(), e.Opts.Config.ResolvedModel(), session.ModelMessages(abandoned), compaction.BranchSummaryOpts{
 				CustomInstructions:  opts.CustomInstructions,
 				ReplaceInstructions: opts.ReplaceInstructions,
 				ReserveTokens:       e.Opts.Config.BranchSummaryReserveTokens(),
@@ -1416,6 +1434,8 @@ func (e *Engine) Reload() {
 	rs := resolvePackageResources(ctx, e.Opts)
 	e.applyResolved(rs)
 
+	e.dropAllVirtuals()
+	e.unroute()
 	for _, h := range e.Hosts {
 		_ = h.Close()
 	}
@@ -1453,6 +1473,8 @@ func (e *Engine) Reload() {
 	if fn := e.bindStream(e.Provider); fn != nil {
 		e.Stream = fn
 	}
+	e.applyVirtualModels()
+	e.wrapVirtualRoute()
 
 	e.DispatchEvent(ctx, "session_start", map[string]any{
 		"sessionId": e.sessionID(),
@@ -1541,7 +1563,13 @@ func userSessionPayload(text string, images []ai.ImageContent) map[string]any {
 
 // CycleModel steps through --models or the catalog (ctrl+p).
 func (e *Engine) CycleModel(backward bool) (models.Spec, bool) {
-	next, ok := models.Cycle(e.Opts.Config.ResolvedProvider(), e.Opts.Config.ResolvedModel(), e.Scoped, backward)
+	scoped := e.Scoped
+	if len(scoped) == 0 {
+		for _, m := range e.mergeVirtual(models.Catalog()) {
+			scoped = append(scoped, models.Spec{Model: m})
+		}
+	}
+	next, ok := models.Cycle(e.Opts.Config.ResolvedProvider(), e.Opts.Config.ResolvedModel(), scoped, backward)
 	if !ok {
 		return models.Spec{}, false
 	}
@@ -1664,9 +1692,10 @@ func (e *Engine) setModel(provider, id, thinking string, persist bool) {
 		}
 		if e.Opts.AgentDir != "" {
 			if fn := e.bindStream(provider); fn != nil {
-				e.Stream = fn
+				e.assignBaseStream(fn)
 			}
 		}
+		e.wrapVirtualRoute()
 	}
 	if id != "" {
 		e.Opts.Config.Model = id

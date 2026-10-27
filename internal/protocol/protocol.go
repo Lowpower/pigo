@@ -13,49 +13,54 @@ const MaxFrameLen = 16 * 1024 * 1024
 // Message type tags for the extension RPC (handshake, registration, tool
 // invocation, events, shallow UI, lifecycle).
 const (
-	TypeHello                = "hello"                  // ext -> host: announce { ExtName, APIVersion }
-	TypeReady                = "ready"                  // host -> ext: handshake accepted
-	TypeInitialized          = "initialized"            // ext -> host: finished registering
-	TypeRegisterTool         = "register_tool"          // ext -> host: { Name, Description, Schema, optional exposure fields }
-	TypeRegisterLoadout      = "register_loadout"       // ext -> host: this extension implements prepare_loadout
-	TypeRegisterCommand      = "register_command"       // ext -> host: { Name, Description }
-	TypeRegisterShortcut     = "register_shortcut"      // ext -> host: { Name, Description }
-	TypeRegisterFlag         = "register_flag"          // ext -> host: { Name, Description, Args }
-	TypeRegisterProvider     = "register_provider"      // ext -> host: { Name, Args }
-	TypeUnregisterProvider   = "unregister_provider"    // ext -> host: { Name }
-	TypeSubscribe            = "subscribe"              // ext -> host: { Events }
-	TypeToolCall             = "tool_call"              // host -> ext: { ID, Name, Args }
-	TypeToolResult           = "tool_result"            // ext -> host: { ID, Result, IsError, optional structuredContent, usage }
-	TypePrepareLoadout       = "prepare_loadout"        // host -> ext: { ID, Payload.names }
-	TypePrepareLoadoutResult = "prepare_loadout_result" // ext -> host: { ID, Payload.names, Payload.guidelines }
-	TypeCommand              = "command"                // host -> ext: { Name, Text }
-	TypeShortcut             = "shortcut"               // host -> ext: { Name }
-	TypeEvent                = "event"                  // host -> ext: { ID, Event, Payload }
-	TypeEventResult          = "event_result"           // ext -> host: { ID, Payload }
-	TypeGetFlag              = "get_flag"               // ext -> host: { ID, Name }
-	TypeFlagValue            = "flag_value"             // host -> ext: { ID, Payload }
-	TypeOAuthLogin           = "oauth_login"            // host -> ext: { ID }
-	TypeOAuthRefresh         = "oauth_refresh"          // host -> ext: { ID, Payload }
-	TypeOAuthGetAPIKey       = "oauth_get_api_key"      // host -> ext: { ID, Payload }
-	TypeOAuthResult          = "oauth_result"           // ext -> host: { ID, Payload }
-	TypeRefreshModels        = "refresh_models"         // host -> ext: { ID }
-	TypeRefreshModelsResult  = "refresh_models_result"  // ext -> host: { ID, Payload }
-	TypeStreamStart          = "stream_start"           // host -> ext: { ID, Payload }
-	TypeStreamEvent          = "stream_event"           // ext -> host: { ID, Event, Payload }
-	TypeStreamAbort          = "stream_abort"           // host -> ext: { ID }
-	TypeNotify               = "notify"                 // ext -> host: { Text, Level }
-	TypeStatusItem           = "status_line_item"       // ext -> host: { Name, Text }
-	TypeUIRequest            = "ui_request"             // ext -> host: { ID, Name=method, Args }
-	TypeUIResult             = "ui_result"              // host -> ext: { ID, Args }
-	TypeSetActiveTools       = "set_active_tools"       // ext -> host: { Payload.names }
-	TypeHostRequest          = "host_request"           // ext -> host: { ID, Name=method, Args }
-	TypeHostResult           = "host_result"            // host -> ext: { ID, Args, IsError }
-	TypeHostEvent            = "host_event"             // host -> ext: { ID, Name, Args }
-	TypeHostEventResult      = "host_event_result"      // ext -> host: { ID, Args }
-	TypePing                 = "ping"                   // host -> ext
-	TypePong                 = "pong"                   // ext -> host
-	TypeShutdown             = "shutdown"               // host -> ext: terminate gracefully
-	TypeShutdownRequest      = "shutdown_request"       // ext -> host: request process exit
+	TypeHello                  = "hello"                    // ext -> host: announce { ExtName, APIVersion }
+	TypeReady                  = "ready"                    // host -> ext: handshake accepted
+	TypeInitialized            = "initialized"              // ext -> host: finished registering
+	TypeRegisterTool           = "register_tool"            // ext -> host: { Name, Description, Schema, optional exposure fields }
+	TypeRegisterLoadout        = "register_loadout"         // ext -> host: this extension implements prepare_loadout
+	TypeRegisterCommand        = "register_command"         // ext -> host: { Name, Description }
+	TypeRegisterShortcut       = "register_shortcut"        // ext -> host: { Name, Description }
+	TypeRegisterFlag           = "register_flag"            // ext -> host: { Name, Description, Args }
+	TypeRegisterProvider       = "register_provider"        // ext -> host: { Name, Args }
+	TypeUnregisterProvider     = "unregister_provider"      // ext -> host: { Name }
+	TypeRegisterVirtualModel   = "register_virtual_model"   // ext -> host: { Args: provider, id, name, thinkingLevels, contextWindow, maxTokens, input }
+	TypeUnregisterVirtualModel = "unregister_virtual_model" // ext -> host: { Args: provider, id }
+	TypeRoute                  = "route"                    // host -> ext: { ID, Payload }
+	TypeRouteResult            = "route_result"             // ext -> host: { ID, Payload, IsError, Result }
+	TypeRouteAbort             = "route_abort"              // host -> ext: { ID }
+	TypeSubscribe              = "subscribe"                // ext -> host: { Events }
+	TypeToolCall               = "tool_call"                // host -> ext: { ID, Name, Args }
+	TypeToolResult             = "tool_result"              // ext -> host: { ID, Result, IsError, optional structuredContent, usage }
+	TypePrepareLoadout         = "prepare_loadout"          // host -> ext: { ID, Payload.names }
+	TypePrepareLoadoutResult   = "prepare_loadout_result"   // ext -> host: { ID, Payload.names, Payload.guidelines }
+	TypeCommand                = "command"                  // host -> ext: { Name, Text }
+	TypeShortcut               = "shortcut"                 // host -> ext: { Name }
+	TypeEvent                  = "event"                    // host -> ext: { ID, Event, Payload }
+	TypeEventResult            = "event_result"             // ext -> host: { ID, Payload }
+	TypeGetFlag                = "get_flag"                 // ext -> host: { ID, Name }
+	TypeFlagValue              = "flag_value"               // host -> ext: { ID, Payload }
+	TypeOAuthLogin             = "oauth_login"              // host -> ext: { ID }
+	TypeOAuthRefresh           = "oauth_refresh"            // host -> ext: { ID, Payload }
+	TypeOAuthGetAPIKey         = "oauth_get_api_key"        // host -> ext: { ID, Payload }
+	TypeOAuthResult            = "oauth_result"             // ext -> host: { ID, Payload }
+	TypeRefreshModels          = "refresh_models"           // host -> ext: { ID }
+	TypeRefreshModelsResult    = "refresh_models_result"    // ext -> host: { ID, Payload }
+	TypeStreamStart            = "stream_start"             // host -> ext: { ID, Payload }
+	TypeStreamEvent            = "stream_event"             // ext -> host: { ID, Event, Payload }
+	TypeStreamAbort            = "stream_abort"             // host -> ext: { ID }
+	TypeNotify                 = "notify"                   // ext -> host: { Text, Level }
+	TypeStatusItem             = "status_line_item"         // ext -> host: { Name, Text }
+	TypeUIRequest              = "ui_request"               // ext -> host: { ID, Name=method, Args }
+	TypeUIResult               = "ui_result"                // host -> ext: { ID, Args }
+	TypeSetActiveTools         = "set_active_tools"         // ext -> host: { Payload.names }
+	TypeHostRequest            = "host_request"             // ext -> host: { ID, Name=method, Args }
+	TypeHostResult             = "host_result"              // host -> ext: { ID, Args, IsError }
+	TypeHostEvent              = "host_event"               // host -> ext: { ID, Name, Args }
+	TypeHostEventResult        = "host_event_result"        // ext -> host: { ID, Args }
+	TypePing                   = "ping"                     // host -> ext
+	TypePong                   = "pong"                     // ext -> host
+	TypeShutdown               = "shutdown"                 // host -> ext: terminate gracefully
+	TypeShutdownRequest        = "shutdown_request"         // ext -> host: request process exit
 )
 
 // Message is the RPC envelope. Type selects which fields are meaningful.

@@ -283,7 +283,12 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				if p == "" {
 					p = e.Provider
 				}
-				if _, ok := models.Lookup(p, modelID); !ok {
+				if vm, virt := e.lookupVirtual(p, modelID); virt {
+					if !e.virtualSelectable(vm) {
+						reply(id, "set_model", false, nil, "model not available: "+p+"/"+modelID)
+						break
+					}
+				} else if _, ok := models.Lookup(p, modelID); !ok {
 					if _, known := models.LookupProvider(p); known {
 						reply(id, "set_model", false, nil, "model not found: "+p+"/"+modelID)
 						break
@@ -306,7 +311,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 		case "get_available_models":
 			ids := auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))
 			var list []map[string]any
-			for _, m := range models.Available(ids) {
+			for _, m := range e.mergeVirtual(models.Available(ids)) {
 				list = append(list, rpcModelPayload(m))
 			}
 			reply(id, "get_available_models", true, map[string]any{"models": list}, "")

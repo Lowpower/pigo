@@ -103,6 +103,7 @@ type Host struct {
 	subscribed      map[string]bool
 	preparesLoadout bool
 	providers       []registeredProvider
+	virtuals        []VirtualModelDef
 	pending         map[string]chan protocol.Message
 	streamCh        map[string]chan protocol.Message
 	closed          bool
@@ -110,6 +111,7 @@ type Host struct {
 	waitDone        chan struct{}
 
 	providerHook    func(id string, args map[string]any, drop bool)
+	virtualHook     func(VirtualModelDef, bool)
 	activeToolsHook func([]string)
 	busSubs         map[string]bool
 }
@@ -277,11 +279,36 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 			if hook != nil {
 				hook(m.Name, nil, true)
 			}
+		case protocol.TypeRegisterVirtualModel:
+			def, err := virtualModelFromArgs(m.Args)
+			if err != nil {
+				if h.notify != nil {
+					h.notify("error", err.Error())
+				}
+				break
+			}
+			h.mu.Lock()
+			h.upsertVirtual(def)
+			vhook := h.virtualHook
+			h.mu.Unlock()
+			if vhook != nil {
+				vhook(def, false)
+			}
+		case protocol.TypeUnregisterVirtualModel:
+			provider := stringField(m.Args, "provider")
+			id := stringField(m.Args, "id")
+			h.mu.Lock()
+			h.removeVirtual(provider, id)
+			vhook := h.virtualHook
+			h.mu.Unlock()
+			if vhook != nil {
+				vhook(VirtualModelDef{Provider: provider, ID: id}, true)
+			}
 		case protocol.TypeGetFlag:
 			h.replyFlag(m.ID, m.Name)
 		case protocol.TypeInitialized:
 			signalReady(nil)
-		case protocol.TypeToolResult, protocol.TypeEventResult, protocol.TypeOAuthResult, protocol.TypeRefreshModelsResult, protocol.TypeHostEventResult, protocol.TypePrepareLoadoutResult:
+		case protocol.TypeToolResult, protocol.TypeEventResult, protocol.TypeOAuthResult, protocol.TypeRefreshModelsResult, protocol.TypeHostEventResult, protocol.TypePrepareLoadoutResult, protocol.TypeRouteResult:
 			h.deliverPending(m)
 		case protocol.TypeStreamEvent:
 			h.deliverStream(m)

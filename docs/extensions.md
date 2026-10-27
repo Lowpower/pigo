@@ -151,6 +151,55 @@ Useful return payloads:
 - `project_trust`: `{ "block": true }`
 - `user_bash`: omit the payload to run the local shell. Replace execution with `{ "result": { "output": "…", "cancelled": false, "truncated": false, "exitCode": 0 } }`. Any other payload, including `{ "block": true }` or `{ "operations": … }`, fails the command and does not run the local shell. A handler timeout or crash does the same.
 
+## Virtual models
+
+An extension can register a selectable model that picks a physical model
+before each request. pigo does not embed JavaScript. Registration is one
+`register_virtual_model` frame. Each request is one `route` / `route_result`
+round trip.
+
+```go
+VirtualModels: []ext.VirtualModelDef{{
+    Provider: "router", ID: "auto", Name: "Auto",
+    ThinkingLevels: []string{"low", "high"},
+    ContextWindow: 200000, MaxTokens: 8192,
+    Route: func(ctx context.Context, req ext.RouteRequest) (ext.RouteResult, error) {
+        id := "claude-haiku-4-5"
+        if req.Reason == "direct" {
+            id = "claude-sonnet-4-5"
+        }
+        return ext.RouteResult{
+            Model: ext.RouteModel{Provider: "anthropic", ID: id},
+            ThinkingLevel: "medium",
+        }, nil
+    },
+}},
+```
+
+`route` runs only while that virtual model is selected. The request carries
+`reason` (`user`, `continuation`, `retry`, `direct`), the selected thinking
+level, `previous` (last successful physical reply), `failed` (retry only),
+`state` (omitted for `direct`), and `messages` including the system message.
+Return a physical model and thinking level. Returning `state` replaces the
+in-memory state for the current session branch. `KeepState`, or a nil `State`,
+leaves it. `direct` requests neither read nor store state.
+
+The selected model stays virtual. Only that one call uses the physical
+provider, model, and thinking level. The thinking level is clamped to the
+physical model. A route error, a returned virtual model, or a model whose
+provider has no credentials fails that request.
+
+The same `provider` and `id` replaces a previous registration.
+`unregister_virtual_model` removes it. `unregister_provider` does not.
+Registering an id that already belongs to a physical model of that provider
+is rejected. If a later catalog refresh adds that physical id, the virtual
+model stays and hides it in `/model`, scoped models, and settings.
+
+A virtual model listed under a real provider is selectable only when that
+provider has credentials. A provider id that no provider uses is always
+selectable. Session recording of the routed model is separate from this
+registration.
+
 ## Host calls (`ext.HostCall` / `host_request`)
 
 From a tool, command, shortcut, or event handler:
@@ -222,7 +271,8 @@ The editor component itself is not swappable. Unknown UI methods still return
 ## Wire types
 
 `hello`, `ready`, `initialized`, `register_tool|command|shortcut|flag|provider`,
-`unregister_provider`, `subscribe`, `tool_call` / `tool_result`, `command`,
+`unregister_provider`, `register_virtual_model`, `unregister_virtual_model`,
+`route` / `route_result` / `route_abort`, `subscribe`, `tool_call` / `tool_result`, `command`,
 `shortcut`, `event` / `event_result`, `get_flag` / `flag_value`,
 `oauth_login|refresh|get_api_key` / `oauth_result`, `refresh_models` /
 `refresh_models_result`, `stream_start|event|abort`, `notify`,

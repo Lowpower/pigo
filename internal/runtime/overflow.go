@@ -52,6 +52,9 @@ func (e *Engine) prepareOverflow(ctx context.Context, last []agent.Msg) bool {
 	e.overflowAttempted = true
 	hist := stripLastAssistant(last)
 	_, err := e.runCompaction(ctx, "overflow", hist, e.compactionSettings(), true)
+	if err == nil {
+		e.armRouteRetry(msg)
+	}
 	return err == nil
 }
 
