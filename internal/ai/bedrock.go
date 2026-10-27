@@ -144,6 +144,12 @@ func (c *BedrockClient) StreamFn() StreamFn {
 }
 
 func bedrockThinkingFields(opts Options) map[string]any {
+	name := bedrockCatalogName(opts)
+	if !bedrockIsClaude(opts.Model, name) {
+		if fields, ok := bedrockOpenAIReasoningFields(opts, name); ok {
+			return fields
+		}
+	}
 	canonical, _ := resolvedThinking(opts)
 	if !thinkingOn(canonical) && opts.ThinkingBudget <= 0 {
 		return nil
@@ -156,6 +162,81 @@ func bedrockThinkingFields(opts Options) map[string]any {
 		return map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": budget}}
 	}
 	return map[string]any{"thinking": map[string]any{"type": "adaptive"}}
+}
+
+// bedrockGPTEffort is the nested reasoning.effort table for GPT models on
+// Bedrock. A null thinkingLevelMap entry falls back here instead of clamping.
+var bedrockGPTEffort = map[string]string{
+	"minimal": "low",
+	"low":     "low",
+	"medium":  "medium",
+	"high":    "high",
+	"xhigh":   "xhigh",
+	"max":     "max",
+}
+
+// bedrockGPTOSSEffort is the flat reasoning_effort table. gpt-oss only
+// accepts low, medium, and high, and ignores thinkingLevelMap.
+var bedrockGPTOSSEffort = map[string]string{
+	"minimal": "low",
+	"low":     "low",
+	"medium":  "medium",
+	"high":    "high",
+	"xhigh":   "high",
+	"max":     "high",
+}
+
+// bedrockOpenAIReasoningFields reports whether model id or name is an OpenAI
+// model on Bedrock. The bool is true even when no fields are sent, so a GPT
+// model does not fall through to Claude thinking budgets.
+func bedrockOpenAIReasoningFields(opts Options, modelName string) (map[string]any, bool) {
+	kind := bedrockOpenAIKind(opts.Model, modelName)
+	if kind == "" {
+		return nil, false
+	}
+	m, ok := models.Lookup(recordedProvider(opts, "amazon-bedrock"), opts.Model)
+	if ok && !m.SupportsReasoning() {
+		return nil, true
+	}
+	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	if level == "" || level == "off" {
+		return nil, true
+	}
+	if kind == "oss" {
+		effort := bedrockGPTOSSEffort[level]
+		if effort == "" {
+			return nil, true
+		}
+		return map[string]any{"reasoning_effort": effort}, true
+	}
+	effort := ""
+	if ok {
+		if mapped, present := m.ThinkingLevelMap[level]; present && mapped != nil {
+			effort = strings.TrimSpace(*mapped)
+		}
+	}
+	if effort == "" {
+		effort = bedrockGPTEffort[level]
+	}
+	if effort == "" {
+		return nil, true
+	}
+	return map[string]any{"reasoning": map[string]any{"effort": effort}}, true
+}
+
+func bedrockOpenAIKind(modelID, modelName string) string {
+	cands := bedrockMatchCandidates(modelID, modelName)
+	for _, s := range cands {
+		if strings.Contains(s, "gpt-oss") {
+			return "oss"
+		}
+	}
+	for _, s := range cands {
+		if strings.Contains(s, "gpt-") {
+			return "gpt"
+		}
+	}
+	return ""
 }
 
 const bedrockEmptyText = "<empty>"
