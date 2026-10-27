@@ -70,6 +70,7 @@ type Handler struct {
 	Shortcuts       []ShortcutDef
 	Flags           []FlagDef
 	Providers       []ProviderDef
+	VirtualModels   []VirtualModelDef
 	Events          []string
 	OnEvent         func(event string, payload map[string]any) map[string]any
 	OnOAuth         func(kind string, cred map[string]any) map[string]any
@@ -189,6 +190,17 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 			return err
 		}
 	}
+	routes := map[string]func(context.Context, RouteRequest) (RouteResult, error){}
+	for _, vm := range h.VirtualModels {
+		if err := protocol.WriteMessage(out, protocol.Message{
+			Type: protocol.TypeRegisterVirtualModel, Args: virtualModelArgs(vm),
+		}); err != nil {
+			return err
+		}
+		if vm.Route != nil {
+			routes[vm.Provider+"\x00"+vm.ID] = vm.Route
+		}
+	}
 	if len(h.Events) > 0 {
 		if err := protocol.WriteMessage(out, protocol.Message{Type: protocol.TypeSubscribe, Events: h.Events}); err != nil {
 			return err
@@ -204,6 +216,8 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 	}
 
 	aborts := map[string]chan struct{}{}
+	var routeMu sync.Mutex
+	routeCancel := map[string]context.CancelFunc{}
 	runtime.mu.Lock()
 	runtime.onHost = h.OnHostEvent
 	runtime.mu.Unlock()
@@ -354,6 +368,40 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 				var payload map[string]any
 				_ = json.Unmarshal(msg, &payload)
 				emit("error", map[string]any{"reason": "error", "message": payload})
+			}
+		case protocol.TypeRoute:
+			id := m.ID
+			payload := m.Payload
+			req := routeRequestFromPayload(payload)
+			fn := routes[req.Model.Provider+"\x00"+req.Model.ID]
+			ctx, cancel := context.WithCancel(context.Background())
+			routeMu.Lock()
+			routeCancel[id] = cancel
+			routeMu.Unlock()
+			go func() {
+				defer func() {
+					cancel()
+					routeMu.Lock()
+					delete(routeCancel, id)
+					routeMu.Unlock()
+				}()
+				res, err := callRoute(ctx, fn, req)
+				if err != nil {
+					_ = writeOut(protocol.Message{
+						Type: protocol.TypeRouteResult, ID: id, IsError: true, Result: err.Error(),
+					})
+					return
+				}
+				_ = writeOut(protocol.Message{
+					Type: protocol.TypeRouteResult, ID: id, Payload: routeResultPayload(req, res),
+				})
+			}()
+		case protocol.TypeRouteAbort:
+			routeMu.Lock()
+			cancel := routeCancel[m.ID]
+			routeMu.Unlock()
+			if cancel != nil {
+				cancel()
 			}
 		case protocol.TypeStreamAbort:
 			if ch := aborts[m.ID]; ch != nil {

@@ -175,7 +175,7 @@ func (e *Engine) SummarizeBugReport(ctx context.Context, fallback []ai.Message, 
 		return "", errors.New("no messages to summarize")
 	}
 	selected := bugreport.SelectMessages(msgs, e.ContextWindow()*6/10)
-	stream, err := e.Stream(ctx, ai.Context{
+	stream, err := e.directStream()(ctx, ai.Context{
 		System: bugreport.SummarySystemPrompt(),
 		Messages: []ai.Message{{
 			Role:    ai.RoleUser,

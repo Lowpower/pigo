@@ -5,7 +5,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/models"
 )
@@ -105,11 +104,8 @@ func (m Model) openModelPicker(search string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) catalogModels() []models.Model {
-	if m.engine != nil && m.engine.Opts.AgentDir != "" {
-		ids := auth.AuthenticatedIDs(auth.Open(m.engine.Opts.AgentDir))
-		if list := models.Available(ids); len(list) > 0 {
-			return list
-		}
+	if m.engine != nil {
+		return m.engine.VisibleModels()
 	}
 	return models.Catalog()
 }

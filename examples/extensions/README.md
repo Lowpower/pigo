@@ -12,6 +12,16 @@ go build -o /tmp/hello-ext ./examples/extensions/hello
 go run ./cmd/pigo -e /tmp/hello-ext -p "say hello to pigo"
 ```
 
+## router
+
+Registers virtual model `router/auto`. Before each request it picks a physical
+model from the route reason. The physical provider still needs its own credentials.
+
+```bash
+go build -o /tmp/router-ext ./examples/extensions/router
+go run ./cmd/pigo -e /tmp/router-ext --model router/auto -p "hi"
+```
+
 ## capdemo
 
 Registers a slash command, blocks `tool_call`, and serves a scripted provider

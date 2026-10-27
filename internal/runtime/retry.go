@@ -87,6 +87,7 @@ func (e *Engine) prepareRetry(ctx context.Context, last []agent.Msg) bool {
 		})
 		return false
 	}
+	e.armRouteRetry(msg)
 	return true
 }
 
