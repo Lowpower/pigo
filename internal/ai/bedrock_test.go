@@ -439,3 +439,92 @@ func TestApplyBedrockUsageCacheTTL(t *testing.T) {
 		t.Fatalf("one-hour usage=%+v", hourOnly)
 	}
 }
+
+func TestBedrockOpenAIReasoningFields(t *testing.T) {
+	const provider = "amazon-bedrock"
+
+	assertNested := func(model, level, effort string) {
+		t.Helper()
+		got := bedrockThinkingFields(Options{Provider: provider, Model: model, Thinking: level})
+		reasoning, _ := got["reasoning"].(map[string]any)
+		if reasoning["effort"] != effort {
+			t.Fatalf("%s %s = %#v", model, level, got)
+		}
+		if _, ok := got["thinking"]; ok {
+			t.Fatalf("%s %s sent thinking: %#v", model, level, got)
+		}
+		if _, ok := got["reasoning_effort"]; ok {
+			t.Fatalf("%s %s sent reasoning_effort: %#v", model, level, got)
+		}
+	}
+	for _, level := range []string{"low", "high", "xhigh"} {
+		assertNested("global.openai.gpt-6-sol", level, level)
+	}
+	assertNested("openai.gpt-5.4", "minimal", "low")
+	assertNested("openai.gpt-5.4", "max", "max")
+	if got := bedrockThinkingFields(Options{Provider: provider, Model: "openai.gpt-5.4", Thinking: "off"}); got != nil {
+		t.Fatalf("off = %#v", got)
+	}
+	if got := bedrockThinkingFields(Options{Provider: provider, Model: "openai.gpt-5.4", Thinking: ""}); got != nil {
+		t.Fatalf("empty = %#v", got)
+	}
+
+	assertFlat := func(level, effort string) {
+		t.Helper()
+		got := bedrockThinkingFields(Options{Provider: provider, Model: "openai.gpt-oss-120b", Thinking: level})
+		if got["reasoning_effort"] != effort {
+			t.Fatalf("oss %s = %#v", level, got)
+		}
+		if _, ok := got["reasoning"]; ok || got["thinking"] != nil {
+			t.Fatalf("oss %s extra fields: %#v", level, got)
+		}
+	}
+	assertFlat("xhigh", "high")
+	assertFlat("max", "high")
+	assertFlat("low", "low")
+
+	const arnProvider = "bedrock-arn-effort"
+	arn := "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc"
+	noReasoning := false
+	models.RegisterProvider(models.ProviderSpec{
+		ID: arnProvider, DefaultAPI: "bedrock-converse-stream", DefaultID: arn,
+		Models: []models.Model{
+			{
+				Provider: arnProvider, ID: arn, Name: "GPT-6 Sol",
+				Reasoning: boolPtrAI(true),
+				ThinkingLevelMap: map[string]*string{
+					"high": strPtrAI("xhigh"),
+				},
+			},
+			{
+				Provider: arnProvider, ID: "openai.gpt-5-noreason", Name: "GPT-5",
+				Reasoning: &noReasoning,
+			},
+		},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(arnProvider) })
+
+	got := bedrockThinkingFields(Options{Provider: arnProvider, Model: arn, Thinking: "high"})
+	reasoning, _ := got["reasoning"].(map[string]any)
+	if reasoning["effort"] != "xhigh" {
+		t.Fatalf("arn name match = %#v", got)
+	}
+	if _, ok := got["thinking"]; ok {
+		t.Fatalf("arn sent thinking: %#v", got)
+	}
+	if got := bedrockThinkingFields(Options{Provider: arnProvider, Model: "openai.gpt-5-noreason", Thinking: "high"}); got != nil {
+		t.Fatalf("reasoning false = %#v", got)
+	}
+
+	claude := bedrockThinkingFields(Options{Provider: provider, Model: "us.anthropic.claude-opus-4-6-v1", Thinking: "high"})
+	thinking, _ := claude["thinking"].(map[string]any)
+	if thinking["type"] != "enabled" {
+		t.Fatalf("claude = %#v", claude)
+	}
+	if _, ok := claude["reasoning"]; ok {
+		t.Fatalf("claude sent reasoning: %#v", claude)
+	}
+	if _, ok := claude["reasoning_effort"]; ok {
+		t.Fatalf("claude sent reasoning_effort: %#v", claude)
+	}
+}
