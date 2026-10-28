@@ -87,8 +87,8 @@ and `/skill:name` from [skills](skills.md). Extensions can
 Prefix a line with `!` to run bash without going through the model.
 
 `/image` generates an image through OpenRouter (`OPENROUTER_API_KEY`).
-`/share` uploads via Radius when authenticated, otherwise a private GitHub gist
-(`PIGO_SHARE_VIEWER_URL`).
+`/share` uploads via Radius when authenticated, otherwise a private GitHub gist,
+unless `sessionShareDestination` is `gist` or `radius` (`PIGO_SHARE_VIEWER_URL`).
 
 `/bug [description]` writes `pigo-bug-report-<id>.zip` in the working directory
 and prints that path plus a GitHub new-issue URL. The form's title is the

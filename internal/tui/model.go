@@ -1100,7 +1100,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if m.engine == nil {
 			return note("reload requires a runtime engine")
 		}
-		m.engine.Reload()
+		reloadErr := m.engine.Reload()
 		m.cfg = m.engine.Opts.Config
 		if m.keys != nil {
 			m.keys.Reload()
@@ -1109,6 +1109,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		applyTrueColor(m.cfg)
 		m.applyTheme(theme.LoadWith(m.themeOpts(m.cfg.Theme)))
 		msg := "reloaded keybindings, skills, settings, and context files"
+		if reloadErr != nil {
+			msg += "\n" + reloadErr.Error()
+		}
 		if lines := m.engine.PromptTemplateWarnings(); len(lines) > 0 {
 			msg += "\n" + strings.Join(lines, "\n")
 		}
@@ -1132,6 +1135,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			Cwd:          m.engine.Opts.Cwd,
 			AgentDir:     m.engine.Opts.AgentDir,
 			SystemPrompt: m.engine.System,
+			Destination:  m.cfg.ShareDestination(),
 		}
 		if m.engine.Tools != nil {
 			opts.Tools = m.engine.Tools.AITools()

@@ -285,7 +285,10 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 	st := trust.Open(agentDir)
 	trusted := trust.Decide(st, cwd, trust.Options{Override: override, Default: fileCfg.ProjectTrustDefault()})
-	cfg = config.ApplyProject(fileCfg, cwd, trusted)
+	cfg, err = config.ApplyProject(fileCfg, cwd, trusted)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
 	if f.provider != "" {
 		cfg.Provider, cfg.DefaultProvider = f.provider, f.provider
 	}

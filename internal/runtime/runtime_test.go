@@ -783,6 +783,15 @@ func TestDefaultLoadsBuiltinTools(t *testing.T) {
 	}
 }
 
+func mustApplyProject(t *testing.T, user config.Config, cwd string, trusted bool) config.Config {
+	t.Helper()
+	got, err := config.ApplyProject(user, cwd, trusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 func TestProjectSettingsDefaultToolsWhenTrusted(t *testing.T) {
 	ctx := context.Background()
 	cwd := t.TempDir()
@@ -801,7 +810,7 @@ func TestProjectSettingsDefaultToolsWhenTrusted(t *testing.T) {
 		AgentDir:       t.TempDir(),
 		NoExtensions:   true,
 		ProjectTrusted: true,
-		Config:         config.ApplyProject(user, cwd, true),
+		Config:         mustApplyProject(t, user, cwd, true),
 	})
 	if err != nil {
 		t.Fatal(err)

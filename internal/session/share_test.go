@@ -134,6 +134,71 @@ func TestSharePrefersRadius(t *testing.T) {
 	}
 }
 
+func TestShareDestinationBranches(t *testing.T) {
+	const loginErr = "Radius authentication is not configured. Run '/login radius' first."
+	tests := []struct {
+		name      string
+		dest      string
+		radiusURL string
+		radiusOK  bool
+		radiusErr error
+		wantURL   string
+		wantGist  bool
+		wantRad   bool
+		wantErr   string
+	}{
+		{name: "auto radius", dest: "auto", radiusURL: "https://radius.example/a/1", radiusOK: true, wantURL: "https://radius.example/a/1", wantRad: true},
+		{name: "auto gist", dest: "auto", wantGist: true, wantRad: true},
+		{name: "unset is auto gist", wantGist: true, wantRad: true},
+		{name: "gist skips radius", dest: "gist", radiusURL: "https://radius.example/a/1", radiusOK: true, wantGist: true},
+		{name: "radius missing auth", dest: "radius", wantRad: true, wantErr: loginErr},
+		{name: "radius success", dest: "radius", radiusURL: "https://radius.example/a/2", radiusOK: true, wantURL: "https://radius.example/a/2", wantRad: true},
+		{name: "auto upload error", dest: "auto", radiusOK: true, radiusErr: errors.New("Failed to upload Radius artifact: 500"), wantRad: true, wantErr: "Failed to upload Radius artifact"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			m := New(t.TempDir(), dir)
+			_, _ = m.AppendMessage("user", map[string]any{"role": "user", "content": "hi"})
+			var radiusCalls, gistCalls int
+			origRadius, origLook, origAuth, origGist := shareRadius, shareLookPath, shareGHAuthStatus, shareGistCreate
+			t.Cleanup(func() {
+				shareRadius, shareLookPath, shareGHAuthStatus, shareGistCreate = origRadius, origLook, origAuth, origGist
+			})
+			shareRadius = func(string, string) (string, bool, error) {
+				radiusCalls++
+				return tt.radiusURL, tt.radiusOK, tt.radiusErr
+			}
+			shareLookPath = func(string) (string, error) { return "/bin/gh", nil }
+			shareGHAuthStatus = func() error { return nil }
+			shareGistCreate = func(string) (string, error) {
+				gistCalls++
+				return "https://gist.github.com/u/deadbeef", nil
+			}
+			res, err := Share(ShareOptions{Session: m, AgentDir: dir, Destination: tt.dest})
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err=%v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if (radiusCalls > 0) != tt.wantRad {
+				t.Fatalf("radius calls=%d", radiusCalls)
+			}
+			if (gistCalls > 0) != tt.wantGist {
+				t.Fatalf("gist calls=%d", gistCalls)
+			}
+			if tt.wantURL != "" && res.RadiusURL != tt.wantURL {
+				t.Fatalf("radius url=%q", res.RadiusURL)
+			}
+			if tt.wantGist && res.GistURL == "" {
+				t.Fatalf("missing gist result %+v", res)
+			}
+		})
+	}
+}
+
 func TestTryShareViaRadiusHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/artifacts" {

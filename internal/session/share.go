@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	errGHMissing = "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/"
-	errGHAuth    = "GitHub CLI is not logged in. Run 'gh auth login' first."
+	errGHMissing   = "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/"
+	errGHAuth      = "GitHub CLI is not logged in. Run 'gh auth login' first."
+	errRadiusLogin = "Radius authentication is not configured. Run '/login radius' first."
 )
 
 type shareError string
@@ -62,6 +63,8 @@ type ShareOptions struct {
 	AgentDir     string
 	SystemPrompt string
 	Tools        []ai.Tool
+	// Destination is auto, gist, or radius. Empty means auto.
+	Destination string
 }
 
 // Test hooks (nil = real implementations).
@@ -74,7 +77,9 @@ var (
 	shareHTTPClient   = http.DefaultClient
 )
 
-// Share exports the session and uploads it (Radius, else private gist).
+// Share exports the session and uploads it.
+// Destination auto tries Radius, then a private gist. gist skips Radius.
+// radius never falls back to a gist.
 func Share(opts ShareOptions) (ShareResult, error) {
 	if opts.Session == nil {
 		return ShareResult{}, errors.New("no session to share")
@@ -92,11 +97,20 @@ func Share(opts ShareOptions) (ShareResult, error) {
 	if err := redactShareFile(jsonlPath); err != nil {
 		return ShareResult{}, fmt.Errorf("failed to export session: %w", err)
 	}
-	if url, ok, err := shareRadius(jsonlPath, opts.AgentDir); ok {
-		if err != nil {
-			return ShareResult{}, err
+	dest := opts.Destination
+	if dest == "" {
+		dest = "auto"
+	}
+	if dest != "gist" {
+		if url, ok, err := shareRadius(jsonlPath, opts.AgentDir); ok {
+			if err != nil {
+				return ShareResult{}, err
+			}
+			return ShareResult{RadiusURL: url}, nil
 		}
-		return ShareResult{RadiusURL: url}, nil
+		if dest == "radius" {
+			return ShareResult{}, shareError(errRadiusLogin)
+		}
 	}
 
 	if _, err := shareLookPath("gh"); err != nil {

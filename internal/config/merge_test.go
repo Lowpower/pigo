@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func mustApplyProject(t *testing.T, user Config, cwd string, trusted bool) Config {
+	t.Helper()
+	got, err := ApplyProject(user, cwd, trusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 func TestApplyProjectStripsBOM(t *testing.T) {
 	user, err := Load(t.TempDir())
 	if err != nil {
@@ -20,7 +29,7 @@ func TestApplyProjectStripsBOM(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := ApplyProject(user, cwd, true)
+	got := mustApplyProject(t, user, cwd, true)
 	if got.Theme != "light" || got.ShellPath != "/bin/custom-bash" {
 		t.Fatalf("theme=%q shellPath=%q", got.Theme, got.ShellPath)
 	}
@@ -43,7 +52,7 @@ func TestApplyProjectOverlaysTrustedSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	untrusted := ApplyProject(user, cwd, false)
+	untrusted := mustApplyProject(t, user, cwd, false)
 	if untrusted.BlockImages() || untrusted.ShellPath != "" {
 		t.Fatalf("untrusted applied project settings: %+v", untrusted)
 	}
@@ -51,7 +60,7 @@ func TestApplyProjectOverlaysTrustedSettings(t *testing.T) {
 		t.Fatalf("untrusted tools=%v", untrusted.InitialBuiltinTools())
 	}
 
-	got := ApplyProject(user, cwd, true)
+	got := mustApplyProject(t, user, cwd, true)
 	if !got.BlockImages() {
 		t.Fatal("trusted should overlay blockImages")
 	}
@@ -84,7 +93,7 @@ func TestApplyProjectEmptyListDisablesTools(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"defaultTools":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := ApplyProject(user, cwd, true)
+	got := mustApplyProject(t, user, cwd, true)
 	if n := len(got.InitialBuiltinTools()); n != 0 {
 		t.Fatalf("empty project defaultTools should disable builtins, n=%d", n)
 	}
@@ -138,7 +147,7 @@ func TestApplyProjectMergesCompactionOverridesAndWarnings(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := ApplyProject(user, cwd, true)
+	got := mustApplyProject(t, user, cwd, true)
 	if got.RetryMaxAgentDelayMs() != 5000 {
 		t.Fatalf("retry cap=%d", got.RetryMaxAgentDelayMs())
 	}
@@ -179,7 +188,7 @@ func TestApplyProjectEmptyThinkingDefaultsMedium(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := ApplyProject(user, t.TempDir(), false)
+	got := mustApplyProject(t, user, t.TempDir(), false)
 	if got.Thinking != "medium" {
 		t.Fatalf("thinking=%q, want medium", got.Thinking)
 	}
@@ -198,7 +207,7 @@ func TestApplyProjectOverlaysContainer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := ApplyProject(user, cwd, true)
+	got := mustApplyProject(t, user, cwd, true)
 	if got.ContainerImage() != "debian:bookworm-slim" {
 		t.Fatalf("image=%q", got.ContainerImage())
 	}
@@ -208,7 +217,7 @@ func TestApplyProjectOverlaysContainer(t *testing.T) {
 	if len(got.Container.Env) != 1 || got.Container.Env[0] != "GOPATH" {
 		t.Fatalf("env=%v", got.Container.Env)
 	}
-	untrusted := ApplyProject(user, cwd, false)
+	untrusted := mustApplyProject(t, user, cwd, false)
 	if untrusted.ContainerImage() != "" {
 		t.Fatalf("untrusted image=%q", untrusted.ContainerImage())
 	}
@@ -223,14 +232,14 @@ func TestApplyProjectContextWindow(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"contextWindow":200000}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := ApplyProject(user, cwd, true)
+	got := mustApplyProject(t, user, cwd, true)
 	if got.ContextWindow != 8192 {
 		t.Fatalf("legacy project default overrode user window: %d", got.ContextWindow)
 	}
 	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"contextWindow":32768}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got = ApplyProject(user, cwd, true)
+	got = mustApplyProject(t, user, cwd, true)
 	if got.ContextWindow != 32768 {
 		t.Fatalf("project contextWindow = %d, want 32768", got.ContextWindow)
 	}

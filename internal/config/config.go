@@ -3,6 +3,8 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -68,6 +70,7 @@ type Config struct {
 	EnabledModels             []string              `mapstructure:"enabledModels"`
 	DefaultProjectTrust       string                `mapstructure:"defaultProjectTrust"`
 	SessionDir                string                `mapstructure:"sessionDir"`
+	SessionShareDestination   string                `mapstructure:"sessionShareDestination"`
 	QuietStartupFlag          *bool                 `mapstructure:"quietStartup"`
 	HTTPProxy                 string                `mapstructure:"httpProxy"`
 	EnableSkillCommands       *bool                 `mapstructure:"enableSkillCommands"`
@@ -557,16 +560,32 @@ func Load(configDir string) (Config, error) {
 	v.AutomaticEnv()
 
 	var cfg Config
+	var file []byte
 	settingsPath := filepath.Join(configDir, "settings.json")
 	if b, err := os.ReadFile(settingsPath); err != nil {
 		if !os.IsNotExist(err) {
 			return cfg, err
 		}
-	} else if err := v.MergeConfig(bytes.NewReader(bom.Strip(b))); err != nil {
-		return cfg, err
+	} else {
+		file = b
+		if err := v.MergeConfig(bytes.NewReader(bom.Strip(b))); err != nil {
+			return cfg, err
+		}
 	}
 	if err := v.Unmarshal(&cfg); err != nil {
 		return cfg, err
+	}
+	if len(file) > 0 {
+		dest, present, err := sessionShareDestinationIn(file)
+		if present && err != nil {
+			return cfg, err
+		}
+		if present {
+			cfg.SessionShareDestination = dest
+		}
+	}
+	if cfg.SessionShareDestination != "" && !validSessionShareDestination(cfg.SessionShareDestination) {
+		return cfg, invalidSessionShareDestination(cfg.SessionShareDestination)
 	}
 	if cfg.Theme == "" {
 		cfg.Theme = "system"
@@ -611,6 +630,54 @@ func applyThinkingDefault(cfg *Config) {
 	if cfg.Thinking == "" {
 		cfg.Thinking = "medium"
 	}
+}
+
+// ShareDestination is the /share target. An unset value is auto.
+func (c Config) ShareDestination() string {
+	if validSessionShareDestination(c.SessionShareDestination) {
+		return c.SessionShareDestination
+	}
+	return "auto"
+}
+
+func validSessionShareDestination(s string) bool {
+	switch s {
+	case "auto", "gist", "radius":
+		return true
+	default:
+		return false
+	}
+}
+
+func invalidSessionShareDestination(s string) error {
+	if s == "" {
+		return errors.New(`invalid sessionShareDestination: expected "auto", "gist", or "radius"`)
+	}
+	return fmt.Errorf(`invalid sessionShareDestination %q: expected "auto", "gist", or "radius"`, s)
+}
+
+// sessionShareDestinationIn reads the raw settings key.
+// present is false when the key is absent or the file is not a JSON object.
+func sessionShareDestinationIn(raw []byte) (value string, present bool, err error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(bom.Strip(raw), &doc); err != nil {
+		return "", false, err
+	}
+	v, ok := doc["sessionShareDestination"]
+	if !ok {
+		return "", false, nil
+	}
+	if string(bytes.TrimSpace(v)) == "null" {
+		return "", true, invalidSessionShareDestination("")
+	}
+	var s string
+	if err := json.Unmarshal(v, &s); err != nil {
+		return "", true, invalidSessionShareDestination("")
+	}
+	if !validSessionShareDestination(s) {
+		return "", true, invalidSessionShareDestination(s)
+	}
+	return s, true, nil
 }
 
 func fillPackagesFromFile(configDir string, cfg *Config) {
@@ -841,6 +908,9 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	}
 	if cfg.Transport != "" {
 		existing["transport"] = cfg.Transport
+	}
+	if validSessionShareDestination(cfg.SessionShareDestination) {
+		existing["sessionShareDestination"] = cfg.SessionShareDestination
 	}
 	if cfg.Warnings != nil {
 		existing["warnings"] = cfg.Warnings

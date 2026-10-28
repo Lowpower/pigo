@@ -27,6 +27,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `enabledModels` | Ctrl+P cycle allowlist (globs) |
 | `defaultProjectTrust` | `ask` \| `always` \| `never` (global only) |
 | `sessionDir` | Session storage root |
+| `sessionShareDestination` | `/share` destination: `auto` (default), `gist`, or `radius`. `auto` uses Radius when authenticated and otherwise a private GitHub gist. `gist` always uses a gist. `radius` requires Radius authentication and does not fall back. Invalid values fail when settings load. Trusted projects may override it |
 | `enableSkillCommands` | `/skill:name` slash (default true) |
 | `shellPath` / `shellCommandPrefix` | Bash wrapper |
 | `externalEditor` | Ctrl+G editor |

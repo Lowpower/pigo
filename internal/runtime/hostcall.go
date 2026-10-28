@@ -176,7 +176,9 @@ func (e *Engine) HandleHostCall(h *ext.Host, name string, args map[string]any) m
 		}()
 		return map[string]any{"ok": true}
 	case "reload":
-		e.Reload()
+		if err := e.Reload(); err != nil {
+			return map[string]any{"ok": false, "error": err.Error()}
+		}
 		return map[string]any{"ok": true}
 	case "getActiveTools":
 		return map[string]any{"names": e.activeToolNamesCopy()}
