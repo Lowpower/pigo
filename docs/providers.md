@@ -20,8 +20,9 @@ Wire APIs include `anthropic-messages`, `openai-completions`,
 ## Credentials
 
 `pigo auth login <provider>` stores keys in `~/.pigo/agent/auth.json`.
-OAuth is available for several providers (Anthropic, OpenAI Codex, GitHub
-Copilot, OpenRouter, Kimi, Meta, xAI, Radius). See [auth.md](auth.md).
+OAuth is available for several providers (Anthropic, OpenAI ChatGPT
+subscription, legacy OpenAI Codex, GitHub Copilot, OpenRouter, Kimi, Meta,
+xAI, Radius). See [auth.md](auth.md).
 
 `--api-key` injects a key for this process only.
 

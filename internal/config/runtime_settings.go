@@ -341,6 +341,24 @@ func (c *Config) ensureAnalyticsTrackingID() {
 	c.TrackingID = newTrackingID()
 }
 
+// GetOrCreateDeviceID returns the installation UUID used by Sign in with ChatGPT.
+// The first call writes it to the global settings file. A later call keeps that
+// value. Project settings cannot supply it.
+func GetOrCreateDeviceID(configDir string) (string, error) {
+	cfg, err := Load(configDir)
+	if err != nil {
+		return "", err
+	}
+	if id := strings.TrimSpace(cfg.DeviceID); id != "" {
+		return id, nil
+	}
+	cfg.DeviceID = newTrackingID()
+	if err := Save(configDir, cfg); err != nil {
+		return "", err
+	}
+	return cfg.DeviceID, nil
+}
+
 func newTrackingID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

@@ -39,6 +39,7 @@ func registerBuiltins() {
 			Env:   []string{"OPENAI_API_KEY"},
 			Login: promptAPIKey("OpenAI API key"),
 		},
+		OAuth: openaiChatGPTOAuth{},
 	})
 	registerProvider(Provider{
 		ID: "openai-codex",

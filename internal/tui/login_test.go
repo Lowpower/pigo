@@ -14,6 +14,44 @@ import (
 
 const loginTestURL = "https://example.test/oauth?code=login-403"
 
+func TestLoginOpenAIOffersChatGPT(t *testing.T) {
+	next, _ := New(testCfg()).startLogin("openai")
+	m := next.(Model)
+	if m.login.phase != loginPickType {
+		t.Fatalf("phase %v", m.login.phase)
+	}
+	var labels []string
+	for _, opt := range m.login.options {
+		labels = append(labels, opt.label)
+	}
+	joined := strings.Join(labels, "\n")
+	if !strings.Contains(joined, "Sign in with ChatGPT") || !strings.Contains(joined, "Sign in with an API key") {
+		t.Fatalf("options = %#v", m.login.options)
+	}
+}
+
+func TestLoginAccountListMarksCodexLegacy(t *testing.T) {
+	m := New(testCfg())
+	m.login = loginState{
+		phase:   loginPickType,
+		options: []loginOption{{id: auth.TypeOAuth, label: "Sign in with an account"}},
+	}
+	next, _ := m.chooseLoginOption()
+	got := next.(Model)
+	found := map[string]string{}
+	for _, opt := range got.login.options {
+		if opt.id == "openai" || opt.id == "openai-codex" {
+			found[opt.id] = opt.label
+		}
+	}
+	if found["openai"] != "OpenAI (ChatGPT subscription)" {
+		t.Fatalf("openai = %q", found["openai"])
+	}
+	if found["openai-codex"] != "OpenAI Codex (legacy)" {
+		t.Fatalf("codex = %q", found["openai-codex"])
+	}
+}
+
 func TestLoginDoneWarnsWhenRadiusCatalogMissing(t *testing.T) {
 	orig, ok := models.LookupProvider("radius")
 	if !ok {

@@ -28,7 +28,7 @@ var (
 
 type openaiCodexOAuth struct{}
 
-func (openaiCodexOAuth) Name() string         { return "OpenAI Codex (ChatGPT)" }
+func (openaiCodexOAuth) Name() string         { return "OpenAI Codex (legacy)" }
 func (openaiCodexOAuth) LoginLabel() string   { return "" }
 func (openaiCodexOAuth) IsSubscription() bool { return true }
 

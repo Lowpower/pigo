@@ -177,6 +177,37 @@ func intPtr(v int) *int { return &v }
 
 var trackingIDRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+func TestGetOrCreateDeviceIDIsStable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte("{\n  \"theme\": \"dark\"\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := GetOrCreateDeviceID(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !trackingIDRe.MatchString(first) {
+		t.Fatalf("deviceId=%q", first)
+	}
+	second, err := GetOrCreateDeviceID(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != first {
+		t.Fatalf("deviceId changed: %q vs %q", second, first)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"deviceId": "`+first+`"`) {
+		t.Fatalf("settings = %s", raw)
+	}
+	if !strings.Contains(string(raw), `"theme": "dark"`) {
+		t.Fatalf("theme dropped: %s", raw)
+	}
+}
+
 func TestSetEnableAnalyticsMintsTrackingID(t *testing.T) {
 	var c Config
 	c.SetEnableAnalytics(true)

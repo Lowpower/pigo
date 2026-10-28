@@ -214,6 +214,26 @@ func TestApplyProjectOverlaysContainer(t *testing.T) {
 	}
 }
 
+func TestApplyProjectIgnoresDeviceID(t *testing.T) {
+	const globalID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	user := Config{DeviceID: globalID, Theme: "dark"}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"theme":"light","deviceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}`
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ApplyProject(user, cwd, true)
+	if got.DeviceID != globalID {
+		t.Fatalf("deviceId = %q", got.DeviceID)
+	}
+	if got.Theme != "light" {
+		t.Fatalf("theme = %q", got.Theme)
+	}
+}
+
 func TestApplyProjectContextWindow(t *testing.T) {
 	user := Config{ContextWindow: 8192}
 	cwd := t.TempDir()

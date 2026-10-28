@@ -100,13 +100,21 @@ func (m Model) startLogin(rest string) (tea.Model, tea.Cmd) {
 
 func matchLoginProviders(q string) []auth.Provider {
 	q = strings.ToLower(q)
-	var out []auth.Provider
+	var exact, partial []auth.Provider
 	for _, p := range auth.Providers() {
-		if p.ID == q || strings.Contains(p.ID, q) {
-			out = append(out, p)
+		id := strings.ToLower(p.ID)
+		if id == q {
+			exact = append(exact, p)
+			continue
+		}
+		if strings.Contains(id, q) {
+			partial = append(partial, p)
 		}
 	}
-	return out
+	if len(exact) > 0 {
+		return exact
+	}
+	return partial
 }
 
 func oauthLabel(p auth.Provider) string {
@@ -135,6 +143,9 @@ func (m Model) beginProviderLogin(providerID, authType string) (tea.Model, tea.C
 	store := auth.Open(dir)
 	ix := auth.Interaction{
 		Ctx: ctx,
+		DeviceID: func() (string, error) {
+			return config.GetOrCreateDeviceID(dir)
+		},
 		Prompt: func(p auth.Prompt) (string, error) {
 			reply := make(chan string, 1)
 			select {
