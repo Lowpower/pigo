@@ -32,9 +32,14 @@ and is re-read on each exchange. `ANTHROPIC_SERVICE_ACCOUNT_ID` and
 not written to `auth.json`. The exchange uses `ANTHROPIC_BASE_URL` when that is
 set, otherwise `https://api.anthropic.com`.
 
-OAuth (device or loopback): `anthropic`, `openai-codex`, `github-copilot`,
-`openrouter`, `kimi-coding`, `meta`, `xai`, `radius`. `pigo auth login meta`
-runs a device-code sign-in, then mints a Model API key (about 24h). The
+OAuth (device or loopback): `anthropic`, `openai`, `openai-codex`, `github-copilot`,
+`openrouter`, `kimi-coding`, `meta`, `xai`, `radius`. `/login openai` offers
+Sign in with ChatGPT (a subscription token for the OpenAI API) or an API key.
+That login keeps a stable `deviceId` in global settings and omits it from bug
+reports. `openai-codex` is legacy: existing Codex credentials keep working and
+are not moved to `openai`. `pigo auth login` still stores an API key.
+`pigo auth login meta` runs a device-code sign-in, then mints a Model API key
+(about 24h). The
 identity token is stored as `refresh` and re-minted when the key expires. A
 401/403 from mint means the session is gone: run `/login meta` again.
 `META_API_KEY` is the API-key path. Callback bind host:

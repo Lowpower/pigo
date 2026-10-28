@@ -416,6 +416,34 @@ func TestOpenAIResponsesConfigurationUpdateMinimalAndAPIKey(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesChatGPTSignInSkipsConfigurationUpdate(t *testing.T) {
+	var authz string
+	var got capturedResponses
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authz = r.Header.Get("Authorization")
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(responsesFixture))
+	}))
+	defer srv.Close()
+
+	runResponsesTurn(t, srv, "https://api.openai.com/v1", "sub-token", "openai", "gpt-6-luna", "high", []Message{
+		{Role: RoleUser, Content: "one"},
+	})
+	if authz != "Bearer sub-token" {
+		t.Fatalf("authorization = %q", authz)
+	}
+	if got.Reasoning.Effort != "high" {
+		t.Fatalf("effort = %q", got.Reasoning.Effort)
+	}
+	if efforts := configurationEfforts(t, got.Input); len(efforts) != 0 {
+		t.Fatalf("configuration_update = %#v", efforts)
+	}
+}
+
 func TestBuildResponsesInputSkipsEmptyAssistantUpdate(t *testing.T) {
 	items := buildResponsesInput(Context{Messages: []Message{
 		{Role: RoleUser, Content: "one"},

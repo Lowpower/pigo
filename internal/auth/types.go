@@ -100,6 +100,9 @@ type Interaction struct {
 	Ctx    context.Context
 	Prompt func(Prompt) (string, error)
 	Notify func(Event)
+	// DeviceID returns this installation's UUID for Sign in with ChatGPT.
+	// Other providers ignore it.
+	DeviceID func() (string, error)
 }
 
 func (ix Interaction) ctx() context.Context {

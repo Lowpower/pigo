@@ -31,14 +31,15 @@ func isLoopbackHost(host string) bool {
 }
 
 type callbackServer struct {
-	ln     net.Listener
-	srv    *http.Server
-	mu     sync.Mutex
-	done   chan struct{}
-	code   string
-	state  string
-	err    error
-	closed bool
+	ln       net.Listener
+	srv      *http.Server
+	mu       sync.Mutex
+	done     chan struct{}
+	code     string
+	state    string
+	clientID string
+	err      error
+	closed   bool
 }
 
 func startCallback(ctx context.Context, host string, port int, path, expectedState string) (*callbackServer, error) {
@@ -65,7 +66,7 @@ func serveCallback(ctx context.Context, ln net.Listener, path, expectedState str
 		if errVal := q.Get("error"); errVal != "" {
 			err := authorizationError(q)
 			writeOAuthHTML(w, 400, oauthErrorHTML("Authentication did not complete.", err.Error()))
-			cs.finish("", "", err)
+			cs.finish("", "", "", err)
 			return
 		}
 		code := q.Get("code")
@@ -79,7 +80,7 @@ func serveCallback(ctx context.Context, ln net.Listener, path, expectedState str
 			return
 		}
 		writeOAuthHTML(w, 200, oauthSuccessHTML("Authentication completed. You can close this window."))
-		cs.finish(code, state, nil)
+		cs.finish(code, state, q.Get("client_id"), nil)
 	})
 	cs.srv = &http.Server{Handler: mux}
 	go func() { _ = cs.srv.Serve(ln) }()
@@ -108,22 +109,20 @@ func (cs *callbackServer) boundPort() (int, error) {
 	return ta.Port, nil
 }
 
-func (cs *callbackServer) finish(code, state string, err error) {
+func (cs *callbackServer) finish(code, state, clientID string, err error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	if cs.closed {
 		return
 	}
 	cs.closed = true
-	cs.code, cs.state, cs.err = code, state, err
+	cs.code, cs.state, cs.clientID, cs.err = code, state, clientID, err
 	close(cs.done)
 }
 
 func (cs *callbackServer) Cancel() {
-	cs.finish("", "", nil)
-	if cs.srv != nil {
-		_ = cs.srv.Close()
-	}
+	cs.finish("", "", "", nil)
+	cs.Close()
 }
 
 func (cs *callbackServer) Wait() (code, state string, err error) {
@@ -131,9 +130,18 @@ func (cs *callbackServer) Wait() (code, state string, err error) {
 	return cs.code, cs.state, cs.err
 }
 
+// issuedClientID is the client_id query value from a completed callback.
+// It is valid after Wait returns.
+func (cs *callbackServer) issuedClientID() string {
+	return cs.clientID
+}
+
 func (cs *callbackServer) Close() {
 	if cs.srv != nil {
 		_ = cs.srv.Close()
+	}
+	if cs.ln != nil {
+		_ = cs.ln.Close()
 	}
 }
 

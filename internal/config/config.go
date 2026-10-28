@@ -84,6 +84,7 @@ type Config struct {
 	FullscreenCopyOnSelect    *bool                 `mapstructure:"fullscreenCopyOnSelect"`
 	EnableAnalytics           *bool                 `mapstructure:"enableAnalytics"`
 	TrackingID                string                `mapstructure:"trackingId"`
+	DeviceID                  string                `mapstructure:"deviceId"`
 	Transport                 string                `mapstructure:"transport"`
 	Warnings                  map[string]any        `mapstructure:"warnings"`
 
@@ -838,6 +839,9 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	}
 	if cfg.TrackingID != "" {
 		existing["trackingId"] = cfg.TrackingID
+	}
+	if cfg.DeviceID != "" {
+		existing["deviceId"] = cfg.DeviceID
 	}
 	if cfg.Transport != "" {
 		existing["transport"] = cfg.Transport

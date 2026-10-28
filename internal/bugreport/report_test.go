@@ -57,7 +57,7 @@ func TestBuildRedactsAndOmitsTranscript(t *testing.T) {
 		ThinkingLevel:   "off",
 		Model:           &ModelInfo{Provider: "anthropic", ID: "m", BaseURL: "https://user:sk-abcdefghij@example.test/v1?api_key=sekret"},
 		Provider:        &ProviderInfo{ID: "anthropic", BaseURL: "https://example.test", HeaderNames: []string{"Authorization"}, AuthTypes: []string{"api_key"}},
-		GlobalSettings:  json.RawMessage(`{"theme":"dark","apiKey":"sk-abcdefghij","trackingId":"abc","note":"Bearer abcdefghijklmnop"}`),
+		GlobalSettings:  json.RawMessage(`{"theme":"dark","apiKey":"sk-abcdefghij","trackingId":"abc","deviceId":"device-should-not-leak","note":"Bearer abcdefghijklmnop"}`),
 		ProjectSettings: json.RawMessage(`{"apiKey":"project-secret"}`),
 		IncludeProject:  false,
 		Header:          header,
@@ -75,10 +75,13 @@ func TestBuildRedactsAndOmitsTranscript(t *testing.T) {
 	}
 	raw, _ := json.Marshal(b.Metadata)
 	text := string(raw) + b.SessionJSONL
-	for _, leak := range []string{"sk-abcdefghij", "sekret", "project-secret", "abcdefghijklmnop", "abc", "PIGO_SECRET_TOKEN=sk-should-not-leak", "/secret/project"} {
+	for _, leak := range []string{"sk-abcdefghij", "sekret", "project-secret", "abcdefghijklmnop", "abc", "device-should-not-leak", "PIGO_SECRET_TOKEN=sk-should-not-leak", "/secret/project"} {
 		if strings.Contains(text, leak) {
 			t.Fatalf("leaked %q in %s", leak, text)
 		}
+	}
+	if strings.Contains(string(raw), `"deviceId"`) {
+		t.Fatal("deviceId key should be omitted")
 	}
 	if b.Metadata.Session.Cwd != "" || b.Metadata.Session.Included || b.SessionJSONL != "" {
 		t.Fatalf("transcript leaked: %+v %q", b.Metadata.Session, b.SessionJSONL)

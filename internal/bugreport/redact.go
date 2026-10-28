@@ -17,7 +17,7 @@ var (
 )
 
 func isSensitiveKey(key string) bool {
-	if key == "" || key == "trackingId" {
+	if key == "" || key == "trackingId" || key == "deviceId" {
 		return false
 	}
 	var b strings.Builder
@@ -38,7 +38,7 @@ func redactJSON(v any) any {
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, child := range t {
-			if k == "trackingId" {
+			if k == "trackingId" || k == "deviceId" {
 				continue
 			}
 			if isSensitiveKey(k) {
