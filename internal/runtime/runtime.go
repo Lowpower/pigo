@@ -1408,15 +1408,25 @@ func (e *Engine) History() []ai.Message {
 }
 
 // Reload rediscovers skills, extensions, and rebuilds the system prompt (/reload).
-func (e *Engine) Reload() {
+// A settings load or project-overlay error is returned after the rest of reload runs.
+func (e *Engine) Reload() error {
 	ctx := context.Background()
+	var loadErr error
 	if e.Opts.AgentDir != "" {
 		loaded, err := config.Load(e.Opts.AgentDir)
-		if err == nil {
+		if err != nil {
+			loadErr = err
+		} else {
 			if e.Opts.UserConfig != nil {
 				*e.Opts.UserConfig = loaded
 			}
-			e.Opts.Config = config.ApplyProject(loaded, e.Opts.Cwd, e.Opts.ProjectTrusted)
+			applied, applyErr := config.ApplyProject(loaded, e.Opts.Cwd, e.Opts.ProjectTrusted)
+			if applyErr != nil {
+				loadErr = applyErr
+				e.Opts.Config = loaded
+			} else {
+				e.Opts.Config = applied
+			}
 			if e.Opts.CLIProvider != "" {
 				e.Opts.Config.Provider = e.Opts.CLIProvider
 				e.Opts.Config.DefaultProvider = e.Opts.CLIProvider
@@ -1483,6 +1493,7 @@ func (e *Engine) Reload() {
 	})
 	e.extendResourcesFromExtensions(ctx, "reload")
 	e.rebuildSystemPrompt()
+	return loadErr
 }
 
 // PersistTranscript writes new agent messages to the session file.
@@ -1674,7 +1685,12 @@ func (e *Engine) RefreshSessionConfig() {
 	if e.Opts.UserConfig == nil {
 		return
 	}
-	e.Opts.Config = config.ApplyProject(*e.Opts.UserConfig, e.Opts.Cwd, e.Opts.ProjectTrusted)
+	applied, err := config.ApplyProject(*e.Opts.UserConfig, e.Opts.Cwd, e.Opts.ProjectTrusted)
+	if err != nil {
+		e.Opts.Config = *e.Opts.UserConfig
+		return
+	}
+	e.Opts.Config = applied
 }
 
 func (e *Engine) setModel(provider, id, thinking string, persist bool) {

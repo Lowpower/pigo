@@ -59,6 +59,7 @@ func (m *Model) refreshSettingsItems() {
 		{"default-project-trust", "Default project trust", "When a project has local resources and no saved decision", m.cfg.ProjectTrustDefault()},
 		{"double-escape-action", "Double-escape action", "Action when pressing Escape twice with empty editor", m.cfg.DoubleEscape()},
 		{"tree-filter-mode", "Tree filter mode", "Default filter when opening /tree", m.cfg.TreeFilter()},
+		{"share-destination", "Session share destination", "Where to upload sessions with /share (auto prefers Radius when authenticated, otherwise GitHub Gist)", m.cfg.ShareDestination()},
 		{"theme", "Theme", "Colour theme", m.theme.Name},
 		{"thinking", "Thinking level", "Reasoning level for the current session", thinkingValue(m.cfg.Thinking)},
 		{"collapse-changelog", "Collapse changelog", "Show condensed changelog after updates", boolText(m.cfg.CollapsedChangelog())},
@@ -136,6 +137,8 @@ func (m Model) settingChoices(id string) []string {
 		return []string{"ask", "always", "never"}
 	case "tree-filter-mode":
 		return []string{"default", "no-tools", "user-only", "labeled-only", "all"}
+	case "share-destination":
+		return []string{"auto", "gist", "radius"}
 	case "theme":
 		names := theme.NamesWith(m.themeOpts(""))
 		if len(names) == 0 {
@@ -179,6 +182,8 @@ func (m Model) settingCurrent(id string) string {
 		return m.cfg.DoubleEscape()
 	case "tree-filter-mode":
 		return m.cfg.TreeFilter()
+	case "share-destination":
+		return m.cfg.ShareDestination()
 	case "theme":
 		if m.theme.Name != "" {
 			return m.theme.Name
@@ -252,6 +257,8 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 		patch(func(c *config.Config) { c.DoubleEscapeAction = value })
 	case "tree-filter-mode":
 		patch(func(c *config.Config) { c.TreeFilterMode = value })
+	case "share-destination":
+		patch(func(c *config.Config) { c.SessionShareDestination = value })
 	case "theme":
 		patch(func(c *config.Config) { c.Theme = value })
 		m.applyTheme(theme.LoadWith(m.themeOpts(value)))

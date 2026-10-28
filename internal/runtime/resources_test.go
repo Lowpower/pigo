@@ -97,7 +97,9 @@ func TestNewHonorsDisabledSkillOverride(t *testing.T) {
 	}
 
 	writeSettings(t, agent, `{}`)
-	e.Reload()
+	if err := e.Reload(); err != nil {
+		t.Fatal(err)
+	}
 	if names := skillNames(e.Skills); len(names) != 1 || names[0] != "demo" {
 		t.Fatalf("reload after enabling: %v", names)
 	}
@@ -258,7 +260,9 @@ func TestNewWarnsOnSkillWithoutDescription(t *testing.T) {
 		t.Fatalf("warnings = %v", warnings)
 	}
 
-	e.Reload()
+	if err := e.Reload(); err != nil {
+		t.Fatal(err)
+	}
 	warnings = e.SkillWarnings()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], path) {
 		t.Fatalf("warnings after reload = %v", warnings)
@@ -293,7 +297,9 @@ func TestNewWarnsOnMalformedPromptFrontmatter(t *testing.T) {
 		t.Fatalf("warnings = %v", warnings)
 	}
 
-	e.Reload()
+	if err := e.Reload(); err != nil {
+		t.Fatal(err)
+	}
 	if names := templateNames(e.Templates); len(names) != 1 || names[0] != "valid" {
 		t.Fatalf("templates after reload = %v", names)
 	}
@@ -428,5 +434,30 @@ func TestCollectExtensionSpecsOfflineMissing(t *testing.T) {
 	_, err := collectExtensionSpecs(context.Background(), opts, nil)
 	if err == nil || !strings.Contains(err.Error(), "offline") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestReloadReportsInvalidProjectShareDestination(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"sessionShareDestination":"nope"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := testEngineOpts(agent, cwd)
+	opts.ProjectTrusted = true
+	e, err := New(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	err = e.Reload()
+	if err == nil || !strings.Contains(err.Error(), "sessionShareDestination") {
+		t.Fatalf("err=%v", err)
+	}
+	if e.Opts.Config.ShareDestination() != "auto" {
+		t.Fatalf("invalid project destination applied: %q", e.Opts.Config.SessionShareDestination)
 	}
 }

@@ -209,7 +209,10 @@ func TestThinkingDisplayLoadSaveAndProjectOverlay(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(`{"thinkingDisplay":"omitted"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := ApplyProject(cfg, cwd, true)
+	got, err := ApplyProject(cfg, cwd, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.ThinkingDisplay != "omitted" {
 		t.Fatalf("project display=%q", got.ThinkingDisplay)
 	}
@@ -598,11 +601,17 @@ func TestApplyProjectOverlayAndUntrusted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trusted := ApplyProject(base, cwd, true)
+	trusted, err := ApplyProject(base, cwd, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if trusted.Theme != "light" || trusted.CompactionEnabled() {
 		t.Fatalf("trusted theme=%s compact=%v", trusted.Theme, trusted.CompactionEnabled())
 	}
-	untrusted := ApplyProject(base, cwd, false)
+	untrusted, err := ApplyProject(base, cwd, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if untrusted.Theme != "dark" || !untrusted.CompactionEnabled() {
 		t.Fatalf("untrusted theme=%s compact=%v", untrusted.Theme, untrusted.CompactionEnabled())
 	}
@@ -992,5 +1001,119 @@ func TestSaveContextWindowOmitAndWrite(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"contextWindow": 32768`) {
 		t.Fatalf("explicit contextWindow missing: %s", b)
+	}
+}
+
+func TestSessionShareDestinationLoadSave(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SessionShareDestination != "" || cfg.ShareDestination() != "auto" {
+		t.Fatalf("missing file dest=%q effective=%q", cfg.SessionShareDestination, cfg.ShareDestination())
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"theme":"dark"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SessionShareDestination != "" || cfg.ShareDestination() != "auto" {
+		t.Fatalf("missing key dest=%q effective=%q", cfg.SessionShareDestination, cfg.ShareDestination())
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "sessionShareDestination") {
+		t.Fatalf("unset destination should not be written: %s", b)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"sessionShareDestination":"gist"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SessionShareDestination != "gist" || cfg.ShareDestination() != "gist" {
+		t.Fatalf("loaded=%q", cfg.SessionShareDestination)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"sessionShareDestination": "gist"`) {
+		t.Fatalf("saved: %s", b)
+	}
+
+	cfg.SessionShareDestination = "auto"
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"sessionShareDestination": "auto"`) {
+		t.Fatalf("explicit auto missing: %s", b)
+	}
+}
+
+func TestSessionShareDestinationRejectsInvalid(t *testing.T) {
+	for _, raw := range []string{
+		`{"sessionShareDestination":"nope"}`,
+		`{"sessionShareDestination":""}`,
+		`{"sessionShareDestination":null}`,
+		`{"sessionShareDestination":"Auto"}`,
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "sessionShareDestination") {
+			t.Fatalf("raw %s err=%v", raw, err)
+		}
+	}
+}
+
+func TestApplyProjectSessionShareDestination(t *testing.T) {
+	user := Config{SessionShareDestination: "radius"}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cwd, ".pigo", "settings.json")
+	if err := os.WriteFile(path, []byte(`{"sessionShareDestination":"gist"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	untrusted, err := ApplyProject(user, cwd, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if untrusted.ShareDestination() != "radius" {
+		t.Fatalf("untrusted dest=%q", untrusted.ShareDestination())
+	}
+	got, err := ApplyProject(user, cwd, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ShareDestination() != "gist" {
+		t.Fatalf("trusted dest=%q", got.ShareDestination())
+	}
+	if err := os.WriteFile(path, []byte(`{"sessionShareDestination":"nope"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyProject(user, cwd, true); err == nil || !strings.Contains(err.Error(), "sessionShareDestination") {
+		t.Fatalf("invalid project err=%v", err)
 	}
 }

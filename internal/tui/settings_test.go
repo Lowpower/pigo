@@ -144,6 +144,35 @@ func TestSettingsTogglesChangelogAndTelemetry(t *testing.T) {
 	}
 }
 
+func TestSettingsCyclesShareDestination(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
+	m := New(testCfg())
+	m = submit(m, "/settings")
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("session share")})
+	if !strings.Contains(m.View(), "Session share destination") || !strings.Contains(m.View(), "auto") {
+		t.Fatalf("menu:\n%s", m.View())
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.cfg.ShareDestination() != "gist" {
+		t.Fatalf("cycle = %s", m.cfg.ShareDestination())
+	}
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ShareDestination() != "gist" {
+		t.Fatalf("saved = %s", loaded.ShareDestination())
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"sessionShareDestination": "gist"`) {
+		t.Fatalf("saved file: %s", b)
+	}
+}
+
 func TestSettingsCyclesScrollbarAndAnthropicWarning(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", dir)

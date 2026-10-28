@@ -28,6 +28,6 @@ copies history up to a chosen entry.
 ## Export and share
 
 - `--export <session.jsonl> [out.html]`, `/export`, RPC `export_html` — themed HTML
-- `/share` — Radius when authenticated, otherwise a private `gh` gist
+- `/share` — destination from `sessionShareDestination` (`auto` by default: Radius when authenticated, otherwise a private `gh` gist). `gist` always uses a gist. `radius` requires Radius authentication and does not fall back
 
 HTML themes live next to the exporter (`light` / `dark`).

@@ -41,6 +41,7 @@ type projectOverlay struct {
 	DefaultTools              *[]string              `json:"defaultTools"`
 	EnabledModels             []string               `json:"enabledModels"`
 	SessionDir                string                 `json:"sessionDir"`
+	SessionShareDestination   string                 `json:"sessionShareDestination"`
 	QuietStartup              *bool                  `json:"quietStartup"`
 	HTTPProxy                 string                 `json:"httpProxy"`
 	EnableSkillCommands       *bool                  `json:"enableSkillCommands"`
@@ -69,19 +70,28 @@ type projectOverlay struct {
 
 // ApplyProject overlays cwd/.pigo/settings.json onto user when trusted.
 // Missing or unreadable project files leave user unchanged.
-func ApplyProject(user Config, cwd string, trusted bool) Config {
+// An invalid sessionShareDestination is an error and the overlay is not applied.
+func ApplyProject(user Config, cwd string, trusted bool) (Config, error) {
 	if !trusted || cwd == "" {
-		return user
+		return user, nil
 	}
 	b, err := os.ReadFile(filepath.Join(ProjectDir(cwd), "settings.json"))
 	if err != nil {
-		return user
+		return user, nil
+	}
+	dest, present, destErr := sessionShareDestinationIn(b)
+	if present && destErr != nil {
+		return user, destErr
 	}
 	var over projectOverlay
 	if err := json.Unmarshal(bom.Strip(b), &over); err != nil {
-		return user
+		return user, nil
 	}
-	return applyOverlay(user, over)
+	out := applyOverlay(user, over)
+	if present {
+		out.SessionShareDestination = dest
+	}
+	return out, nil
 }
 
 func applyOverlay(user Config, over projectOverlay) Config {
@@ -239,6 +249,9 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	if over.SessionDir != "" {
 		out.SessionDir = over.SessionDir
 	}
+	if over.SessionShareDestination != "" {
+		out.SessionShareDestination = over.SessionShareDestination
+	}
 	if over.QuietStartup != nil {
 		out.QuietStartupFlag = over.QuietStartup
 	}
@@ -367,6 +380,7 @@ func CopyUISettings(dst *Config, src Config) {
 	dst.DefaultProjectTrust = src.DefaultProjectTrust
 	dst.DoubleEscapeAction = src.DoubleEscapeAction
 	dst.TreeFilterMode = src.TreeFilterMode
+	dst.SessionShareDestination = src.SessionShareDestination
 	dst.CollapseChangelog = src.CollapseChangelog
 	dst.EnableInstallTelemetry = src.EnableInstallTelemetry
 	dst.TUIMode = src.TUIMode
