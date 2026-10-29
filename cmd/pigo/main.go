@@ -184,6 +184,9 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "pigo %s\n", version.Version)
 		return nil
 	}
+	if f.provider != "" && strings.TrimSpace(f.model) == "" {
+		return fmt.Errorf("--provider requires --model (for example: --provider %s --model <model>)", f.provider)
+	}
 	if f.offline {
 		_ = os.Setenv("PIGO_OFFLINE", "1")
 	}
@@ -229,8 +232,10 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		off := false
 		cfg.QuietStartupFlag = &off
 	}
+	apiKeyProvider := ""
 	if f.apiKey != "" {
-		auth.SetProcessAPIKey(cfg.ResolvedProvider(), f.apiKey)
+		apiKeyProvider = cfg.ResolvedProvider()
+		auth.SetProcessAPIKey(apiKeyProvider, f.apiKey)
 	}
 	auth.ApplyEnv(agentDir)
 	cwd, _ := os.Getwd()
@@ -364,6 +369,18 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		appendSystem = append(appendSystem, resolvePromptInput(s))
 	}
 
+	cliProvider, cliModel, err := resolveRootModel(agentDir, &cfg, f.provider, f.model, f.apiKey != "")
+	if err != nil {
+		if apiKeyProvider != "" {
+			auth.ClearProcessAPIKey(apiKeyProvider)
+		}
+		return err
+	}
+	if f.apiKey != "" && cliProvider != "" && cliProvider != apiKeyProvider {
+		auth.ClearProcessAPIKey(apiKeyProvider)
+		auth.SetProcessAPIKey(cliProvider, f.apiKey)
+	}
+
 	var sess *session.Manager
 	switch {
 	case f.noSession:
@@ -427,16 +444,6 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 
 	exts := f.extension
 
-	cliProvider := f.provider
-	cliModel := ""
-	if f.model != "" {
-		p, id, _ := models.ParseSpec(f.model)
-		if cliProvider == "" {
-			cliProvider = p
-		}
-		cliModel = id
-	}
-
 	eng, err := runtime.New(cmd.Context(), runtime.Options{
 		Config:         cfg,
 		UserConfig:     &userCfg,
@@ -474,6 +481,9 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 	for _, w := range eng.PromptTemplateWarnings() {
 		fmt.Fprintln(cmd.ErrOrStderr(), w)
+	}
+	for _, w := range eng.ModelWarnings() {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", w)
 	}
 	if mode != "interactive" {
 		for _, w := range eng.SkillWarnings() {
@@ -534,6 +544,36 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	default:
 		return fmt.Errorf("unknown --mode %q (want: interactive|text|json|rpc)", mode)
 	}
+}
+
+// resolveRootModel turns --model into one provider and id before startup.
+// A miss leaves the historical synthetic id. Several providers is an error.
+func resolveRootModel(agentDir string, cfg *config.Config, providerFlag, modelFlag string, inlineAPIKey bool) (string, string, error) {
+	cliProvider := providerFlag
+	if strings.TrimSpace(modelFlag) == "" {
+		return cliProvider, "", nil
+	}
+	res, err := models.ResolveCLIModel(models.CLIModelRequest{
+		Text:          modelFlag,
+		Provider:      providerFlag,
+		Authenticated: auth.AuthenticatedIDs(auth.Open(agentDir)),
+		InlineAPIKey:  inlineAPIKey,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	if !res.Found {
+		p, id, _ := models.ParseSpec(modelFlag)
+		if cliProvider == "" {
+			cliProvider = p
+		}
+		return cliProvider, id, nil
+	}
+	cfg.Provider = res.Model.Provider
+	cfg.DefaultProvider = res.Model.Provider
+	cfg.Model = res.Model.ID
+	cfg.DefaultModel = res.Model.ID
+	return res.Model.Provider, res.Model.ID, nil
 }
 
 func promptImagesFor(i int, images []ai.ImageContent) []ai.ImageContent {
