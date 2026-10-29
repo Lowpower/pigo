@@ -106,6 +106,12 @@ func (e *Engine) SkillWarnings() []string {
 	return e.skillWarnings
 }
 
+// ModelWarnings returns startup warnings for --models and enabledModels.
+// Each line is the sentence without a "Warning:" prefix.
+func (e *Engine) ModelWarnings() []string {
+	return e.modelWarnings
+}
+
 func loadTemplates(opts Options, rs []pkgmgr.Resource) ([]prompt.Template, []prompt.Diagnostic) {
 	paths := append([]string{}, opts.PromptPaths...)
 	if !opts.NoPromptTpls {

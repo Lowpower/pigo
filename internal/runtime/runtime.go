@@ -82,6 +82,7 @@ type Engine struct {
 	// skillWarnings are the latest skill-load warnings.
 	skillWarnings []string
 	Scoped        []models.Spec
+	modelWarnings []string
 	System        string
 
 	Steering  func() []ai.Message
@@ -194,6 +195,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		avail = models.Catalog()
 	}
 	scoped := models.ResolvePatternsIn(patterns, avail)
+	modelWarnings := models.AmbiguousExactPatterns(patterns, avail)
 	picked := models.PickInitial(models.PickOpts{
 		CLIProvider:   opts.CLIProvider,
 		CLIModel:      opts.CLIModel,
@@ -234,10 +236,11 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		MaxDelay:   opts.Config.ProviderRetryMaxDelay(),
 	})
 	e := &Engine{
-		Opts:     opts,
-		Stream:   sf,
-		Provider: provider,
-		Scoped:   scoped,
+		Opts:          opts,
+		Stream:        sf,
+		Provider:      provider,
+		Scoped:        scoped,
+		modelWarnings: modelWarnings,
 	}
 	e.syncToolRunner()
 	reg := e.builtinRegistry()
