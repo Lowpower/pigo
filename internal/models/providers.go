@@ -49,7 +49,7 @@ var extraProviders = []extraProvider{
 	}},
 	{ID: "cloudflare-workers-ai", Name: "Cloudflare API key", DefaultAPI: "openai-completions", DefaultID: "@cf/moonshotai/kimi-k2.6", BaseURL: "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1"},
 	{ID: "cloudflare-ai-gateway", Name: "Cloudflare API key", DefaultAPI: "anthropic-messages", DefaultID: "workers-ai/@cf/moonshotai/kimi-k2.6", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic"},
-	{ID: "azure-openai-responses", Name: "Azure OpenAI API key", DefaultAPI: "azure-openai-responses", DefaultID: "gpt-5.4"},
+	{ID: "azure", Name: "Azure OpenAI API key", DefaultAPI: "azure-openai-responses", DefaultID: "gpt-5.4"},
 	{ID: "google-vertex", Name: "Google Cloud credentials", DefaultAPI: "google-vertex", DefaultID: "gemini-3.1-pro-preview", BaseURL: "https://{location}-aiplatform.googleapis.com", Env: []string{"GOOGLE_CLOUD_API_KEY", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_APPLICATION_CREDENTIALS"}},
 	{ID: "mistral", Name: "Mistral API key", DefaultAPI: "mistral-conversations", DefaultID: "devstral-medium-latest", BaseURL: "https://api.mistral.ai", Env: []string{"MISTRAL_API_KEY"}},
 	{ID: "openai-codex", Name: "OpenAI Codex (legacy)", DefaultAPI: "openai-codex-responses", DefaultID: "gpt-6.1-sol", BaseURL: "https://chatgpt.com/backend-api"},

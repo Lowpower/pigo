@@ -26,6 +26,25 @@ xAI, Radius). See [auth.md](auth.md).
 
 `--api-key` injects a key for this process only.
 
+## Azure
+
+The built-in provider id is `azure`. Responses deployments keep the wire API
+`azure-openai-responses`. `azure/deepseek-v4-pro` uses Chat Completions
+(`openai-completions`). Add other Foundry chat deployments under `azure` in
+`models.json` with `"api": "openai-completions"`.
+
+This id used to be `azure-openai-responses`. pigo does not rewrite existing
+config. Rename the old id by hand in three places:
+
+- `auth.json`: the provider key (or run `pigo auth login azure`)
+- `models.json`: the provider id
+- `settings.json`: `defaultProvider`, `enabledModels` patterns, and
+  `modelThinkingLevels` keys
+
+A resumed session that still names the old provider falls back to another
+model, and its prompt cache is not reused. `AZURE_OPENAI_*` environment
+variable names are unchanged.
+
 ## Custom providers
 
 1. **models.json** — add a provider id, models, and optional `apiKey`

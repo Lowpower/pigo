@@ -257,7 +257,7 @@ func resolveCloudflare(gateway bool) func() *Result {
 
 func registerAzureAuth() {
 	registerProvider(Provider{
-		ID: "azure-openai-responses",
+		ID: "azure",
 		APIKey: &APIKeyHandler{
 			Name:    "Azure OpenAI API key",
 			Login:   azureLogin,

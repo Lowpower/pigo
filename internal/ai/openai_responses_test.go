@@ -107,13 +107,13 @@ func TestStreamForAzureOpenAIResponses(t *testing.T) {
 	t.Setenv("AZURE_OPENAI_API_VERSION", "")
 	t.Setenv("AZURE_OPENAI_DEPLOYMENT_NAME_MAP", "gpt-4=my-dep")
 	var gotModel, gotVersion string
+	var payload map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/responses") {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		gotVersion = r.Header.Get("api-version")
 		body, _ := io.ReadAll(r.Body)
-		var payload map[string]any
 		_ = json.Unmarshal(body, &payload)
 		gotModel, _ = payload["model"].(string)
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -121,7 +121,7 @@ func TestStreamForAzureOpenAIResponses(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	stream, err := StreamFor("azure-openai-responses", ClientConfig{APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client()})(context.Background(), Context{
+	stream, err := StreamFor("azure", ClientConfig{APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client()})(context.Background(), Context{
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	}, Options{Model: "gpt-4"})
 	if err != nil {
@@ -133,6 +133,15 @@ func TestStreamForAzureOpenAIResponses(t *testing.T) {
 	}
 	if final.API != "azure-openai-responses" {
 		t.Fatalf("api = %q", final.API)
+	}
+	if final.Model != "gpt-4" {
+		t.Fatalf("message model = %q, want catalog id", final.Model)
+	}
+	if _, ok := payload["input"]; !ok {
+		t.Fatalf("responses body missing input: %#v", payload)
+	}
+	if _, ok := payload["messages"]; ok {
+		t.Fatalf("responses body has messages: %#v", payload)
 	}
 	if gotVersion != "v1" {
 		t.Fatalf("api-version = %q", gotVersion)

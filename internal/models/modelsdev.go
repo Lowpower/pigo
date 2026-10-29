@@ -10,13 +10,12 @@ import (
 // modelsDevAliases maps a pigo provider id to the models.dev provider id
 // when the two catalogs use different names.
 var modelsDevAliases = map[string]string{
-	"together":               "togetherai",
-	"fireworks":              "fireworks-ai",
-	"vercel-ai-gateway":      "vercel",
-	"azure-openai-responses": "azure",
-	"qwen-token-plan":        "alibaba-token-plan",
-	"qwen-token-plan-cn":     "alibaba-token-plan-cn",
-	"zai-coding-cn":          "zai-coding-plan",
+	"together":           "togetherai",
+	"fireworks":          "fireworks-ai",
+	"vercel-ai-gateway":  "vercel",
+	"qwen-token-plan":    "alibaba-token-plan",
+	"qwen-token-plan-cn": "alibaba-token-plan-cn",
+	"zai-coding-cn":      "zai-coding-plan",
 }
 
 // modelsDevLocalOnly are registered providers that are not sourced from models.dev.
