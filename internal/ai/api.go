@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -71,10 +72,7 @@ func registerBuiltinAPIs() {
 		return openCodeMux(cfg)
 	})
 	RegisterAPI("azure-openai-responses", func(cfg ClientConfig) StreamFn {
-		base := cfg.BaseURL
-		if base == "" {
-			base = azureResolvedBaseURL()
-		}
+		base, err := resolveAzureEndpoint(cfg.BaseURL)
 		headers := map[string]string{}
 		for k, v := range cfg.Headers {
 			headers[k] = v
@@ -82,13 +80,14 @@ func registerBuiltinAPIs() {
 		if headers["api-version"] == "" {
 			headers["api-version"] = azureAPIVersion()
 		}
-		inner := (&OpenAIResponsesClient{
+		if err != nil {
+			return func(_ context.Context, _ Context, opts Options) (*EventStream, error) {
+				return errorStreamProvider(opts.Model, "azure-openai-responses", err.Error()), nil
+			}
+		}
+		return (&OpenAIResponsesClient{
 			BaseURL: base, APIKey: cfg.APIKey, Headers: headers, HTTPClient: httpClient(cfg), API: "azure-openai-responses",
 		}).StreamFn()
-		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
-			opts.Model = azureDeploymentName(opts.Model)
-			return inner(ctx, reqCtx, opts)
-		}
 	})
 	RegisterAPI("google-vertex", func(cfg ClientConfig) StreamFn {
 		return (&GoogleClient{
@@ -207,6 +206,21 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 		if api == "" {
 			api = "unknown"
 		}
+		if provider == "azure" {
+			base, err := resolveAzureEndpoint(c.BaseURL)
+			if err != nil {
+				return errorStreamProvider(opts.Model, api, err.Error()), nil
+			}
+			c.BaseURL = base
+			headers := map[string]string{}
+			for k, v := range c.Headers {
+				headers[k] = v
+			}
+			if headers["api-version"] == "" {
+				headers["api-version"] = azureAPIVersion()
+			}
+			c.Headers = headers
+		}
 		if provider == "cloudflare-ai-gateway" {
 			c.BaseURL = cloudflareGatewayBaseURL(api, c.BaseURL)
 		}
@@ -259,6 +273,42 @@ func azureResolvedBaseURL() string {
 		return "https://" + res + ".openai.azure.com/openai/v1"
 	}
 	return ""
+}
+
+// resolveAzureEndpoint picks an Azure base URL and normalizes Azure hosts to
+// /openai/v1. A non-Azure host, such as a test server, is left unchanged.
+func resolveAzureEndpoint(base string) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = azureResolvedBaseURL()
+	}
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return "", fmt.Errorf("azure OpenAI base URL is required. Set AZURE_OPENAI_BASE_URL or AZURE_OPENAI_RESOURCE_NAME")
+	}
+	return normalizeAzureBaseURL(base)
+}
+
+func normalizeAzureBaseURL(base string) (string, error) {
+	trimmed := strings.TrimRight(strings.TrimSpace(base), "/")
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("invalid Azure OpenAI base URL: %s", base)
+	}
+	host := strings.ToLower(u.Hostname())
+	if !strings.HasSuffix(host, ".openai.azure.com") &&
+		!strings.HasSuffix(host, ".cognitiveservices.azure.com") &&
+		!strings.HasSuffix(host, ".ai.azure.com") {
+		return trimmed, nil
+	}
+	path := strings.TrimRight(u.EscapedPath(), "/")
+	if path == "" || path == "/openai" || path == "/openai/v1/responses" {
+		u.Path = "/openai/v1"
+		u.RawQuery = ""
+		u.Fragment = ""
+		return strings.TrimRight(u.String(), "/"), nil
+	}
+	return trimmed, nil
 }
 
 func envKey(names ...string) string {

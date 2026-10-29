@@ -135,7 +135,7 @@ func buildOpenAIRequestAt(reqCtx Context, opts Options, baseURL string) ([]byte,
 	}, opts)...)
 
 	req := map[string]any{
-		"model":    opts.Model,
+		"model":    azureRequestModel(opts.Provider, opts.Model),
 		"messages": msgs,
 		"stream":   true,
 	}
@@ -189,6 +189,10 @@ func buildOpenAIRequestAt(reqCtx Context, opts Options, baseURL string) ([]byte,
 		if compat.maxTokensField != "max_completion_tokens" {
 			delete(req, "max_completion_tokens")
 		}
+	}
+	if azureOmitsPromptCache(opts) {
+		delete(req, "prompt_cache_key")
+		delete(req, "prompt_cache_retention")
 	}
 	return json.Marshal(req)
 }

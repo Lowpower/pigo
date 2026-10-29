@@ -24,8 +24,14 @@ selector. `/llama` manages a llama.cpp router.
 Built-in providers include `anthropic`, `openai`, `opencode`, `google`,
 `amazon-bedrock`, `llama.cpp`, `radius`, plus catalog providers such as
 `openrouter`, `xai`, `github-copilot`, `deepseek`, `groq`, `mistral`,
-`google-vertex`, `azure-openai-responses`, Cloudflare, MiniMax, Moonshot, Z.AI,
-and others. `pigo --list-models` is the live list.
+`google-vertex`, `azure`, Cloudflare, MiniMax, Moonshot, Z.AI,
+and others. `pigo --list-models` is the live list. The Azure id is `azure`
+(wire API `azure-openai-responses`, except `azure/deepseek-v4-pro`, which uses
+Chat Completions). pigo does not rename an old `azure-openai-responses` id.
+Change it by hand in `auth.json`, in `models.json`, and in `settings.json`
+(`defaultProvider`, `enabledModels`, and `modelThinkingLevels`). A resumed
+session that still names the old provider falls back to another model, and
+its prompt cache is not reused. See [providers.md](providers.md).
 
 The offline list is a snapshot of [models.dev](https://models.dev) `api.json`
 (MIT, Copyright 2025 models.dev), embedded in the binary. Refresh it from the

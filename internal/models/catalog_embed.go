@@ -86,7 +86,34 @@ func annotateBuiltin(m Model) Model {
 		}
 		m.Compat.SupportsExplicitPromptCacheMode = true
 	}
-	return fillOpus55ThinkingLevels(applyOpenRouterReasoning(m, true))
+	return annotateAzureFoundryChat(fillOpus55ThinkingLevels(applyOpenRouterReasoning(m, true)))
+}
+
+// annotateAzureFoundryChat routes the one built-in Foundry chat model.
+// pi v1.3.0 keeps every other Azure row on the Responses API. The thinking
+// map drops levels Foundry rejects, and ClampThinking then sends max as high.
+// models.dev does not publish this split, so cataloggen must not wipe it.
+func annotateAzureFoundryChat(m Model) Model {
+	if m.Provider != "azure" || m.ID != "deepseek-v4-pro" {
+		return m
+	}
+	m.API = "openai-completions"
+	low, medium, high := "low", "medium", "high"
+	m.ThinkingLevelMap = map[string]*string{
+		"minimal": nil,
+		"low":     &low,
+		"medium":  &medium,
+		"high":    &high,
+		"xhigh":   nil,
+		"max":     nil,
+	}
+	if m.Compat == nil {
+		m.Compat = &Compat{}
+	}
+	off := false
+	m.Compat.SupportsDeveloperRole = &off
+	m.Compat.SupportsLongCacheRetention = &off
+	return m
 }
 
 // openAIMidConvoEffort reports whether this builtin row should keep the prompt

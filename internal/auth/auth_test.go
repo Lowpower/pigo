@@ -450,11 +450,11 @@ func TestCheckAuthAzureNeedsBaseOrResource(t *testing.T) {
 	t.Setenv("AZURE_OPENAI_BASE_URL", "")
 	t.Setenv("AZURE_OPENAI_RESOURCE_NAME", "")
 	s := Open(t.TempDir())
-	if chk := CheckAuth(s, "azure-openai-responses"); chk != nil {
+	if chk := CheckAuth(s, "azure"); chk != nil {
 		t.Fatalf("key alone should not auth: %+v", chk)
 	}
 	t.Setenv("AZURE_OPENAI_RESOURCE_NAME", "myres")
-	if chk := CheckAuth(s, "azure-openai-responses"); chk == nil {
+	if chk := CheckAuth(s, "azure"); chk == nil {
 		t.Fatal("expected azure auth with resource name")
 	}
 }

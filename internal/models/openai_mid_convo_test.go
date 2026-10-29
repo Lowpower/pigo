@@ -28,7 +28,7 @@ func TestAnnotateBuiltinOpenAIMidConvoEffort(t *testing.T) {
 	for _, m := range []Model{
 		{Provider: "openai", API: "openai-responses", ID: "gpt-5.4"},
 		{Provider: "openai", API: "openai-completions", ID: "gpt-6-luna"},
-		{Provider: "azure-openai-responses", API: "azure-openai-responses", ID: "gpt-6-luna"},
+		{Provider: "azure", API: "azure-openai-responses", ID: "gpt-6-luna"},
 		{Provider: "openai-codex", API: "openai-codex-responses", ID: "gpt-6.1-sol"},
 		{Provider: "openrouter", API: "openai-responses", ID: "openai/gpt-6-luna"},
 	} {
@@ -53,7 +53,7 @@ func TestCatalogOpenAIMidConvoEffort(t *testing.T) {
 	if m, ok := Lookup("openai", "gpt-5.4"); ok && m.Compat != nil && m.Compat.SupportsMidConvoEffort {
 		t.Fatalf("gpt-5.4 compat = %+v", m.Compat)
 	}
-	if m, ok := Lookup("azure-openai-responses", "gpt-6-luna"); ok && m.Compat != nil && m.Compat.SupportsMidConvoEffort {
+	if m, ok := Lookup("azure", "gpt-6-luna"); ok && m.Compat != nil && m.Compat.SupportsMidConvoEffort {
 		t.Fatalf("azure luna compat = %+v", m.Compat)
 	}
 }

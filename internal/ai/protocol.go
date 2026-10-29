@@ -179,6 +179,28 @@ func guessFireworksAPI(model string) string {
 	}
 }
 
+// azureRequestModel keeps the catalog id unless this turn is Azure and a
+// deployment map renames it. The assistant message still records opts.Model.
+func azureRequestModel(provider, model string) string {
+	if provider != "azure" {
+		return model
+	}
+	return azureDeploymentName(model)
+}
+
+// azureOmitsPromptCache reports Foundry chat models that reject every prompt
+// cache field. Only an explicit false on the Azure model opts out.
+func azureOmitsPromptCache(opts Options) bool {
+	if opts.Provider != "azure" {
+		return false
+	}
+	m, ok := models.Lookup(opts.Provider, opts.Model)
+	if !ok || m.Compat == nil || m.Compat.SupportsLongCacheRetention == nil {
+		return false
+	}
+	return !*m.Compat.SupportsLongCacheRetention
+}
+
 func azureDeploymentName(model string) string {
 	raw := strings.TrimSpace(os.Getenv("AZURE_OPENAI_DEPLOYMENT_NAME_MAP"))
 	if raw == "" || model == "" {

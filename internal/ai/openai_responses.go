@@ -58,7 +58,7 @@ func (c *OpenAIResponsesClient) StreamFn() StreamFn {
 		updateEffort := responsesConfigurationEffort(opts, c.APIKey, c.BaseURL)
 		responsesAnchor, listedTools := responsesDeferred(reqCtx, opts)
 		params := responses.ResponseNewParams{
-			Model: shared.ResponsesModel(opts.Model),
+			Model: shared.ResponsesModel(azureRequestModel(opts.Provider, opts.Model)),
 			Input: responses.ResponseNewParamsInputUnion{
 				OfInputItemList: buildResponsesInput(reqCtx, replayTarget{
 					Provider: provider,

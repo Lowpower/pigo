@@ -123,7 +123,7 @@ func TestOfflineDefaultIDs(t *testing.T) {
 		"amazon-bedrock":             "us.anthropic.claude-opus-4-6-v1",
 		"anthropic":                  "claude-opus-4-8",
 		"ant-ling":                   "Ring-2.6-1T",
-		"azure-openai-responses":     "gpt-5.4",
+		"azure":                      "gpt-5.4",
 		"baseten":                    "zai-org/GLM-5.2",
 		"cerebras":                   "gpt-oss-120b",
 		"cloudflare-ai-gateway":      "workers-ai/@cf/moonshotai/kimi-k2.6",
@@ -239,16 +239,32 @@ func TestFilterByAvailableIDs(t *testing.T) {
 	}
 }
 
-func TestAzureOpenAIResponsesRegistered(t *testing.T) {
-	spec, ok := LookupProvider("azure-openai-responses")
+func TestAzureRegistered(t *testing.T) {
+	spec, ok := LookupProvider("azure")
 	if !ok {
-		t.Fatal("missing azure-openai-responses")
+		t.Fatal("missing azure")
 	}
 	if spec.DefaultAPI != "azure-openai-responses" || spec.DefaultID == "" {
 		t.Fatalf("spec = %+v", spec)
 	}
-	if APIFor("azure-openai-responses", spec.DefaultID) != "azure-openai-responses" {
-		t.Fatalf("api = %q", APIFor("azure-openai-responses", spec.DefaultID))
+	if APIFor("azure", spec.DefaultID) != "azure-openai-responses" {
+		t.Fatalf("api = %q", APIFor("azure", spec.DefaultID))
+	}
+	chat, ok := Lookup("azure", "deepseek-v4-pro")
+	if !ok || chat.API != "openai-completions" {
+		t.Fatalf("deepseek-v4-pro = %+v ok=%v", chat, ok)
+	}
+	if chat.RequestThinkingLevel("max") != "high" {
+		t.Fatalf("max clamps to %q", chat.RequestThinkingLevel("max"))
+	}
+	if chat.Compat == nil || chat.Compat.SupportsDeveloperRole == nil || *chat.Compat.SupportsDeveloperRole {
+		t.Fatalf("developer role = %+v", chat.Compat)
+	}
+	if chat.Compat.SupportsLongCacheRetention == nil || *chat.Compat.SupportsLongCacheRetention {
+		t.Fatalf("long cache = %+v", chat.Compat)
+	}
+	if APIFor("azure", "gpt-5.4") != "azure-openai-responses" {
+		t.Fatalf("gpt-5.4 api = %q", APIFor("azure", "gpt-5.4"))
 	}
 }
 
