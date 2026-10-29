@@ -2,6 +2,7 @@ package ai
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -12,7 +13,7 @@ func AnthropicWireMessages(msgs []Message) []map[string]any {
 	return anthropicWireMessages(msgs, false, nil, nil, "", false)
 }
 
-func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]struct{}, levels map[int]string, provider string, allowEmptySignature bool) []map[string]any {
+func anthropicWireMessages(msgs []Message, _ bool, deferred map[string]struct{}, levels map[int]string, provider string, allowEmptySignature bool) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	loaded := map[string]struct{}{}
 	for i := 0; i < len(msgs); i++ {
@@ -34,25 +35,25 @@ func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]st
 			continue
 		}
 		if isAnthropicToolResult(m) {
-			if !emitRefs {
-				tr, _ := convertAnthropicToolResult(m, nil, loaded)
-				out = append(out, map[string]any{
-					"role":    "user",
-					"content": []map[string]any{tr},
-				})
-				continue
-			}
 			var blocks []map[string]any
 			var siblings []map[string]any
+			var imageSiblings []map[string]any
 			j := i
 			for j < len(msgs) {
 				n := msgs[j]
 				if n.Assistant != nil || !isAnthropicToolResult(n) {
 					break
 				}
+				n, images := splitErrorToolResultImages(n)
 				tr, sib := convertAnthropicToolResult(n, deferred, loaded)
 				blocks = append(blocks, tr)
 				siblings = append(siblings, sib...)
+				if len(images) > 0 {
+					imageSiblings = append(imageSiblings, map[string]any{"type": "text", "text": errorToolImagesCaption(n)})
+					for _, img := range images {
+						imageSiblings = append(imageSiblings, map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": img.MimeType, "data": img.Data}})
+					}
+				}
 				j++
 			}
 			i = j - 1
@@ -60,6 +61,9 @@ func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]st
 				"role":    "user",
 				"content": append(blocks, siblings...),
 			})
+			if len(imageSiblings) > 0 {
+				out = append(out, map[string]any{"role": "user", "content": imageSiblings})
+			}
 			continue
 		}
 		role := m.Role
@@ -69,6 +73,90 @@ func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]st
 		out = append(out, map[string]any{"role": role, "content": anthropicUserContent(m)})
 	}
 	return out
+}
+
+const anthropicErrorImagePlaceholder = "(image attached after the tool results)"
+
+func splitErrorToolResultImages(m Message) (Message, []ImageContent) {
+	if !m.IsError {
+		return m, nil
+	}
+	blocks, ok := toolContentBlocks(m)
+	if !ok {
+		return m, nil
+	}
+	var textBlocks []toolContentBlock
+	var images []ImageContent
+	previousPlaceholder := false
+	for _, block := range blocks {
+		if block.Type == "image" {
+			if block.Data != "" {
+				images = append(images, ImageContent{Type: "image", Data: block.Data, MimeType: block.MimeType})
+			}
+			if !previousPlaceholder {
+				textBlocks = append(textBlocks, toolContentBlock{Type: "text", Text: anthropicErrorImagePlaceholder})
+			}
+			previousPlaceholder = true
+			continue
+		}
+		textBlocks = append(textBlocks, block)
+		previousPlaceholder = block.Type == "text" && block.Text == anthropicErrorImagePlaceholder
+	}
+	if len(images) == 0 {
+		return m, nil
+	}
+	texts := make([]string, 0, len(textBlocks))
+	for _, block := range textBlocks {
+		if block.Type == "text" && block.Text != "" {
+			texts = append(texts, block.Text)
+		}
+	}
+	m.Content = strings.Join(texts, "\n")
+	m.Images = nil
+	return m, images
+}
+
+func errorToolImagesCaption(m Message) string {
+	return fmt.Sprintf("Images from the error result of tool call %s (%s):", m.ToolCallID, m.ToolName)
+}
+
+func toolContentBlocks(m Message) ([]toolContentBlock, bool) {
+	raw := strings.TrimSpace(m.Content)
+	if raw != "" {
+		var obj struct {
+			Content []toolContentBlock `json:"content"`
+		}
+		if json.Unmarshal([]byte(raw), &obj) == nil && len(obj.Content) > 0 {
+			return appendFallbackImages(obj.Content, m.Images), true
+		}
+		var arr []toolContentBlock
+		if json.Unmarshal([]byte(raw), &arr) == nil && len(arr) > 0 {
+			return appendFallbackImages(arr, m.Images), true
+		}
+	}
+	if len(m.Images) == 0 {
+		return nil, false
+	}
+	blocks := []toolContentBlock{}
+	if m.Content != "" {
+		blocks = append(blocks, toolContentBlock{Type: "text", Text: m.Content})
+	}
+	for _, img := range m.Images {
+		blocks = append(blocks, toolContentBlock{Type: "image", Data: img.Data, MimeType: img.MimeType})
+	}
+	return blocks, true
+}
+
+func appendFallbackImages(blocks []toolContentBlock, images []ImageContent) []toolContentBlock {
+	for _, block := range blocks {
+		if block.Type == "image" && block.Data != "" {
+			return blocks
+		}
+	}
+	for _, img := range images {
+		blocks = append(blocks, toolContentBlock{Type: "image", Data: img.Data, MimeType: img.MimeType})
+	}
+	return blocks
 }
 
 func isAnthropicToolResult(m Message) bool {

@@ -289,12 +289,29 @@ func bedrockMessages(reqCtx Context, target replayTarget, wire bedrockWire) []ty
 		}
 		if bedrockIsToolResult(m) {
 			var blocks []types.ContentBlock
+			var siblings []types.ContentBlock
 			for i < len(msgs) && bedrockIsToolResult(msgs[i]) {
-				blocks = append(blocks, bedrockToolResultBlock(msgs[i]))
+				result := msgs[i]
+				var images []ImageContent
+				if bedrockIsClaude(target.Model, wire.ModelName) {
+					result, images = splitErrorToolResultImages(result)
+				}
+				blocks = append(blocks, bedrockToolResultBlock(result))
+				if len(images) > 0 {
+					siblings = append(siblings, &types.ContentBlockMemberText{Value: errorToolImagesCaption(result)})
+					for _, img := range images {
+						if b := bedrockImageBlock(img); b != nil {
+							siblings = append(siblings, b)
+						}
+					}
+				}
 				i++
 			}
 			i--
 			out = append(out, types.Message{Role: types.ConversationRoleUser, Content: blocks})
+			if len(siblings) > 0 {
+				out = append(out, types.Message{Role: types.ConversationRoleUser, Content: siblings})
+			}
 			continue
 		}
 		role := types.ConversationRoleUser

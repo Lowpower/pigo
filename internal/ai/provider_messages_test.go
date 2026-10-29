@@ -177,6 +177,86 @@ func TestAnthropicWireMessagesIncludesToolResultImages(t *testing.T) {
 	}
 }
 
+func TestAnthropicWireMessagesMovesErrorToolResultImagesAfterResults(t *testing.T) {
+	// Regression for #339.
+	raw := `{"content":[{"type":"text","text":"before"},{"type":"image","data":"AAA","mimeType":"image/png"},{"type":"image","data":"BBB","mimeType":"image/png"},{"type":"text","text":"after"}]}`
+	wire := AnthropicWireMessages([]Message{
+		{Role: RoleToolResult, ToolCallID: "tu_error", ToolName: "read", IsError: true, Content: raw},
+		{Role: RoleToolResult, ToolCallID: "tu_ok", ToolName: "other", Content: `{"content":[{"type":"text","text":"ok"},{"type":"image","data":"CCC","mimeType":"image/png"}]}`},
+	})
+	blocks, _ := wire[0]["content"].([]map[string]any)
+	if len(wire) != 2 || len(blocks) != 2 {
+		t.Fatalf("messages = %#v", wire)
+	}
+	images := wire[1]["content"].([]map[string]any)
+	errorResult := blocks[0]
+	if errorResult["type"] != "tool_result" || errorResult["is_error"] != true {
+		t.Fatalf("error result = %#v", errorResult)
+	}
+	if errorResult["content"] != "before\n"+anthropicErrorImagePlaceholder+"\nafter" {
+		t.Fatalf("error content = %#v", errorResult["content"])
+	}
+	if blocks[1]["type"] != "tool_result" {
+		t.Fatalf("success result = %#v", blocks[1])
+	}
+	successContent, _ := blocks[1]["content"].([]map[string]any)
+	if len(successContent) != 2 || successContent[1]["type"] != "image" {
+		t.Fatalf("success content = %#v", blocks[1]["content"])
+	}
+	if len(images) != 3 || images[0]["type"] != "text" || images[0]["text"] != "Images from the error result of tool call tu_error (read):" {
+		t.Fatalf("images = %#v", images)
+	}
+	for i, want := range []string{"AAA", "BBB"} {
+		if images[1+i]["type"] != "image" {
+			t.Fatalf("deferred image %d = %#v", i, images[1+i])
+		}
+		src, _ := images[1+i]["source"].(map[string]any)
+		if src["data"] != want {
+			t.Fatalf("deferred image %d data = %#v", i, src["data"])
+		}
+	}
+}
+
+func TestAnthropicWireMessagesKeepsErrorToolResultWithoutImages(t *testing.T) {
+	// Regression for #339.
+	wire := AnthropicWireMessages([]Message{{Role: RoleToolResult, ToolCallID: "tu_1", IsError: true, Content: "failed"}})
+	blocks, _ := wire[0]["content"].([]map[string]any)
+	if len(blocks) != 1 || blocks[0]["content"] != "failed" || blocks[0]["is_error"] != true {
+		t.Fatalf("error result = %#v", blocks)
+	}
+}
+
+func TestErrorToolResultStructuredTextAndSeparateImages(t *testing.T) {
+	// Regression for #339.
+	m := Message{Role: RoleToolResult, ToolCallID: "a", ToolName: "read", IsError: true,
+		Content: `{"content":[{"type":"text","text":"failed"}]}`,
+		Images:  []ImageContent{{Type: "image", Data: "QQ==", MimeType: "image/png"}}}
+	wire := AnthropicWireMessages([]Message{m})
+	blocks := wire[0]["content"].([]map[string]any)
+	if len(wire) != 2 || len(blocks) != 1 || blocks[0]["content"] != "failed\n"+anthropicErrorImagePlaceholder || wire[1]["content"].([]map[string]any)[1]["type"] != "image" {
+		t.Fatalf("content = %#v", blocks)
+	}
+	bedrock := bedrockMessages(Context{Messages: []Message{m}}, replayTarget{Model: "anthropic.claude"}, bedrockWire{})
+	if len(bedrock) != 2 || len(bedrock[0].Content) != 1 || len(bedrock[1].Content) != 2 {
+		t.Fatalf("bedrock messages = %#v", bedrock)
+	}
+	result := bedrockToolResult(t, bedrock[0].Content[0])
+	if len(result.Content) != 1 || bedrockToolText(t, result.Content[0]) != "failed\n"+anthropicErrorImagePlaceholder {
+		t.Fatalf("bedrock result = %#v", result)
+	}
+}
+
+func TestAnthropicErrorImagesKeepDeferredReferences(t *testing.T) {
+	// Regression for #339.
+	m := Message{Role: RoleToolResult, ToolCallID: "a", ToolName: "search", IsError: true, Content: "failed", AddedToolNames: []string{"read"}, Images: []ImageContent{{Data: "QQ==", MimeType: "image/png"}}}
+	wire := anthropicWireMessages([]Message{m}, true, map[string]struct{}{"read": {}}, nil, "", false)
+	blocks := wire[0]["content"].([]map[string]any)
+	refs := blocks[0]["content"].([]map[string]any)
+	if len(refs) != 1 || refs[0]["type"] != "tool_reference" || refs[0]["tool_name"] != "read" || len(blocks) != 2 || len(wire) != 2 || wire[1]["content"].([]map[string]any)[1]["type"] != "image" {
+		t.Fatalf("content = %#v", blocks)
+	}
+}
+
 func TestBlockImagesStripsToolAndUserImages(t *testing.T) {
 	raw := `{"content":[{"type":"text","text":"Read image file [image/png]"},{"type":"image","data":"AAA","mimeType":"image/png"}]}`
 	got := BlockImages([]Message{

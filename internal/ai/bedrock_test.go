@@ -63,6 +63,44 @@ func TestBedrockMessagesMergesParallelToolResults(t *testing.T) {
 	}
 }
 
+func TestBedrockMessagesMovesErrorToolResultImagesAfterResults(t *testing.T) {
+	// Regression for #339.
+	raw := `{"content":[{"type":"text","text":"before"},{"type":"image","data":"QQ==","mimeType":"image/png"},{"type":"image","data":"Qg==","mimeType":"image/png"},{"type":"text","text":"after"}]}`
+	got := bedrockMessages(Context{Messages: []Message{
+		{Role: RoleToolResult, ToolCallID: "error", ToolName: "read", IsError: true, Content: raw},
+		{Role: RoleToolResult, ToolCallID: "ok", ToolName: "other", Content: "ok", Images: []ImageContent{{Type: "image", Data: "Qw==", MimeType: "image/png"}}},
+	}}, replayTarget{Model: "anthropic.claude"}, bedrockWire{})
+	if len(got) != 2 || len(got[0].Content) != 2 || len(got[1].Content) != 3 {
+		t.Fatalf("messages = %#v", got)
+	}
+	err := bedrockToolResult(t, got[0].Content[0])
+	if err.Status != types.ToolResultStatusError || len(err.Content) != 1 || bedrockToolText(t, err.Content[0]) != "before\n"+anthropicErrorImagePlaceholder+"\nafter" {
+		t.Fatalf("error result = %#v", err)
+	}
+	ok := bedrockToolResult(t, got[0].Content[1])
+	if len(ok.Content) != 2 {
+		t.Fatalf("success result content = %#v", ok.Content)
+	}
+	if bedrockText(t, got[1].Content[0]) != "Images from the error result of tool call error (read):" {
+		t.Fatalf("caption = %#v", got[1].Content[0])
+	}
+	for i, want := range []byte{'A', 'B'} {
+		img, ok := got[1].Content[1+i].(*types.ContentBlockMemberImage)
+		if !ok || len(img.Value.Source.(*types.ImageSourceMemberBytes).Value) != 1 || img.Value.Source.(*types.ImageSourceMemberBytes).Value[0] != want {
+			t.Fatalf("deferred image %d = %#v", i, got[1].Content[1+i])
+		}
+	}
+}
+
+func TestBedrockNonClaudeKeepsErrorImages(t *testing.T) {
+	// Regression for #339.
+	m := Message{Role: RoleToolResult, ToolCallID: "a", IsError: true, Content: "failed", Images: []ImageContent{{Data: "QQ==", MimeType: "image/png"}}}
+	got := bedrockMessages(Context{Messages: []Message{m}}, replayTarget{Model: "amazon.nova"}, bedrockWire{})
+	if len(got) != 1 || len(got[0].Content) != 1 || len(bedrockToolResult(t, got[0].Content[0]).Content) != 2 {
+		t.Fatalf("messages = %#v", got)
+	}
+}
+
 func TestBedrockMessagesOmitsBlankText(t *testing.T) {
 	png := ImageContent{Type: "image", Data: "QQ==", MimeType: "image/png"}
 	got := bedrockMessages(Context{Messages: []Message{
