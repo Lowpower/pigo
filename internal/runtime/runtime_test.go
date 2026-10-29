@@ -934,6 +934,112 @@ func TestNewHonorsCLIProvider(t *testing.T) {
 	}
 }
 
+func TestNewUsesSavedExtensionModel(t *testing.T) {
+	clearCompetingProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("PIGO_RUNTIME_EXT", "saved-provider")
+	dir := t.TempDir()
+	writeExtSavedAuth(t, dir)
+	e := newExtensionModelEngine(t, dir, false)
+	if e.Provider != "ext-saved" || e.Opts.Config.ResolvedModel() != "ext-model" {
+		t.Fatalf("provider=%s model=%s", e.Provider, e.Opts.Config.ResolvedModel())
+	}
+	if warns := e.ModelWarnings(); len(warns) != 0 {
+		t.Fatalf("warnings = %v", warns)
+	}
+}
+
+func TestNewWarnsWhenLoadedExtensionOmitsSavedProvider(t *testing.T) {
+	clearCompetingProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("PIGO_RUNTIME_EXT", "saved-provider")
+	e, err := New(context.Background(), Options{
+		Cwd:           t.TempDir(),
+		AgentDir:      t.TempDir(),
+		Offline:       true,
+		NoSkills:      true,
+		CLIExtensions: []string{os.Args[0] + " -test.run=^TestRuntimeHelperProcess$"},
+		Config:        config.Config{Provider: "ext-other", Model: "missing"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		e.dropAllProviders()
+		e.Close()
+	})
+	warns := e.ModelWarnings()
+	if len(warns) != 1 || !strings.Contains(warns[0], "no loaded extension registered it") || !strings.Contains(warns[0], "ext-other/missing") {
+		t.Fatalf("warnings = %v", warns)
+	}
+	if e.Provider != "openai" {
+		t.Fatalf("provider = %q", e.Provider)
+	}
+}
+
+func TestNewWarnsWhenSavedExtensionNotLoaded(t *testing.T) {
+	clearCompetingProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	dir := t.TempDir()
+	writeExtSavedAuth(t, dir)
+	e := newExtensionModelEngine(t, dir, true)
+	wantModel := models.DefaultID("openai")
+	if e.Provider != "openai" || e.Opts.Config.ResolvedModel() != wantModel {
+		t.Fatalf("provider=%s model=%s, want openai/%s", e.Provider, e.Opts.Config.ResolvedModel(), wantModel)
+	}
+	warns := e.ModelWarnings()
+	if len(warns) != 1 {
+		t.Fatalf("warnings = %v", warns)
+	}
+	if !strings.Contains(warns[0], "ext-saved/ext-model") || !strings.Contains(warns[0], "extensions not loaded") || !strings.Contains(warns[0], "openai/"+wantModel) {
+		t.Fatalf("warning = %q", warns[0])
+	}
+}
+
+func newExtensionModelEngine(t *testing.T, dir string, noExtensions bool) *Engine {
+	t.Helper()
+	opts := Options{
+		Cwd:      t.TempDir(),
+		AgentDir: dir,
+		Offline:  true,
+		NoSkills: true,
+		Config:   config.Config{Provider: "ext-saved", Model: "ext-model"},
+	}
+	if !noExtensions {
+		opts.CLIExtensions = []string{os.Args[0] + " -test.run=^TestRuntimeHelperProcess$"}
+	} else {
+		opts.NoExtensions = true
+	}
+	e, err := New(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		e.dropAllProviders()
+		e.Close()
+	})
+	return e
+}
+
+func writeExtSavedAuth(t *testing.T, dir string) {
+	t.Helper()
+	body := []byte(`{"ext-saved":{"type":"api_key","key":"sk-ext"}}` + "\n")
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func clearCompetingProviderEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN",
+		"OPENCODE_API_KEY", "GEMINI_API_KEY",
+		"AWS_BEARER_TOKEN_BEDROCK", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 func TestApplyModelDoesNotOverwriteSavedDefault(t *testing.T) {
 	e := &Engine{Opts: Options{Config: config.Config{
 		Provider: "anthropic", Model: "claude-sonnet-4",

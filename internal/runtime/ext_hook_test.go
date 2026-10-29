@@ -349,6 +349,19 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 				return nil
 			},
 		})
+	case "saved-provider":
+		_ = ext.Serve(ext.Handler{
+			Name: "saved-provider-ext",
+			Providers: []ext.ProviderDef{{
+				ID: "ext-saved",
+				Args: map[string]any{
+					"name":   "ext-saved",
+					"api":    "openai-completions",
+					"apiKey": "stored",
+					"models": []any{map[string]any{"id": "ext-model", "api": "openai-completions"}},
+				},
+			}},
+		})
 	case "span":
 		_ = ext.Serve(ext.Handler{
 			Name:   "span-ext",
