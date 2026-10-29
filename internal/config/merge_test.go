@@ -234,7 +234,7 @@ func TestApplyProjectIgnoresDeviceID(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := ApplyProject(user, cwd, true)
+	got := mustApplyProject(t, user, cwd, true)
 	if got.DeviceID != globalID {
 		t.Fatalf("deviceId = %q", got.DeviceID)
 	}
