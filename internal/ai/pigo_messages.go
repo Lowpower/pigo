@@ -214,8 +214,11 @@ func handlePigoMessagesEvent(ctx context.Context, payload string, out *Assistant
 			if ev.ToolCall.Arguments != nil {
 				block.Arguments = ev.ToolCall.Arguments
 			}
+			block.InvalidArguments = ev.ToolCall.InvalidArguments
 		}
-		block.partialJSON = ""
+		if block.partialJSON != "" && block.InvalidArguments == nil {
+			finalizeToolArguments(block)
+		}
 		return s.push(ctx, Event{Type: EventToolCallEnd, ContentIndex: ev.ContentIndex, ToolCall: block, Partial: out})
 	case "done":
 		if ev.Usage != nil {

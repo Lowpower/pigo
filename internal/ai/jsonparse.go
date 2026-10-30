@@ -11,7 +11,23 @@ import (
 
 var validJSONEscapes = map[byte]bool{
 	'"': true, '\\': true, '/': true, 'b': true, 'f': true,
-	'n': true, 'r': true, 't': true, 'u': true,
+	'n': true, 'r': true, 't': true,
+}
+
+// finalizeToolArguments validates the complete input without completing a
+// truncated stream. Partial parsing is only suitable for streaming previews.
+func finalizeToolArguments(c *Content) {
+	raw := c.partialJSON
+	c.RawArguments = &raw
+	var args map[string]any
+	if err := parseJSONWithRepair(c.partialJSON, &args); err != nil || args == nil {
+		c.InvalidArguments = &raw
+		c.Arguments = nil
+	} else {
+		c.Arguments = args
+		c.InvalidArguments = nil
+	}
+	c.partialJSON = ""
 }
 
 func isControlChar(c byte) bool { return c <= 0x1f }
@@ -133,10 +149,10 @@ func parseStreamingJSON(partial string) map[string]any {
 		return out
 	}
 
-	if v, ok := tryComplete(partial); ok {
+	if v, ok := tryComplete(repairJSON(partial)); ok {
 		return v
 	}
-	if v, ok := tryComplete(repairJSON(partial)); ok {
+	if v, ok := tryComplete(partial); ok {
 		return v
 	}
 	return map[string]any{}

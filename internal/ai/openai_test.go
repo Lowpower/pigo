@@ -65,6 +65,22 @@ func TestStreamOpenAIReaderFixture(t *testing.T) {
 	}
 }
 
+func TestStreamOpenAIReaderRejectsIncompleteToolArguments(t *testing.T) {
+	fixture := `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read","arguments":"{\"path\":\"foo\""}}]}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+	_, final := StreamOpenAIReader(context.Background(), strings.NewReader(fixture), "gpt-test").Collect()
+	if final == nil || len(final.ToolCalls()) != 1 || final.ToolCalls()[0].InvalidArguments == nil {
+		t.Fatalf("expected invalid arguments, got %+v", final)
+	}
+	if got := *final.ToolCalls()[0].InvalidArguments; got != `{"path":"foo"` {
+		t.Fatalf("raw arguments = %q", got)
+	}
+}
+
 func TestStreamOpenAIReaderSplitsCacheUsage(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -779,8 +779,9 @@ func handleAnthropicEvent(ctx context.Context, payload string, out *AssistantMes
 		case KindThinking:
 			return s.push(ctx, Event{Type: EventThinkingEnd, ContentIndex: idx, Content: block.Thinking, Partial: out})
 		case KindToolCall:
-			block.Arguments = parseStreamingJSON(block.partialJSON)
-			block.partialJSON = ""
+			if block.partialJSON != "" {
+				finalizeToolArguments(block)
+			}
 			return s.push(ctx, Event{Type: EventToolCallEnd, ContentIndex: idx, ToolCall: block, Partial: out})
 		}
 

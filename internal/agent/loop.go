@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/Lowpower/pigo/internal/ai"
@@ -30,9 +31,11 @@ const (
 
 // ToolCall is a tool invocation requested by the model.
 type ToolCall struct {
-	ID   string
-	Name string
-	Args map[string]any
+	ID               string
+	Name             string
+	Args             map[string]any
+	InvalidArguments *string
+	RawArguments     *string
 }
 
 // ToolExecutor runs a tool call and returns its textual result. isError reports
@@ -370,7 +373,9 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 		toolCtx, span := telemetry.Start(ctx, "pigo.tool")
 		span.SetAttribute("gen_ai.tool.name", c.Name)
 		defer span.End()
-		if exec != nil {
+		if c.InvalidArguments != nil {
+			out, isError = fmt.Sprintf("invalid tool arguments: %s", *c.InvalidArguments), true
+		} else if exec != nil {
 			execCtx := tools.WithOutputUpdate(toolCtx, func(partial string) {
 				_ = emit(Event{
 					Type:       EventToolUpdate,
@@ -382,14 +387,20 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 			})
 			execCtx = WithToolEmitter(execCtx, emit)
 			out, isError = exec.Execute(execCtx, c)
+			if isError && c.RawArguments != nil && strings.HasPrefix(out, "invalid arguments:") {
+				out += "\nRaw arguments: " + *c.RawArguments
+			}
 		} else {
 			out, isError = fmt.Sprintf("no executor for tool %q", c.Name), true
 		}
 		if isError {
 			span.RecordError(errToolFailed)
 		}
-		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: isError, AddedToolNames: toolAddedNames(cfg, c)}
-		if cfg.ToolResultMeta != nil {
+		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: isError}
+		if c.InvalidArguments == nil {
+			results[i].AddedToolNames = toolAddedNames(cfg, c)
+		}
+		if c.InvalidArguments == nil && cfg.ToolResultMeta != nil {
 			meta := cfg.ToolResultMeta(c)
 			results[i].Usage = meta.Usage
 			results[i].NestedCalls = meta.Nested
@@ -477,7 +488,7 @@ func msgFromAI(m ai.Message) Msg {
 func toToolCalls(m *ai.AssistantMessage) []ToolCall {
 	var calls []ToolCall
 	for _, c := range m.ToolCalls() {
-		calls = append(calls, ToolCall{ID: c.ToolID, Name: c.ToolName, Args: c.Arguments})
+		calls = append(calls, ToolCall{ID: c.ToolID, Name: c.ToolName, Args: c.Arguments, InvalidArguments: c.InvalidArguments, RawArguments: c.RawArguments})
 	}
 	return calls
 }

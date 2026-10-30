@@ -48,3 +48,40 @@ func TestRepairJSONInvalidEscape(t *testing.T) {
 		t.Errorf(`a = %q, want %q`, got["a"], `c:\path`)
 	}
 }
+
+func TestStreamingRepairKeepsFieldsAfterInvalidUnicodeEscape(t *testing.T) {
+	got := parseStreamingJSON(`{"path":"\usepackage{x}","count":1}`)
+	want := map[string]any{"path": `\usepackage{x}`, "count": float64(1)}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("arguments = %#v, want %#v", got, want)
+	}
+}
+
+func TestFinalizeToolArguments(t *testing.T) {
+	tests := []struct {
+		name, input string
+		want        map[string]any
+		invalid     bool
+	}{
+		{"invalid unicode escape", `{"path":"\usepackage{x}","count":1}`, map[string]any{"path": `\usepackage{x}`, "count": float64(1)}, false},
+		{"valid unicode escape", `{"path":"\u0041"}`, map[string]any{"path": "A"}, false},
+		{"incomplete object", `{"path":"foo"`, nil, true},
+		{"non-object", `[]`, nil, true},
+		{"null", `null`, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Content{partialJSON: tt.input}
+			finalizeToolArguments(c)
+			if !reflect.DeepEqual(c.Arguments, tt.want) {
+				t.Fatalf("arguments = %#v, want %#v", c.Arguments, tt.want)
+			}
+			if (c.InvalidArguments != nil) != tt.invalid {
+				t.Fatalf("invalid arguments = %v, want invalid=%v", c.InvalidArguments, tt.invalid)
+			}
+			if tt.invalid && *c.InvalidArguments != tt.input {
+				t.Fatalf("raw arguments = %q, want %q", *c.InvalidArguments, tt.input)
+			}
+		})
+	}
+}
