@@ -81,8 +81,11 @@ type Engine struct {
 	promptTemplateWarnings []string
 	// skillWarnings are the latest skill-load warnings.
 	skillWarnings []string
-	Scoped        []models.Spec
+	// modelWarnings are startup model warnings without a "Warning:" prefix.
+	// They cover ambiguous --models / enabledModels patterns and a saved model
+	// whose provider never registered.
 	modelWarnings []string
+	Scoped        []models.Spec
 	System        string
 
 	Steering  func() []ai.Message
@@ -195,52 +198,10 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		avail = models.Catalog()
 	}
 	scoped := models.ResolvePatternsIn(patterns, avail)
-	modelWarnings := models.AmbiguousExactPatterns(patterns, avail)
-	picked := models.PickInitial(models.PickOpts{
-		CLIProvider:   opts.CLIProvider,
-		CLIModel:      opts.CLIModel,
-		SavedProvider: opts.Config.ResolvedProvider(),
-		SavedModel:    opts.Config.ResolvedModel(),
-		Authenticated: auth.AuthenticatedIDs(store),
-	})
-	provider := picked.Provider
-	if provider == "" {
-		provider = opts.Config.ResolvedProvider()
-	}
-	if provider == "" {
-		provider = "anthropic"
-	}
-	if picked.Provider != "" {
-		opts.Config.Provider = picked.Provider
-		opts.Config.DefaultProvider = picked.Provider
-	}
-	if picked.ID != "" {
-		opts.Config.Model = picked.ID
-		opts.Config.DefaultModel = picked.ID
-	}
-	if opts.CLIThinking == "" {
-		if lvl := opts.Config.ModelThinkingLevel(provider, opts.Config.ResolvedModel()); lvl != "" {
-			opts.Config.Thinking = lvl
-		}
-	}
-	if opts.Config.Thinking == "" {
-		opts.Config.Thinking = "medium"
-	}
-	sf := boundStream(opts.AgentDir, provider, opts.Config.Transport)
-	if sf == nil {
-		sf, _ = ai.DefaultStreamFn()
-	}
-	sf = ai.WrapProviderRetry(sf, ai.ProviderRetry{
-		Timeout:    opts.Config.ProviderRetryTimeout(),
-		MaxRetries: opts.Config.ProviderRetryMaxRetries(),
-		MaxDelay:   opts.Config.ProviderRetryMaxDelay(),
-	})
 	e := &Engine{
 		Opts:          opts,
-		Stream:        sf,
-		Provider:      provider,
 		Scoped:        scoped,
-		modelWarnings: modelWarnings,
+		modelWarnings: models.AmbiguousExactPatterns(patterns, avail),
 	}
 	e.syncToolRunner()
 	reg := e.builtinRegistry()
@@ -300,11 +261,12 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.Steering = e.drainSteer
 	e.FollowUp = e.drainFollow
 	e.applyProviders()
+	e.resolveInitialModel()
 	e.rebuildCommands()
 	e.applyProjectTrust(ctx)
 	e.bindExtensionHooks()
 	e.wireTelemetry()
-	if fn := e.bindStream(provider); fn != nil {
+	if fn := e.bindStream(e.Provider); fn != nil {
 		e.Stream = fn
 	} else if e.Stream != nil {
 		e.Stream = e.gatedStream(e.Stream)
@@ -327,6 +289,81 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.extendResourcesFromExtensions(ctx, "startup")
 	e.rebuildSystemPrompt()
 	return e, nil
+}
+
+// resolveInitialModel picks the session model after extension providers and
+// their credentials are registered. A saved provider that never registered
+// falls back to the next authenticated model, with one warning.
+func (e *Engine) resolveInitialModel() {
+	opts := e.Opts
+	savedProvider := opts.Config.ResolvedProvider()
+	savedModel := opts.Config.ResolvedModel()
+	picked := models.PickInitial(models.PickOpts{
+		CLIProvider:   opts.CLIProvider,
+		CLIModel:      opts.CLIModel,
+		SavedProvider: savedProvider,
+		SavedModel:    savedModel,
+		Authenticated: auth.AuthenticatedIDs(auth.Open(opts.AgentDir)),
+	})
+	_, registered := models.LookupProvider(savedProvider)
+	savedMissing := savedProvider != "" && opts.CLIProvider == "" && !registered
+
+	provider := picked.Provider
+	modelID := picked.ID
+	if provider == "" {
+		if savedMissing || savedProvider == "" {
+			provider = "anthropic"
+			modelID = models.DefaultID("anthropic")
+		} else {
+			provider = savedProvider
+			modelID = savedModel
+		}
+	}
+	if savedMissing {
+		e.modelWarnings = append(e.modelWarnings, savedModelUnavailableWarning(savedProvider, savedModel, provider, modelID, opts))
+	}
+	if provider != "" && (picked.Provider != "" || savedMissing) {
+		e.Opts.Config.Provider = provider
+		e.Opts.Config.DefaultProvider = provider
+	}
+	if modelID != "" && (picked.ID != "" || savedMissing) {
+		e.Opts.Config.Model = modelID
+		e.Opts.Config.DefaultModel = modelID
+	}
+	if opts.CLIThinking == "" {
+		if lvl := e.Opts.Config.ModelThinkingLevel(provider, e.Opts.Config.ResolvedModel()); lvl != "" {
+			e.Opts.Config.Thinking = lvl
+		}
+	}
+	if e.Opts.Config.Thinking == "" {
+		e.Opts.Config.Thinking = "medium"
+	}
+	sf := boundStream(opts.AgentDir, provider, e.Opts.Config.Transport)
+	if sf == nil {
+		sf, _ = ai.DefaultStreamFn()
+	}
+	e.Stream = ai.WrapProviderRetry(sf, ai.ProviderRetry{
+		Timeout:    e.Opts.Config.ProviderRetryTimeout(),
+		MaxRetries: e.Opts.Config.ProviderRetryMaxRetries(),
+		MaxDelay:   e.Opts.Config.ProviderRetryMaxDelay(),
+	})
+	e.Provider = provider
+}
+
+func savedModelUnavailableWarning(savedProvider, savedModel, fallbackProvider, fallbackModel string, opts Options) string {
+	reason := "no loaded extension registered it"
+	if opts.NoExtensions || opts.NoTools {
+		reason = "extensions not loaded"
+	}
+	saved := savedProvider
+	if savedModel != "" {
+		saved += "/" + savedModel
+	}
+	using := fallbackProvider
+	if fallbackModel != "" {
+		using += "/" + fallbackModel
+	}
+	return fmt.Sprintf("saved model %s is unavailable because its provider was not registered (%s). Using %s.", saved, reason, using)
 }
 
 func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, unknown []ext.UnknownFlag) ([]*ext.Host, *tools.Registry, error) {

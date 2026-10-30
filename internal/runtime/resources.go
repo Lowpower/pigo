@@ -106,8 +106,8 @@ func (e *Engine) SkillWarnings() []string {
 	return e.skillWarnings
 }
 
-// ModelWarnings returns startup warnings for --models and enabledModels.
-// Each line is the sentence without a "Warning:" prefix.
+// ModelWarnings returns startup warnings for model patterns and a saved model
+// whose provider never registered. Each line is the sentence without a "Warning:" prefix.
 func (e *Engine) ModelWarnings() []string {
 	return e.modelWarnings
 }
