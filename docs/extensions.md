@@ -259,7 +259,9 @@ talk to each other).
 - `custom.open` / `update` / `close` / `focus` / `unfocus` / `hide` /
   `setHidden`: declarative widgets (`text`, `markdown`, `select`, `input`,
   `list`, `buttons`). Overlay is `{overlay: true}` plus static
-  `overlayOptions` (`anchor`, `width`, `margin`). Interaction is `host_event`
+  `overlayOptions` (`anchor`, `width`, `margin`). Overlays stack. `custom.close`
+  and the other `custom.*` ops target that layer's `id`; a close with no `id`
+  removes the custom UI only when exactly one is open. Interaction is `host_event`
   `custom.change` / `custom.submit` / `custom.cancel`. Unknown widget `kind`
   is skipped
 - `terminal_input.subscribe`: host pushes `host_event` `terminal.input`;

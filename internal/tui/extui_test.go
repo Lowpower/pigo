@@ -67,7 +67,7 @@ func TestCustomOverlayRendersWidgets(t *testing.T) {
 			map[string]any{"id": "skip", "kind": "unknown", "props": map[string]any{"text": "NOPE"}},
 		},
 	})
-	m.extCustom = s
+	m.extCustomOverlays = []*extCustomState{s}
 	view := m.View()
 	if !strings.Contains(view, "PICK-ONE") || !strings.Contains(view, "alpha") {
 		t.Fatalf("overlay missing widgets:\n%s", view)
