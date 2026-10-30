@@ -63,6 +63,114 @@ func TestBedrockMessagesMergesParallelToolResults(t *testing.T) {
 	}
 }
 
+func TestBedrockMessagesRelocatesClaudeErrorToolImages(t *testing.T) {
+	id := "anthropic.claude-sonnet-4-6"
+	name := "Claude Sonnet 4.6"
+	png := ImageContent{Type: "image", Data: "QQ==", MimeType: "image/png"}
+	successJSON := `{"content":[{"type":"text","text":"see"},{"type":"image","data":"QQ==","mimeType":"image/png"}]}`
+	errJSON := `{"content":[{"type":"text","text":"before"},{"type":"image","data":"QQ==","mimeType":"image/png"},{"type":"image","data":"QQ==","mimeType":"image/jpeg"},{"type":"text","text":"after"}]}`
+	got := bedrockMessages(Context{Messages: []Message{
+		{Role: RoleUser, Content: "look"},
+		{Assistant: &AssistantMessage{Content: []*Content{
+			{Type: KindToolCall, ToolID: "a", ToolName: "read"},
+			{Type: KindToolCall, ToolID: "b", ToolName: "snap"},
+			{Type: KindToolCall, ToolID: "c", ToolName: "bash"},
+			{Type: KindToolCall, ToolID: "d", ToolName: "shot"},
+		}}},
+		{Role: RoleToolResult, ToolCallID: "a", ToolName: "read", Content: successJSON, Images: []ImageContent{png}},
+		{Role: RoleToolResult, ToolCallID: "b", ToolName: "snap", Content: errJSON, IsError: true},
+		{Role: RoleToolResult, ToolCallID: "c", ToolName: "bash", Content: "nope", IsError: true},
+		{Role: RoleToolResult, ToolCallID: "d", ToolName: "shot", Content: "plain", IsError: true, Images: []ImageContent{png, {Type: "image", Data: "QQ==", MimeType: "image/webp"}}},
+	}}, replayTarget{Model: id}, bedrockWire{ModelName: name, CacheRetention: "short"})
+	if len(got) != 3 {
+		t.Fatalf("len = %d", len(got))
+	}
+	tool := got[2]
+	if tool.Role != types.ConversationRoleUser {
+		t.Fatalf("role = %s", tool.Role)
+	}
+	// tool results a-d, caption+2 images for b, caption+2 images for d, cache point
+	if len(tool.Content) != 4+1+2+1+2+1 {
+		t.Fatalf("blocks = %d", len(tool.Content))
+	}
+	success := bedrockToolResult(t, tool.Content[0])
+	if success.Status != types.ToolResultStatusSuccess || len(success.Content) != 2 {
+		t.Fatalf("success = %+v", success)
+	}
+	if bedrockToolText(t, success.Content[0]) != successJSON {
+		t.Fatalf("success text = %q", bedrockToolText(t, success.Content[0]))
+	}
+	if _, ok := success.Content[1].(*types.ToolResultContentBlockMemberImage); !ok {
+		t.Fatalf("success image = %T", success.Content[1])
+	}
+	fromJSON := bedrockToolResult(t, tool.Content[1])
+	jsonText := bedrockToolText(t, fromJSON.Content[0])
+	if fromJSON.Status != types.ToolResultStatusError || len(fromJSON.Content) != 1 || strings.Count(jsonText, "(image attached after the tool results)") != 1 || !strings.Contains(jsonText, "before") || !strings.Contains(jsonText, "after") {
+		t.Fatalf("json error = %+v text %q", fromJSON, jsonText)
+	}
+	plainErr := bedrockToolResult(t, tool.Content[2])
+	if plainErr.Status != types.ToolResultStatusError || len(plainErr.Content) != 1 || bedrockToolText(t, plainErr.Content[0]) != "nope" {
+		t.Fatalf("plain error = %+v", plainErr)
+	}
+	fromField := bedrockToolResult(t, tool.Content[3])
+	fieldText := bedrockToolText(t, fromField.Content[0])
+	if fromField.Status != types.ToolResultStatusError || len(fromField.Content) != 1 || strings.Count(fieldText, "(image attached after the tool results)") != 1 || !strings.Contains(fieldText, "plain") {
+		t.Fatalf("field error = %+v text %q", fromField, fieldText)
+	}
+	if text := bedrockText(t, tool.Content[4]); text != "Images from the error result of tool call b (snap):" {
+		t.Fatalf("json caption = %q", text)
+	}
+	if mime := bedrockImageMIME(t, tool.Content[5]); mime != types.ImageFormatPng {
+		t.Fatalf("json image 0 = %s", mime)
+	}
+	if mime := bedrockImageMIME(t, tool.Content[6]); mime != types.ImageFormatJpeg {
+		t.Fatalf("json image 1 = %s", mime)
+	}
+	if text := bedrockText(t, tool.Content[7]); text != "Images from the error result of tool call d (shot):" {
+		t.Fatalf("field caption = %q", text)
+	}
+	if mime := bedrockImageMIME(t, tool.Content[8]); mime != types.ImageFormatPng {
+		t.Fatalf("field image 0 = %s", mime)
+	}
+	if mime := bedrockImageMIME(t, tool.Content[9]); mime != types.ImageFormatWebp {
+		t.Fatalf("field image 1 = %s", mime)
+	}
+	if _, ok := tool.Content[10].(*types.ContentBlockMemberCachePoint); !ok {
+		t.Fatalf("cache point = %T", tool.Content[10])
+	}
+
+	followed := bedrockMessages(Context{Messages: []Message{
+		{Role: RoleToolResult, ToolCallID: "b", ToolName: "snap", Content: errJSON, IsError: true},
+		{Role: RoleUser, Content: "next"},
+	}}, replayTarget{Model: id}, bedrockWire{ModelName: name, CacheRetention: "none"})
+	if len(followed) != 2 || len(followed[1].Content) != 1 || bedrockText(t, followed[1].Content[0]) != "next" {
+		t.Fatalf("follow-up = %#v", followed)
+	}
+	if _, ok := followed[0].Content[len(followed[0].Content)-1].(*types.ContentBlockMemberImage); !ok {
+		t.Fatalf("relocated image = %T", followed[0].Content[len(followed[0].Content)-1])
+	}
+}
+
+func TestBedrockMessagesKeepsNonClaudeErrorToolImages(t *testing.T) {
+	png := ImageContent{Type: "image", Data: "QQ==", MimeType: "image/png"}
+	got := bedrockMessages(Context{Messages: []Message{
+		{Role: RoleToolResult, ToolCallID: "b", ToolName: "snap", Content: "boom", IsError: true, Images: []ImageContent{png}},
+	}}, replayTarget{Model: "amazon.nova-pro-v1:0"}, bedrockWire{ModelName: "Nova Pro"})
+	if len(got) != 1 || len(got[0].Content) != 1 {
+		t.Fatalf("messages = %d blocks %d", len(got), len(got[0].Content))
+	}
+	tr := bedrockToolResult(t, got[0].Content[0])
+	if tr.Status != types.ToolResultStatusError || len(tr.Content) != 2 {
+		t.Fatalf("error result = %+v", tr)
+	}
+	if bedrockToolText(t, tr.Content[0]) != "boom" {
+		t.Fatalf("text = %q", bedrockToolText(t, tr.Content[0]))
+	}
+	if _, ok := tr.Content[1].(*types.ToolResultContentBlockMemberImage); !ok {
+		t.Fatalf("image = %T", tr.Content[1])
+	}
+}
+
 func TestBedrockMessagesOmitsBlankText(t *testing.T) {
 	png := ImageContent{Type: "image", Data: "QQ==", MimeType: "image/png"}
 	got := bedrockMessages(Context{Messages: []Message{
@@ -111,6 +219,15 @@ func bedrockToolText(t *testing.T, block types.ToolResultContentBlock) string {
 		t.Fatalf("tool content %T", block)
 	}
 	return tb.Value
+}
+
+func bedrockImageMIME(t *testing.T, block types.ContentBlock) types.ImageFormat {
+	t.Helper()
+	img, ok := block.(*types.ContentBlockMemberImage)
+	if !ok {
+		t.Fatalf("content %T", block)
+	}
+	return img.Value.Format
 }
 
 func bedrockToolResult(t *testing.T, block types.ContentBlock) types.ToolResultBlock {

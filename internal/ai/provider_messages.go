@@ -34,31 +34,36 @@ func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]st
 			continue
 		}
 		if isAnthropicToolResult(m) {
-			if !emitRefs {
-				tr, _ := convertAnthropicToolResult(m, nil, loaded)
-				out = append(out, map[string]any{
-					"role":    "user",
-					"content": []map[string]any{tr},
-				})
-				continue
-			}
+			// One user message per turn: every tool_result first, then any
+			// tool-reference siblings, then images taken out of error results.
+			// Anthropic rejects image blocks inside an is_error tool_result.
 			var blocks []map[string]any
 			var siblings []map[string]any
+			var tails []map[string]any
 			j := i
 			for j < len(msgs) {
 				n := msgs[j]
 				if n.Assistant != nil || !isAnthropicToolResult(n) {
 					break
 				}
-				tr, sib := convertAnthropicToolResult(n, deferred, loaded)
+				names := deferred
+				if !emitRefs {
+					names = nil
+				}
+				tr, sib, tail := convertAnthropicToolResult(n, names, loaded)
 				blocks = append(blocks, tr)
 				siblings = append(siblings, sib...)
+				tails = append(tails, tail...)
 				j++
 			}
 			i = j - 1
+			content := make([]map[string]any, 0, len(blocks)+len(siblings)+len(tails))
+			content = append(content, blocks...)
+			content = append(content, siblings...)
+			content = append(content, tails...)
 			out = append(out, map[string]any{
 				"role":    "user",
-				"content": append(blocks, siblings...),
+				"content": content,
 			})
 			continue
 		}
@@ -75,8 +80,7 @@ func isAnthropicToolResult(m Message) bool {
 	return m.Role == RoleToolResult || m.ToolCallID != ""
 }
 
-func convertAnthropicToolResult(m Message, deferred map[string]struct{}, loaded map[string]struct{}) (block map[string]any, siblings []map[string]any) {
-	inner, siblingBlocks := anthropicToolResultBody(m)
+func convertAnthropicToolResult(m Message, deferred map[string]struct{}, loaded map[string]struct{}) (block map[string]any, siblings, imageTail []map[string]any) {
 	var refs []map[string]any
 	for _, name := range m.AddedToolNames {
 		if name == "" {
@@ -91,6 +95,24 @@ func convertAnthropicToolResult(m Message, deferred map[string]struct{}, loaded 
 		loaded[name] = struct{}{}
 		refs = append(refs, map[string]any{"type": "tool_reference", "tool_name": name})
 	}
+	if text, caption, imgs, ok := splitErrorToolImages(m); ok {
+		block = map[string]any{
+			"type":        "tool_result",
+			"tool_use_id": m.ToolCallID,
+			"content":     text,
+			"is_error":    true,
+		}
+		imageTail = anthropicErrorImageTail(caption, imgs)
+		if len(refs) == 0 {
+			return block, nil, imageTail
+		}
+		block["content"] = refs
+		if text != "" {
+			siblings = []map[string]any{{"type": "text", "text": text}}
+		}
+		return block, siblings, imageTail
+	}
+	inner, siblingBlocks := anthropicToolResultBody(m)
 	block = map[string]any{
 		"type":        "tool_result",
 		"tool_use_id": m.ToolCallID,
@@ -100,10 +122,26 @@ func convertAnthropicToolResult(m Message, deferred map[string]struct{}, loaded 
 		block["is_error"] = true
 	}
 	if len(refs) == 0 {
-		return block, nil
+		return block, nil, nil
 	}
 	block["content"] = refs
-	return block, siblingBlocks
+	return block, siblingBlocks, nil
+}
+
+func anthropicErrorImageTail(caption string, imgs []ImageContent) []map[string]any {
+	tail := make([]map[string]any, 0, 1+len(imgs))
+	tail = append(tail, map[string]any{"type": "text", "text": caption})
+	for _, img := range imgs {
+		tail = append(tail, map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": img.MimeType,
+				"data":       img.Data,
+			},
+		})
+	}
+	return tail
 }
 
 func anthropicToolResultBody(m Message) (inner any, siblings []map[string]any) {
