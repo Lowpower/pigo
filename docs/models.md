@@ -58,6 +58,10 @@ without that flag refreshes both snapshots.
 
 `llama.cpp` and `radius` are not in the snapshot. `ant-ling`, `kimi-coding`,
 `qwen-token-plan-individual`, and `openai-codex` keep a single local placeholder.
+`kimi-coding` uses Chat Completions at `https://api.kimi.com/coding/v1`. A
+`models.json` `baseUrl` override must include `/v1`. Resumed sessions from the
+previous Anthropic shape do not reuse the prompt cache. See
+[providers.md](providers.md).
 
 Remote overlays still win: `PIGO_CATALOG_BASE_URL` (empty by default) and
 `pigo update --models` (cache `models-store.json`).

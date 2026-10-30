@@ -35,7 +35,7 @@ func (c *OpenAICompletionsClient) StreamFn() StreamFn {
 		}
 		body = transformRequestBody(opts, body)
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			chatCompletionsURL(c.BaseURL), bytes.NewReader(body))
+			chatCompletionsURLFor(opts.Provider, c.BaseURL), bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -101,6 +101,15 @@ func chatCompletionsURL(base string) string {
 		return base + "/chat/completions"
 	}
 	return base + "/v1/chat/completions"
+}
+
+// chatCompletionsURLFor joins a Chat Completions path. kimi-coding keeps the
+// caller base verbatim: a models.json override must already include /v1.
+func chatCompletionsURLFor(provider, base string) string {
+	if strings.EqualFold(strings.TrimSpace(provider), "kimi-coding") {
+		return strings.TrimRight(base, "/") + "/chat/completions"
+	}
+	return chatCompletionsURL(base)
 }
 
 func buildOpenAIRequest(reqCtx Context, opts Options) ([]byte, error) {

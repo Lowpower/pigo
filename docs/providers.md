@@ -45,6 +45,23 @@ A resumed session that still names the old provider falls back to another
 model, and its prompt cache is not reused. `AZURE_OPENAI_*` environment
 variable names are unchanged.
 
+## Kimi Coding
+
+The built-in provider id is `kimi-coding`. It uses Chat Completions
+(`openai-completions`) at `https://api.kimi.com/coding/v1`.
+
+`k3`, `k3-256k`, and `kimi-for-coding` accept tools added mid-conversation.
+Those definitions go in a later `system` message, and the cached tool prefix
+stays in the top-level `tools` list. `kimi-for-coding-highspeed` keeps added
+tools in that top-level list.
+
+A `models.json` override of this provider's `baseUrl` must include `/v1`.
+pigo does not rewrite an existing file. A base without `/v1` is requested as
+`https://api.kimi.com/coding/chat/completions`.
+
+Sessions recorded with the previous Anthropic Messages shape are replayed as
+Chat Completions. Their prompt cache is not reused.
+
 ## Custom providers
 
 1. **models.json** — add a provider id, models, and optional `apiKey`

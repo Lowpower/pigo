@@ -19,7 +19,7 @@ var extraProviders = []extraProvider{
 	{ID: "deepseek", Name: "DeepSeek API key", DefaultAPI: "openai-completions", DefaultID: "deepseek-v4-pro", BaseURL: "https://api.deepseek.com", Env: []string{"DEEPSEEK_API_KEY"}},
 	{ID: "groq", Name: "Groq API key", DefaultAPI: "openai-completions", DefaultID: "openai/gpt-oss-120b", BaseURL: "https://api.groq.com/openai/v1", Env: []string{"GROQ_API_KEY"}},
 	{ID: "huggingface", Name: "Hugging Face token", DefaultAPI: "openai-completions", DefaultID: "moonshotai/Kimi-K2.6", BaseURL: "https://router.huggingface.co/v1", Env: []string{"HF_TOKEN"}},
-	{ID: "kimi-coding", Name: "Kimi API key", DefaultAPI: "anthropic-messages", DefaultID: "kimi-for-coding", BaseURL: "https://api.kimi.com/coding", Env: []string{"KIMI_API_KEY"}},
+	{ID: "kimi-coding", Name: "Kimi API key", DefaultAPI: "openai-completions", DefaultID: "kimi-for-coding", BaseURL: "https://api.kimi.com/coding/v1", Env: []string{"KIMI_API_KEY"}},
 	{ID: "meta", Name: "Meta Model API key", DefaultAPI: "openai-responses", DefaultID: "muse-spark-1.3", BaseURL: "https://api.meta.ai/v1", Env: []string{"META_API_KEY"}},
 	{ID: "minimax", Name: "MiniMax API key", DefaultAPI: "anthropic-messages", DefaultID: "MiniMax-M2.7", BaseURL: "https://api.minimax.io/anthropic", Env: []string{"MINIMAX_API_KEY"}},
 	{ID: "minimax-cn", Name: "MiniMax CN API key", DefaultAPI: "anthropic-messages", DefaultID: "MiniMax-M2.7", BaseURL: "https://api.minimaxi.com/anthropic", Env: []string{"MINIMAX_CN_API_KEY"}},
@@ -55,6 +55,20 @@ var extraProviders = []extraProvider{
 	{ID: "openai-codex", Name: "OpenAI Codex (legacy)", DefaultAPI: "openai-codex-responses", DefaultID: "gpt-6.1-sol", BaseURL: "https://chatgpt.com/backend-api"},
 }
 
+func kimiCodingPlaceholderCompat() *Compat {
+	store := false
+	developer := false
+	reasoning := true
+	return &Compat{
+		DeferredToolsMode:     "kimi",
+		SupportsStore:         &store,
+		SupportsDeveloperRole: &developer,
+		MaxTokensField:        "max_tokens",
+		RequiresReasoningContentOnAssistantMessages: &reasoning,
+		SupportsReasoningEffort:                     true,
+	}
+}
+
 func registerExtraProviders() {
 	for _, p := range extraProviders {
 		spec := ProviderSpec{
@@ -73,6 +87,9 @@ func registerExtraProviders() {
 		}
 		if p.ID == "github-copilot" {
 			spec.FilterModels = filterByAvailableIDs(p.ID)
+		}
+		if p.ID == "kimi-coding" {
+			spec.Models[0].Compat = kimiCodingPlaceholderCompat()
 		}
 		RegisterProvider(spec)
 	}
