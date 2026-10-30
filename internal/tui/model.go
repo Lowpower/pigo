@@ -192,7 +192,8 @@ type Model struct {
 	workingFrames     []string
 	workingInterval   int
 	thinkingLabel     string
-	extCustom         *extCustomState
+	extCustomDock     *extCustomState   // non-overlay custom UI; a new open replaces it
+	extCustomOverlays []*extCustomState // overlay stack, bottom to top; close matches id
 	termHosts         []*ext.Host
 	bugHintShown      bool
 	prevDropAssistant *ai.AssistantMessage
@@ -374,7 +375,7 @@ func (m Model) overlayVisible() bool {
 		m.modelPickerActive() || m.thinkingPickerActive() || m.loginActive() || m.extUI.active {
 		return true
 	}
-	if m.extCustom != nil && m.extCustom.overlay && !m.extCustom.hidden {
+	if m.visibleOverlay() != nil {
 		return true
 	}
 	return m.overlay != overlayNone
@@ -513,7 +514,7 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		if m.loginActive() {
 			return m.handleLoginKey(msg)
 		}
-		if m.extCustom != nil && !m.extCustom.hidden {
+		if m.customKeyTarget() != nil {
 			return m.handleExtCustomKey(msg)
 		}
 		if m.extUI.active {
@@ -1547,8 +1548,8 @@ func (m Model) View() string {
 	if m.extUI.active {
 		return m.extUIView()
 	}
-	if m.extCustom != nil && m.extCustom.overlay && !m.extCustom.hidden {
-		return m.present(m.extCustomView())
+	if s := m.visibleOverlay(); s != nil {
+		return m.present(m.extCustomView(s))
 	}
 	if m.overlay == overlayTree || m.overlay == overlayTreeLabel || m.overlay == overlayTreeSummary || m.overlay == overlayTreeCustom {
 		return m.present(m.treeView())
@@ -1569,8 +1570,8 @@ func (m Model) View() string {
 func (m Model) viewDock() string {
 	var dock strings.Builder
 	dock.WriteString(m.widgets("aboveEditor"))
-	if m.extCustom != nil && !m.extCustom.overlay && !m.extCustom.hidden {
-		dock.WriteString(m.extCustomView())
+	if m.extCustomDock != nil && !m.extCustomDock.hidden {
+		dock.WriteString(m.extCustomView(m.extCustomDock))
 		dock.WriteString("\n")
 	} else {
 		dock.WriteString(m.framedEditor())

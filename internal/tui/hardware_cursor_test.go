@@ -34,7 +34,7 @@ func TestUpdateRestoresCursorWhenLastOverlayCloses(t *testing.T) {
 	on := true
 	cfg.ShowHardwareCursor = &on
 	m := New(cfg)
-	m.extCustom = &extCustomState{overlay: true}
+	m.extCustomOverlays = []*extCustomState{{overlay: true}}
 
 	next, cmd := m.Update(extCustomOpMsg{op: "custom.close"})
 	got := next.(Model)
@@ -60,7 +60,7 @@ func TestUpdateDoesNotHideCursorWhenOverlayClosesAfterQuit(t *testing.T) {
 	cfg.ShowHardwareCursor = &on
 	m := New(cfg)
 	m.quitting = true
-	m.extCustom = &extCustomState{overlay: true}
+	m.extCustomOverlays = []*extCustomState{{overlay: true}}
 
 	_, cmd := m.Update(extCustomOpMsg{op: "custom.close"})
 	if kind := cursorCmdKind(cmd); kind != "none" {

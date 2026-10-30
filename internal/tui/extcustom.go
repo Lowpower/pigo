@@ -29,6 +29,7 @@ type extCustomState struct {
 	focusIdx int
 	input    map[string]string
 	sel      map[string]int
+	onEmit   func(name string, args map[string]any) // nil outside tests
 }
 
 func parseWidgets(v any) []extWidgetNode {
@@ -185,18 +186,124 @@ func widgetOptions(w extWidgetNode) []string {
 }
 
 func (s *extCustomState) emit(name string, extra map[string]any) {
-	if s == nil || s.host == nil {
+	if s == nil {
 		return
 	}
 	args := map[string]any{"id": s.id}
 	for k, v := range extra {
 		args[k] = v
 	}
+	if s.onEmit != nil {
+		s.onEmit(name, args)
+		return
+	}
+	if s.host == nil {
+		return
+	}
 	go s.host.SendHostEvent(context.Background(), name, args, false)
 }
 
-func (m Model) extCustomView() string {
-	s := m.extCustom
+// visibleOverlay is the topmost overlay that is still on screen.
+func (m Model) visibleOverlay() *extCustomState {
+	for i := len(m.extCustomOverlays) - 1; i >= 0; i-- {
+		s := m.extCustomOverlays[i]
+		if s != nil && !s.hidden {
+			return s
+		}
+	}
+	return nil
+}
+
+// customKeyTarget is the custom UI that receives keys: the topmost visible
+// overlay, or the docked custom UI when no overlay is showing.
+func (m Model) customKeyTarget() *extCustomState {
+	if s := m.visibleOverlay(); s != nil {
+		return s
+	}
+	if m.extCustomDock != nil && !m.extCustomDock.hidden {
+		return m.extCustomDock
+	}
+	return nil
+}
+
+func (m *Model) customLayers() []*extCustomState {
+	out := make([]*extCustomState, 0, len(m.extCustomOverlays)+1)
+	if m.extCustomDock != nil {
+		out = append(out, m.extCustomDock)
+	}
+	out = append(out, m.extCustomOverlays...)
+	return out
+}
+
+// customTargets resolves a custom UI op. A non-empty id matches every layer
+// with that id. An empty id matches only when exactly one custom UI is open,
+// so a close cannot pick the top of a stack.
+func (m *Model) customTargets(id string) []*extCustomState {
+	layers := m.customLayers()
+	if id != "" {
+		var out []*extCustomState
+		for _, s := range layers {
+			if s != nil && s.id == id {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	if len(layers) == 1 {
+		return layers
+	}
+	return nil
+}
+
+func (m *Model) dropCustoms(drop map[*extCustomState]struct{}) {
+	if len(drop) == 0 {
+		return
+	}
+	if m.extCustomDock != nil {
+		if _, ok := drop[m.extCustomDock]; ok {
+			m.extCustomDock = nil
+		}
+	}
+	kept := make([]*extCustomState, 0, len(m.extCustomOverlays))
+	for _, s := range m.extCustomOverlays {
+		if _, ok := drop[s]; ok {
+			continue
+		}
+		kept = append(kept, s)
+	}
+	m.extCustomOverlays = kept
+}
+
+func (m *Model) dropCustom(s *extCustomState) {
+	if s == nil {
+		return
+	}
+	m.dropCustoms(map[*extCustomState]struct{}{s: {}})
+}
+
+// syncCustomPlace moves a layer after an update flips its overlay flag.
+func (m *Model) syncCustomPlace(s *extCustomState) {
+	if s == nil {
+		return
+	}
+	for i, cur := range m.extCustomOverlays {
+		if cur != s {
+			continue
+		}
+		if s.overlay {
+			return
+		}
+		m.extCustomOverlays = append(append([]*extCustomState{}, m.extCustomOverlays[:i]...), m.extCustomOverlays[i+1:]...)
+		m.extCustomDock = s
+		return
+	}
+	if m.extCustomDock == s && s.overlay {
+		m.extCustomDock = nil
+		m.extCustomOverlays = append(m.extCustomOverlays, s)
+	}
+}
+
+func (m Model) extCustomView(s *extCustomState) string {
 	if s == nil {
 		return ""
 	}
@@ -260,13 +367,13 @@ func (m Model) renderExtWidget(w extWidgetNode, s *extCustomState, focus bool) s
 }
 
 func (m Model) handleExtCustomKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	s := m.extCustom
-	if s == nil || s.hidden {
+	s := m.customKeyTarget()
+	if s == nil {
 		return m, nil
 	}
 	if m.keyIs(msg, "tui.select.cancel") || m.keyIs(msg, "app.interrupt") {
 		s.emit("custom.cancel", map[string]any{})
-		m.extCustom = nil
+		m.dropCustom(s)
 		return m, nil
 	}
 	if msg.String() == "tab" {
@@ -281,7 +388,7 @@ func (m Model) handleExtCustomKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "input":
 		if m.keyIs(msg, "tui.input.submit") {
 			s.emit("custom.submit", map[string]any{"values": s.values(), "widgetId": w.ID})
-			m.extCustom = nil
+			m.dropCustom(s)
 			return m, nil
 		}
 		if msg.Type == tea.KeyBackspace || msg.Type == tea.KeyCtrlH {
@@ -315,13 +422,13 @@ func (m Model) handleExtCustomKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.keyIs(msg, "tui.select.confirm") || m.keyIs(msg, "tui.input.submit") {
 			s.emit("custom.submit", map[string]any{"values": s.values(), "widgetId": w.ID})
-			m.extCustom = nil
+			m.dropCustom(s)
 			return m, nil
 		}
 	}
 	if m.keyIs(msg, "tui.input.submit") {
 		s.emit("custom.submit", map[string]any{"values": s.values()})
-		m.extCustom = nil
+		m.dropCustom(s)
 	}
 	return m, nil
 }

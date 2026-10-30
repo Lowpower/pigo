@@ -404,30 +404,47 @@ func (m *Model) applyCustomOp(x extCustomOpMsg) {
 	case "custom.open":
 		s := &extCustomState{}
 		s.applyOpen(x.host, x.args)
-		m.extCustom = s
+		if s.overlay {
+			m.extCustomOverlays = append(m.extCustomOverlays, s)
+		} else {
+			m.extCustomDock = s
+		}
 	case "custom.update":
-		if m.extCustom != nil {
-			m.extCustom.applyUpdate(x.args)
+		for _, s := range m.customTargets(strArg(x.args, "id")) {
+			s.applyUpdate(x.args)
+			m.syncCustomPlace(s)
 		}
 	case "custom.close":
-		m.extCustom = nil
+		m.dropCustoms(customDropSet(m.customTargets(strArg(x.args, "id"))))
 	case "custom.focus":
-		if m.extCustom != nil {
-			m.extCustom.focused = true
+		for _, s := range m.customTargets(strArg(x.args, "id")) {
+			s.focused = true
 		}
 	case "custom.unfocus":
-		if m.extCustom != nil {
-			m.extCustom.focused = false
+		for _, s := range m.customTargets(strArg(x.args, "id")) {
+			s.focused = false
 		}
 	case "custom.hide":
-		if m.extCustom != nil {
-			m.extCustom.hidden = true
+		for _, s := range m.customTargets(strArg(x.args, "id")) {
+			s.hidden = true
 		}
 	case "custom.setHidden":
-		if m.extCustom != nil {
-			m.extCustom.hidden = argBool(x.args, "hidden") || argBool(x.args, "value")
+		hidden := argBool(x.args, "hidden") || argBool(x.args, "value")
+		for _, s := range m.customTargets(strArg(x.args, "id")) {
+			s.hidden = hidden
 		}
 	}
+}
+
+func customDropSet(layers []*extCustomState) map[*extCustomState]struct{} {
+	if len(layers) == 0 {
+		return nil
+	}
+	drop := make(map[*extCustomState]struct{}, len(layers))
+	for _, s := range layers {
+		drop[s] = struct{}{}
+	}
+	return drop
 }
 
 func (m Model) handleThemeCall(method string, args map[string]any) map[string]any {
