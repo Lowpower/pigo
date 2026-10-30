@@ -288,12 +288,34 @@ func bedrockMessages(reqCtx Context, target replayTarget, wire bedrockWire) []ty
 			continue
 		}
 		if bedrockIsToolResult(m) {
+			claude := bedrockIsClaude(target.Model, wire.ModelName)
 			var blocks []types.ContentBlock
+			var tails []types.ContentBlock
 			for i < len(msgs) && bedrockIsToolResult(msgs[i]) {
-				blocks = append(blocks, bedrockToolResultBlock(msgs[i]))
+				msg := msgs[i]
+				if claude {
+					if text, caption, imgs, ok := splitErrorToolImages(msg); ok {
+						stripped := msg
+						stripped.Content = text
+						stripped.Images = nil
+						blocks = append(blocks, bedrockToolResultBlock(stripped))
+						if b := bedrockTextBlock(caption, false); b != nil {
+							tails = append(tails, b)
+						}
+						for _, img := range imgs {
+							if b := bedrockImageBlock(img); b != nil {
+								tails = append(tails, b)
+							}
+						}
+						i++
+						continue
+					}
+				}
+				blocks = append(blocks, bedrockToolResultBlock(msg))
 				i++
 			}
 			i--
+			blocks = append(blocks, tails...)
 			out = append(out, types.Message{Role: types.ConversationRoleUser, Content: blocks})
 			continue
 		}
