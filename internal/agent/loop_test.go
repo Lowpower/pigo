@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,35 @@ import (
 
 	"github.com/Lowpower/pigo/internal/ai"
 )
+
+func TestMalformedToolArgumentsAreNotExecuted(t *testing.T) {
+	raw := `{"path":"foo"`
+	message := &ai.AssistantMessage{Content: []*ai.Content{{
+		Type: ai.KindToolCall, ToolID: "bad", ToolName: "read", InvalidArguments: &raw,
+	}}}
+	calls := toToolCalls(message)
+	invoked := false
+	exec := ToolFunc(func(context.Context, ToolCall) (string, bool) {
+		invoked = true
+		return "unexpected", false
+	})
+	results, ok := executeToolCalls(context.Background(), calls, exec, Config{}, func(Event) bool { return true })
+	if !ok || invoked || len(results) != 1 || !results[0].IsError || !strings.Contains(results[0].Text, raw) {
+		t.Fatalf("ok=%v invoked=%v results=%+v", ok, invoked, results)
+	}
+}
+
+func TestSchemaFailureIncludesRawToolArguments(t *testing.T) {
+	raw := `{"count":"not-a-number"}`
+	calls := []ToolCall{{ID: "bad", Name: "read", RawArguments: &raw}}
+	exec := ToolFunc(func(context.Context, ToolCall) (string, bool) {
+		return "invalid arguments: count: expected integer", true
+	})
+	results, ok := executeToolCalls(context.Background(), calls, exec, Config{}, func(Event) bool { return true })
+	if !ok || len(results) != 1 || !results[0].IsError || !strings.Contains(results[0].Text, raw) {
+		t.Fatalf("ok=%v results=%+v", ok, results)
+	}
+}
 
 func toolCallMessage(id, name string, args map[string]any) *ai.AssistantMessage {
 	return &ai.AssistantMessage{

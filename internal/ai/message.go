@@ -51,6 +51,9 @@ type Content struct {
 	ToolID    string         `json:"id,omitempty"`
 	ToolName  string         `json:"name,omitempty"`
 	Arguments map[string]any `json:"arguments,omitempty"`
+	// InvalidArguments preserves malformed final input for the tool error result.
+	InvalidArguments *string `json:"invalidArguments,omitempty"`
+	RawArguments     *string `json:"-"`
 	// Namespace is the Responses function_call namespace. Empty on other APIs
 	// and on cross-model replay.
 	Namespace string `json:"namespace,omitempty"`
