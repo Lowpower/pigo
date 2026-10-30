@@ -44,8 +44,25 @@ func responsesAnchorMode(opts Options) toolAnchorMode {
 }
 
 func chatDeferredKimi(opts Options) bool {
+	if kimiCodingDeferredTools(opts.Provider, opts.Model) {
+		return true
+	}
 	c := lookupCompat(opts)
 	return c != nil && strings.EqualFold(strings.TrimSpace(c.DeferredToolsMode), "kimi")
+}
+
+// kimiCodingDeferredTools reports K3-style Kimi Coding models. Those ids accept
+// tools added in a later system message. kimi-for-coding-highspeed does not.
+func kimiCodingDeferredTools(provider, modelID string) bool {
+	if !strings.EqualFold(strings.TrimSpace(provider), "kimi-coding") {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(modelID)) {
+	case "k3", "k3-256k", "kimi-for-coding":
+		return true
+	default:
+		return false
+	}
 }
 
 // supportsToolReferences reports whether Anthropic Messages deferred-tool

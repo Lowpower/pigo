@@ -620,3 +620,37 @@ func TestLoadUserJSONStripsBOM(t *testing.T) {
 		t.Fatalf("model = %+v ok=%v", m, ok)
 	}
 }
+
+func TestLoadUserJSONKeepsKimiCodingBaseURL(t *testing.T) {
+	orig, ok := LookupProvider("kimi-coding")
+	if !ok {
+		t.Fatal("missing kimi-coding")
+	}
+	t.Cleanup(func() {
+		ClearOverlays()
+		RegisterProvider(orig)
+	})
+	path := filepath.Join(t.TempDir(), "models.json")
+	const body = `{
+  "providers": {
+    "kimi-coding": { "baseUrl": "https://api.kimi.com/coding" }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := LookupProvider("kimi-coding")
+	if !ok || spec.BaseURL != "https://api.kimi.com/coding" {
+		t.Fatalf("baseUrl = %q ok=%v", spec.BaseURL, ok)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != body {
+		t.Fatalf("models.json rewritten:\n%s", got)
+	}
+}

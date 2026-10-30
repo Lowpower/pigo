@@ -32,7 +32,13 @@ func (c resolvedOpenAICompat) developerRole() bool {
 }
 
 func (c resolvedOpenAICompat) emptyReasoningContent() bool {
-	return c.model != nil && c.model.SupportsReasoning() && c.requiresReasoningContent
+	if !c.requiresReasoningContent {
+		return false
+	}
+	if c.model == nil {
+		return true
+	}
+	return c.model.SupportsReasoning()
 }
 
 func resolveOpenAICompat(opts Options, baseURL string) resolvedOpenAICompat {
@@ -115,8 +121,9 @@ func detectOpenAICompat(provider, modelID, baseURL string) resolvedOpenAICompat 
 	isOpenCode := p == "opencode" || strings.Contains(u, "opencode.ai")
 	isChutes := strings.Contains(u, "chutes.ai")
 
-	nonStandard := isNvidia || isCerebras || isXAI || isTogether || isChutes || isDeepSeek || isZai || isMoonshot || isOpenCode || isCloudflareWorkers || isCloudflareGateway || isAntLing
-	useMaxTokens := isChutes || isDeepSeek || isMoonshot || isCloudflareGateway || isTogether || isNvidia || isAntLing || isZai
+	k3Style := kimiCodingDeferredTools(p, modelID)
+	nonStandard := isNvidia || isCerebras || isXAI || isTogether || isChutes || isDeepSeek || isZai || isMoonshot || isOpenCode || isCloudflareWorkers || isCloudflareGateway || isAntLing || k3Style
+	useMaxTokens := isChutes || isDeepSeek || isMoonshot || isCloudflareGateway || isTogether || isNvidia || isAntLing || isZai || k3Style
 
 	field := "max_completion_tokens"
 	if useMaxTokens {
@@ -138,7 +145,7 @@ func detectOpenAICompat(provider, modelID, baseURL string) resolvedOpenAICompat 
 		supportsUsageInStreaming: true,
 		supportsDeveloperRole:    developer,
 		maxTokensField:           field,
-		requiresReasoningContent: isDeepSeek,
+		requiresReasoningContent: isDeepSeek || k3Style,
 		cacheControlFormat:       cache,
 	}
 }

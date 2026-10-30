@@ -10,7 +10,7 @@ func TestThinProvidersAreRegistered(t *testing.T) {
 		"deepseek":                   "openai-completions",
 		"groq":                       "openai-completions",
 		"huggingface":                "openai-completions",
-		"kimi-coding":                "anthropic-messages",
+		"kimi-coding":                "openai-completions",
 		"meta":                       "openai-responses",
 		"minimax":                    "anthropic-messages",
 		"minimax-cn":                 "anthropic-messages",
@@ -301,5 +301,46 @@ func TestRemainingNewAPIProvidersRegistered(t *testing.T) {
 	}
 	if spec, _ := LookupProvider("radius"); spec.RefreshModels == nil {
 		t.Error("radius missing RefreshModels")
+	}
+}
+
+func TestKimiCodingChatCompletions(t *testing.T) {
+	spec, ok := LookupProvider("kimi-coding")
+	if !ok {
+		t.Fatal("missing kimi-coding")
+	}
+	if spec.DefaultAPI != "openai-completions" {
+		t.Fatalf("DefaultAPI = %q", spec.DefaultAPI)
+	}
+	if spec.BaseURL != "https://api.kimi.com/coding/v1" {
+		t.Fatalf("BaseURL = %q", spec.BaseURL)
+	}
+	if spec.DefaultID != "kimi-for-coding" {
+		t.Fatalf("DefaultID = %q", spec.DefaultID)
+	}
+	m, ok := Lookup("kimi-coding", "kimi-for-coding")
+	if !ok || m.API != "openai-completions" {
+		t.Fatalf("placeholder = %+v ok=%v", m, ok)
+	}
+	if m.Compat == nil {
+		t.Fatal("placeholder missing compat")
+	}
+	if m.Compat.DeferredToolsMode != "kimi" {
+		t.Fatalf("deferredToolsMode = %q", m.Compat.DeferredToolsMode)
+	}
+	if m.Compat.MaxTokensField != "max_tokens" {
+		t.Fatalf("maxTokensField = %q", m.Compat.MaxTokensField)
+	}
+	if m.Compat.SupportsStore == nil || *m.Compat.SupportsStore {
+		t.Fatalf("supportsStore = %v", m.Compat.SupportsStore)
+	}
+	if m.Compat.SupportsDeveloperRole == nil || *m.Compat.SupportsDeveloperRole {
+		t.Fatalf("supportsDeveloperRole = %v", m.Compat.SupportsDeveloperRole)
+	}
+	if m.Compat.RequiresReasoningContentOnAssistantMessages == nil || !*m.Compat.RequiresReasoningContentOnAssistantMessages {
+		t.Fatalf("requiresReasoningContent = %v", m.Compat.RequiresReasoningContentOnAssistantMessages)
+	}
+	if !m.Compat.SupportsReasoningEffort {
+		t.Fatal("supportsReasoningEffort is false")
 	}
 }
