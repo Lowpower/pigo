@@ -318,7 +318,7 @@ func TestThinkingLevelMapWireValues(t *testing.T) {
 			{Provider: "map-wire", ID: "router", Compat: &models.Compat{ThinkingFormat: "openrouter"}},
 			{Provider: "map-wire", ID: "router-off", Compat: &models.Compat{ThinkingFormat: "openrouter"}, ThinkingLevelMap: map[string]*string{"off": nil}},
 			{Provider: "map-wire", ID: "router-none", Compat: &models.Compat{ThinkingFormat: "openrouter"}, ThinkingLevelMap: map[string]*string{"off": strPtrAI("disabled")}},
-			{Provider: "map-wire", ID: "google", ThinkingLevelMap: map[string]*string{"xhigh": strPtrAI("max")}},
+			{Provider: "map-wire", ID: "gemini-4-argon", ThinkingLevelMap: map[string]*string{"xhigh": strPtrAI("max")}},
 			{Provider: "map-wire", ID: "adaptive", Compat: &models.Compat{ForceAdaptiveThinking: boolPtrAI(true)}, ThinkingLevelMap: map[string]*string{
 				"minimal": nil, "low": strPtrAI("max"),
 			}},
@@ -390,13 +390,13 @@ func TestThinkingLevelMapWireValues(t *testing.T) {
 		t.Fatal("unmapped off should omit")
 	}
 
-	cfg := googleThinkingConfig(Options{Provider: "map-wire", Model: "google", Thinking: "xhigh"})
-	if cfg == nil || string(cfg.ThinkingLevel) != "max" {
+	cfg := googleThinkingConfig(Options{Provider: "map-wire", Model: "gemini-4-argon", Thinking: "xhigh", ThinkingBudget: 10000})
+	if cfg == nil || string(cfg.ThinkingLevel) != "max" || cfg.ThinkingBudget != nil {
 		t.Fatalf("google mapped level = %+v", cfg)
 	}
 	cfg = googleThinkingConfig(Options{Provider: "map-wire", Model: "plain", Thinking: "low"})
-	if cfg == nil || cfg.ThinkingLevel != genai.ThinkingLevelLow {
-		t.Fatalf("google unmapped = %+v", cfg)
+	if cfg != nil {
+		t.Fatalf("budget model without a budget = %+v", cfg)
 	}
 
 	raw, err := buildAnthropicRequest(Context{Messages: []Message{{Role: RoleUser, Content: "hi"}}},
@@ -894,13 +894,35 @@ func TestGoogleThinkingConfig(t *testing.T) {
 	if googleThinkingConfig(Options{}) != nil {
 		t.Fatal("off should omit thinking config")
 	}
-	cfg := googleThinkingConfig(Options{Thinking: "low"})
-	if cfg == nil || cfg.ThinkingLevel != genai.ThinkingLevelLow || !cfg.IncludeThoughts {
-		t.Fatalf("%+v", cfg)
+	if googleThinkingConfig(Options{Model: "gemini-4-argon", Thinking: "off", ThinkingBudget: 80}) != nil {
+		t.Fatal("off should omit thinking config for a level model")
 	}
-	cfg = googleThinkingConfig(Options{ThinkingBudget: 80})
-	if cfg == nil || cfg.ThinkingBudget == nil || *cfg.ThinkingBudget != 80 {
-		t.Fatalf("%+v", cfg)
+
+	levelModels := []string{
+		"gemini-4-argon",
+		"gemini-3.1-pro-preview",
+		"gemini-flash-latest",
+		"gemini-flash-lite-latest",
+		"gemma-4",
+		"gemma4",
+	}
+	for _, id := range levelModels {
+		cfg := googleThinkingConfig(Options{Model: id, Thinking: "medium", ThinkingBudget: 8192})
+		if cfg == nil || cfg.ThinkingLevel != genai.ThinkingLevelMedium || cfg.ThinkingBudget != nil || !cfg.IncludeThoughts {
+			t.Fatalf("%s = %+v", id, cfg)
+		}
+	}
+
+	budgetModels := []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"}
+	for _, id := range budgetModels {
+		cfg := googleThinkingConfig(Options{Model: id, Thinking: "low", ThinkingBudget: 80})
+		if cfg == nil || cfg.ThinkingLevel != "" || cfg.ThinkingBudget == nil || *cfg.ThinkingBudget != 80 || !cfg.IncludeThoughts {
+			t.Fatalf("%s = %+v", id, cfg)
+		}
+	}
+
+	if googleThinkingConfig(Options{Model: "gemini-2.5-pro", Thinking: "low"}) != nil {
+		t.Fatal("budget model without a budget should omit thinking config")
 	}
 }
 

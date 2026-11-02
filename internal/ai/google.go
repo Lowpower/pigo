@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"google.golang.org/genai"
 )
@@ -248,20 +250,44 @@ func (c *GoogleClient) StreamFn() StreamFn {
 	}
 }
 
+// gemini3ThinkingLevel matches Gemini 3 Pro/Flash ids, with or without a minor
+// version. gemini4ThinkingLevel matches Gemini 4 and later. gemma4ThinkingLevel
+// matches both gemma-4 and gemma4. The patterns follow pi v1.3.0.
+var (
+	gemini3ThinkingLevel = regexp.MustCompile(`gemini-3(?:\.\d+)?-(?:pro|flash)`)
+	gemini4ThinkingLevel = regexp.MustCompile(`gemini-(?:[4-9]|[1-9]\d)`)
+	gemma4ThinkingLevel  = regexp.MustCompile(`gemma-?4`)
+)
+
+// usesGoogleThinkingLevel reports whether this model takes Gemini's discrete
+// thinkingLevel instead of a token thinkingBudget.
+func usesGoogleThinkingLevel(modelID string) bool {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	switch id {
+	case "gemini-flash-latest", "gemini-flash-lite-latest":
+		return true
+	}
+	return gemini3ThinkingLevel.MatchString(id) ||
+		gemini4ThinkingLevel.MatchString(id) ||
+		gemma4ThinkingLevel.MatchString(id)
+}
+
 func googleThinkingConfig(opts Options) *genai.ThinkingConfig {
-	level := googleThinkingWire(opts)
-	if opts.ThinkingBudget <= 0 && level == "" {
+	if usesGoogleThinkingLevel(opts.Model) {
+		level := googleThinkingWire(opts)
+		if level == "" {
+			return nil
+		}
+		return &genai.ThinkingConfig{
+			IncludeThoughts: true,
+			ThinkingLevel:   genai.ThinkingLevel(level),
+		}
+	}
+	if opts.ThinkingBudget <= 0 {
 		return nil
 	}
-	cfg := &genai.ThinkingConfig{IncludeThoughts: true}
-	if opts.ThinkingBudget > 0 {
-		b := int32(opts.ThinkingBudget)
-		cfg.ThinkingBudget = &b
-	}
-	if level != "" {
-		cfg.ThinkingLevel = genai.ThinkingLevel(level)
-	}
-	return cfg
+	b := int32(opts.ThinkingBudget)
+	return &genai.ThinkingConfig{IncludeThoughts: true, ThinkingBudget: &b}
 }
 
 func mapGoogleFinishReason(reason genai.FinishReason, finishMessage string, toolUse bool) (StopReason, string) {
