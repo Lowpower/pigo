@@ -2,6 +2,7 @@ package ai
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -11,7 +12,7 @@ import (
 
 var validJSONEscapes = map[byte]bool{
 	'"': true, '\\': true, '/': true, 'b': true, 'f': true,
-	'n': true, 'r': true, 't': true, 'u': true,
+	'n': true, 'r': true, 't': true,
 }
 
 func isControlChar(c byte) bool { return c <= 0x1f }
@@ -116,6 +117,46 @@ func parseJSONWithRepair(s string, out any) error {
 		return json.Unmarshal([]byte(repaired), out)
 	}
 	return json.Unmarshal([]byte(s), out) // return the original error
+}
+
+// parseToolCallArguments parses a finished tool call's argument text.
+// It repairs string escapes, and it does not keep a partial prefix: text that
+// is not a JSON object comes back as an empty object plus an error that
+// includes the original text.
+func parseToolCallArguments(raw string) (map[string]any, string) {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]any{}, ""
+	}
+	var parsed any
+	if err := parseJSONWithRepair(raw, &parsed); err != nil {
+		return map[string]any{}, toolArgumentsError(err, raw)
+	}
+	obj, ok := parsed.(map[string]any)
+	if !ok || obj == nil {
+		return map[string]any{}, toolArgumentsError(errors.New("Tool arguments must be a JSON object"), raw)
+	}
+	return obj, ""
+}
+
+func toolArgumentsError(err error, raw string) string {
+	return err.Error() + "\n\nReceived arguments:\n" + raw
+}
+
+// finalizeToolArguments replaces a streamed preview with a strict parse of the
+// accumulated argument text. Blank text keeps arguments a provider already set
+// from a structured object.
+func finalizeToolArguments(c *Content) {
+	if c == nil {
+		return
+	}
+	raw := c.partialJSON
+	c.partialJSON = ""
+	if strings.TrimSpace(raw) == "" {
+		return
+	}
+	args, errText := parseToolCallArguments(raw)
+	c.Arguments = args
+	c.argumentsError = errText
 }
 
 // parseStreamingJSON parses potentially-incomplete streamed JSON, always

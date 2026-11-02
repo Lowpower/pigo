@@ -33,6 +33,9 @@ type ToolCall struct {
 	ID   string
 	Name string
 	Args map[string]any
+	// ArgumentsError is set when the finished argument text was not a JSON
+	// object. The tool is not executed.
+	ArgumentsError string
 }
 
 // ToolExecutor runs a tool call and returns its textual result. isError reports
@@ -370,7 +373,9 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 		toolCtx, span := telemetry.Start(ctx, "pigo.tool")
 		span.SetAttribute("gen_ai.tool.name", c.Name)
 		defer span.End()
-		if exec != nil {
+		if c.ArgumentsError != "" {
+			out, isError = fmt.Sprintf("Invalid arguments for tool %q: %s", c.Name, c.ArgumentsError), true
+		} else if exec != nil {
 			execCtx := tools.WithOutputUpdate(toolCtx, func(partial string) {
 				_ = emit(Event{
 					Type:       EventToolUpdate,
@@ -477,7 +482,7 @@ func msgFromAI(m ai.Message) Msg {
 func toToolCalls(m *ai.AssistantMessage) []ToolCall {
 	var calls []ToolCall
 	for _, c := range m.ToolCalls() {
-		calls = append(calls, ToolCall{ID: c.ToolID, Name: c.ToolName, Args: c.Arguments})
+		calls = append(calls, ToolCall{ID: c.ToolID, Name: c.ToolName, Args: c.Arguments, ArgumentsError: c.ArgumentsError()})
 	}
 	return calls
 }

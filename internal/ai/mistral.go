@@ -339,8 +339,7 @@ func streamMistralSSE(ctx context.Context, r io.Reader, out *AssistantMessage, s
 		case KindThinking:
 			s.push(ctx, Event{Type: EventThinkingEnd, ContentIndex: i, Content: c.Thinking, Partial: out})
 		case KindToolCall:
-			c.Arguments = parseStreamingJSON(c.partialJSON)
-			c.partialJSON = ""
+			finalizeToolArguments(c)
 			s.push(ctx, Event{Type: EventToolCallEnd, ContentIndex: i, ToolCall: c, Partial: out})
 		}
 	}

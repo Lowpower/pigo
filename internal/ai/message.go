@@ -59,6 +59,10 @@ type Content struct {
 	// It is never serialized.
 	partialJSON string
 
+	// argumentsError is set when finished argument text is not a JSON object.
+	// It is never serialized; the tool result carries the text instead.
+	argumentsError string
+
 	// toolDone is set when a Responses function call receives output_item.done.
 	// It is never serialized.
 	toolDone bool
@@ -172,6 +176,15 @@ func (m *AssistantMessage) Text() string {
 		}
 	}
 	return s
+}
+
+// ArgumentsError reports why a finished tool call's arguments were rejected.
+// An empty string means the arguments parsed as a JSON object.
+func (c *Content) ArgumentsError() string {
+	if c == nil {
+		return ""
+	}
+	return c.argumentsError
 }
 
 // ToolCalls returns the tool-call blocks of the message.

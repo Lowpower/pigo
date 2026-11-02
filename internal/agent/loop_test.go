@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -434,4 +436,80 @@ func TestLoopStampsAddedToolNamesAndRefreshesTools(t *testing.T) {
 	if len(toolSets[1]) != 2 || toolSets[1][0] != "search" || toolSets[1][1] != "lookup" {
 		t.Fatalf("second tools = %v", toolSets[1])
 	}
+}
+
+func anthropicToolSSE(partial string) string {
+	encoded, _ := json.Marshal(partial)
+	return `event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":1,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"read","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":` + string(encoded) + `}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+}
+
+func TestLoopMalformedToolArguments(t *testing.T) {
+	run := func(t *testing.T, raw string) (ran int, results []Msg, events []Event) {
+		t.Helper()
+		var turn atomic.Int32
+		provider := func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+			if turn.Add(1) == 1 {
+				return ai.StreamAnthropicReader(ctx, strings.NewReader(anthropicToolSSE(raw)), "m", nil), nil
+			}
+			return ai.EmitMessage(ctx, textMessage("done")), nil
+		}
+		exec := ToolFunc(func(context.Context, ToolCall) (string, bool) {
+			ran++
+			return "file body", false
+		})
+		events = Run(context.Background(), provider, ai.Context{
+			Messages: []ai.Message{{Role: ai.RoleUser, Content: "go"}},
+		}, exec, Config{Model: "test"}).Collect()
+		for _, e := range events {
+			if e.Type == EventTurnEnd && len(e.ToolResults) > 0 {
+				results = e.ToolResults
+				break
+			}
+		}
+		return ran, results, events
+	}
+
+	t.Run("truncated", func(t *testing.T) {
+		raw := `{"path":"/tmp/x"`
+		ran, results, events := run(t, raw)
+		if ran != 0 {
+			t.Fatalf("executor ran %d times", ran)
+		}
+		if len(results) != 1 || !results[0].IsError || !strings.Contains(results[0].Text, raw) {
+			t.Fatalf("result = %+v", results)
+		}
+		if !strings.Contains(results[0].Text, `Invalid arguments for tool "read"`) {
+			t.Fatalf("text = %q", results[0].Text)
+		}
+		if countType(events, EventToolStart) != 1 || countType(events, EventToolEnd) != 1 {
+			t.Fatalf("tool events missing")
+		}
+	})
+
+	t.Run("valid", func(t *testing.T) {
+		ran, results, _ := run(t, `{"path":"README.md"}`)
+		if ran != 1 {
+			t.Fatalf("executor ran %d times", ran)
+		}
+		if len(results) != 1 || results[0].IsError || results[0].Text != "file body" {
+			t.Fatalf("result = %+v", results)
+		}
+	})
 }

@@ -605,6 +605,27 @@ func TestResponsesStreamParallelToolCallsWithOutputIndex(t *testing.T) {
 	}
 }
 
+func TestResponsesTruncatedToolArgumentsFailClosed(t *testing.T) {
+	raw := `{"path":"/tmp/x"`
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, final := collectResponsesSSE(t, sseData(
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_cut","call_id":"call_cut","name":"read","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_cut","delta":`+string(encoded)+`}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_cut","call_id":"call_cut","name":"read","arguments":`+string(encoded)+`}}`,
+		`{"type":"response.completed","response":{"id":"resp_cut","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+	))
+	calls := final.ToolCalls()
+	if len(calls) != 1 || len(calls[0].Arguments) != 0 {
+		t.Fatalf("calls = %#v", calls)
+	}
+	if !strings.Contains(calls[0].ArgumentsError(), "Received arguments:\n"+raw) {
+		t.Fatalf("error = %q", calls[0].ArgumentsError())
+	}
+}
+
 func TestResponsesStreamParallelToolCallsWithoutOutputIndex(t *testing.T) {
 	events, final := collectResponsesSSE(t, sseData(
 		`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"bash","arguments":""}}`,
