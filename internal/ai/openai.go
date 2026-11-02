@@ -320,8 +320,7 @@ func streamOpenAISSE(ctx context.Context, r io.Reader, out *AssistantMessage, s 
 				return
 			}
 		case KindToolCall:
-			c.Arguments = parseStreamingJSON(c.partialJSON)
-			c.partialJSON = ""
+			finalizeToolArguments(c)
 			if !s.push(ctx, Event{Type: EventToolCallEnd, ContentIndex: i, ToolCall: c, Partial: out}) {
 				return
 			}

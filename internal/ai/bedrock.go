@@ -764,10 +764,7 @@ func processBedrockStream(ctx context.Context, stream *bedrockruntime.ConverseSt
 		case KindThinking:
 			s.push(ctx, Event{Type: EventThinkingEnd, ContentIndex: i, Content: c.Thinking, Partial: out})
 		case KindToolCall:
-			if c.partialJSON != "" {
-				c.Arguments = parseStreamingJSON(c.partialJSON)
-				c.partialJSON = ""
-			}
+			finalizeToolArguments(c)
 			s.push(ctx, Event{Type: EventToolCallEnd, ContentIndex: i, ToolCall: c, Partial: out})
 		}
 	}

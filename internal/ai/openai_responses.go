@@ -467,10 +467,9 @@ func processResponsesStream(ctx context.Context, stream *ssestream.Stream[respon
 				block := out.Content[idx]
 				if v.Item.Arguments != "" {
 					block.partialJSON = v.Item.Arguments
-					block.Arguments = parseStreamingJSON(block.partialJSON)
 				}
 				applyFunctionCallNamespace(block, v.Item)
-				block.partialJSON = ""
+				finalizeToolArguments(block)
 				block.toolDone = true
 				delete(toolSlots, key)
 			}

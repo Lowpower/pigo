@@ -103,6 +103,43 @@ func TestStreamAnthropicReaderFixture(t *testing.T) {
 	}
 }
 
+func TestAnthropicTruncatedToolArgumentsFailClosed(t *testing.T) {
+	raw := `{"path":"/tmp/x"`
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_cut","usage":{"input_tokens":1,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_cut","name":"read","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":` + string(encoded) + `}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+	_, final := StreamAnthropicReader(context.Background(), strings.NewReader(fixture), "claude-test", nil).Collect()
+	calls := final.ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d", len(calls))
+	}
+	if len(calls[0].Arguments) != 0 {
+		t.Fatalf("args = %#v, want empty", calls[0].Arguments)
+	}
+	if !strings.Contains(calls[0].ArgumentsError(), "Received arguments:\n"+raw) {
+		t.Fatalf("error = %q", calls[0].ArgumentsError())
+	}
+}
+
 func TestAnthropicAuthTokenUsesBearerNotAPIKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-api-key") != "" {
