@@ -148,15 +148,19 @@ func loadFile(path, source string) (Template, []Diagnostic) {
 }
 
 // ParseCommandArgs splits a rest string with bash-style quotes.
+// Quoted empty strings are kept, so later positional args stay put.
 func ParseCommandArgs(s string) []string {
 	var args []string
 	var cur strings.Builder
 	var inQuote rune
+	started := false
 	flush := func() {
-		if cur.Len() > 0 {
-			args = append(args, cur.String())
-			cur.Reset()
+		if !started {
+			return
 		}
+		args = append(args, cur.String())
+		cur.Reset()
+		started = false
 	}
 	for _, r := range s {
 		if inQuote != 0 {
@@ -169,12 +173,14 @@ func ParseCommandArgs(s string) []string {
 		}
 		if r == '"' || r == '\'' {
 			inQuote = r
+			started = true
 			continue
 		}
 		if r == ' ' || r == '\t' || r == '\n' {
 			flush()
 			continue
 		}
+		started = true
 		cur.WriteRune(r)
 	}
 	flush()

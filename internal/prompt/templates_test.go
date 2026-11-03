@@ -37,6 +37,35 @@ func TestParseCommandArgsQuotes(t *testing.T) {
 	}
 }
 
+func TestParseCommandArgsEmptyQuotes(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{`"" b`, []string{"", "b"}},
+		{`a '' c`, []string{"a", "", "c"}},
+		{`"" " "`, []string{"", " "}},
+		{`" "`, []string{" "}},
+		{`a""b`, []string{"ab"}},
+		{"a  b", []string{"a", "b"}},
+		{"a\tb\tc", []string{"a", "b", "c"}},
+		{"", nil},
+	}
+	for _, c := range cases {
+		got := ParseCommandArgs(c.in)
+		if len(got) != len(c.want) {
+			t.Errorf("ParseCommandArgs(%q) = %#v want %#v", c.in, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("ParseCommandArgs(%q) = %#v want %#v", c.in, got, c.want)
+				break
+			}
+		}
+	}
+}
+
 func TestDiscoverTemplatesMalformedFrontmatter(t *testing.T) {
 	dir := t.TempDir()
 	invalid := filepath.Join(dir, "invalid.md")
@@ -168,5 +197,30 @@ func TestExpandTemplate(t *testing.T) {
 	}
 	if _, ok := ExpandTemplate("/nope", tpls); ok {
 		t.Fatal("unknown template should not expand")
+	}
+}
+
+func TestExpandTemplateEmptyQuotedArgKeepsLaterPosition(t *testing.T) {
+	tpls := []Template{{
+		Name:    "review",
+		Content: "Review $2. Focus: ${1:-correctness}.",
+	}}
+	for _, in := range []string{`/review "" src/index.ts`, `/review '' src/index.ts`} {
+		got, ok := ExpandTemplate(in, tpls)
+		if !ok || got != "Review src/index.ts. Focus: correctness." {
+			t.Fatalf("ExpandTemplate(%q) = %q ok=%v", in, got, ok)
+		}
+	}
+
+	bare, ok := ExpandTemplate("/review", tpls)
+	if !ok || bare != "Review . Focus: correctness." {
+		t.Fatalf("ExpandTemplate(/review) = %q ok=%v", bare, ok)
+	}
+
+	if got := SubstituteArgs("$1", ParseCommandArgs(`""`)); got != "" {
+		t.Fatalf("$1 of empty quotes = %q", got)
+	}
+	if got := SubstituteArgs("${1:-correctness}", nil); got != "correctness" {
+		t.Fatalf("missing $1 default = %q", got)
 	}
 }
