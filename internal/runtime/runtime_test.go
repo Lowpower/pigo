@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -1252,6 +1253,75 @@ func TestPrintTextErrorExit(t *testing.T) {
 	err := e.PrintText(context.Background(), io.Discard, nil, "hi", nil)
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func printStopReply(reason ai.StopReason, text string) ai.StreamFn {
+	return func(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+		return ai.EmitMessage(ctx, &ai.AssistantMessage{
+			Role:       ai.RoleAssistant,
+			StopReason: reason,
+			Content:    []*ai.Content{{Type: ai.KindText, Text: text}},
+		}), nil
+	}
+}
+
+func TestPrintTextLengthExit(t *testing.T) {
+	e := &Engine{
+		Stream:   printStopReply(ai.StopLength, "partial answer"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Model: "x"}},
+	}
+	wireQueues(e)
+	var out bytes.Buffer
+	err := e.PrintText(context.Background(), &out, nil, "hi", nil)
+	if err == nil || !errors.Is(err, ErrOutputLimit) {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(out.String(), "partial answer") {
+		t.Fatalf("stdout=%q", out.String())
+	}
+}
+
+func TestPrintTextStopExit(t *testing.T) {
+	e := &Engine{
+		Stream:   printStopReply(ai.StopStop, "done"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Model: "x"}},
+	}
+	wireQueues(e)
+	var out bytes.Buffer
+	if err := e.PrintText(context.Background(), &out, nil, "hi", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "done") {
+		t.Fatalf("stdout=%q", out.String())
+	}
+}
+
+func TestPrintJSONLengthIsNotFailure(t *testing.T) {
+	e := &Engine{
+		Stream:   printStopReply(ai.StopLength, "partial answer"),
+		Provider: "anthropic",
+		Tools:    tools.NewRegistry(),
+		Opts:     Options{Config: config.Config{Model: "x"}},
+	}
+	wireQueues(e)
+	var out bytes.Buffer
+	if err := e.PrintJSON(context.Background(), &out, nil, "hi", nil); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.TrimSpace(out.String())
+	if !strings.Contains(raw, "partial answer") {
+		t.Fatalf("json=%s", raw)
+	}
+	for i, line := range strings.Split(raw, "\n") {
+		var v map[string]any
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
+			t.Fatalf("line %d: %v\n%s", i+1, err, line)
+		}
 	}
 }
 

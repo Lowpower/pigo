@@ -1855,6 +1855,9 @@ func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Mess
 			return stopErr
 		}
 		if !cont {
+			if err := printLengthErr(last); err != nil {
+				return err
+			}
 			return nil
 		}
 		hist = e.History()
@@ -1867,6 +1870,26 @@ func (e *Engine) WriteSessionHeader(out io.Writer) error {
 		return nil
 	}
 	return json.NewEncoder(out).Encode(e.Opts.Session.Header())
+}
+
+// outputLimitError is the print-mode failure for a final reply cut off at the
+// model's output token limit. The sentence matches pi v1.3.0.
+type outputLimitError struct{}
+
+func (outputLimitError) Error() string {
+	return "Response was truncated: the model reached its output token limit."
+}
+
+// ErrOutputLimit is returned by PrintText when the settled assistant reply
+// stopped because it hit the output token limit. JSON mode does not return it.
+var ErrOutputLimit error = outputLimitError{}
+
+func printLengthErr(last []agent.Msg) error {
+	a := lastAssistantMsg(last)
+	if a != nil && a.StopReason == ai.StopLength {
+		return ErrOutputLimit
+	}
+	return nil
 }
 
 func printStopErr(last []agent.Msg) error {
