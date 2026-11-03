@@ -50,6 +50,8 @@ type ResultMeta struct {
 	Usage      *ai.Usage
 	Nested     *ai.NestedToolCalls
 	Structured json.RawMessage
+	// DurationMs is the recorded execution time. Nil means the tool did not run.
+	DurationMs *int
 }
 
 // ToolFunc adapts a function to ToolExecutor.
@@ -394,13 +396,16 @@ func executeToolCalls(ctx context.Context, calls []ToolCall, exec ToolExecutor, 
 			span.RecordError(errToolFailed)
 		}
 		results[i] = Msg{Role: RoleToolResult, ToolCallID: c.ID, ToolName: c.Name, Text: out, IsError: isError, AddedToolNames: toolAddedNames(cfg, c)}
+		var duration *int
 		if cfg.ToolResultMeta != nil {
 			meta := cfg.ToolResultMeta(c)
 			results[i].Usage = meta.Usage
 			results[i].NestedCalls = meta.Nested
 			results[i].Structured = meta.Structured
+			results[i].DurationMs = meta.DurationMs
+			duration = meta.DurationMs
 		}
-		return emit(Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: isError})
+		return emit(Event{Type: EventToolEnd, ToolCallID: c.ID, ToolName: c.Name, Result: out, IsError: isError, DurationMs: duration})
 	}
 
 	if cfg.ToolExecution == Parallel && len(calls) > 1 {
@@ -474,6 +479,7 @@ func msgFromAI(m ai.Message) Msg {
 			Role: RoleToolResult, Text: m.Content, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
 			IsError: m.IsError, AddedToolNames: append([]string(nil), m.AddedToolNames...),
 			Usage: m.Usage, NestedCalls: m.NestedCalls, Structured: append(json.RawMessage(nil), m.StructuredContent...),
+			DurationMs: m.DurationMs,
 		}
 	default:
 		return Msg{Role: RoleUser, Text: m.Content, Images: m.Images}
@@ -518,6 +524,7 @@ func MessagesFromTranscript(transcript []Msg) []ai.Message {
 				Usage:             m.Usage,
 				NestedCalls:       m.NestedCalls,
 				StructuredContent: append(json.RawMessage(nil), m.Structured...),
+				DurationMs:        m.DurationMs,
 			})
 		default:
 			out = append(out, ai.Message{Role: ai.RoleUser, Content: m.Text, Images: m.Images})

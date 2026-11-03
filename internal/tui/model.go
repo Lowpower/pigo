@@ -1334,7 +1334,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		rendered := m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, label))
 		if m.engine != nil {
-			if custom := m.engine.RenderTool("call", ev.ToolName, ev.Args, ""); custom != "" {
+			if custom := m.engine.RenderTool("call", ev.ToolName, ev.Args, "", nil); custom != "" {
 				rendered = m.toolStyle.Render(custom)
 			}
 		}

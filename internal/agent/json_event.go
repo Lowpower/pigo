@@ -60,6 +60,7 @@ func ToJSON(ev Event) (any, error) {
 			"isError":    ev.IsError,
 		}
 		putParent(out, ev.ParentToolCallID)
+		putDuration(out, ev.DurationMs)
 		return out, nil
 	case EventAgentEnd:
 		msgs := make([]any, 0, len(ev.Messages))
@@ -156,6 +157,13 @@ func assistantJSON(m *ai.AssistantMessage) any {
 	return m
 }
 
+func putDuration(out map[string]any, ms *int) {
+	if out == nil || ms == nil {
+		return
+	}
+	out["durationMs"] = *ms
+}
+
 func putParent(out map[string]any, parent string) {
 	if parent != "" {
 		out["parentToolCallId"] = parent
@@ -200,6 +208,7 @@ func msgJSON(m Msg) any {
 				out["structuredContent"] = v
 			}
 		}
+		putDuration(out, m.DurationMs)
 		return out
 	default:
 		if len(m.Images) == 0 {

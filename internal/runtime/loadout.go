@@ -289,7 +289,7 @@ func (e *Engine) storeResultMeta(id string, meta agent.ResultMeta) {
 	if id == "" {
 		return
 	}
-	if meta.Usage == nil && meta.Nested == nil && len(meta.Structured) == 0 {
+	if meta.Usage == nil && meta.Nested == nil && len(meta.Structured) == 0 && meta.DurationMs == nil {
 		return
 	}
 	e.mu.Lock()

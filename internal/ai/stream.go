@@ -37,6 +37,9 @@ type Message struct {
 	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
 	// Usage is token usage attributed to this tool result, including nested calls.
 	Usage *Usage `json:"usage,omitempty"`
+	// DurationMs is the recorded tool execution time. Nil means the tool did
+	// not run. A pointer to 0 means it finished in under a millisecond.
+	DurationMs *int `json:"durationMs,omitempty"`
 	// NestedCalls records executeTool calls made while this tool ran.
 	NestedCalls *NestedToolCalls `json:"nestedCalls,omitempty"`
 	// Images are extra user-message blocks. Empty for text-only.

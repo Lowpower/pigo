@@ -73,7 +73,7 @@ func (r *nestedRecorder) tryStart(id, name string, args map[string]any) bool {
 	return true
 }
 
-func (r *nestedRecorder) finish(id string, isErr bool, errText string) {
+func (r *nestedRecorder) finish(id string, isErr bool, errText string) (int, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for i := range r.calls {
@@ -89,11 +89,14 @@ func (r *nestedRecorder) finish(id string, isErr bool, errText string) {
 			r.calls[i].Status = "ok"
 		}
 		if started, ok := r.started[id]; ok {
-			r.calls[i].DurationMs = int(time.Since(started) / time.Millisecond)
+			ms := int(time.Since(started) / time.Millisecond)
+			r.calls[i].DurationMs = ms
 			delete(r.started, id)
+			return ms, true
 		}
-		return
+		return 0, false
 	}
+	return 0, false
 }
 
 func (r *nestedRecorder) addUsage(u ai.Usage) {
@@ -230,13 +233,21 @@ func (e *Engine) executeNested(ctx context.Context, parent, name string, args ma
 	if isErr {
 		errText = out
 	}
-	rec.finish(id, isErr, errText)
-	e.emitToolEvent(agent.Event{
+	ms, timed := rec.finish(id, isErr, errText)
+	endEv := agent.Event{
 		Type: agent.EventToolEnd, ToolCallID: id, ToolName: name, Result: out, IsError: isErr, ParentToolCallID: parent,
-	})
-	e.DispatchEvent(runCtx, "tool_execution_end", map[string]any{
+	}
+	var duration *int
+	if timed {
+		duration = &ms
+		endEv.DurationMs = duration
+	}
+	e.emitToolEvent(endEv)
+	end := map[string]any{
 		"toolCallId": id, "toolName": name, "content": out, "isError": isErr, "parentToolCallId": parent,
-	})
+	}
+	putDuration(end, duration)
+	e.DispatchEvent(runCtx, "tool_execution_end", end)
 	res := map[string]any{"content": out, "isError": isErr, "toolCallId": id}
 	if len(structured) > 0 {
 		var v any
