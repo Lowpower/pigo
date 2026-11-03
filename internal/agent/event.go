@@ -32,6 +32,9 @@ type Msg struct {
 	Usage          *ai.Usage           `json:"usage,omitempty"`
 	NestedCalls    *ai.NestedToolCalls `json:"nestedCalls,omitempty"`
 	Structured     json.RawMessage     `json:"structuredContent,omitempty"`
+	// DurationMs is the recorded execution time. Nil means the tool did not run.
+	// A pointer to 0 means it finished in under a millisecond.
+	DurationMs *int `json:"durationMs,omitempty"`
 
 	// Images are user-message attachments.
 	Images []ai.ImageContent `json:"images,omitempty"`
@@ -70,6 +73,9 @@ type Event struct {
 	Args             map[string]any
 	Result           string
 	IsError          bool
+	// DurationMs is the recorded execution time for tool_execution_end.
+	// Nil omits the field. A pointer to 0 is a finished call under one millisecond.
+	DurationMs *int
 
 	// turn_end: the tool results produced this turn.
 	ToolResults []Msg

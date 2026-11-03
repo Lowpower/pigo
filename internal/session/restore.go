@@ -103,6 +103,7 @@ func RestoreAIMessages(entries []Entry) []ai.Message {
 				StructuredContent: rawField(e.Message, "structuredContent"),
 				Usage:             usageFromAny(payload["usage"]),
 				NestedCalls:       nestedFromAny(payload["nestedCalls"]),
+				DurationMs:        durationFromAny(payload["durationMs"]),
 			})
 		default:
 			content, images := parseUserContent(payload["content"])
@@ -125,6 +126,26 @@ func rawField(msg json.RawMessage, key string) json.RawMessage {
 		return nil
 	}
 	return append(json.RawMessage(nil), raw...)
+}
+
+func durationFromAny(v any) *int {
+	switch n := v.(type) {
+	case float64:
+		ms := int(n)
+		return &ms
+	case int:
+		ms := n
+		return &ms
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return nil
+		}
+		ms := int(i)
+		return &ms
+	default:
+		return nil
+	}
 }
 
 func usageFromAny(v any) *ai.Usage {

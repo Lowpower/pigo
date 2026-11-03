@@ -226,6 +226,7 @@ func agentMsgFromAI(m ai.Message) agent.Msg {
 			Usage:          m.Usage,
 			NestedCalls:    m.NestedCalls,
 			Structured:     append(json.RawMessage(nil), m.StructuredContent...),
+			DurationMs:     m.DurationMs,
 		}
 	default:
 		return agent.Msg{Role: agent.RoleUser, Text: m.Content, Images: m.Images}

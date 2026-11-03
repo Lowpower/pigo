@@ -262,8 +262,19 @@ func TestRestoreToolResultKeepsNestedUsageAndStructuredContent(t *testing.T) {
 
 	old := []byte(`{"role":"toolResult","toolCallId":"c1","toolName":"bash","content":"hello","isError":false}`)
 	msgs = RestoreAIMessages([]Entry{{Type: "message", Message: old}})
-	if msgs[0].Content != "hello" || msgs[0].Usage != nil || msgs[0].NestedCalls != nil || len(msgs[0].StructuredContent) != 0 {
+	if msgs[0].Content != "hello" || msgs[0].Usage != nil || msgs[0].NestedCalls != nil || len(msgs[0].StructuredContent) != 0 || msgs[0].DurationMs != nil {
 		t.Fatalf("old message = %+v", msgs[0])
+	}
+
+	zero := []byte(`{"role":"toolResult","toolCallId":"c0","toolName":"bash","content":"ok","isError":false,"durationMs":0}`)
+	msgs = RestoreAIMessages([]Entry{{Type: "message", Message: zero}})
+	if msgs[0].DurationMs == nil || *msgs[0].DurationMs != 0 {
+		t.Fatalf("zero duration = %v", msgs[0].DurationMs)
+	}
+	recorded := []byte(`{"role":"toolResult","toolCallId":"c15","toolName":"bash","content":"ok","isError":false,"durationMs":15}`)
+	msgs = RestoreAIMessages([]Entry{{Type: "message", Message: recorded}})
+	if msgs[0].DurationMs == nil || *msgs[0].DurationMs != 15 {
+		t.Fatalf("duration = %v, want 15", msgs[0].DurationMs)
 	}
 }
 

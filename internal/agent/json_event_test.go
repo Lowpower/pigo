@@ -102,6 +102,54 @@ func TestToJSONNestedToolEventIncludesParent(t *testing.T) {
 	}
 }
 
+func TestToJSONToolEndKeepsZeroDuration(t *testing.T) {
+	zero := 0
+	got, err := ToJSON(Event{
+		Type: EventToolEnd, ToolCallID: "c1", ToolName: "bash", Result: "ok", DurationMs: &zero,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(got)
+	var payload map[string]any
+	if json.Unmarshal(raw, &payload) != nil {
+		t.Fatal(string(raw))
+	}
+	if payload["durationMs"] != float64(0) {
+		t.Fatalf("durationMs = %v, want 0", payload["durationMs"])
+	}
+
+	got, err = ToJSON(Event{Type: EventToolEnd, ToolCallID: "c1", ToolName: "bash", Result: "skipped", IsError: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(got)
+	payload = map[string]any{}
+	if json.Unmarshal(raw, &payload) != nil {
+		t.Fatal(string(raw))
+	}
+	if _, ok := payload["durationMs"]; ok {
+		t.Fatalf("unrun tool included durationMs: %s", raw)
+	}
+}
+
+func TestMsgJSONKeepsZeroDuration(t *testing.T) {
+	zero := 0
+	raw, err := json.Marshal(msgJSON(Msg{
+		Role: RoleToolResult, ToolCallID: "c1", ToolName: "bash", Text: "ok", DurationMs: &zero,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if json.Unmarshal(raw, &payload) != nil {
+		t.Fatal(string(raw))
+	}
+	if payload["durationMs"] != float64(0) {
+		t.Fatalf("durationMs = %v, raw %s", payload["durationMs"], raw)
+	}
+}
+
 func TestToJSONAgentEndIncludesWillRetry(t *testing.T) {
 	got, err := ToJSON(Event{
 		Type: EventAgentEnd,

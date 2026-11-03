@@ -310,6 +310,58 @@ func TestLoopLengthStopDoesNotExecuteTools(t *testing.T) {
 	if !sawErr {
 		t.Fatal("expected error tool_end for truncated call")
 	}
+	for _, ev := range events {
+		if ev.Type == EventToolEnd && ev.DurationMs != nil {
+			t.Fatalf("truncated call recorded duration %d", *ev.DurationMs)
+		}
+	}
+}
+
+func TestLoopCopiesRecordedToolDuration(t *testing.T) {
+	zero := 0
+	exec := ToolFunc(func(_ context.Context, _ ToolCall) (string, bool) {
+		return "ok", false
+	})
+	events := Run(context.Background(), scriptedProvider(
+		toolCallMessage("tc1", "echo", map[string]any{}),
+		textMessage("done"),
+	), ai.Context{Messages: []ai.Message{{Role: ai.RoleUser, Content: "go"}}}, exec, Config{
+		Model: "test",
+		ToolResultMeta: func(call ToolCall) ResultMeta {
+			if call.ID != "tc1" {
+				return ResultMeta{}
+			}
+			return ResultMeta{DurationMs: &zero}
+		},
+	}).Collect()
+
+	var end Event
+	for _, ev := range events {
+		if ev.Type == EventToolEnd && ev.ToolCallID == "tc1" {
+			end = ev
+		}
+	}
+	if end.DurationMs == nil || *end.DurationMs != 0 {
+		t.Fatalf("tool_execution_end duration = %v, want 0", end.DurationMs)
+	}
+	last := events[len(events)-1]
+	var tool Msg
+	for _, m := range last.Messages {
+		if m.Role == RoleToolResult && m.ToolCallID == "tc1" {
+			tool = m
+		}
+	}
+	if tool.DurationMs == nil || *tool.DurationMs != 0 {
+		t.Fatalf("tool result duration = %v, want 0", tool.DurationMs)
+	}
+	restored := msgFromAI(ai.Message{Role: ai.RoleToolResult, Content: "ok", ToolCallID: "tc1", DurationMs: &zero})
+	if restored.DurationMs == nil || *restored.DurationMs != 0 {
+		t.Fatalf("msgFromAI dropped duration: %+v", restored.DurationMs)
+	}
+	back := MessagesFromTranscript([]Msg{tool})
+	if len(back) != 1 || back[0].DurationMs == nil || *back[0].DurationMs != 0 {
+		t.Fatalf("transcript duration = %+v", back)
+	}
 }
 
 func TestLoopInjectsSteeringBeforeNextLLMCall(t *testing.T) {

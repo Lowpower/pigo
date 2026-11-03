@@ -911,20 +911,32 @@ func (e *Engine) providerAuthStatus(id string) map[string]any {
 }
 
 // RenderTool asks a registered tool renderer for call/result text.
-func (e *Engine) RenderTool(phase, name string, args any, result string) string {
+// durationMs is the recorded execution time for a finished result. Nil omits
+// the field, which is the call phase and any result stored before durations
+// were recorded. A pointer to 0 is a finished call under one millisecond.
+func (e *Engine) RenderTool(phase, name string, args any, result string, durationMs *int) string {
 	e.mu.Lock()
 	h := e.toolRender[name]
 	e.mu.Unlock()
 	if h == nil {
 		return ""
 	}
-	res := h.SendHostEvent(context.Background(), "render.tool", map[string]any{
-		"phase": phase, "name": name, "args": args, "result": result,
-	}, true)
+	res := h.SendHostEvent(context.Background(), "render.tool", toolRenderPayload(phase, name, args, result, durationMs, e.Opts.Config.OutputPadN()), true)
 	if s := argString(res, "text"); s != "" {
 		return s
 	}
 	return argString(res, "markdown")
+}
+
+func toolRenderPayload(phase, name string, args any, result string, durationMs *int, outputPad int) map[string]any {
+	payload := map[string]any{
+		"phase": phase, "name": name, "args": args, "result": result,
+	}
+	if durationMs != nil {
+		payload["durationMs"] = *durationMs
+	}
+	payload["outputPad"] = outputPad
+	return payload
 }
 
 func modelsToAny(in []models.Model) []map[string]any {

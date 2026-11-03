@@ -129,18 +129,45 @@ func (r *Registry) List() []Tool {
 	return out
 }
 
-// Execute dispatches a tool call by name. It satisfies the shape expected by an
-// agent ToolExecutor adapter: Execute(ctx, name, args).
-func (r *Registry) Execute(ctx context.Context, name string, args map[string]any) (string, bool) {
-	t, ok := r.byName[name]
-	if !ok {
-		return "unknown tool: " + name, true
+// ReadyCall is a tool invocation that passed name lookup and argument checks.
+type ReadyCall struct {
+	tool Tool
+	args map[string]any
+}
+
+// Execute runs the tool body.
+func (c ReadyCall) Execute(ctx context.Context) (string, bool) {
+	if c.tool == nil {
+		return "", true
+	}
+	return c.tool.Execute(ctx, c.args)
+}
+
+// Ready prepares a call. ok is false when the tool is unknown or the arguments
+// are invalid; result is the error text and the tool body has not run.
+func (r *Registry) Ready(name string, args map[string]any) (call ReadyCall, result string, isError, ok bool) {
+	if r == nil {
+		return ReadyCall{}, "unknown tool: " + name, true, false
+	}
+	t, found := r.byName[name]
+	if !found {
+		return ReadyCall{}, "unknown tool: " + name, true, false
 	}
 	prepared, err := prepareToolArgs(t, args)
 	if err != nil {
-		return "invalid arguments: " + err.Error(), true
+		return ReadyCall{}, "invalid arguments: " + err.Error(), true, false
 	}
-	return t.Execute(ctx, prepared)
+	return ReadyCall{tool: t, args: prepared}, "", false, true
+}
+
+// Execute dispatches a tool call by name. It satisfies the shape expected by an
+// agent ToolExecutor adapter: Execute(ctx, name, args).
+func (r *Registry) Execute(ctx context.Context, name string, args map[string]any) (string, bool) {
+	call, result, isErr, ok := r.Ready(name, args)
+	if !ok {
+		return result, isErr
+	}
+	return call.Execute(ctx)
 }
 
 // schemaFor reflects a JSON Schema from a params struct, inlined (no $ref) and

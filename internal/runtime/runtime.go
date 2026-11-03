@@ -1040,7 +1040,7 @@ func (e *Engine) Executor() agent.ToolExecutor {
 		box := &ext.ToolResult{}
 		callCtx := ext.WithOutcome(ext.WithToolCallID(ctx, c.ID), box)
 		before := e.activeSnapshot()
-		result, isErr := e.Tools.Execute(callCtx, c.Name, c.Args)
+		result, isErr, duration := e.runRegisteredTool(callCtx, c.Name, c.Args)
 		snap := e.finishNested(c.ID)
 		usage := box.Usage
 		if snap.usage != nil {
@@ -1051,14 +1051,16 @@ func (e *Engine) Executor() agent.ToolExecutor {
 				usage = &sum
 			}
 		}
-		e.storeResultMeta(c.ID, agent.ResultMeta{Usage: usage, Nested: snap.calls, Structured: box.Structured})
+		e.storeResultMeta(c.ID, agent.ResultMeta{Usage: usage, Nested: snap.calls, Structured: box.Structured, DurationMs: duration})
 		if added := addedNames(before, e.activeSnapshot()); len(added) > 0 {
 			e.noteAddedTools(c.ID, added)
 		}
-		e.DispatchEvent(ctx, "tool_execution_end", map[string]any{
+		end := map[string]any{
 			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
 			"content": result, "isError": isErr,
-		})
+		}
+		putDuration(end, duration)
+		e.DispatchEvent(ctx, "tool_execution_end", end)
 		post := e.DispatchEvent(ctx, "tool_result", map[string]any{
 			"toolCallId": c.ID, "toolName": c.Name, "input": c.Args,
 			"content": result, "isError": isErr,
@@ -1072,6 +1074,27 @@ func (e *Engine) Executor() agent.ToolExecutor {
 		result = tools.NormalizeToolResultImages(result, e.Opts.Config.AutoResize(), e.currentModel().ImageResize())
 		return result, isErr
 	})
+}
+
+func (e *Engine) runRegisteredTool(ctx context.Context, name string, args map[string]any) (string, bool, *int) {
+	if e == nil || e.Tools == nil {
+		return "", true, nil
+	}
+	call, result, isErr, ok := e.Tools.Ready(name, args)
+	if !ok {
+		return result, isErr, nil
+	}
+	started := time.Now()
+	result, isErr = call.Execute(ctx)
+	ms := int(time.Since(started).Round(time.Millisecond) / time.Millisecond)
+	return result, isErr, &ms
+}
+
+func putDuration(payload map[string]any, ms *int) {
+	if payload == nil || ms == nil {
+		return
+	}
+	payload["durationMs"] = *ms
 }
 
 // PromptTools is the tool declaration that the next request would send.
@@ -1569,6 +1592,7 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 			if len(msg.Structured) > 0 {
 				payload["structuredContent"] = json.RawMessage(msg.Structured)
 			}
+			putDuration(payload, msg.DurationMs)
 			entry, err = e.Opts.Session.AppendMessage("toolResult", payload)
 		default:
 			entry, err = e.Opts.Session.AppendMessage("user", userSessionPayload(msg.Text, msg.Images))

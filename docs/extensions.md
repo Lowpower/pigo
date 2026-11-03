@@ -240,6 +240,13 @@ Render / complete: `registerMessageRenderer`, `registerEntryRenderer`,
 `autocomplete.query` / `command.complete`). Return `{text}` / `{markdown}` /
 `{items}`.
 
+`tool_execution_end` includes `durationMs` when the tool body ran, including
+`0`. The same number is stored on the `toolResult` message. A blocked call,
+an unknown tool, invalid arguments, and a call that never started omit it.
+`render.tool` always includes `outputPad` (the current setting, including `0`).
+`durationMs` is present only when the caller is rendering a finished result
+that has a recorded time. A call still in progress omits it.
+
 `ext.EventsOn` / `ext.EventsEmit` is a host-forwarded bus (extensions do not
 talk to each other).
 
