@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -501,7 +502,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	switch mode {
 	case "interactive":
 		if prompt != "" || len(promptImages) > 0 {
-			if err := eng.PrintText(ctx, out, history, prompt, promptImages); err != nil {
+			if err := eng.PrintText(ctx, out, history, prompt, promptImages); err != nil && !errors.Is(err, runtime.ErrOutputLimit) {
 				return err
 			}
 		}
