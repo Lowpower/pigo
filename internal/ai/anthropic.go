@@ -53,71 +53,126 @@ func NewAnthropicFromEnv() (*AnthropicClient, bool) {
 // StreamFn returns a StreamFn bound to this client.
 func (c *AnthropicClient) StreamFn() StreamFn {
 	return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
-		body, err := buildAnthropicRequest(reqCtx, opts)
-		if err != nil {
-			return nil, err
-		}
-		body = transformRequestBody(opts, body)
-		oauth := anthropicOAuth(c.APIKey, c.Headers)
-		if oauth {
-			body, err = applyClaudeCodeWire(body, opts)
+		var fallback *AssistantDiagnostic
+		for attempt := 0; attempt < 2; attempt++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			body, err := buildAnthropicRequest(reqCtx, opts)
 			if err != nil {
 				return nil, err
 			}
-		}
-
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("anthropic-version", anthropicVersion)
-		httpReq.Header.Set("accept", "text/event-stream")
-		for k, v := range c.Headers {
-			httpReq.Header.Set(k, v)
-		}
-		applyAnthropicAuth(httpReq, c.APIKey, anthropicExtraBetas(opts, len(reqCtx.Tools) > 0)...)
-		if opts.SessionID != "" && sendAnthropicSessionAffinity(opts) {
-			httpReq.Header.Set("x-session-affinity", opts.SessionID)
-		}
-		applyOpenCodeSessionHeader(httpReq.Header, c.Headers, opts)
-
-		client := c.HTTPClient
-		if client == nil {
-			client = defaultHTTPClient()
-		}
-		resp, err := doHTTP(client, httpReq, opts)
-		if err != nil {
-			return nil, err
-		}
-
-		model := opts.Model
-		provider := recordedProvider(opts, "anthropic")
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			msg, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			return errorStream(model, provider, fmt.Sprintf("anthropic API error %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))), nil
-		}
-
-		s := NewEventStream(16)
-		out := newOutputMessage(model, provider)
-		if midConvoEffortTurn(opts) {
-			out.ProviderThinkingLevel = activeMidConvoEffort(opts)
-		}
-		var restoreTool func(string) string
-		if oauth {
-			tools := reqCtx.Tools
-			restoreTool = func(name string) string {
-				return fromClaudeCodeName(name, tools)
+			body = transformRequestBody(opts, body)
+			oauth := anthropicOAuth(c.APIKey, c.Headers)
+			if oauth {
+				body, err = applyClaudeCodeWire(body, opts)
+				if err != nil {
+					return nil, err
+				}
 			}
+			hasPreferred := anthropicRequestHasPreferredStrict(reqCtx, opts)
+
+			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			httpReq.Header.Set("content-type", "application/json")
+			httpReq.Header.Set("anthropic-version", anthropicVersion)
+			httpReq.Header.Set("accept", "text/event-stream")
+			for k, v := range c.Headers {
+				httpReq.Header.Set(k, v)
+			}
+			applyAnthropicAuth(httpReq, c.APIKey, anthropicExtraBetas(opts, len(reqCtx.Tools) > 0)...)
+			if opts.SessionID != "" && sendAnthropicSessionAffinity(opts) {
+				httpReq.Header.Set("x-session-affinity", opts.SessionID)
+			}
+			applyOpenCodeSessionHeader(httpReq.Header, c.Headers, opts)
+
+			client := c.HTTPClient
+			if client == nil {
+				client = defaultHTTPClient()
+			}
+			resp, err := doHTTP(client, httpReq, opts)
+			if err != nil {
+				return nil, err
+			}
+
+			model := opts.Model
+			provider := recordedProvider(opts, "anthropic")
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				msg, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				if attempt == 0 {
+					if reason, ok := anthropicStrictToolLimitError(resp.StatusCode, msg); ok && hasPreferred {
+						fallback = &AssistantDiagnostic{
+							Type:      "anthropic_strict_tools_fallback",
+							Timestamp: time.Now().UnixMilli(),
+							Error:     &DiagnosticError{Message: reason},
+							Details:   &DiagnosticDetails{Reason: "strict_tool_limits_exceeded"},
+						}
+						opts.disablePreferredStrictTools = true
+						continue
+					}
+				}
+				return errorStreamWithDiagnostics(model, provider, fmt.Sprintf("anthropic API error %d: %s", resp.StatusCode, strings.TrimSpace(string(msg))), fallback), nil
+			}
+
+			s := NewEventStream(16)
+			out := newOutputMessage(model, provider)
+			if midConvoEffortTurn(opts) {
+				out.ProviderThinkingLevel = activeMidConvoEffort(opts)
+			}
+			if fallback != nil {
+				out.Diagnostics = append(out.Diagnostics, *fallback)
+			}
+			var restoreTool func(string) string
+			if oauth {
+				tools := reqCtx.Tools
+				restoreTool = func(name string) string {
+					return fromClaudeCodeName(name, tools)
+				}
+			}
+			go func() {
+				defer s.end()
+				defer func() { _ = resp.Body.Close() }()
+				streamAnthropicSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, newAnthropicPricing(opts), restoreTool)
+			}()
+			return s, nil
 		}
-		go func() {
-			defer s.end()
-			defer func() { _ = resp.Body.Close() }()
-			streamAnthropicSSE(ctx, resp.Body, out, s, opts.OnProviderStreamEvent, newAnthropicPricing(opts), restoreTool)
-		}()
-		return s, nil
+		return nil, fmt.Errorf("anthropic strict tool fallback did not finish")
 	}
+}
+
+// anthropicStrictToolLimitError reports an Anthropic 400 caused by strict tool
+// grammar, tool count, or union limits. The match is the parsed error message,
+// and the error type must be invalid_request_error.
+func anthropicStrictToolLimitError(status int, body []byte) (string, bool) {
+	if status != http.StatusBadRequest {
+		return "", false
+	}
+	var parsed struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", false
+	}
+	if parsed.Error.Type != "invalid_request_error" {
+		return "", false
+	}
+	msg := parsed.Error.Message
+	for _, sub := range []string{
+		"The compiled grammar is too large",
+		"Too many strict tools (",
+		"Schemas contains too many parameters with union types (",
+	} {
+		if strings.Contains(msg, sub) {
+			return msg, true
+		}
+	}
+	return "", false
 }
 
 // StreamAnthropicReader runs the SSE→event core against an already-open reader
@@ -204,11 +259,14 @@ func newOutputMessage(model, provider string) *AssistantMessage {
 	}
 }
 
-func errorStream(model, provider, msg string) *EventStream {
+func errorStreamWithDiagnostics(model, provider, msg string, diag *AssistantDiagnostic) *EventStream {
 	s := NewEventStream(1)
 	out := newOutputMessage(model, provider)
 	out.StopReason = StopError
 	out.ErrorMessage = msg
+	if diag != nil {
+		out.Diagnostics = []AssistantDiagnostic{*diag}
+	}
 	s.ch <- Event{Type: EventError, Reason: StopError, Message: out}
 	close(s.ch)
 	return s
@@ -393,17 +451,9 @@ func anthropicToolDefs(tools []Tool, deferLoading bool, opts Options) []map[stri
 		return nil
 	}
 	eager := supportsEagerToolInputStreaming(opts)
-	strictOK := supportsStrictTools(opts)
 	out := make([]map[string]any, 0, len(tools))
 	for _, t := range tools {
-		schema := t.Parameters
-		strict := false
-		if strictOK && toolStrict(t) && !anthropicStrictSchemaUnsupported(t.Parameters) {
-			if closed := strictToolParameters(t.Parameters); closed != nil {
-				schema = closed
-				strict = true
-			}
-		}
+		schema, strict, _ := anthropicToolSchema(t, opts)
 		tool := map[string]any{
 			"name":         t.Name,
 			"description":  t.Description,
@@ -421,6 +471,37 @@ func anthropicToolDefs(tools []Tool, deferLoading bool, opts Options) []map[stri
 		out = append(out, tool)
 	}
 	return out
+}
+
+// anthropicToolSchema decides the input schema and strict bit for one tool.
+// preferred is true only when this request sends strict for a prefer tool.
+func anthropicToolSchema(t Tool, opts Options) (schema map[string]any, strict, preferred bool) {
+	schema = t.Parameters
+	if !supportsStrictTools(opts) || !toolStrict(t) || anthropicStrictSchemaUnsupported(t.Parameters) {
+		return schema, false, false
+	}
+	if toolStrictPrefer(t) && opts.disablePreferredStrictTools {
+		return schema, false, false
+	}
+	closed := strictToolParameters(t.Parameters)
+	if closed == nil {
+		return schema, false, false
+	}
+	return closed, true, toolStrictPrefer(t)
+}
+
+// anthropicRequestHasPreferredStrict reports whether the tools on this request
+// include at least one prefer tool that is actually sent strict.
+func anthropicRequestHasPreferredStrict(reqCtx Context, opts Options) bool {
+	immediate, deferred := splitDeferredTools(reqCtx.Messages, reqCtx.Tools, supportsToolReferences(opts))
+	for _, list := range [][]Tool{immediate, deferred} {
+		for _, t := range list {
+			if _, _, preferred := anthropicToolSchema(t, opts); preferred {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func applyAnthropicTemperature(req map[string]any, opts Options) {

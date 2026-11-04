@@ -75,6 +75,17 @@ func toolStrict(t Tool) bool {
 	}
 }
 
+// toolStrictPrefer reports a JSON-schema tool that may be sent strict and
+// downgraded after a provider grammar rejection. required, true, and on stay
+// strict.
+func toolStrictPrefer(t Tool) bool {
+	cs := t.ConstrainedSampling
+	if cs == nil || !strings.EqualFold(strings.TrimSpace(cs.Type), "json_schema") {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(cs.Strict), "prefer")
+}
+
 // sendChatStrict reports whether Chat Completions should set function.strict.
 // Unknown providers stay off. Cerebras never sends the field.
 func sendChatStrict(t Tool, opts Options) bool {

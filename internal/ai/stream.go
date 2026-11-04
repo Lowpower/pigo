@@ -118,6 +118,10 @@ type Options struct {
 	// is normalized into an AssistantMessageEvent. data is raw JSON and is only
 	// valid for the duration of the call. Nil skips the observation path.
 	OnProviderStreamEvent func(data []byte)
+
+	// disablePreferredStrictTools is set for the one Anthropic retry after a
+	// strict-tool grammar rejection. It is not a caller option.
+	disablePreferredStrictTools bool
 }
 
 // StreamFn is the spine abstraction: given a request context it returns a stream

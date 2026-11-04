@@ -117,6 +117,11 @@ type InputTransformation struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// DiagnosticError is the provider error recorded on a recovery diagnostic.
+type DiagnosticError struct {
+	Message string `json:"message,omitempty"`
+}
+
 // DiagnosticDetails is the payload of an assistant diagnostic.
 type DiagnosticDetails struct {
 	Transformations []InputTransformation `json:"transformations,omitempty"`
@@ -125,6 +130,8 @@ type DiagnosticDetails struct {
 	Status    int    `json:"status,omitempty"`
 	ErrorCode string `json:"errorCode,omitempty"`
 	RequestID string `json:"requestId,omitempty"`
+	// Reason is a stable recovery code, such as strict_tool_limits_exceeded.
+	Reason string `json:"reason,omitempty"`
 }
 
 // AssistantDiagnostic is one persisted provider diagnostic on an assistant message.
@@ -132,6 +139,7 @@ type AssistantDiagnostic struct {
 	Type      string             `json:"type"`
 	Timestamp int64              `json:"timestamp"`
 	Details   *DiagnosticDetails `json:"details,omitempty"`
+	Error     *DiagnosticError   `json:"error,omitempty"`
 }
 
 // droppedThinkingCount is the number of thinking_dropped transformations on msg.
