@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,7 +72,7 @@ type Config struct {
 	DefaultProjectTrust       string                `mapstructure:"defaultProjectTrust"`
 	SessionDir                string                `mapstructure:"sessionDir"`
 	SessionShareDestination   string                `mapstructure:"sessionShareDestination"`
-	QuietStartupFlag          *bool                 `mapstructure:"quietStartup"`
+	QuietStartupFlag          any                   `mapstructure:"quietStartup"`
 	HTTPProxy                 string                `mapstructure:"httpProxy"`
 	EnableSkillCommands       *bool                 `mapstructure:"enableSkillCommands"`
 	HideThinkingBlock         *bool                 `mapstructure:"hideThinkingBlock"`
@@ -227,9 +228,43 @@ func applyNestedCompaction(cfg *Config) {
 	}
 }
 
-// QuietStartup reports whether verbose startup listings are suppressed (default false).
+// QuietStartup reports whether startup output is fully suppressed.
+// Unset and false keep the full listing. Only boolean true hides it.
 func (c Config) QuietStartup() bool {
-	return c.QuietStartupFlag != nil && *c.QuietStartupFlag
+	mode, ok := c.quietStartupMode()
+	return ok && mode == "true"
+}
+
+// ShowStartupHeader reports whether the version and key-hint header is shown.
+// Hidden only when quietStartup is true.
+func (c Config) ShowStartupHeader() bool {
+	return !c.QuietStartup()
+}
+
+// ShowStartupDetails reports whether the model scope and loaded-resource
+// listing are shown. Hidden for true and "header".
+func (c Config) ShowStartupDetails() bool {
+	mode, ok := c.quietStartupMode()
+	if !ok {
+		return true
+	}
+	return mode == "false"
+}
+
+// quietStartupMode is "false", "true", or "header". ok is false when unset.
+func (c Config) quietStartupMode() (string, bool) {
+	switch v := c.QuietStartupFlag.(type) {
+	case bool:
+		if v {
+			return "true", true
+		}
+		return "false", true
+	case string:
+		if v == "header" {
+			return "header", true
+		}
+	}
+	return "", false
 }
 
 // SkillCommandsEnabled reports whether skills register as /skill:name (default true).
@@ -584,6 +619,13 @@ func Load(configDir string) (Config, error) {
 		if present {
 			cfg.SessionShareDestination = dest
 		}
+		q, qPresent, qErr := quietStartupIn(file)
+		if qPresent && qErr != nil {
+			return cfg, qErr
+		}
+		if qPresent {
+			cfg.QuietStartupFlag = q
+		}
 	}
 	if cfg.SessionShareDestination != "" && !validSessionShareDestination(cfg.SessionShareDestination) {
 		return cfg, invalidSessionShareDestination(cfg.SessionShareDestination)
@@ -679,6 +721,42 @@ func sessionShareDestinationIn(raw []byte) (value string, present bool, err erro
 		return "", true, invalidSessionShareDestination(s)
 	}
 	return s, true, nil
+}
+
+func invalidQuietStartup(shown string) error {
+	if shown == "" {
+		return errors.New(`invalid quietStartup: expected true, false, or "header"`)
+	}
+	return fmt.Errorf(`invalid quietStartup %s: expected true, false, or "header"`, shown)
+}
+
+// quietStartupIn reads the raw settings key.
+// present is false when the key is absent or the file is not a JSON object.
+func quietStartupIn(raw []byte) (value any, present bool, err error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(bom.Strip(raw), &doc); err != nil {
+		return nil, false, err
+	}
+	v, ok := doc["quietStartup"]
+	if !ok {
+		return nil, false, nil
+	}
+	trimmed := bytes.TrimSpace(v)
+	if string(trimmed) == "null" {
+		return nil, true, invalidQuietStartup("null")
+	}
+	var b bool
+	if err := json.Unmarshal(trimmed, &b); err == nil {
+		return b, true, nil
+	}
+	var s string
+	if err := json.Unmarshal(trimmed, &s); err == nil {
+		if s == "header" {
+			return s, true, nil
+		}
+		return nil, true, invalidQuietStartup(strconv.Quote(s))
+	}
+	return nil, true, invalidQuietStartup(string(trimmed))
 }
 
 func fillPackagesFromFile(configDir string, cfg *Config) {
@@ -862,7 +940,7 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 		existing["sessionDir"] = cfg.SessionDir
 	}
 	if cfg.QuietStartupFlag != nil {
-		existing["quietStartup"] = *cfg.QuietStartupFlag
+		existing["quietStartup"] = cfg.QuietStartupFlag
 	}
 	if cfg.HTTPProxy != "" {
 		existing["httpProxy"] = cfg.HTTPProxy

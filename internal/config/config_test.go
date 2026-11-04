@@ -1117,3 +1117,94 @@ func TestApplyProjectSessionShareDestination(t *testing.T) {
 		t.Fatalf("invalid project err=%v", err)
 	}
 }
+
+func TestLoadQuietStartupModes(t *testing.T) {
+	cases := []struct {
+		raw     string
+		header  bool
+		details bool
+		quiet   bool
+		saved   string
+	}{
+		{raw: `{}`, header: true, details: true},
+		{raw: `{"quietStartup":false}`, header: true, details: true, saved: `"quietStartup": false`},
+		{raw: `{"quietStartup":true}`, header: false, details: false, quiet: true, saved: `"quietStartup": true`},
+		{raw: `{"quietStartup":"header"}`, header: true, details: false, saved: `"quietStartup": "header"`},
+	}
+	for _, tc := range cases {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(tc.raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(dir)
+		if err != nil {
+			t.Fatalf("raw %s: %v", tc.raw, err)
+		}
+		if cfg.ShowStartupHeader() != tc.header || cfg.ShowStartupDetails() != tc.details || cfg.QuietStartup() != tc.quiet {
+			t.Fatalf("raw %s header=%v details=%v quiet=%v", tc.raw, cfg.ShowStartupHeader(), cfg.ShowStartupDetails(), cfg.QuietStartup())
+		}
+		if tc.saved == "" {
+			continue
+		}
+		if err := Save(dir, cfg); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), tc.saved) {
+			t.Fatalf("raw %s saved %s", tc.raw, b)
+		}
+	}
+}
+
+func TestLoadQuietStartupRejectsInvalid(t *testing.T) {
+	for _, raw := range []string{
+		`{"quietStartup":"yes"}`,
+		`{"quietStartup":"true"}`,
+		`{"quietStartup":"Header"}`,
+		`{"quietStartup":1}`,
+		`{"quietStartup":null}`,
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "quietStartup") {
+			t.Fatalf("raw %s err=%v", raw, err)
+		}
+	}
+}
+
+func TestApplyProjectQuietStartupHeader(t *testing.T) {
+	user := Config{QuietStartupFlag: true}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cwd, ".pigo", "settings.json")
+	if err := os.WriteFile(path, []byte(`{"quietStartup":"header"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	untrusted, err := ApplyProject(user, cwd, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if untrusted.ShowStartupHeader() || !untrusted.QuietStartup() {
+		t.Fatalf("untrusted quiet=%v header=%v", untrusted.QuietStartup(), untrusted.ShowStartupHeader())
+	}
+	got, err := ApplyProject(user, cwd, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.ShowStartupHeader() || got.ShowStartupDetails() || got.QuietStartup() {
+		t.Fatalf("trusted header=%v details=%v quiet=%v flag=%#v", got.ShowStartupHeader(), got.ShowStartupDetails(), got.QuietStartup(), got.QuietStartupFlag)
+	}
+	if err := os.WriteFile(path, []byte(`{"theme":"light","quietStartup":"yes"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyProject(user, cwd, true); err == nil || !strings.Contains(err.Error(), "quietStartup") {
+		t.Fatalf("invalid project err=%v", err)
+	}
+}

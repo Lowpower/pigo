@@ -230,8 +230,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		}
 	}
 	if f.verbose {
-		off := false
-		cfg.QuietStartupFlag = &off
+		cfg.QuietStartupFlag = false
 	}
 	apiKeyProvider := ""
 	if f.apiKey != "" {
@@ -315,8 +314,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		}
 	}
 	if f.verbose {
-		off := false
-		cfg.QuietStartupFlag = &off
+		cfg.QuietStartupFlag = false
 	}
 	applyHTTPProxy(cfg.HTTPProxy)
 	shell.SetPath(cfg.ShellPath)

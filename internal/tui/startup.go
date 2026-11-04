@@ -12,13 +12,11 @@ import (
 	"github.com/Lowpower/pigo/internal/version"
 )
 
-func (m Model) showStartupListing() bool {
-	return !m.cfg.QuietStartup()
-}
-
 func (m Model) startupView() string {
 	warnings := m.skillWarningBlock()
-	if !m.showStartupListing() {
+	showHeader := m.cfg.ShowStartupHeader()
+	showDetails := m.cfg.ShowStartupDetails()
+	if !showHeader && !showDetails {
 		return warnings
 	}
 	var b strings.Builder
@@ -26,14 +24,18 @@ func (m Model) startupView() string {
 		b.WriteString(warnings)
 		b.WriteString("\n\n")
 	}
-	b.WriteString(m.startupHeader())
-	b.WriteString("\n\n")
-	if line := m.scopedModelsLine(); line != "" {
-		b.WriteString(m.metaStyle.Render(line))
+	if showHeader {
+		b.WriteString(m.startupHeader())
 		b.WriteString("\n\n")
 	}
-	if res := m.startupResources(); res != "" {
-		b.WriteString(res)
+	if showDetails {
+		if line := m.scopedModelsLine(); line != "" {
+			b.WriteString(m.metaStyle.Render(line))
+			b.WriteString("\n\n")
+		}
+		if res := m.startupResources(); res != "" {
+			b.WriteString(res)
+		}
 	}
 	return b.String()
 }
