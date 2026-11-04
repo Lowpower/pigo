@@ -20,8 +20,10 @@ copies the selection; otherwise `Ctrl+X` copies it.
 A new interactive session shows a startup header (version, compact key hints)
 and loaded resources (`SYSTEM.md` / `APPEND_SYSTEM.md`, `AGENTS.md` /
 `CLAUDE.md`, skills, prompt templates, extensions, themes). `Ctrl+O` expands
-the full shortcut list and resource paths. `quietStartup` hides this listing; `--verbose` forces it on. Changelog
-notices still appear either way.
+the full shortcut list and resource paths. `quietStartup` accepts `false`
+(default, full listing), `true` (hide the startup block), or `"header"` (keep
+the version and key hints, hide the model scope and loaded resources).
+`--verbose` forces the full listing. Changelog notices still appear either way.
 
 ## Root flags
 

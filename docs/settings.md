@@ -41,7 +41,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `fullscreenScrollbar` | `auto` \| `always` \| `hidden` (bool true/false still accepted; unset is `auto`) |
 | `fullscreenCopyOnSelect` | Fullscreen only: copy the mouse selection on release (default true). When false, the highlight stays and `Ctrl+X` copies it |
 | `warnings.anthropicExtraUsage` | TUI notice when Anthropic subscription/OAuth auth is active (default true) |
-| `quietStartup` | Skip startup notes |
+| `quietStartup` | Startup listing. `false` (default) shows it, `true` hides it, `"header"` keeps the version and key hints and hides the model scope and loaded resources |
 | `httpProxy` / `httpIdleTimeoutMs` / `websocketConnectTimeoutMs` | Networking |
 | `hideThinkingBlock` / `showCacheMissNotices` | Display |
 | `cacheWarming` | `off` \| `streaming` \| `idle` (default `streaming`). Global file only. Replays an eligible request with a 1-token output cap at 90% of the model's prompt-cache lifetime, when expected savings are at least $0.05. `streaming` stops when the agent settles (60 minute cap). `idle` continues between runs (30 minute cap). |

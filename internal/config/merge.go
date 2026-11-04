@@ -42,7 +42,7 @@ type projectOverlay struct {
 	EnabledModels             []string               `json:"enabledModels"`
 	SessionDir                string                 `json:"sessionDir"`
 	SessionShareDestination   string                 `json:"sessionShareDestination"`
-	QuietStartup              *bool                  `json:"quietStartup"`
+	QuietStartup              any                    `json:"quietStartup"`
 	HTTPProxy                 string                 `json:"httpProxy"`
 	EnableSkillCommands       *bool                  `json:"enableSkillCommands"`
 	HideThinkingBlock         *bool                  `json:"hideThinkingBlock"`
@@ -83,6 +83,10 @@ func ApplyProject(user Config, cwd string, trusted bool) (Config, error) {
 	if present && destErr != nil {
 		return user, destErr
 	}
+	q, qPresent, qErr := quietStartupIn(b)
+	if qPresent && qErr != nil {
+		return user, qErr
+	}
 	var over projectOverlay
 	if err := json.Unmarshal(bom.Strip(b), &over); err != nil {
 		return user, nil
@@ -90,6 +94,9 @@ func ApplyProject(user Config, cwd string, trusted bool) (Config, error) {
 	out := applyOverlay(user, over)
 	if present {
 		out.SessionShareDestination = dest
+	}
+	if qPresent {
+		out.QuietStartupFlag = q
 	}
 	return out, nil
 }

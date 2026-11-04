@@ -49,8 +49,7 @@ func TestStartupHeaderCompact(t *testing.T) {
 
 func TestQuietStartupHidesHeaderAndResources(t *testing.T) {
 	m := New(testCfg())
-	on := true
-	m.cfg.QuietStartupFlag = &on
+	m.cfg.QuietStartupFlag = true
 	m.engine = &runtime.Engine{
 		Skills: []skills.Skill{{Name: "quiet-marker", FilePath: "/tmp/skill/SKILL.md"}},
 	}
@@ -60,6 +59,42 @@ func TestQuietStartupHidesHeaderAndResources(t *testing.T) {
 	}
 	if strings.Contains(view, "[Skills]") || strings.Contains(view, "quiet-marker") {
 		t.Fatalf("quiet startup still showed skills:\n%s", view)
+	}
+}
+
+func TestQuietStartupHeaderKeepsHeaderHidesResources(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cwd := t.TempDir()
+	m := New(testCfg())
+	m.cfg.QuietStartupFlag = "header"
+	m.engine = &runtime.Engine{
+		Opts:      runtime.Options{Cwd: cwd},
+		Skills:    []skills.Skill{{Name: "header-marker", FilePath: filepath.Join(home, "skills", "header", "SKILL.md")}},
+		Templates: []prompt.Template{{Name: "review", FilePath: filepath.Join(home, "prompts", "review.md")}},
+		Scoped:    []models.Spec{{Model: models.Model{Provider: "anthropic", ID: "claude-sonnet-4"}, Thinking: "high"}},
+	}
+	view := m.View()
+	if !strings.Contains(view, "v"+version.Version) || !strings.Contains(view, "interrupt") {
+		t.Fatalf("header mode missing startup header:\n%s", view)
+	}
+	if !strings.Contains(view, "full startup help and loaded resources") {
+		t.Fatalf("header mode changed the compact hint:\n%s", view)
+	}
+	if strings.Contains(view, "Model scope:") || strings.Contains(view, "[Skills]") || strings.Contains(view, "header-marker") {
+		t.Fatalf("header mode showed model scope or skills:\n%s", view)
+	}
+	if strings.Contains(view, "[Prompts]") || strings.Contains(view, "review") {
+		t.Fatalf("header mode showed prompts:\n%s", view)
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	view = m.View()
+	if !strings.Contains(view, "to interrupt") {
+		t.Fatalf("header mode ctrl+o should expand key hints:\n%s", view)
+	}
+	if strings.Contains(view, "[Skills]") || strings.Contains(view, "header-marker") || strings.Contains(view, "Model scope:") {
+		t.Fatalf("header mode ctrl+o revealed resources:\n%s", view)
 	}
 }
 
@@ -98,8 +133,7 @@ func TestStartupShowsSkillWarningEvenWhenQuiet(t *testing.T) {
 		t.Fatalf("startup header missing:\n%s", view)
 	}
 
-	on := true
-	m.cfg.QuietStartupFlag = &on
+	m.cfg.QuietStartupFlag = true
 	quiet := m.View()
 	quietFlat := strings.ReplaceAll(quiet, "\n", "")
 	if !strings.Contains(quietFlat, "has no description") || !strings.Contains(quietFlat, path) {
