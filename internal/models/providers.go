@@ -40,7 +40,7 @@ var extraProviders = []extraProvider{
 	{ID: "zai-coding-cn", Name: "Z.AI Coding CN API key", DefaultAPI: "openai-completions", DefaultID: "glm-5.3", BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4", Env: []string{"ZAI_CODING_CN_API_KEY"}},
 	{ID: "xai", Name: "xAI API key", DefaultAPI: "openai-responses", DefaultID: "grok-4.7", BaseURL: "https://api.x.ai/v1", Env: []string{"XAI_API_KEY", "GROK_API_KEY"}},
 	{ID: "fireworks", Name: "Fireworks API key", DefaultAPI: "anthropic-messages", DefaultID: "accounts/fireworks/models/kimi-k3", BaseURL: "https://api.fireworks.ai/inference", Env: []string{"FIREWORKS_API_KEY"}},
-	{ID: "opencode-go", Name: "OpenCode API key", DefaultAPI: "openai-completions", DefaultID: "kimi-k3", BaseURL: "https://opencode.ai/zen/go/v1", Env: []string{"OPENCODE_API_KEY"}},
+	{ID: "opencode-go", Name: "OpenCode API key", DefaultAPI: "openai-completions", DefaultID: "kimi-k3", BaseURL: "https://opencode.ai/inference/go", Env: []string{"OPENCODE_API_KEY"}},
 	{ID: "github-copilot", Name: "GitHub Copilot token", DefaultAPI: "openai-completions", DefaultID: "gpt-5.4", BaseURL: "https://api.individual.githubcopilot.com", Env: []string{"COPILOT_GITHUB_TOKEN"}, Headers: map[string]string{
 		"User-Agent":             "GitHubCopilotChat/0.35.0",
 		"Editor-Version":         "vscode/1.107.0",
@@ -71,6 +71,12 @@ func kimiCodingPlaceholderCompat() *Compat {
 
 func registerExtraProviders() {
 	for _, p := range extraProviders {
+		model := Model{Provider: p.ID, ID: p.DefaultID, API: p.DefaultAPI}
+		// pi v1.3.0 keeps this Codex row at 500K. models.dev does not list the provider.
+		if p.ID == "openai-codex" && p.DefaultID == "gpt-6.1-sol" {
+			model.ContextWindow = 500000
+			model.MaxTokens = 128000
+		}
 		spec := ProviderSpec{
 			ID:         p.ID,
 			Name:       p.Name,
@@ -79,11 +85,7 @@ func registerExtraProviders() {
 			DefaultAPI: p.DefaultAPI,
 			DefaultID:  p.DefaultID,
 			Headers:    p.Headers,
-			Models: []Model{{
-				Provider: p.ID,
-				ID:       p.DefaultID,
-				API:      p.DefaultAPI,
-			}},
+			Models:     []Model{model},
 		}
 		if p.ID == "github-copilot" {
 			spec.FilterModels = filterByAvailableIDs(p.ID)
