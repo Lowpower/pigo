@@ -344,6 +344,7 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 	}
 	return func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {
 		opts = e.withSamplingOpts(opts)
+		req = e.withToolTimeline(req, opts)
 		if cachewarm.IsRefresh(ctx) {
 			opts.MaxTokens = 1
 			return fn(ctx, req, opts)
@@ -363,7 +364,7 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 		if err != nil {
 			return nil, err
 		}
-		req = next
+		req = e.withToolTimeline(next, opts)
 		if e.hasEvent("before_provider_headers") {
 			res := e.DispatchEvent(ctx, "before_provider_headers", map[string]any{"headers": map[string]any{}})
 			opts.ExtraHeaders = stringMap(res["headers"])

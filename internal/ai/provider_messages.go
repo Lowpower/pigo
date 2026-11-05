@@ -9,15 +9,32 @@ import (
 // shape. Assistant tool calls become tool_use blocks; toolResult becomes a user
 // message with tool_result.
 func AnthropicWireMessages(msgs []Message) []map[string]any {
-	return anthropicWireMessages(msgs, false, nil, nil, "", false)
+	return anthropicWireMessages(msgs, false, nil, nil, "", false, Options{}, false)
 }
 
-func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]struct{}, levels map[int]string, provider string, allowEmptySignature bool) []map[string]any {
+func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]struct{}, levels map[int]string, provider string, allowEmptySignature bool, opts Options, emitInline bool) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	loaded := map[string]struct{}{}
+	var pending []map[string]any
+	flushPending := func() {
+		if len(pending) == 0 {
+			return
+		}
+		out = append(out, pending...)
+		pending = nil
+	}
 	for i := 0; i < len(msgs); i++ {
 		m := msgs[i]
+		if InlineToolSystem(m) {
+			if emitInline {
+				if msg := inlineToolMessage(m, opts); msg != nil {
+					pending = append(pending, msg)
+				}
+			}
+			continue
+		}
 		if m.Assistant != nil {
+			flushPending()
 			blocks := anthropicContent(m.Assistant, allowEmptySignature)
 			if len(blocks) == 0 {
 				continue
@@ -73,7 +90,47 @@ func anthropicWireMessages(msgs []Message, emitRefs bool, deferred map[string]st
 		}
 		out = append(out, map[string]any{"role": role, "content": anthropicUserContent(m)})
 	}
+	flushPending()
 	return out
+}
+
+func inlineToolMessage(m Message, opts Options) map[string]any {
+	redefined := map[string]struct{}{}
+	for _, tool := range m.ToolsAdded {
+		if tool.Name != "" {
+			redefined[tool.Name] = struct{}{}
+		}
+	}
+	var blocks []map[string]any
+	for _, name := range m.ToolsRemoved {
+		if name == "" {
+			continue
+		}
+		if _, ok := redefined[name]; ok {
+			continue
+		}
+		blocks = append(blocks, map[string]any{
+			"type": "tool_removal",
+			"tool": map[string]any{"type": "tool_reference", "name": name},
+		})
+	}
+	for _, tool := range m.ToolsAdded {
+		if tool.Name == "" {
+			continue
+		}
+		defs := anthropicToolDefs([]Tool{tool}, false, opts)
+		if len(defs) == 0 {
+			continue
+		}
+		blocks = append(blocks, map[string]any{
+			"type": "tool_addition",
+			"tool": map[string]any{"type": "tool_definition", "definition": defs[0]},
+		})
+	}
+	if len(blocks) == 0 {
+		return nil
+	}
+	return map[string]any{"role": RoleSystem, "content": blocks}
 }
 
 func isAnthropicToolResult(m Message) bool {

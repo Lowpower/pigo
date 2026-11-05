@@ -88,6 +88,10 @@ func (e *Engine) warmContextCurrent() bool {
 		return true
 	}
 	cur := session.ModelMessages(session.ContextEntries(e.Opts.Session))
+	cur = e.withToolTimeline(ai.Context{Messages: cur}, ai.Options{
+		Provider: e.Provider,
+		Model:    e.Opts.Config.ResolvedModel(),
+	}).Messages
 	return messagesPrefix(base, cur)
 }
 

@@ -10,6 +10,7 @@ import (
 const (
 	midConvoOutputConfigBeta    = "mid-conversation-output-config-2026-07-01"
 	thinkingBindingControlsBeta = "thinking-binding-controls-2026-08-01"
+	inlineToolsBeta             = "inline-tools-2026-09-15"
 
 	affinityCompletions = "completions"
 	affinityResponses   = "responses"
@@ -259,6 +260,16 @@ func sendAnthropicSessionAffinity(opts Options) bool {
 func midConvoEffort(opts Options) bool {
 	c := lookupCompat(opts)
 	return c != nil && c.SupportsMidConvoEffort
+}
+
+func supportsMidConvoSystemMessages(opts Options) bool {
+	c := lookupCompat(opts)
+	return c != nil && c.SupportsMidConvoSystemMessages
+}
+
+func supportsMidConvoToolChanges(opts Options) bool {
+	c := lookupCompat(opts)
+	return c != nil && c.SupportsMidConvoToolChanges
 }
 
 // midConvoEffortTurn is a managed-effort request that actually sends adaptive thinking.
