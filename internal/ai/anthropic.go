@@ -82,7 +82,7 @@ func (c *AnthropicClient) StreamFn() StreamFn {
 			for k, v := range c.Headers {
 				httpReq.Header.Set(k, v)
 			}
-			applyAnthropicAuth(httpReq, c.APIKey, anthropicExtraBetas(opts, len(reqCtx.Tools) > 0)...)
+			applyAnthropicAuth(httpReq, c.APIKey, anthropicExtraBetas(opts, reqCtx)...)
 			if opts.SessionID != "" && sendAnthropicSessionAffinity(opts) {
 				httpReq.Header.Set("x-session-affinity", opts.SessionID)
 			}
@@ -237,12 +237,23 @@ func isAnthropicOAuthToken(key string) bool {
 
 const fineGrainedToolStreamingBeta = "fine-grained-tool-streaming-2025-05-14"
 
+// inlineDeferredPlaceholder is declared on every native tool-change request,
+// including the first, so Anthropic's hidden tool-change scaffolding stays in
+// the cached prefix. pi v1.3.0 uses this name.
+const inlineDeferredPlaceholder = "__pi_deferred_placeholder__"
+
 // anthropicExtraBetas adds the legacy tool-streaming beta only when tools are
-// present and eager input streaming is off. A caller-supplied anthropic-beta
-// header is left in place; these values are appended.
-func anthropicExtraBetas(opts Options, hasTools bool) []string {
+// present and eager input streaming is off. Native inline tool changes also
+// add inline-tools-2026-09-15 on every request, including ones whose tool set
+// did not change. A caller-supplied anthropic-beta header is left in place;
+// these values are appended.
+func anthropicExtraBetas(opts Options, reqCtx Context) []string {
 	betas := midConvoBetas(opts)
-	if hasTools && !supportsEagerToolInputStreaming(opts) {
+	_, native := anthropicInlineInitialTools(reqCtx.Messages, opts)
+	if native {
+		betas = append(betas, inlineToolsBeta)
+	}
+	if (len(reqCtx.Tools) > 0 || native) && !supportsEagerToolInputStreaming(opts) {
 		betas = append(betas, fineGrainedToolStreamingBeta)
 	}
 	return betas
@@ -286,6 +297,12 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		API:      "anthropic-messages",
 		Model:    opts.Model,
 	}, normalizeSanitizedToolCallID)
+	initial, native := anthropicInlineInitialTools(replayed, opts)
+	wireMsgs := replayed
+	if native {
+		wireMsgs = dropFirstInlineToolSystem(replayed)
+		enabled = false
+	}
 	var levels map[int]string
 	if midConvoEffortTurn(opts) {
 		levels = map[int]string{}
@@ -293,9 +310,9 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 	var msgs []map[string]any
 	emptySig := allowEmptySignature(opts)
 	if enabled {
-		msgs = anthropicWireMessages(replayed, true, deferredNameSet(deferred), levels, provider, emptySig)
+		msgs = anthropicWireMessages(wireMsgs, true, deferredNameSet(deferred), levels, provider, emptySig, opts, false)
 	} else {
-		msgs = anthropicWireMessages(replayed, false, nil, levels, provider, emptySig)
+		msgs = anthropicWireMessages(wireMsgs, false, nil, levels, provider, emptySig, opts, native)
 	}
 	if midConvoEffortTurn(opts) {
 		msgs = insertThinkingLevelMessages(msgs, levels, activeMidConvoEffort(opts))
@@ -320,7 +337,15 @@ func buildAnthropicRequest(reqCtx Context, opts Options) ([]byte, error) {
 		}
 		req["system"] = []map[string]any{sys}
 	}
-	if len(immediate) > 0 || len(deferred) > 0 {
+	if native {
+		tools := anthropicToolDefs(initial, false, opts)
+		if cc := anthropicCacheControl(opts); cc != nil && supportsCacheControlOnTools(opts) && len(tools) > 0 {
+			tools[len(tools)-1]["cache_control"] = cc
+		}
+		tools = append(tools, inlineDeferredPlaceholderTool())
+		req["tools"] = tools
+		req["tool_choice"] = map[string]any{"type": "auto"}
+	} else if len(immediate) > 0 || len(deferred) > 0 {
 		tools := anthropicToolDefs(immediate, false, opts)
 		if cc := anthropicCacheControl(opts); cc != nil && supportsCacheControlOnTools(opts) && len(tools) > 0 {
 			tools[len(tools)-1]["cache_control"] = cc
@@ -493,8 +518,19 @@ func anthropicToolSchema(t Tool, opts Options) (schema map[string]any, strict, p
 // anthropicRequestHasPreferredStrict reports whether the tools on this request
 // include at least one prefer tool that is actually sent strict.
 func anthropicRequestHasPreferredStrict(reqCtx Context, opts Options) bool {
-	immediate, deferred := splitDeferredTools(reqCtx.Messages, reqCtx.Tools, supportsToolReferences(opts))
-	for _, list := range [][]Tool{immediate, deferred} {
+	var lists [][]Tool
+	if initial, ok := anthropicInlineInitialTools(reqCtx.Messages, opts); ok {
+		lists = append(lists, initial)
+		for _, m := range reqCtx.Messages {
+			if InlineToolSystem(m) {
+				lists = append(lists, m.ToolsAdded)
+			}
+		}
+	} else {
+		immediate, deferred := splitDeferredTools(reqCtx.Messages, reqCtx.Tools, supportsToolReferences(opts))
+		lists = [][]Tool{immediate, deferred}
+	}
+	for _, list := range lists {
 		for _, t := range list {
 			if _, _, preferred := anthropicToolSchema(t, opts); preferred {
 				return true
@@ -502,6 +538,53 @@ func anthropicRequestHasPreferredStrict(reqCtx Context, opts Options) bool {
 		}
 	}
 	return false
+}
+
+// anthropicInlineInitialTools is the frozen top-level tool list for native
+// inline tool changes. The first tool-bearing system message must contain at
+// least one tool. Later messages stay in the transcript as patches.
+func anthropicInlineInitialTools(msgs []Message, opts Options) ([]Tool, bool) {
+	if !supportsMidConvoSystemMessages(opts) || !supportsMidConvoToolChanges(opts) {
+		return nil, false
+	}
+	for _, m := range msgs {
+		if m.Assistant != nil || m.Role != RoleSystem {
+			continue
+		}
+		// The first system message is the baseline. Text there means it
+		// declared no tools, so later additions stay on the top-level list.
+		if !InlineToolSystem(m) || len(m.ToolsAdded) == 0 {
+			return nil, false
+		}
+		return append([]Tool(nil), m.ToolsAdded...), true
+	}
+	return nil, false
+}
+
+func dropFirstInlineToolSystem(msgs []Message) []Message {
+	for i, m := range msgs {
+		if !InlineToolSystem(m) {
+			continue
+		}
+		out := make([]Message, 0, len(msgs)-1)
+		out = append(out, msgs[:i]...)
+		out = append(out, msgs[i+1:]...)
+		return out
+	}
+	return msgs
+}
+
+func inlineDeferredPlaceholderTool() map[string]any {
+	return map[string]any{
+		"name":        inlineDeferredPlaceholder,
+		"description": "Reserved placeholder. Never available. Never call this.",
+		"input_schema": map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+			"required":   []any{},
+		},
+		"defer_loading": true,
+	}
 }
 
 func applyAnthropicTemperature(req map[string]any, opts Options) {
@@ -577,7 +660,10 @@ func applyAnthropicCacheControl(msgs []map[string]any, opts Options) {
 	}
 	for i := len(msgs) - 1; i >= 0; i-- {
 		role, _ := msgs[i]["role"].(string)
-		if role != RoleUser {
+		if role != RoleUser && role != RoleSystem {
+			continue
+		}
+		if _, effort := msgs[i]["output_config"]; effort {
 			continue
 		}
 		switch content := msgs[i]["content"].(type) {
@@ -587,14 +673,15 @@ func applyAnthropicCacheControl(msgs []map[string]any, opts Options) {
 				"text":          content,
 				"cache_control": cc,
 			}}
+			return
 		case []map[string]any:
 			if len(content) == 0 {
-				break
+				continue
 			}
 			content[len(content)-1]["cache_control"] = cc
 			msgs[i]["content"] = content
+			return
 		}
-		return
 	}
 }
 

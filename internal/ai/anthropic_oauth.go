@@ -138,6 +138,17 @@ func rewriteClaudeCodeContent(content any) {
 			}
 		case "tool_result":
 			rewriteClaudeCodeContent(block["content"])
+		case "tool_addition":
+			tool, _ := block["tool"].(map[string]any)
+			def, _ := tool["definition"].(map[string]any)
+			if name, ok := def["name"].(string); ok {
+				def["name"] = toClaudeCodeName(name)
+			}
+		case "tool_removal":
+			tool, _ := block["tool"].(map[string]any)
+			if name, ok := tool["name"].(string); ok {
+				tool["name"] = toClaudeCodeName(name)
+			}
 		}
 	}
 }

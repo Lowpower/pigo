@@ -374,6 +374,15 @@ func mergeCompat(base, extra *Compat) *Compat {
 		out.AllowedFallbackModels = cloneFallbacks(extra.AllowedFallbackModels)
 	}
 	mergeOpenAICompat(&out, extra)
+	if extra.SupportsMidConvoEffort {
+		out.SupportsMidConvoEffort = true
+	}
+	if extra.SupportsMidConvoSystemMessages {
+		out.SupportsMidConvoSystemMessages = true
+	}
+	if extra.SupportsMidConvoToolChanges {
+		out.SupportsMidConvoToolChanges = true
+	}
 	if extra.SupportsAdditionalTools {
 		out.SupportsAdditionalTools = true
 	}

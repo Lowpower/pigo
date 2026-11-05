@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -93,7 +94,42 @@ func annotateBuiltin(m Model) Model {
 	m = annotateXiaomiThinking(m)
 	m = annotateOpenCodeGoMiniMax(m)
 	m = dropAnthropicDisabledOff(m)
+	m = annotateMidConvoSystem(m)
 	return annotateAzureFoundryChat(fillOpus55ThinkingLevels(applyOpenRouterReasoning(m, true)))
+}
+
+// pi v1.3.0 generate-models.ts supportsAnthropicMidConvoSystemMessages.
+// Dated snapshots (-YYYYMMDD) are included. Vertex ids with @ are not.
+var (
+	anthropicOpusMidConvo  = regexp.MustCompile(`^claude-opus-(?:4[.-]8|5(?:[.-]5)?)(?:-\d{8})?$`)
+	anthropic55MidConvo    = regexp.MustCompile(`^claude-(?:sonnet|haiku)-5[.-]5(?:-\d{8})?$`)
+	anthropicFableMidConvo = regexp.MustCompile(`^claude-(?:fable|mythos)-5(?:[.-]1)?(?:-\d{8})?$`)
+)
+
+func anthropicMidConvoSystemModel(id string) bool {
+	return anthropicOpusMidConvo.MatchString(id) || anthropic55MidConvo.MatchString(id) || anthropicFableMidConvo.MatchString(id)
+}
+
+// annotateMidConvoSystem stamps pi v1.3.0 mid-conversation system flags.
+// The anthropic provider also gets tool changes. OpenCode and GitHub Copilot
+// forward system text but reject tool_addition and tool_removal.
+func annotateMidConvoSystem(m Model) Model {
+	if !anthropicMidConvoSystemModel(m.ID) {
+		return m
+	}
+	switch m.Provider {
+	case "anthropic", "opencode", "github-copilot":
+	default:
+		return m
+	}
+	if m.Compat == nil {
+		m.Compat = &Compat{}
+	}
+	m.Compat.SupportsMidConvoSystemMessages = true
+	if m.Provider == "anthropic" {
+		m.Compat.SupportsMidConvoToolChanges = true
+	}
+	return m
 }
 
 // annotateXiaomiThinking limits MiMo to the documented on/off toggle.

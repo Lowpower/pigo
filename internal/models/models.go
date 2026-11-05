@@ -92,6 +92,13 @@ type PromptCache struct {
 type Compat struct {
 	ThinkingFormat         string `json:"thinkingFormat,omitempty"`
 	SupportsMidConvoEffort bool   `json:"supportsMidConvoEffort,omitempty"`
+	// SupportsMidConvoSystemMessages keeps later system messages in place.
+	// Proxies that reject tool blocks set this without SupportsMidConvoToolChanges.
+	SupportsMidConvoSystemMessages bool `json:"supportsMidConvoSystemMessages,omitempty"`
+	// SupportsMidConvoToolChanges sends Anthropic tool_addition and tool_removal
+	// under the inline-tools beta. It also requires SupportsMidConvoSystemMessages
+	// and at least one tool on the first system message.
+	SupportsMidConvoToolChanges bool `json:"supportsMidConvoToolChanges,omitempty"`
 	// ForceAdaptiveThinking requires Anthropic adaptive thinking.
 	// Nil leaves the model on budget thinking. False overrides a builtin true.
 	ForceAdaptiveThinking           *bool  `json:"forceAdaptiveThinking,omitempty"`

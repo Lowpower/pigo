@@ -47,6 +47,19 @@ type Message struct {
 	// Tools is set on a synthetic leading system message so a context handler
 	// cannot drop the current tool declaration by slicing the transcript.
 	Tools []Tool `json:"tools,omitempty"`
+	// ToolsAdded and ToolsRemoved are a session tool declaration or patch.
+	// The first such system message is the Anthropic baseline. Later ones
+	// become tool_addition and tool_removal blocks. Empty content keeps them
+	// out of providers that do not understand the blocks.
+	ToolsAdded   []Tool   `json:"toolsAdded,omitempty"`
+	ToolsRemoved []string `json:"toolsRemoved,omitempty"`
+}
+
+// InlineToolSystem reports a session tool declaration or patch.
+// Anthropic native tool changes consume it. Other wires ignore it.
+func InlineToolSystem(m Message) bool {
+	return m.Role == RoleSystem && m.Assistant == nil && m.Content == "" && len(m.Images) == 0 &&
+		(len(m.ToolsAdded) > 0 || len(m.ToolsRemoved) > 0)
 }
 
 // ImageContent is a base64 image attached to a user (or tool-result) message.

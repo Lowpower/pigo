@@ -282,7 +282,7 @@ func TestAnthropicWireMessagesRelocatesErrorImagesAfterRefs(t *testing.T) {
 		Content:        raw,
 		IsError:        true,
 		AddedToolNames: []string{"lookup"},
-	}}, true, map[string]struct{}{"lookup": {}}, nil, "", false)
+	}}, true, map[string]struct{}{"lookup": {}}, nil, "", false, Options{}, false)
 	content, _ := wire[0]["content"].([]map[string]any)
 	if len(content) != 4 {
 		t.Fatalf("blocks = %#v", content)
