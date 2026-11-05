@@ -30,9 +30,9 @@ func TestGuessOpenCodeAPI(t *testing.T) {
 	}
 }
 
-func TestGuessOpenCodeGoAPISkipsGoogle(t *testing.T) {
-	if got := guessOpenCodeGoAPI("gemini-2.5-pro"); got != "" {
-		t.Fatalf("got %q, want empty (no google on opencode-go)", got)
+func TestGuessOpenCodeGoAPIIncludesGoogle(t *testing.T) {
+	if got := guessOpenCodeGoAPI("gemini-2.5-pro"); got != "google-generative-ai" {
+		t.Fatalf("got %q", got)
 	}
 	if got := guessOpenCodeGoAPI("gpt-5"); got != "openai-responses" {
 		t.Fatalf("got %q", got)

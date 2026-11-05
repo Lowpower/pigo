@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// defaultOpenCodeBaseURL is the OpenCode Zen gateway base. The adapters append
+// defaultOpenCodeBaseURL is the OpenCode Zen gateway. Adapters append
 // /v1/messages (Anthropic), /v1/chat/completions, /v1/responses, or Gemini paths.
-const defaultOpenCodeBaseURL = "https://opencode.ai/zen"
+const defaultOpenCodeBaseURL = "https://opencode.ai/inference"
 
 // NewOpenCodeFromEnv builds a StreamFn for the OpenCode gateway from
 // OPENCODE_API_KEY (required) and OPENCODE_BASE_URL (optional; defaults to

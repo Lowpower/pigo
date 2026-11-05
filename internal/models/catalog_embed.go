@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // catalogJSON is the offline model catalog.
@@ -37,6 +38,9 @@ func applyEmbeddedCatalog() error {
 		return err
 	}
 	if gateway, ok := file.Providers["cloudflare-ai-gateway"]; ok {
+		// models.dev lists dotted Claude ids. The Anthropic passthrough only
+		// accepts dashed ids, so rewrite them when the snapshot loads.
+		gateway = dashCloudflareAnthropicIDs(gateway)
 		file.Providers["cloudflare-ai-gateway"] = AppendGatewayWorkersAI(gateway, file.Providers["cloudflare-workers-ai"])
 	}
 	for id, list := range file.Providers {
@@ -86,7 +90,92 @@ func annotateBuiltin(m Model) Model {
 		}
 		m.Compat.SupportsExplicitPromptCacheMode = true
 	}
+	m = annotateXiaomiThinking(m)
+	m = annotateOpenCodeGoMiniMax(m)
+	m = dropAnthropicDisabledOff(m)
 	return annotateAzureFoundryChat(fillOpus55ThinkingLevels(applyOpenRouterReasoning(m, true)))
+}
+
+// annotateXiaomiThinking limits MiMo to the documented on/off toggle.
+// pi v1.3.0 exposes only off and high and sends thinking.type, not reasoning_effort.
+func annotateXiaomiThinking(m Model) Model {
+	switch m.Provider {
+	case "xiaomi", "xiaomi-token-plan-cn", "xiaomi-token-plan-ams", "xiaomi-token-plan-sgp":
+	default:
+		return m
+	}
+	if m.Reasoning == nil || !*m.Reasoning {
+		return m
+	}
+	off, high := "off", "high"
+	m.ThinkingLevelMap = map[string]*string{
+		"off":     &off,
+		"minimal": nil,
+		"low":     nil,
+		"medium":  nil,
+		"high":    &high,
+		"xhigh":   nil,
+		"max":     nil,
+	}
+	if m.Compat == nil {
+		m.Compat = &Compat{}
+	}
+	m.Compat.ThinkingFormat = "deepseek"
+	m.Compat.SupportsReasoningEffort = false
+	replay := true
+	m.Compat.RequiresReasoningContentOnAssistantMessages = &replay
+	return m
+}
+
+// annotateOpenCodeGoMiniMax routes MiniMax M2.7 through Anthropic Messages.
+// OpenCode Go rejects that model on the OpenAI-compatible protocol.
+func annotateOpenCodeGoMiniMax(m Model) Model {
+	if m.Provider == "opencode-go" && m.ID == "minimax-m2.7" {
+		m.API = "anthropic-messages"
+	}
+	return m
+}
+
+// dropAnthropicDisabledOff keeps off available on Haiku 5.5 and Opus 5.
+// Those models accept thinking disabled. Opus 5.5 keeps a null off entry.
+func dropAnthropicDisabledOff(m Model) Model {
+	if m.API != "anthropic-messages" || !anthropicDisabledOffModel(m.ID) {
+		return m
+	}
+	mapped, ok := m.ThinkingLevelMap["off"]
+	if !ok || mapped != nil {
+		return m
+	}
+	next := make(map[string]*string, len(m.ThinkingLevelMap)-1)
+	for k, v := range m.ThinkingLevelMap {
+		if k == "off" {
+			continue
+		}
+		next[k] = v
+	}
+	m.ThinkingLevelMap = next
+	return m
+}
+
+func anthropicDisabledOffModel(id string) bool {
+	id = strings.TrimPrefix(id, "anthropic/")
+	switch id {
+	case "claude-haiku-5-5", "claude-haiku-5.5", "claude-opus-5":
+		return true
+	default:
+		return false
+	}
+}
+
+// dashCloudflareAnthropicIDs rewrites anthropic/claude-opus-5.5 to
+// anthropic/claude-opus-5-5. workers-ai/ and openai/ rows stay dotted.
+func dashCloudflareAnthropicIDs(list []Model) []Model {
+	for i := range list {
+		if strings.HasPrefix(list[i].ID, "anthropic/") {
+			list[i].ID = strings.ReplaceAll(list[i].ID, ".", "-")
+		}
+	}
+	return list
 }
 
 // annotateAzureFoundryChat routes the one built-in Foundry chat model.

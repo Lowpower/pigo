@@ -56,6 +56,11 @@ func (c *GoogleClient) clientConfig(opts Options) *genai.ClientConfig {
 	if c.BaseURL != "" {
 		httpOpts.BaseURL = c.BaseURL
 	}
+	// OpenCode's inference gateway serves Gemini at /v1. The SDK otherwise
+	// appends v1beta when APIVersion is empty.
+	if opts.Provider == "opencode" || opts.Provider == "opencode-go" {
+		httpOpts.APIVersion = "v1"
+	}
 	cfg.HTTPOptions = httpOpts
 	if c.Vertex {
 		cfg.Backend = genai.BackendVertexAI
