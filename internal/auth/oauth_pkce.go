@@ -6,6 +6,11 @@ import (
 	"encoding/base64"
 )
 
+// GeneratePKCE returns a PKCE verifier and its S256 challenge.
+func GeneratePKCE() (verifier, challenge string, err error) {
+	return generatePKCE()
+}
+
 func generatePKCE() (verifier, challenge string, err error) {
 	raw := make([]byte, 32)
 	if _, err = rand.Read(raw); err != nil {

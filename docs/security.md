@@ -8,6 +8,7 @@ project-local resources and credentials as the two trust boundaries.
 | Location | What |
 | --- | --- |
 | `~/.pigo/agent/auth.json` | API keys and OAuth tokens (mode `0600`) |
+| `~/.pigo/agent/mcp-auth.json` | MCP server OAuth tokens, keyed by server name and URL (mode `0600`) |
 | Provider env vars | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, … |
 | `--api-key` | In-process only; not written to disk or copied into the environment |
 | Session JSONL | Transcripts (mode `0600`, directory `0700`) |
