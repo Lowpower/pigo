@@ -31,7 +31,7 @@ func registerBuiltins() {
 	RegisterProvider(ProviderSpec{
 		ID:         "opencode",
 		Env:        []string{"OPENCODE_API_KEY"},
-		BaseURL:    "https://opencode.ai/zen",
+		BaseURL:    "https://opencode.ai/inference",
 		DefaultAPI: "opencode",
 		DefaultID:  "kimi-k2.6",
 	})

@@ -119,9 +119,6 @@ func guessOpenCodeAPI(model string) string {
 }
 
 func guessOpenCodeGoAPI(model string) string {
-	if guessOpenCodeAPI(model) == "google-generative-ai" {
-		return ""
-	}
 	return guessOpenCodeAPI(model)
 }
 
