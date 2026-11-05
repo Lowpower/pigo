@@ -44,3 +44,14 @@ identity token is stored as `refresh` and re-minted when the key expires. A
 401/403 from mint means the session is gone: run `/login meta` again.
 `META_API_KEY` is the API-key path. Callback bind host:
 `PIGO_OAUTH_CALLBACK_HOST` (default `127.0.0.1`).
+
+## MCP servers
+
+Remote MCP OAuth tokens live in `~/.pigo/agent/mcp-auth.json` (mode `0600`),
+not in `auth.json`. Each record is keyed by the server name and its URL.
+Leaving `oauth.clientRegistration` unset uses dynamic client registration.
+`"cimd"` uses the client metadata document at `docs/oauth/client.json`. Its
+client id is `https://raw.githubusercontent.com/Lowpower/pigo/main/docs/oauth/client.json`
+and does not change. `auth.provider` is read from the provider's `/login`
+credential on each request. It is allowed in the user configuration and in
+extension registration, and the server URL must be https unless it is loopback.
