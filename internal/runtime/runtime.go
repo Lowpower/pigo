@@ -65,7 +65,10 @@ type Options struct {
 	Offline        bool
 	SessionDir     string
 	UnknownFlags   []ext.UnknownFlag
-	InputSource    string
+	// BuiltinFlags are CLI flag names this process already recognizes.
+	// An extension flag with one of these names warns once; unknown flags stay claimable.
+	BuiltinFlags []string
+	InputSource  string
 }
 
 // Engine is a configured agent runner.
@@ -92,8 +95,12 @@ type Engine struct {
 	// They cover ambiguous --models / enabledModels patterns and a saved model
 	// whose provider never registered.
 	modelWarnings []string
-	Scoped        []models.Spec
-	System        string
+	// extLoadWarnings are extension spawn failures and built-in tool or flag overrides.
+	extLoadWarnings []string
+	// extCommandWarnings are built-in slash-command overrides from the latest rebuild.
+	extCommandWarnings []string
+	Scoped             []models.Spec
+	System             string
 
 	Steering  func() []ai.Message
 	FollowUp  func() []ai.Message
@@ -242,12 +249,9 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.Opts = opts
 
 	var hosts []*ext.Host
+	var extWarn []string
 	if !opts.NoTools {
-		var err error
-		hosts, reg, err = spawnExtensions(ctx, extSpecs, reg, opts.UnknownFlags)
-		if err != nil {
-			return nil, err
-		}
+		hosts, reg, extWarn = spawnExtensions(ctx, extSpecs, reg, opts.UnknownFlags, opts.BuiltinFlags)
 	}
 
 	sk, skillDiags := loadSkills(opts, rs)
@@ -268,6 +272,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 
 	e.Tools = reg
 	e.Hosts = hosts
+	e.setExtLoadWarnings(extWarn)
 	e.setBugExtensions(hostPaths(hosts), extSpecs, rs)
 	e.Skills = sk
 	e.Templates = tpls
@@ -430,8 +435,22 @@ func (e *Engine) sessionModels(list []models.Model) []models.Model {
 	return dropProviderModels(list, llama.ProviderID)
 }
 
-func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, unknown []ext.UnknownFlag) ([]*ext.Host, *tools.Registry, error) {
+func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, unknown []ext.UnknownFlag, builtinFlags []string) ([]*ext.Host, *tools.Registry, []string) {
+	if reg == nil {
+		reg = tools.NewRegistry()
+	}
+	builtinTools := map[string]bool{}
+	for _, t := range reg.List() {
+		builtinTools[t.Name()] = true
+	}
+	knownFlags := map[string]bool{}
+	for _, name := range builtinFlags {
+		knownFlags[name] = true
+	}
 	var hosts []*ext.Host
+	var warnings []string
+	warnedTool := map[string]bool{}
+	warnedFlag := map[string]bool{}
 	for _, spec := range specs {
 		argv := strings.Fields(spec)
 		if len(argv) == 0 {
@@ -444,14 +463,53 @@ func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, u
 			},
 		})
 		if err != nil {
-			return hosts, reg, fmt.Errorf("extension %q: %w", spec, err)
+			warnings = append(warnings, fmt.Sprintf("Warning: extension %q: %s", spec, err.Error()))
+			continue
 		}
 		hosts = append(hosts, h)
 		for _, t := range h.Tools() {
-			reg = tools.NewRegistry(append(reg.List(), wrapExt(h, t.Name, t.Description, t.Parameters))...)
+			if builtinTools[t.Name] && !warnedTool[t.Name] {
+				warnings = append(warnings, fmt.Sprintf("Warning: extension %q overrides built-in tool %q", h.Name(), t.Name))
+				warnedTool[t.Name] = true
+			}
+			reg = replaceTool(reg, wrapExt(h, t.Name, t.Description, t.Parameters))
+		}
+		for _, f := range h.Flags() {
+			if knownFlags[f.Name] && !warnedFlag[f.Name] {
+				warnings = append(warnings, fmt.Sprintf("Warning: extension %q overrides built-in flag %q", h.Name(), f.Name))
+				warnedFlag[f.Name] = true
+			}
 		}
 	}
-	return hosts, reg, nil
+	return hosts, reg, warnings
+}
+
+// replaceTool registers tool, replacing an existing name in place so a later
+// extension does not restore the previous implementation.
+func replaceTool(reg *tools.Registry, tool tools.Tool) *tools.Registry {
+	if reg == nil {
+		return tools.NewRegistry(tool)
+	}
+	replaced := false
+	next := make([]tools.Tool, 0, len(reg.List())+1)
+	for _, existing := range reg.List() {
+		if existing.Name() == tool.Name() {
+			next = append(next, tool)
+			replaced = true
+			continue
+		}
+		next = append(next, existing)
+	}
+	if !replaced {
+		next = append(next, tool)
+	}
+	return tools.NewRegistry(next...)
+}
+
+func (e *Engine) setExtLoadWarnings(w []string) {
+	e.mu.Lock()
+	e.extLoadWarnings = append([]string(nil), w...)
+	e.mu.Unlock()
 }
 
 func (e *Engine) builtinRegistry() *tools.Registry {
@@ -1599,21 +1657,23 @@ func (e *Engine) Reload() error {
 	} else {
 		reg = filterTools(reg, builtinAllow(e.Opts), e.Opts.ToolDeny)
 	}
+	var loadWarn []string
 	if !e.Opts.NoTools {
 		specs, err := collectExtensionSpecs(ctx, e.Opts, rs)
 		if err == nil {
 			e.Opts.Extensions = specs
-			hosts, r, err := spawnExtensions(ctx, specs, reg, e.Opts.UnknownFlags)
-			if err == nil {
-				e.Hosts = hosts
-				e.setBugExtensions(hostPaths(hosts), specs, rs)
-				reg = r
-			}
+			var hosts []*ext.Host
+			var spawned *tools.Registry
+			hosts, spawned, loadWarn = spawnExtensions(ctx, specs, reg, e.Opts.UnknownFlags, e.Opts.BuiltinFlags)
+			e.Hosts = hosts
+			e.setBugExtensions(hostPaths(hosts), specs, rs)
+			reg = spawned
 		}
 	}
 	if e.bugExts == nil {
 		e.setBugExtensions(nil, nil, rs)
 	}
+	e.setExtLoadWarnings(loadWarn)
 	e.Tools = reg
 	e.applyProviders()
 	e.rebuildCommands()

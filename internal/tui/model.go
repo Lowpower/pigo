@@ -1119,6 +1119,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if lines := m.engine.SkillWarnings(); len(lines) > 0 {
 			msg += "\n" + strings.Join(lines, "\n")
 		}
+		if lines := m.engine.ExtensionWarnings(); len(lines) > 0 {
+			msg += "\n" + strings.Join(lines, "\n")
+		}
 		return note(msg)
 	case "copy":
 		text := lastAssistant(m.history)

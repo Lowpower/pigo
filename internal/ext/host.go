@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -108,6 +109,7 @@ type Host struct {
 	streamCh        map[string]chan protocol.Message
 	closed          bool
 	waitErr         error
+	initErr         string // error notify seen before initialization
 	waitDone        chan struct{}
 
 	providerHook    func(id string, args map[string]any, drop bool)
@@ -194,6 +196,7 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 		if err != nil {
 			h.mu.Lock()
 			h.closed = true
+			detail := h.initErr
 			if h.waitErr == nil {
 				h.waitErr = err
 			}
@@ -206,7 +209,11 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 				delete(h.streamCh, id)
 			}
 			h.mu.Unlock()
-			signalReady(fmt.Errorf("ext %q exited before initialization", h.name))
+			if detail != "" {
+				signalReady(fmt.Errorf("ext %q: %s", h.name, detail))
+			} else {
+				signalReady(fmt.Errorf("ext %q exited before initialization", h.name))
+			}
 			return
 		}
 
@@ -233,6 +240,10 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 			h.preparesLoadout = true
 			h.mu.Unlock()
 		case protocol.TypeRegisterCommand:
+			if strings.TrimSpace(m.Name) == "" {
+				signalReady(fmt.Errorf("ext %q: command must have a non-empty string name", h.name))
+				return
+			}
 			h.mu.Lock()
 			h.commands = append(h.commands, RegisteredCommand{Name: m.Name, Description: m.Description})
 			h.mu.Unlock()
@@ -317,6 +328,13 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 				h.status(m.Name, m.Text)
 			}
 		case protocol.TypeNotify:
+			if m.Level == "error" && m.Text != "" {
+				h.mu.Lock()
+				if h.initErr == "" {
+					h.initErr = m.Text
+				}
+				h.mu.Unlock()
+			}
 			if h.notify != nil {
 				h.notify(m.Level, m.Text)
 			}

@@ -40,6 +40,7 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 			Commands: []ext.CommandDef{{
 				Name:        "ping",
 				Description: "consumed by the extension",
+				Fn:          func(string) {},
 			}},
 		})
 	case "compact":

@@ -33,6 +33,17 @@ var knownValueFlags = map[string]bool{
 	"tui-mode": true, "session-dir": true,
 }
 
+func builtinFlagNames() []string {
+	out := make([]string, 0, len(knownBoolFlags)+len(knownValueFlags))
+	for name := range knownBoolFlags {
+		out = append(out, name)
+	}
+	for name := range knownValueFlags {
+		out = append(out, name)
+	}
+	return out
+}
+
 func isRootSubcommand(args []string) bool {
 	for _, a := range args {
 		if a == "--" {

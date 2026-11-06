@@ -109,6 +109,20 @@ func (e *Engine) SkillWarnings() []string {
 	return e.skillWarnings
 }
 
+// ExtensionWarnings returns extension load failures and built-in name overrides.
+// Each line is a full "Warning: ..." sentence for the TUI and non-interactive stderr.
+func (e *Engine) ExtensionWarnings() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.extLoadWarnings) == 0 && len(e.extCommandWarnings) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(e.extLoadWarnings)+len(e.extCommandWarnings))
+	out = append(out, e.extLoadWarnings...)
+	out = append(out, e.extCommandWarnings...)
+	return out
+}
+
 // ModelWarnings returns startup warnings for model patterns and a saved model
 // whose provider never registered. Each line is the sentence without a "Warning:" prefix.
 func (e *Engine) ModelWarnings() []string {
