@@ -29,6 +29,22 @@ func BuiltinName(spec string) string {
 	return strings.TrimPrefix(strings.TrimSpace(spec), BuiltinPrefix)
 }
 
+// ReplaceableSurface is the tool, command, and flag names a built-in extension
+// registers in pi v1.3.0. A user extension that registers one of them replaces
+// that built-in. llama.cpp is not replaceable.
+func ReplaceableSurface(name string) (tools, commands, flags []string) {
+	switch name {
+	case "codemode":
+		return []string{"codemode"}, nil, nil
+	case "tool-search":
+		return []string{"tool_search"}, nil, nil
+	case "mcp":
+		return nil, []string{"mcp"}, nil
+	default:
+		return nil, nil, nil
+	}
+}
+
 // KnownBuiltin reports whether name is one of BuiltinNames.
 func KnownBuiltin(name string) bool {
 	for _, n := range BuiltinNames {

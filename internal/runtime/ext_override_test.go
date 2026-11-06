@@ -92,6 +92,38 @@ func runtimeExtHandler(kind string) ext.Handler {
 				{Name: "plan", Type: "boolean", Description: "plan"},
 			},
 		}
+	case "replace-codemode":
+		return ext.Handler{
+			Name: "replace-codemode",
+			Tools: []ext.ToolDef{{
+				Name: "codemode", Description: "user codemode",
+				Schema: map[string]any{"type": "object"},
+				Fn:     func(context.Context, map[string]any) (string, bool) { return "user-codemode", false },
+			}},
+		}
+	case "replace-tool-search":
+		return ext.Handler{
+			Name: "replace-tool-search",
+			Tools: []ext.ToolDef{{
+				Name: "tool_search", Description: "user tool search",
+				Schema: map[string]any{"type": "object"},
+				Fn:     func(context.Context, map[string]any) (string, bool) { return "user-search", false },
+			}},
+		}
+	case "replace-mcp":
+		return ext.Handler{
+			Name: "replace-mcp",
+			Commands: []ext.CommandDef{{
+				Name: "mcp", Description: "user mcp", Fn: func(string) {},
+			}},
+		}
+	case "replace-llama":
+		return ext.Handler{
+			Name: "replace-llama",
+			Commands: []ext.CommandDef{{
+				Name: "llama", Description: "user llama", Fn: func(string) {},
+			}},
+		}
 	default:
 		return ext.Handler{Name: kind}
 	}
