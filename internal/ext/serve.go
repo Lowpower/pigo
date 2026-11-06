@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/Lowpower/pigo/internal/ai"
@@ -117,6 +119,13 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 		}
 		if m.Type == protocol.TypeReady {
 			break
+		}
+	}
+
+	for _, c := range h.Commands {
+		if err := commandRegistrationError(h.Name, c); err != nil {
+			_ = protocol.WriteMessage(out, protocol.Message{Type: protocol.TypeNotify, Level: "error", Text: err.Error()})
+			return err
 		}
 	}
 
@@ -416,6 +425,16 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 			return nil
 		}
 	}
+}
+
+func commandRegistrationError(extName string, c CommandDef) error {
+	if strings.TrimSpace(c.Name) == "" {
+		return fmt.Errorf("command registered by extension %q must have a non-empty string name", extName)
+	}
+	if c.Fn == nil {
+		return fmt.Errorf("command %q registered by extension %q must define handler()", c.Name, extName)
+	}
+	return nil
 }
 
 func ignoreEOF(err error) error {

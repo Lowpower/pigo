@@ -23,11 +23,17 @@ func (e *Engine) rebuildCommands() {
 		}
 	}
 	var cmds []extCommand
+	var warnings []string
+	warned := map[string]bool{}
 	for _, h := range e.Hosts {
 		if h == nil {
 			continue
 		}
 		for _, c := range h.Commands() {
+			if slash.IsBuiltin(c.Name) && !warned[c.Name] {
+				warnings = append(warnings, fmt.Sprintf("Warning: extension %q overrides built-in command %q", h.Name(), c.Name))
+				warned[c.Name] = true
+			}
 			n := used[c.Name]
 			name := c.Name
 			if n > 0 {
@@ -39,6 +45,7 @@ func (e *Engine) rebuildCommands() {
 	}
 	e.mu.Lock()
 	e.extCommands = cmds
+	e.extCommandWarnings = warnings
 	e.mu.Unlock()
 }
 

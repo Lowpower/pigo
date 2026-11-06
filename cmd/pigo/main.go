@@ -473,6 +473,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		Offline:        f.offline,
 		SessionDir:     sessionDir,
 		UnknownFlags:   extraFlags,
+		BuiltinFlags:   builtinFlagNames(),
 		InputSource:    inputSource(mode),
 	})
 	if err != nil {
@@ -486,6 +487,9 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	}
 	if mode != "interactive" {
 		for _, w := range eng.SkillWarnings() {
+			fmt.Fprintln(cmd.ErrOrStderr(), w)
+		}
+		for _, w := range eng.ExtensionWarnings() {
 			fmt.Fprintln(cmd.ErrOrStderr(), w)
 		}
 	}

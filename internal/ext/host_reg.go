@@ -70,6 +70,20 @@ type registeredProvider struct {
 	args map[string]any
 }
 
+// Flags returns the flags this extension registered.
+func (h *Host) Flags() []FlagDef {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]FlagDef, 0, len(h.flags))
+	for _, f := range h.flags {
+		out = append(out, f.def)
+	}
+	return out
+}
+
 // Commands returns slash commands registered by this extension.
 func (h *Host) Commands() []RegisteredCommand {
 	h.mu.Lock()
