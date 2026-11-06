@@ -228,6 +228,9 @@ func extensionListing(m Model) (names, paths []string) {
 		names = append(names, name)
 		paths = append(paths, path)
 	}
+	for _, id := range m.engine.BuiltinExtensionIDs() {
+		add(id, id)
+	}
 	for _, h := range m.engine.Hosts {
 		if h == nil {
 			continue

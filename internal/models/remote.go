@@ -110,20 +110,45 @@ func RestoreOverlays(store CatalogStore) {
 
 // PrepareCatalog loads models.json, restores the on-disk store, and optionally
 // refreshes from catalogBaseURL. A missing models.json is not an error.
+// The llama.cpp provider is refreshed. Session startup uses PrepareSessionCatalog
+// so a disabled builtin:llama.cpp extension can skip that refresh.
 func PrepareCatalog(agentDir, catalogBaseURL string, offline bool) error {
+	return prepareCatalog(agentDir, catalogBaseURL, offline, true)
+}
+
+// PrepareSessionCatalog is PrepareCatalog with an explicit llama.cpp refresh.
+// refreshLlama is false when builtin:llama.cpp is not loaded for this session.
+func PrepareSessionCatalog(agentDir, catalogBaseURL string, offline, refreshLlama bool) error {
+	return prepareCatalog(agentDir, catalogBaseURL, offline, refreshLlama)
+}
+
+func prepareCatalog(agentDir, catalogBaseURL string, offline, refreshLlama bool) error {
 	if err := LoadUserJSON(filepath.Join(agentDir, "models.json")); err != nil {
 		return err
 	}
 	store := OpenFileStore(filepath.Join(agentDir, "models-store.json"))
 	RestoreOverlays(store)
-	refreshLocalProviders(store, offline)
+	refreshLocalProviders(store, offline, refreshLlama)
 	if offline || catalogBaseURL == "" {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), remoteAttemptTimeout)
 	defer cancel()
-	RefreshAll(ctx, store, catalogBaseURL, false)
+	refreshAll(ctx, store, catalogBaseURL, false, refreshLlama)
 	return nil
+}
+
+// RefreshLlama pulls the llama.cpp router catalog into the agent store.
+func RefreshLlama(agentDir string) {
+	if agentDir == "" {
+		return
+	}
+	spec, ok := LookupProvider("llama.cpp")
+	if !ok || spec.RefreshModels == nil {
+		return
+	}
+	store := OpenFileStore(filepath.Join(agentDir, "models-store.json"))
+	_ = spec.RefreshModels(store)
 }
 
 // DefaultCatalogBaseURL is PIGO_CATALOG_BASE_URL, or empty.
@@ -131,9 +156,11 @@ func DefaultCatalogBaseURL() string {
 	return os.Getenv("PIGO_CATALOG_BASE_URL")
 }
 
-func refreshLocalProviders(store CatalogStore, offline bool) {
-	if spec, ok := LookupProvider("llama.cpp"); ok && spec.RefreshModels != nil {
-		_ = spec.RefreshModels(store)
+func refreshLocalProviders(store CatalogStore, offline, refreshLlama bool) {
+	if refreshLlama {
+		if spec, ok := LookupProvider("llama.cpp"); ok && spec.RefreshModels != nil {
+			_ = spec.RefreshModels(store)
+		}
 	}
 	if offline {
 		seedPublicRadius(store)
@@ -157,6 +184,10 @@ func refreshLocalProviders(store CatalogStore, offline bool) {
 // RefreshAll revalidates remote catalogs for every registered provider.
 // It returns provider ids whose refresh failed.
 func RefreshAll(ctx context.Context, store CatalogStore, baseURL string, force bool) []string {
+	return refreshAll(ctx, store, baseURL, force, true)
+}
+
+func refreshAll(ctx context.Context, store CatalogStore, baseURL string, force, refreshLlama bool) []string {
 	if store == nil || baseURL == "" {
 		return nil
 	}
@@ -166,6 +197,9 @@ func RefreshAll(ctx context.Context, store CatalogStore, baseURL string, force b
 		wg     sync.WaitGroup
 	)
 	for _, id := range ProviderIDs() {
+		if id == "llama.cpp" && !refreshLlama {
+			continue
+		}
 		spec, _ := LookupProvider(id)
 		if spec.RefreshModels != nil {
 			if err := spec.RefreshModels(store); err != nil {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
+	"github.com/Lowpower/pigo/internal/llama"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/slash"
@@ -283,6 +284,10 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 				if p == "" {
 					p = e.Provider
 				}
+				if e.disableLlama && p == llama.ProviderID {
+					reply(id, "set_model", false, nil, "builtin:llama.cpp is not loaded")
+					break
+				}
 				if vm, virt := e.lookupVirtual(p, modelID); virt {
 					if !e.virtualSelectable(vm) {
 						reply(id, "set_model", false, nil, "model not available: "+p+"/"+modelID)
@@ -311,7 +316,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 		case "get_available_models":
 			ids := auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))
 			var list []map[string]any
-			for _, m := range e.mergeVirtual(models.Available(ids)) {
+			for _, m := range e.sessionModels(e.mergeVirtual(models.Available(ids))) {
 				list = append(list, rpcModelPayload(m))
 			}
 			reply(id, "get_available_models", true, map[string]any{"models": list}, "")

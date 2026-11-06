@@ -10,6 +10,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/ext"
+	"github.com/Lowpower/pigo/internal/llama"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/session"
 	"github.com/Lowpower/pigo/internal/slash"
@@ -270,13 +271,16 @@ func (e *Engine) HandleHostCall(h *ext.Host, name string, args map[string]any) m
 	case "exec":
 		return e.doExec(args)
 	case "model.list", "model.getAll":
-		return map[string]any{"models": modelsToAny(e.mergeVirtual(models.Catalog()))}
+		return map[string]any{"models": modelsToAny(e.sessionModels(e.mergeVirtual(models.Catalog())))}
 	case "model.getAvailable":
 		ids := auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))
-		return map[string]any{"models": modelsToAny(e.mergeVirtual(models.Available(ids)))}
+		return map[string]any{"models": modelsToAny(e.sessionModels(e.mergeVirtual(models.Available(ids))))}
 	case "model.find":
 		provider := argString(args, "provider")
 		id := argString(args, "id")
+		if e.disableLlama && provider == llama.ProviderID {
+			return map[string]any{}
+		}
 		if vm, ok := e.lookupVirtual(provider, id); ok {
 			return map[string]any{"model": modelToAny(vm.model())}
 		}
@@ -299,7 +303,7 @@ func (e *Engine) HandleHostCall(h *ext.Host, name string, args map[string]any) m
 	case "model.stream", "model.streamSimple", "model.complete":
 		return e.doHostModelStream(h, name, args)
 	case "model.refresh":
-		_ = models.PrepareCatalog(e.Opts.AgentDir, e.Opts.CatalogBaseURL, e.Opts.Offline)
+		_ = models.PrepareSessionCatalog(e.Opts.AgentDir, e.Opts.CatalogBaseURL, e.Opts.Offline, !e.disableLlama)
 		return map[string]any{"ok": true}
 	case "registerMessageRenderer":
 		e.setRenderer(&e.msgRenderers, argString(args, "customType"), h)

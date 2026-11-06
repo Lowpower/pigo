@@ -12,5 +12,6 @@ Defaults: `PIGO_SERVER_LISTEN` / `PIGO_SERVER_CONNECT`. The socket file is
 chmod `0600` after bind.
 
 The server process starts with extensions disabled (`NoExtensions: true`) so
-the socket is a headless control plane, not a second TUI. Commands match
+the socket is a headless control plane, not a second TUI. That also leaves
+built-in extensions unloaded, including the llama.cpp provider. Commands match
 [rpc.md](rpc.md).

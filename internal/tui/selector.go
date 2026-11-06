@@ -77,6 +77,12 @@ func formatBaseDir(baseDir string) string {
 }
 
 func groupLabel(r pkgmgr.Resource, agentDir string) string {
+	if r.Source == "builtin" {
+		if r.Scope == "user" {
+			return "Built-in"
+		}
+		return "Built-in (project override)"
+	}
 	if r.Origin == "package" {
 		return r.Source + " (" + r.Scope + ")"
 	}
@@ -97,6 +103,9 @@ func groupLabel(r pkgmgr.Resource, agentDir string) string {
 }
 
 func displayName(r pkgmgr.Resource) string {
+	if r.Source == "builtin" {
+		return strings.TrimPrefix(r.Path, pkgmgr.BuiltinPrefix)
+	}
 	fileName := filepath.Base(r.Path)
 	parent := filepath.Base(filepath.Dir(r.Path))
 	if r.Type == pkgmgr.KindExtensions && parent != "extensions" {

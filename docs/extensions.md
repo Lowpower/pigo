@@ -1,19 +1,24 @@
 # Extensions
 
-An extension is a **subprocess**. The host spawns a binary (or script) and
+A user extension is a **subprocess**. The host spawns a binary (or script) and
 talks over stdin/stdout using length-prefixed JSON frames (`internal/protocol`,
 API version 1, max 16 MiB).
 
-There is no in-process plugin loader. Write a small program that calls
-`ext.Serve`.
+Write a small program that calls `ext.Serve`. pigo does not load `*.ts` in
+process. Built-in extensions, listed under Load paths, are the exception:
+they run in-process and are switched by name.
 
 ## Load paths
 
-- `-e` / `--extension` (repeatable): a local command, or `npm:<pkg>` / `git:<url>` which install for this process without writing settings
+- `-e` / `--extension` (repeatable): a local command, `npm:<pkg>` / `git:<url>` (installed for this process without writing settings), or a built-in id `builtin:<name>`
 - `~/.pigo/agent/extensions/` (executable, `.js`/`.ts`, or `index.js`/`index.ts`)
 - package manifests and `settings.extensions[]`
 
-`--no-extensions` skips discovery. Explicit `-e` still loads, including `npm:` / `git:`. `/reload` restarts extension processes.
+Built-in extensions are in-process. They are not subprocesses and they have no filesystem path. The names are `builtin:llama.cpp`, `builtin:codemode`, `builtin:tool-search`, and `builtin:mcp`. All four are on by default. `llama.cpp` registers the llama.cpp provider. The other three are switches for features that land in their own issues; turning one on does not add tools until that feature exists.
+
+`settings.json` `extensions` accepts the same override spellings as other resources: `-builtin:mcp` disables one, `+builtin:mcp` turns it back on, and `!builtin:*` matches the set. A project `.pigo/settings.json` entry overrides the user entry for that name. `pigo config` lists them under Built-in. Space writes `-builtin:<name>` or `+builtin:<name>`.
+
+`--no-extensions` skips discovery and the built-ins. Explicit `-e` still loads, including `npm:` / `git:` and `-e builtin:tool-search`. `--no-tools` skips built-ins as well. An unknown `builtin:` name fails startup: `unknown built-in extension: builtin:<name>`. `/reload` restarts extension processes and reapplies the built-in set. Errors, startup listings, and bug reports use the `builtin:<name>` id.
 
 `npm:` / `git:` reuse an already-installed tree (`~/.pigo/agent/npm|git` or a trusted project copy) when present, then spawn using the same discovery as `pigo install` (manifest / `index.*` / `extensions/`, executable or `#!` shebang). Persist with `pigo install` if the next session should auto-load the package. pigo does not load `*.ts` in-process.
 
