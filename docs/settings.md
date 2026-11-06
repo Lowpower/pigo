@@ -48,7 +48,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `lastChangelogVersion` / `collapseChangelog` | `/changelog` |
 | `enableInstallTelemetry` / `enableAnalytics` / `trackingId` | Telemetry. `enableInstallTelemetry` (default true) also gates span export unless `PIGO_TELEMETRY` overrides |
 | `deviceId` | Stable installation UUID for Sign in with ChatGPT. Created on first use. Global file only, and omitted from bug reports |
-| `packages` / `extensions` / `skills` / `prompts` / `themes` / `npmCommand` | Resource lists |
+| `packages` / `extensions` / `skills` / `prompts` / `themes` / `npmCommand` | Resource lists. `extensions` also takes `-builtin:<name>` and `+builtin:<name>` for `llama.cpp`, `codemode`, `tool-search`, and `mcp` |
 | `container.{image,mounts,env,network}` | Opt-in Docker isolation for built-in tools and `!` (see [tools.md](tools.md)). `network` default false (`--network=none`) |
 
 Related files in the agent dir:

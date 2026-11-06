@@ -19,7 +19,9 @@ import (
 	"github.com/Lowpower/pigo/internal/compaction"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
+	"github.com/Lowpower/pigo/internal/llama"
 	"github.com/Lowpower/pigo/internal/models"
+	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/sandbox"
 	"github.com/Lowpower/pigo/internal/session"
@@ -48,7 +50,7 @@ type Options struct {
 	ToolDeny       []string
 	Extensions     []string // argv[0] of each extension binary (CLI -e plus discovered)
 	CLIExtensions  []string // explicit -e; kept across --no-extensions and /reload
-	NoExtensions   bool     // skip auto-discovery; CLI -e still loads
+	NoExtensions   bool     // skip auto-discovery and built-in extensions; CLI -e still loads
 	ProjectTrusted bool
 	ContextWindow  int
 	NoPromptTpls   bool
@@ -68,15 +70,20 @@ type Options struct {
 
 // Engine is a configured agent runner.
 type Engine struct {
-	Opts       Options
-	Stream     ai.StreamFn
-	Provider   string
-	Tools      *tools.Registry
-	Hosts      []*ext.Host
-	bugExts    []bugreport.Extension
-	Skills     []skills.Skill
-	Templates  []prompt.Template
-	ThemeFiles []string // enabled theme files from pkgmgr.Resolve; CLI --theme stays on Opts.ThemePaths
+	Opts     Options
+	Stream   ai.StreamFn
+	Provider string
+	Tools    *tools.Registry
+	Hosts    []*ext.Host
+	bugExts  []bugreport.Extension
+	// builtinExts are the built-in extensions loaded for this session.
+	// Their path is the name builtin:<name>, not a filesystem path.
+	builtinExts []pkgmgr.Resource
+	// disableLlama hides the llama.cpp provider when builtin:llama.cpp is off.
+	disableLlama bool
+	Skills       []skills.Skill
+	Templates    []prompt.Template
+	ThemeFiles   []string // enabled theme files from pkgmgr.Resolve; CLI --theme stays on Opts.ThemePaths
 	// promptTemplateWarnings are the latest prompt-template load warnings.
 	promptTemplateWarnings []string
 	// skillWarnings are the latest skill-load warnings.
@@ -176,7 +183,16 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 	auth.ApplyEnv(opts.AgentDir)
 	offline := opts.Offline || os.Getenv("PIGO_OFFLINE") != ""
-	if err := models.PrepareCatalog(opts.AgentDir, opts.CatalogBaseURL, offline); err != nil {
+	if len(opts.CLIExtensions) == 0 && len(opts.Extensions) > 0 {
+		opts.CLIExtensions = opts.Extensions
+	}
+	rs := resolvePackageResources(ctx, opts)
+	builtins, err := pkgmgr.ApplyBuiltinFlags(rs, opts.NoExtensions, opts.NoTools, opts.CLIExtensions)
+	if err != nil {
+		return nil, err
+	}
+	llamaOn := builtinLoaded(builtins, "llama.cpp")
+	if err := models.PrepareSessionCatalog(opts.AgentDir, opts.CatalogBaseURL, offline, llamaOn); err != nil {
 		return nil, fmt.Errorf("models.json: %w", err)
 	}
 	auth.RegisterUserJSON()
@@ -197,11 +213,16 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	if len(avail) == 0 {
 		avail = models.Catalog()
 	}
+	if !llamaOn {
+		avail = dropProviderModels(avail, llama.ProviderID)
+	}
 	scoped := models.ResolvePatternsIn(patterns, avail)
 	e := &Engine{
 		Opts:          opts,
 		Scoped:        scoped,
 		modelWarnings: models.AmbiguousExactPatterns(patterns, avail),
+		builtinExts:   builtins,
+		disableLlama:  !llamaOn,
 	}
 	e.syncToolRunner()
 	reg := e.builtinRegistry()
@@ -213,10 +234,6 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		reg = filterTools(reg, builtinAllow(opts), opts.ToolDeny)
 	}
 
-	if len(opts.CLIExtensions) == 0 && len(opts.Extensions) > 0 {
-		opts.CLIExtensions = opts.Extensions
-	}
-	rs := resolvePackageResources(ctx, opts)
 	extSpecs, err := collectExtensionSpecs(ctx, opts, rs)
 	if err != nil {
 		return nil, err
@@ -306,10 +323,18 @@ func (e *Engine) resolveInitialModel() {
 		Authenticated: auth.AuthenticatedIDs(auth.Open(opts.AgentDir)),
 	})
 	_, registered := models.LookupProvider(savedProvider)
+	llamaBlocked := e.disableLlama && savedProvider == llama.ProviderID
+	if llamaBlocked {
+		registered = false
+	}
 	savedMissing := savedProvider != "" && opts.CLIProvider == "" && !registered
 
 	provider := picked.Provider
 	modelID := picked.ID
+	if e.disableLlama && provider == llama.ProviderID {
+		provider = ""
+		modelID = ""
+	}
 	if provider == "" {
 		if savedMissing || savedProvider == "" {
 			provider = "anthropic"
@@ -319,8 +344,11 @@ func (e *Engine) resolveInitialModel() {
 			modelID = savedModel
 		}
 	}
-	if savedMissing {
+	if savedMissing && !llamaBlocked {
 		e.modelWarnings = append(e.modelWarnings, savedModelUnavailableWarning(savedProvider, savedModel, provider, modelID, opts))
+	}
+	if e.disableLlama && provider != llama.ProviderID && (llamaBlocked || opts.CLIProvider == llama.ProviderID) {
+		e.modelWarnings = append(e.modelWarnings, llamaDisabledWarning(provider, modelID))
 	}
 	if provider != "" && (picked.Provider != "" || savedMissing) {
 		e.Opts.Config.Provider = provider
@@ -364,6 +392,42 @@ func savedModelUnavailableWarning(savedProvider, savedModel, fallbackProvider, f
 		using += "/" + fallbackModel
 	}
 	return fmt.Sprintf("saved model %s is unavailable because its provider was not registered (%s). Using %s.", saved, reason, using)
+}
+
+func llamaDisabledWarning(usingProvider, usingModel string) string {
+	using := usingProvider
+	if usingModel != "" {
+		using += "/" + usingModel
+	}
+	return fmt.Sprintf("builtin:llama.cpp is not loaded. Using %s.", using)
+}
+
+func builtinLoaded(list []pkgmgr.Resource, name string) bool {
+	path := pkgmgr.BuiltinPath(name)
+	for _, r := range list {
+		if r.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func dropProviderModels(list []models.Model, provider string) []models.Model {
+	out := make([]models.Model, 0, len(list))
+	for _, m := range list {
+		if m.Provider == provider {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func (e *Engine) sessionModels(list []models.Model) []models.Model {
+	if e == nil || !e.disableLlama {
+		return list
+	}
+	return dropProviderModels(list, llama.ProviderID)
 }
 
 func spawnExtensions(ctx context.Context, specs []string, reg *tools.Registry, unknown []ext.UnknownFlag) ([]*ext.Host, *tools.Registry, error) {
@@ -1505,6 +1569,15 @@ func (e *Engine) Reload() error {
 		}
 	}
 	rs := resolvePackageResources(ctx, e.Opts)
+	builtins, berr := pkgmgr.ApplyBuiltinFlags(rs, e.Opts.NoExtensions, e.Opts.NoTools, e.Opts.CLIExtensions)
+	if berr != nil && loadErr == nil {
+		loadErr = berr
+	}
+	e.builtinExts = builtins
+	e.disableLlama = !builtinLoaded(builtins, "llama.cpp")
+	if !e.disableLlama {
+		models.RefreshLlama(e.Opts.AgentDir)
+	}
 	e.applyResolved(rs)
 
 	e.dropAllVirtuals()
@@ -1537,6 +1610,9 @@ func (e *Engine) Reload() error {
 				reg = r
 			}
 		}
+	}
+	if e.bugExts == nil {
+		e.setBugExtensions(nil, nil, rs)
 	}
 	e.Tools = reg
 	e.applyProviders()
@@ -1640,7 +1716,7 @@ func userSessionPayload(text string, images []ai.ImageContent) map[string]any {
 func (e *Engine) CycleModel(backward bool) (models.Spec, bool) {
 	scoped := e.Scoped
 	if len(scoped) == 0 {
-		for _, m := range e.mergeVirtual(models.Catalog()) {
+		for _, m := range e.sessionModels(e.mergeVirtual(models.Catalog())) {
 			scoped = append(scoped, models.Spec{Model: m})
 		}
 	}

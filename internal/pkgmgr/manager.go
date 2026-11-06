@@ -653,6 +653,7 @@ func (m *Manager) resolve(ctx context.Context, trusted bool) ([]Resource, error)
 	if userAgents != "" {
 		addAgentsAuto(userAgents, "user", filepath.Dir(userAgents), m.User.ResourcePaths(KindSkills))
 	}
+	out = appendBuiltinResources(out, m.User.ResourcePaths(KindExtensions), m.Project.ResourcePaths(KindExtensions), trusted)
 	return dedupeResolvedByCanonical(out), nil
 }
 

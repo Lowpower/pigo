@@ -39,6 +39,9 @@ func collectExtensionSpecs(ctx context.Context, opts Options, rs []pkgmgr.Resour
 	}
 	var m *pkgmgr.Manager
 	for _, spec := range opts.CLIExtensions {
+		if pkgmgr.IsBuiltinPath(spec) {
+			continue
+		}
 		if !pkgmgr.IsCLIPackageSource(spec) {
 			specs = append(specs, spec)
 			continue

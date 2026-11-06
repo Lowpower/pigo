@@ -187,10 +187,10 @@ func (e *Engine) VisibleModels() []models.Model {
 	if e.Opts.AgentDir != "" {
 		ids := auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))
 		if list := models.Available(ids); len(list) > 0 {
-			return e.mergeVirtual(list)
+			return e.sessionModels(e.mergeVirtual(list))
 		}
 	}
-	return e.mergeVirtual(models.Catalog())
+	return e.sessionModels(e.mergeVirtual(models.Catalog()))
 }
 
 func (e *Engine) mergeVirtual(base []models.Model) []models.Model {

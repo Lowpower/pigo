@@ -322,6 +322,9 @@ func nextOverrideState(cur OverrideState, inheritedEnabled bool) OverrideState {
 }
 
 func resourcePattern(r Resource) string {
+	if r.Source == "builtin" {
+		return toPosix(r.Path)
+	}
 	base := r.BaseDir
 	if base == "" {
 		base = filepath.Dir(r.Path)
@@ -406,6 +409,9 @@ func (m *Manager) topLevelOverridePatterns(r Resource, scope string) map[string]
 }
 
 func resourcePatternForScope(r Resource, scope string, m *Manager) string {
+	if r.Source == "builtin" {
+		return toPosix(r.Path)
+	}
 	if scope != r.Scope {
 		return r.Path
 	}
@@ -520,7 +526,8 @@ func (m *Manager) setProjectTopLevelOverride(r Resource, state OverrideState) {
 		updated = append(updated, entry)
 	}
 	if state != OverrideInherit {
-		if r.Scope == "user" {
+		// A built-in id is already the pattern. A plain path is only for files.
+		if r.Scope == "user" && r.Source != "builtin" {
 			found := false
 			for _, e := range updated {
 				if e == pattern {

@@ -147,8 +147,8 @@ Environment:
 	cmd.Flags().BoolVar(&f.noTools, "no-tools", false, "disable all tools")
 	cmd.Flags().StringVarP(&f.tools, "tools", "t", "", "comma-separated tool allowlist")
 	cmd.Flags().StringVar(&f.excludeTools, "exclude-tools", "", "comma-separated tool denylist")
-	cmd.Flags().StringArrayVarP(&f.extension, "extension", "e", nil, "extension to spawn (path, npm:<pkg>, or git:<url>; repeatable)")
-	cmd.Flags().BoolVar(&f.noExtensions, "no-extensions", false, "skip extension auto-discovery (explicit -e still loads)")
+	cmd.Flags().StringArrayVarP(&f.extension, "extension", "e", nil, "extension to load (path, npm:<pkg>, git:<url>, or builtin:<name>; repeatable)")
+	cmd.Flags().BoolVar(&f.noExtensions, "no-extensions", false, "skip extension auto-discovery and built-in extensions (explicit -e still loads)")
 	cmd.Flags().StringVar(&f.theme, "use-theme", "", "theme name for this run (does not write settings)")
 	cmd.Flags().StringArrayVar(&f.themePaths, "theme", nil, "load a theme file or directory (repeatable)")
 	cmd.Flags().BoolVar(&f.noThemes, "no-themes", false, "disable theme discovery")
@@ -248,7 +248,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 	if !offline {
 		catalogURL = models.DefaultCatalogBaseURL()
 	}
-	if err := models.PrepareCatalog(agentDir, catalogURL, offline); err != nil {
+	if err := models.PrepareSessionCatalog(agentDir, catalogURL, offline, f.listModels); err != nil {
 		return fmt.Errorf("models.json: %w", err)
 	}
 	auth.RegisterUserJSON()

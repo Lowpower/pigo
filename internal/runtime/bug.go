@@ -42,6 +42,28 @@ func (e *Engine) setBugExtensions(paths, specs []string, rs []pkgmgr.Resource) {
 		})
 	}
 	e.bugExts = bugreport.DescribeExtensions(paths, specs, refs)
+	for _, r := range e.builtinExts {
+		e.bugExts = append(e.bugExts, bugreport.Extension{
+			Path:   r.Path,
+			Source: r.Path,
+			Scope:  r.Scope,
+			Origin: "top-level",
+		})
+	}
+}
+
+// BuiltinExtensionIDs are the loaded built-in extension names (builtin:<name>).
+func (e *Engine) BuiltinExtensionIDs() []string {
+	if e == nil {
+		return nil
+	}
+	out := make([]string, 0, len(e.builtinExts))
+	for _, r := range e.builtinExts {
+		if r.Path != "" {
+			out = append(out, r.Path)
+		}
+	}
+	return out
 }
 
 // LoadedExtensions returns extensions included in /bug reports.

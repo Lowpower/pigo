@@ -44,16 +44,18 @@ Untrusted projects skip `cwd/.pigo/settings.json`, `SYSTEM.md`,
 
 ## Extensions
 
-An extension is a **subprocess**, not an in-process plugin. The host talks
-length-prefixed JSON over stdin/stdout. pigo does not load `*.ts` in-process.
+A user extension is a **subprocess**. The host talks length-prefixed JSON over
+stdin/stdout. pigo does not load `*.ts` in-process. Built-in extensions named
+`builtin:<name>` run in-process.
 
 Load paths (see [extensions.md](extensions.md)):
 
-- `-e` / `--extension` (local command, `npm:<pkg>`, or `git:<url>`)
+- `-e` / `--extension` (local command, `npm:<pkg>`, `git:<url>`, or `builtin:<name>`)
 - `~/.pigo/agent/extensions/`
 - package manifests and `settings.extensions[]`
+- built-in extensions `builtin:llama.cpp`, `builtin:codemode`, `builtin:tool-search`, and `builtin:mcp` (in-process; `extensions` entries `-builtin:<name>` / `+builtin:<name>` turn them off and on)
 
-`--no-extensions` skips discovery. Explicit `-e` still loads.
+`--no-extensions` skips discovery and built-in extensions. Explicit `-e` still loads.
 Project-local extension trees need trust, the same as other `.pigo/`
 resources.
 
