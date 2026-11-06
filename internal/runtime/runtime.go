@@ -272,6 +272,9 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 
 	e.Tools = reg
 	e.Hosts = hosts
+	kept, omitWarn := omitReplacedBuiltins(e.builtinExts, hosts)
+	e.builtinExts = kept
+	extWarn = append(extWarn, omitWarn...)
 	e.setExtLoadWarnings(extWarn)
 	e.setBugExtensions(hostPaths(hosts), extSpecs, rs)
 	e.Skills = sk
@@ -405,6 +408,83 @@ func llamaDisabledWarning(usingProvider, usingModel string) string {
 		using += "/" + usingModel
 	}
 	return fmt.Sprintf("builtin:llama.cpp is not loaded. Using %s.", using)
+}
+
+func omitReplacedBuiltins(builtins []pkgmgr.Resource, hosts []*ext.Host) ([]pkgmgr.Resource, []string) {
+	type claim struct {
+		kind string
+		raw  string
+		path string
+	}
+	taken := map[string]claim{}
+	remember := func(kind, raw, path string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		key := kind + ":" + raw
+		if _, ok := taken[key]; ok {
+			return
+		}
+		taken[key] = claim{kind: kind, raw: raw, path: path}
+	}
+	for _, h := range hosts {
+		if h == nil {
+			continue
+		}
+		for _, t := range h.Tools() {
+			remember("tool", t.Name, h.Name())
+		}
+		for _, c := range h.Commands() {
+			remember("command", c.Name, h.Name())
+		}
+		for _, f := range h.Flags() {
+			remember("flag", f.Name, h.Name())
+		}
+	}
+	kept := make([]pkgmgr.Resource, 0, len(builtins))
+	var warnings []string
+	for _, b := range builtins {
+		name := pkgmgr.BuiltinName(b.Path)
+		tools, commands, flags := pkgmgr.ReplaceableSurface(name)
+		var hit claim
+		found := false
+		for _, n := range tools {
+			if c, ok := taken["tool:"+n]; ok {
+				hit, found = c, true
+				break
+			}
+		}
+		if !found {
+			for _, n := range commands {
+				if c, ok := taken["command:"+n]; ok {
+					hit, found = c, true
+					break
+				}
+			}
+		}
+		if !found {
+			for _, n := range flags {
+				if c, ok := taken["flag:"+n]; ok {
+					hit, found = c, true
+					break
+				}
+			}
+		}
+		if !found {
+			kept = append(kept, b)
+			continue
+		}
+		registered := hit.raw
+		switch hit.kind {
+		case "command":
+			registered = "/" + hit.raw
+		case "flag":
+			registered = "--" + hit.raw
+		}
+		warnings = append(warnings, fmt.Sprintf("Warning: Extension %s registers %s `%s`, so built-in extension `%s` was not loaded. To use `%s`, run `pigo config` and make sure it is enabled under Built-in extensions, then disable or remove the existing extension. We recommend only having one or the other loaded at a time.", hit.path, hit.kind, registered, name, name))
+	}
+	return kept, warnings
 }
 
 func builtinLoaded(list []pkgmgr.Resource, name string) bool {
@@ -1666,6 +1746,9 @@ func (e *Engine) Reload() error {
 			var spawned *tools.Registry
 			hosts, spawned, loadWarn = spawnExtensions(ctx, specs, reg, e.Opts.UnknownFlags, e.Opts.BuiltinFlags)
 			e.Hosts = hosts
+			kept, omitWarn := omitReplacedBuiltins(e.builtinExts, hosts)
+			e.builtinExts = kept
+			loadWarn = append(loadWarn, omitWarn...)
 			e.setBugExtensions(hostPaths(hosts), specs, rs)
 			reg = spawned
 		}
