@@ -91,11 +91,14 @@ type Usage struct {
 
 // AssistantMessage is a completed assistant turn.
 type AssistantMessage struct {
-	Role          string     `json:"role"`
-	Content       []*Content `json:"content"`
-	API           string     `json:"api,omitempty"`
-	Provider      string     `json:"provider,omitempty"`
-	Model         string     `json:"model,omitempty"`
+	Role     string     `json:"role"`
+	Content  []*Content `json:"content"`
+	API      string     `json:"api,omitempty"`
+	Provider string     `json:"provider,omitempty"`
+	Model    string     `json:"model,omitempty"`
+	// ThinkingLevel is the thinking level dispatched for this response.
+	// Under a virtual selection it is the physical level, not the user's selection.
+	ThinkingLevel string     `json:"thinkingLevel,omitempty"`
 	ResponseID    string     `json:"responseId,omitempty"`
 	Usage         Usage      `json:"usage"`
 	StopReason    StopReason `json:"stopReason"`

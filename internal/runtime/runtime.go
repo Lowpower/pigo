@@ -280,6 +280,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 	e.applyVirtualModels()
 	e.wrapVirtualRoute()
+	e.restoreSessionSelection()
 	e.DispatchEvent(ctx, "session_start", map[string]any{
 		"sessionId": e.sessionID(),
 		"cwd":       e.Opts.Cwd,
@@ -1305,6 +1306,7 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 	e.persisted = len(session.ModelMessages(session.ContextEntries(s)))
 	e.restoreActiveTools(s)
 	e.restoreSystem(s)
+	e.restoreSessionSelection()
 }
 
 // NewSession starts a fresh session, emitting shutdown/start extension events.
@@ -1442,6 +1444,7 @@ func (e *Engine) NavigateTree(ctx context.Context, targetID string, opts session
 	if err != nil {
 		return res, err
 	}
+	e.restoreSessionSelection()
 	if e.AfterTree != nil {
 		e.AfterTree(res.OldLeafID, res.NewLeafID)
 	}
@@ -1548,6 +1551,7 @@ func (e *Engine) Reload() error {
 	}
 	e.applyVirtualModels()
 	e.wrapVirtualRoute()
+	e.restoreSessionSelection()
 
 	e.DispatchEvent(ctx, "session_start", map[string]any{
 		"sessionId": e.sessionID(),

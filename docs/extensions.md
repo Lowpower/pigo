@@ -180,14 +180,23 @@ VirtualModels: []ext.VirtualModelDef{{
 `reason` (`user`, `continuation`, `retry`, `direct`), the selected thinking
 level, `previous` (last successful physical reply), `failed` (retry only),
 `state` (omitted for `direct`), and `messages` including the system message.
-Return a physical model and thinking level. Returning `state` replaces the
-in-memory state for the current session branch. `KeepState`, or a nil `State`,
-leaves it. `direct` requests neither read nor store state.
+Return a physical model and thinking level. Returning `state` appends a
+`pi.virtual-model-state` custom entry on the current session branch before the
+request is sent. `KeepState`, or a nil `State`, leaves the stored state.
+`direct` requests neither read nor store state. The entry stays if the request
+later fails. Forks and `/tree` each see the state on their own branch.
 
-The selected model stays virtual. Only that one call uses the physical
-provider, model, and thinking level. The thinking level is clamped to the
-physical model. A route error, a returned virtual model, or a model whose
-provider has no credentials fails that request.
+The selected model stays virtual and is what `model_change` records. Only that
+one call uses the physical provider, model, and thinking level, and the
+assistant message records those physical values in `provider`, `api`, `model`,
+and `thinkingLevel`. The thinking level is clamped to the physical model. A
+route error, a returned virtual model, or a model whose provider has no
+credentials fails that request. The error reply keeps the virtual model
+(`api` `pi-virtual`). Opening a session restores the virtual selection from
+the latest `model_change` on the current branch. If that virtual model is no
+longer registered, the session uses the physical model on the last successful
+assistant message. A branch with none of these entries keeps the configured
+model.
 
 The same `provider` and `id` replaces a previous registration.
 `unregister_virtual_model` removes it. `unregister_provider` does not.
@@ -197,8 +206,7 @@ model stays and hides it in `/model`, scoped models, and settings.
 
 A virtual model listed under a real provider is selectable only when that
 provider has credentials. A provider id that no provider uses is always
-selectable. Session recording of the routed model is separate from this
-registration.
+selectable.
 
 ## Host calls (`ext.HostCall` / `host_request`)
 
