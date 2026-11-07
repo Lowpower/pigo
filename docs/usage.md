@@ -46,7 +46,7 @@ the version and key hints, hide the model scope and loaded resources).
 | `--system-prompt` / `--append-system-prompt` | Replace or append system prompt (repeatable; text or file path) |
 | `--no-context-files`, `-nc` | Skip `AGENTS.md` / `CLAUDE.md` |
 | `--no-skills`, `-ns` / `--skill` | Disable skills or add extra skill paths |
-| `--no-tools`, `-nt` / `--tools`, `-t` / `--exclude-tools`, `-xt` | Tool filters |
+| `--no-tools`, `-nt` / `--tools`, `-t` / `--exclude-tools`, `-xt` | Enabled tools: `a,b` replaces, `+a,-b` adjusts, `*` matches |
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools (extensions still register) |
 | `--extension`, `-e` / `--no-extensions`, `-ne` | Extra extension (path, `npm:<pkg>`, `git:<url>`, or `builtin:<name>`) / skip discovery and built-in extensions |
 | `--use-theme` / `--theme` / `--no-themes` | Theme name or extra theme files |
