@@ -13,6 +13,7 @@ import (
 	"github.com/Lowpower/pigo/internal/cachewarm"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
+	"github.com/Lowpower/pigo/internal/session"
 )
 
 const (
@@ -351,39 +352,43 @@ func (e *Engine) dispatchStream(ctx context.Context, req ai.Context, opts ai.Opt
 	if err != nil || stream == nil {
 		return stream, err
 	}
-	return stampDispatch(ctx, stream, dispatched.Provider, dispatched.ID, dispatched.Thinking), nil
+	return stampDispatch(ctx, stream, dispatched.Provider, dispatched.ID, dispatched.API, dispatched.Thinking), nil
 }
 
 type dispatchedModel struct {
 	Provider string
 	ID       string
+	API      string
 	Thinking string
 }
 
 func (e *Engine) routeVirtual(ctx context.Context, vm virtualModel, req ai.Context, opts ai.Options) (dispatchedModel, error) {
 	label := vm.Provider + "/" + vm.ID
+	fail := func(err error) (dispatchedModel, error) {
+		return dispatchedModel{}, &ai.VirtualRouteError{Provider: vm.Provider, Model: vm.ID, Err: err}
+	}
 	if vm.Host == nil {
-		return dispatchedModel{}, fmt.Errorf("virtual model %s: no extension", label)
+		return fail(fmt.Errorf("virtual model %s: no extension", label))
 	}
 	reason, failed := e.routeReason(ctx, req)
 	payload := e.routePayload(vm, reason, failed, req, opts)
 	res, err := vm.Host.Route(ctx, payload)
 	if err != nil {
-		return dispatchedModel{}, fmt.Errorf("virtual model %s: %w", label, err)
+		return fail(fmt.Errorf("virtual model %s: %w", label, err))
 	}
 	provider, id := routeResultModel(res)
 	if provider == "" || id == "" {
-		return dispatchedModel{}, fmt.Errorf("virtual model %s: route returned no model", label)
+		return fail(fmt.Errorf("virtual model %s: route returned no model", label))
 	}
 	if _, virt := e.lookupVirtual(provider, id); virt {
-		return dispatchedModel{}, fmt.Errorf("virtual model %s: route returned virtual model %s/%s", label, provider, id)
+		return fail(fmt.Errorf("virtual model %s: route returned virtual model %s/%s", label, provider, id))
 	}
 	phys, ok := models.Lookup(provider, id)
 	if !ok {
-		return dispatchedModel{}, fmt.Errorf("virtual model %s: unknown model %s/%s", label, provider, id)
+		return fail(fmt.Errorf("virtual model %s: unknown model %s/%s", label, provider, id))
 	}
 	if !e.hasCredentials(provider) {
-		return dispatchedModel{}, fmt.Errorf("virtual model %s: %s has no credentials", label, provider)
+		return fail(fmt.Errorf("virtual model %s: %s has no credentials", label, provider))
 	}
 	thinking := strings.ToLower(strings.TrimSpace(asString(res["thinkingLevel"])))
 	if thinking == "" {
@@ -392,10 +397,12 @@ func (e *Engine) routeVirtual(ctx context.Context, vm virtualModel, req ai.Conte
 	thinking = models.ClampThinking(thinking, phys)
 	if reason != routeReasonDirect {
 		if state, ok := res["state"]; ok {
-			e.storeRouteState(cloneJSONMap(state))
+			if cloned := cloneJSONMap(state); cloned != nil {
+				e.persistRouteState(vm, cloned)
+			}
 		}
 	}
-	return dispatchedModel{Provider: provider, ID: id, Thinking: thinking}, nil
+	return dispatchedModel{Provider: provider, ID: id, API: phys.API, Thinking: thinking}, nil
 }
 
 func (e *Engine) routeReason(ctx context.Context, req ai.Context) (string, *ai.AssistantMessage) {
@@ -447,7 +454,7 @@ func (e *Engine) routePayload(vm virtualModel, reason string, failed *ai.Assista
 	if prev, ok := previousDispatch(req.Messages); ok {
 		payload["previous"] = map[string]any{
 			"model":         map[string]any{"provider": prev.Provider, "id": prev.Model},
-			"thinkingLevel": prev.ProviderThinkingLevel,
+			"thinkingLevel": dispatchedThinking(prev),
 		}
 	}
 	if reason == routeReasonRetry && failed != nil {
@@ -457,12 +464,12 @@ func (e *Engine) routePayload(vm virtualModel, reason string, failed *ai.Assista
 		}
 		payload["failed"] = map[string]any{
 			"model":         map[string]any{"provider": failed.Provider, "id": failed.Model},
-			"thinkingLevel": failed.ProviderThinkingLevel,
+			"thinkingLevel": dispatchedThinking(*failed),
 			"message":       msg,
 		}
 	}
 	if reason != routeReasonDirect {
-		if state := e.routeState(); state != nil {
+		if state := e.routeState(vm.Provider, vm.ID); state != nil {
 			payload["state"] = state
 		}
 	}
@@ -487,6 +494,13 @@ func previousDispatch(msgs []ai.Message) (ai.AssistantMessage, bool) {
 	return ai.AssistantMessage{}, false
 }
 
+func dispatchedThinking(msg ai.AssistantMessage) string {
+	if msg.ThinkingLevel != "" {
+		return msg.ThinkingLevel
+	}
+	return msg.ProviderThinkingLevel
+}
+
 func routeResultModel(res map[string]any) (provider, id string) {
 	if res == nil {
 		return "", ""
@@ -504,6 +518,42 @@ func routeResultModel(res map[string]any) (provider, id string) {
 	return provider, id
 }
 
+// restoreSessionSelection applies the current branch's model, thinking level,
+// and leaves route state to be read from that branch. It does not append
+// model_change or thinking_level_change entries.
+func (e *Engine) restoreSessionSelection() {
+	if e == nil || e.Opts.Session == nil {
+		return
+	}
+	branch := e.Opts.Session.GetBranch("")
+	if e.Opts.CLIThinking == "" {
+		if level, ok := session.BranchThinkingLevel(branch); ok {
+			e.Opts.Config.Thinking = level
+		}
+	}
+	if e.Opts.CLIProvider != "" || e.Opts.CLIModel != "" {
+		return
+	}
+	provider, id, ok := session.BranchSelection(branch, func(p, modelID string) bool {
+		_, virt := e.lookupVirtual(p, modelID)
+		return virt
+	})
+	if !ok {
+		return
+	}
+	if provider != "" {
+		e.Provider = provider
+		e.Opts.Config.Provider = provider
+		if fn := e.bindStream(provider); fn != nil {
+			e.assignBaseStream(fn)
+		}
+		e.wrapVirtualRoute()
+	}
+	if id != "" {
+		e.Opts.Config.Model = id
+	}
+}
+
 func (e *Engine) routeBranchKey() string {
 	if e.Opts.Session == nil {
 		return ""
@@ -511,7 +561,14 @@ func (e *Engine) routeBranchKey() string {
 	return e.Opts.Session.ID() + "\x00" + e.Opts.Session.LeafID()
 }
 
-func (e *Engine) routeState() map[string]any {
+func (e *Engine) routeState(provider, id string) map[string]any {
+	if e.Opts.Session != nil {
+		state, ok := session.VirtualModelState(e.Opts.Session.GetBranch(""), provider, id)
+		if !ok {
+			return nil
+		}
+		return state
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	cur := e.routeStates[e.routeBranchKey()]
@@ -519,6 +576,22 @@ func (e *Engine) routeState() map[string]any {
 		return nil
 	}
 	return cloneJSONMap(cur)
+}
+
+func (e *Engine) persistRouteState(vm virtualModel, state map[string]any) {
+	if state == nil {
+		return
+	}
+	e.storeRouteState(state)
+	if e.Opts.Session == nil {
+		return
+	}
+	entry, err := e.Opts.Session.AppendCustomEntry(session.VirtualModelStateType, map[string]any{
+		"provider": vm.Provider,
+		"modelId":  vm.ID,
+		"state":    state,
+	})
+	e.recordEntry(entry, err)
 }
 
 func (e *Engine) storeRouteState(state map[string]any) {
@@ -547,13 +620,13 @@ func (e *Engine) callProviderStream(ctx context.Context, req ai.Context, opts ai
 	return nil, fmt.Errorf("no stream for %s", provider)
 }
 
-func stampDispatch(ctx context.Context, stream *ai.EventStream, provider, model, thinking string) *ai.EventStream {
+func stampDispatch(ctx context.Context, stream *ai.EventStream, provider, model, api, thinking string) *ai.EventStream {
 	out := ai.NewEventStream(8)
 	go func() {
 		defer out.Close()
 		for ev := range stream.Events() {
-			stampAssistant(ev.Partial, provider, model, thinking)
-			stampAssistant(ev.Message, provider, model, thinking)
+			stampAssistant(ev.Partial, provider, model, api, thinking)
+			stampAssistant(ev.Message, provider, model, api, thinking)
 			if !out.Push(ctx, ev) {
 				return
 			}
@@ -562,7 +635,7 @@ func stampDispatch(ctx context.Context, stream *ai.EventStream, provider, model,
 	return out
 }
 
-func stampAssistant(msg *ai.AssistantMessage, provider, model, thinking string) {
+func stampAssistant(msg *ai.AssistantMessage, provider, model, api, thinking string) {
 	if msg == nil {
 		return
 	}
@@ -572,8 +645,11 @@ func stampAssistant(msg *ai.AssistantMessage, provider, model, thinking string) 
 	if msg.Model == "" {
 		msg.Model = model
 	}
-	if msg.ProviderThinkingLevel == "" && thinking != "" {
-		msg.ProviderThinkingLevel = thinking
+	if msg.API == "" {
+		msg.API = api
+	}
+	if msg.ThinkingLevel == "" && thinking != "" {
+		msg.ThinkingLevel = thinking
 	}
 }
 

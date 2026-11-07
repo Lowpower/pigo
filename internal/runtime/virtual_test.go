@@ -154,8 +154,11 @@ func TestVirtualRouteByReason(t *testing.T) {
 	if assistant == nil || assistant.StopReason == ai.StopError {
 		t.Fatalf("prompt assistant = %#v", assistant)
 	}
-	if assistant.Provider != "vmphys384" || assistant.Model != "small" {
-		t.Fatalf("dispatched assistant = %s/%s", assistant.Provider, assistant.Model)
+	if assistant.Provider != "vmphys384" || assistant.Model != "small" || assistant.API != "openai-responses" || assistant.ThinkingLevel != "low" {
+		t.Fatalf("dispatched assistant = %s/%s api %s thinking %s", assistant.Provider, assistant.Model, assistant.API, assistant.ThinkingLevel)
+	}
+	if assistant.ProviderThinkingLevel != "" {
+		t.Fatalf("provider thinking = %s", assistant.ProviderThinkingLevel)
 	}
 	if !hasModel(e.VisibleModels(), "router", "auto") {
 		t.Fatal("virtual model missing from the model list")
@@ -194,6 +197,15 @@ func TestVirtualRouteErrors(t *testing.T) {
 	}
 	if stop != ai.StopError {
 		t.Fatalf("stop = %s", stop)
+	}
+	var failed *ai.AssistantMessage
+	for _, ev := range events {
+		if ev.Assistant != nil && ev.Assistant.StopReason == ai.StopError {
+			failed = ev.Assistant
+		}
+	}
+	if failed == nil || failed.API != ai.VirtualModelAPI || failed.Provider != "router" || failed.Model != "auto" {
+		t.Fatalf("route error reply = %#v", failed)
 	}
 	if e.Opts.Config.Model != "auto" {
 		t.Fatalf("model after error = %s", e.Opts.Config.Model)
