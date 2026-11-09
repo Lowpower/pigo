@@ -2,6 +2,38 @@ package models
 
 import "testing"
 
+func TestBuiltinJevAndClefStayOutOfChatCatalog(t *testing.T) {
+	want := []struct{ provider, id, api string }{
+		{"typesafe", "jev-latest", "typesafe-system-one"},
+		{"openrouter", "typesafe/jev-1.13", "typesafe-system-one"},
+		{"openrouter", "~typesafe/jev-latest", "typesafe-system-one"},
+		{"cloudflare-workers-ai", "typesafe/jev", "cloudflare-workers-ai-system-one"},
+		{"cloudflare-workers-ai", "@cf/cloudflare/clef", "cloudflare-workers-ai-system-one"},
+		{"cloudflare-workers-ai", "@cf/cloudflare/clef-flash", "cloudflare-workers-ai-system-one"},
+		{"vercel-ai-gateway", "typesafe-ai/jev", "typesafe-system-one"},
+		{"opencode", "jev-1.13", "typesafe-system-one"},
+		{"opencode", "jev-1.13-free", "typesafe-system-one"},
+	}
+	for _, m := range Catalog() {
+		for _, item := range want {
+			if m.Provider == item.provider && m.ID == item.id {
+				t.Fatalf("chat catalog includes %s/%s", item.provider, item.id)
+			}
+		}
+	}
+	for _, item := range want {
+		got, ok := ModelOfType("classifier", item.provider, item.id)
+		if !ok || got.API != item.api {
+			t.Fatalf("%s/%s = %+v ok=%v", item.provider, item.id, got, ok)
+		}
+	}
+	clef, _ := ModelOfType("classifier", "cloudflare-workers-ai", "@cf/cloudflare/clef")
+	flash, _ := ModelOfType("classifier", "cloudflare-workers-ai", "@cf/cloudflare/clef-flash")
+	if clef.Cost == nil || clef.Cost.Input != 0.24 || flash.Cost == nil || flash.Cost.Input != 0.09 {
+		t.Fatalf("clef prices = %+v %+v", clef.Cost, flash.Cost)
+	}
+}
+
 func TestBuiltinClassifierStaysOutOfChatCatalog(t *testing.T) {
 	for _, m := range Catalog() {
 		if m.Provider == "openai" && m.ID == "gpt-6-luna" && m.ModelType() != "chat" {
