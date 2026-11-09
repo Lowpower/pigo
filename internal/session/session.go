@@ -17,8 +17,9 @@ import (
 )
 
 // CurrentVersion is the session file schema version.
-// System messages and compaction systemMessage checkpoints are optional
-// fields on version 3; old files stay valid without a version bump.
+// System messages, compaction systemMessage checkpoints, assistant
+// thinkingLevel, and pi.virtual-model-state entries are optional fields on
+// version 3; old files stay valid without a version bump.
 const CurrentVersion = 3
 
 // Header is the first line of a session file.

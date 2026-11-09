@@ -22,14 +22,16 @@ Common fields: `type`, `id`, `parentId` (null on the first entry), `timestamp`.
 
 | `type` | Extra fields |
 | --- | --- |
-| `message` | `message`, `usage?`, `provider?`, `modelId?`, `thinkingLevel?` |
+| `message` | `message`, `usage?` |
+| `model_change` | `provider`, `modelId`. The user's selection. It may name a virtual model |
+| `thinking_level_change` | `thinkingLevel`. The user's thinking level, not the level a route dispatched |
 | `compaction` | `summary`, `firstKeptEntryId`, `tokensBefore?`, `fromHook?`, `details?`, `usage?`, `systemMessage?` |
 | `context_edit` | `targetId`, `replacement` (`null` omits the target from later model context) |
 | `branch_summary` | `fromId`, `summary`, `fromHook?`, `details?` |
 | `label` | `targetId`, `label` |
 | `session_info` | `name` |
 | `usage` | `kind` (e.g. `cache_warm`), `provider`, `model`, `usage`, `note?`. Counted in session totals. Not sent to the model |
-| `custom` | `customType`, `data` (e.g. `pigo.share`, `pigo.bug-report`) |
+| `custom` | `customType`, `data` (e.g. `pigo.share`, `pigo.bug-report`, `pi.virtual-model-state`) |
 | `custom_message` | `customType`, `content`, `display` (included in the LLM context) |
 
 Entries are buffered until the first user message, then flushed and
@@ -40,6 +42,20 @@ appended. Do not rewrite historical lines in place; fork instead.
 and `path`. Crash records live in `agentDir/crashes.json` (`timestamp`,
 `version`, `kind`, `message`, `stack`, `sessionFile`, `cwd`, `notified`), not
 in the session file.
+
+An assistant `message` records the model that produced it: `provider`, `api`,
+`model`, and `thinkingLevel`. Under a virtual selection those fields name the
+physical model and the thinking level dispatched for that request. A failed
+route leaves `api` set to `pi-virtual` and the selected virtual provider and
+id, so resume does not treat that reply as a physical model.
+
+`customType: pi.virtual-model-state` stores router state for one virtual model.
+`data` is `{ "provider", "modelId", "state" }`. The latest matching entry on
+the current branch is that model's state. Forks copy the entry, and later
+appends stay on the branch that wrote them. `/tree` reads the state of the
+branch it lands on. Compaction does not send the entry to the model. Sessions
+without these fields keep the previous restore behavior. The file version
+stays `3`.
 
 ## System messages
 
