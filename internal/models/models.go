@@ -34,10 +34,12 @@ func NextThinkingLevel(current string) string {
 }
 
 // Model is a known catalog entry used by --list-models and /model.
+// Type is chat, image, or classifier. Empty means chat.
 type Model struct {
 	Provider         string             `json:"provider,omitempty"`
 	ID               string             `json:"id"`
 	Name             string             `json:"name,omitempty"`
+	Type             string             `json:"type,omitempty"`
 	API              string             `json:"api,omitempty"`
 	BaseURL          string             `json:"baseUrl,omitempty"`
 	Cost             *Cost              `json:"cost,omitempty"`
@@ -72,6 +74,27 @@ type ImageResize struct {
 	MaxHeight   *int `json:"maxHeight,omitempty"`
 	MaxBytes    *int `json:"maxBytes,omitempty"`
 	JPEGQuality *int `json:"jpegQuality,omitempty"`
+}
+
+// ModelType is the catalog role. Empty and "chat" are chat models.
+func (m Model) ModelType() string {
+	switch strings.ToLower(strings.TrimSpace(m.Type)) {
+	case "", "chat":
+		return "chat"
+	default:
+		return strings.ToLower(strings.TrimSpace(m.Type))
+	}
+}
+
+// KnownModelType reports whether a catalog type this build can store.
+// Empty is chat. Anything else is skipped on refresh.
+func KnownModelType(t string) bool {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "", "chat", "image", "classifier":
+		return true
+	default:
+		return false
+	}
 }
 
 // ImageResize reports the model's resize profile, or nil when unset.

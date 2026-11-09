@@ -129,8 +129,14 @@ func APIFor(provider, id string) string {
 	return DefaultAPI(provider)
 }
 
-// Catalog is the built-in (plus overlay) model list.
+// Catalog is the chat model list (built-in plus overlay).
+// Image and classifier rows stay out of /model and --list-models.
 func Catalog() []Model {
+	return modelsOfType(AllModels(), "chat")
+}
+
+// AllModels is every known model type.
+func AllModels() []Model {
 	regMu.Lock()
 	specs := make([]ProviderSpec, 0, len(regOrder))
 	for _, id := range regOrder {
@@ -153,11 +159,70 @@ func Catalog() []Model {
 			if m.API == "" {
 				m.API = p.DefaultAPI
 			}
-			key := m.Provider + "/" + m.ID
+			if !KnownModelType(m.Type) {
+				continue
+			}
+			key := m.Provider + "/" + m.ModelType() + "/" + m.ID
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// OfType returns models of one type. "chat" includes rows with no type.
+func OfType(kind string) []Model {
+	return modelsOfType(AllModels(), kind)
+}
+
+// ModelOfType finds one model by type, provider, and id.
+func ModelOfType(kind, provider, id string) (Model, bool) {
+	for _, m := range OfType(kind) {
+		if m.Provider == provider && m.ID == id {
+			return m, true
+		}
+	}
+	return Model{}, false
+}
+
+// AvailableOfType returns models of one type whose provider is authenticated.
+func AvailableOfType(kind string, authenticated []string) []Model {
+	allow := map[string]bool{}
+	for _, id := range authenticated {
+		allow[id] = true
+	}
+	var out []Model
+	for _, m := range OfType(kind) {
+		if allow[m.Provider] {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// AllAvailable returns every model type whose provider is authenticated.
+func AllAvailable(authenticated []string) []Model {
+	allow := map[string]bool{}
+	for _, id := range authenticated {
+		allow[id] = true
+	}
+	var out []Model
+	for _, m := range AllModels() {
+		if allow[m.Provider] {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func modelsOfType(list []Model, kind string) []Model {
+	want := Model{Type: kind}.ModelType()
+	var out []Model
+	for _, m := range list {
+		if m.ModelType() == want {
 			out = append(out, m)
 		}
 	}
@@ -260,10 +325,10 @@ func mergeOverlay(providerID string, base, extra []Model) []Model {
 	out := append([]Model(nil), base...)
 	idx := map[string]int{}
 	for i, m := range out {
-		idx[m.ID] = i
+		idx[overlayKey(m)] = i
 	}
 	for _, m := range extra {
-		if i, ok := idx[m.ID]; ok {
+		if i, ok := idx[overlayKey(m)]; ok {
 			if m.API != "" {
 				out[i].API = m.API
 			}
@@ -316,10 +381,14 @@ func mergeOverlay(providerID string, base, extra []Model) []Model {
 			m = ensureOpenRouterFormat(m)
 		}
 		m = fillOpus55ThinkingLevels(m)
-		idx[m.ID] = len(out)
+		idx[overlayKey(m)] = len(out)
 		out = append(out, m)
 	}
 	return out
+}
+
+func overlayKey(m Model) string {
+	return m.ModelType() + "\x00" + m.ID
 }
 
 // MergeSamplingParams overlays extra onto base, one key at a time.

@@ -231,12 +231,24 @@ must not insert between a tool call and its result (steering is drained after
 tools). Idle `steer` with `triggerTurn:true` starts a turn.
 
 Model registry: `model.list` / `model.getAll`, `model.getAvailable`,
+`model.getAllModels`, `model.getAllAvailable`, `model.getModelsOfType`,
+`model.getModelOfType`, `model.getAvailableOfType`, `model.classify`,
 `model.find`, `model.hasConfiguredAuth`, `model.stream` / `model.streamSimple`
 (events via `host_event` `model.stream`), `model.complete`, `model.refresh`,
 `model.getApiKeyAndHeaders`, `model.getProviderAuth`,
 `model.getApiKeyForProvider` (these three return an error; credentials stay
 on the host), `model.isUsingOAuth`, `model.getProvider`,
 `model.getProviderDisplayName`, `model.getProviderAuthStatus`.
+
+`model.list` and `model.getAll` stay chat-only. `model.getAllModels` returns
+chat, image, and classifier rows. `type` is `chat`, `image`, or `classifier`.
+`model.classify` takes `provider`, `id` (or `model`), `state`, `questions`,
+and optional `images`. It returns `stopReason` `stop` or `error` and does not
+use the `error` field for provider failures. Token usage is appended to the
+session as a `usage` entry with `kind` `classify`, including when answers
+fail after the service reports usage. OpenAI Decisions is hidden from
+`model.getAvailableOfType` while the stored OpenAI credential is ChatGPT
+OAuth; `--api-key` still lists it. Image generation is not this call.
 
 Render / complete: `registerMessageRenderer`, `registerEntryRenderer`,
 `registerMarkdownTransformer`, `registerToolRenderer`,

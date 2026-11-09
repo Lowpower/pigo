@@ -39,11 +39,24 @@ func ApplyLlamaCatalog(c *llama.Client, store CatalogStore) error {
 		if n := llama.ContextSize(m); n > 0 && n <= int64(math.MaxInt) {
 			cw = int(n)
 		}
+		base := llama.InferenceURL(c.ServerURL)
+		if llama.DecisionOnly(m) {
+			out = append(out, Model{
+				Provider:      llama.ProviderID,
+				ID:            m.ID,
+				Type:          "classifier",
+				API:           "typesafe-system-one",
+				BaseURL:       base,
+				Input:         []string{"text"},
+				ContextWindow: cw,
+			})
+			continue
+		}
 		out = append(out, Model{
 			Provider:      llama.ProviderID,
 			ID:            m.ID,
 			API:           "openai-completions",
-			BaseURL:       llama.InferenceURL(c.ServerURL),
+			BaseURL:       base,
 			ContextWindow: cw,
 		})
 	}
