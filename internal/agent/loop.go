@@ -312,6 +312,12 @@ func streamAssistant(ctx context.Context, sf ai.StreamFn, aiCtx ai.Context, cfg 
 	if err != nil {
 		span.RecordError(err)
 		msg := &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopError, ErrorMessage: err.Error()}
+		var routeErr *ai.VirtualRouteError
+		if errors.As(err, &routeErr) {
+			msg.API = ai.VirtualModelAPI
+			msg.Provider = routeErr.Provider
+			msg.Model = routeErr.Model
+		}
 		return emitAssistantEnd(cfg, emit, msg)
 	}
 
