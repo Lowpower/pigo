@@ -95,8 +95,13 @@ func TestApplyLlamaCatalogHidesDecisionOnlyModelsFromChat(t *testing.T) {
 	if got.BaseURL != llama.InferenceURL(c.ServerURL) {
 		t.Fatalf("base = %q", got.BaseURL)
 	}
-	if _, ok := ModelOfType("classifier", llama.ProviderID, "qwen"); ok {
-		t.Fatal("chat model should not grow a classifier row")
+	qwen, ok := ModelOfType("classifier", llama.ProviderID, "qwen")
+	if !ok || qwen.API != "llama-cpp-classify" || qwen.BaseURL != c.ServerURL {
+		t.Fatalf("qwen classifier = %+v ok=%v", qwen, ok)
+	}
+	both, ok := ModelOfType("classifier", llama.ProviderID, "both")
+	if !ok || both.API != "typesafe-system-one" {
+		t.Fatalf("both classifier = %+v ok=%v", both, ok)
 	}
 }
 

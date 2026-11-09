@@ -16,10 +16,12 @@ import (
 
 // ClassifyContext is one classifier call: structured state, questions, and
 // optional images. Decisions and System One ignore temperature.
+// Temperature 0 uses the default of 1. Only llama-cpp-classify applies it.
 type ClassifyContext struct {
-	State     map[string]any
-	Questions map[string]any
-	Images    []ClassifyImage
+	State       map[string]any
+	Questions   map[string]any
+	Images      []ClassifyImage
+	Temperature float64
 }
 
 // ClassifyImage is one image judged with the state.
@@ -57,7 +59,8 @@ type classifyChoice struct {
 	description string
 }
 
-// Classify calls a classifier model. api is openai-decisions or typesafe-system-one.
+// Classify calls a classifier model. api is openai-decisions, typesafe-system-one,
+// cloudflare-workers-ai-system-one, or llama-cpp-classify.
 func Classify(ctx context.Context, model models.Model, req ClassifyContext, cfg ClientConfig) ClassifyResult {
 	out := ClassifyResult{
 		API:        model.API,
@@ -98,6 +101,10 @@ func Classify(ctx context.Context, model models.Model, req ClassifyContext, cfg 
 	if base == "" {
 		return fail(fmt.Errorf("classifier %s/%s has no base URL", model.Provider, model.ID))
 	}
+	base = expandPlaceholders(base)
+	if model.API == "llama-cpp-classify" {
+		return classifyLlama(ctx, model, req, questions, cfg, base)
+	}
 
 	var endpoint, label string
 	var payload any
@@ -119,6 +126,16 @@ func Classify(ctx context.Context, model models.Model, req ClassifyContext, cfg 
 			return fail(err)
 		}
 		payload, err = systemOnePayload(model, req, questions)
+	case "cloudflare-workers-ai-system-one":
+		label = "cloudflare workers ai"
+		if len(req.Images) > 0 {
+			return fail(fmt.Errorf("system one does not support image input"))
+		}
+		endpoint, err = classifierEndpoint(base, "run")
+		if err != nil {
+			return fail(err)
+		}
+		payload, err = cloudflarePayload(model, req, questions)
 	default:
 		return fail(fmt.Errorf("unsupported classifier api %q", model.API))
 	}
@@ -129,6 +146,12 @@ func Classify(ctx context.Context, model models.Model, req ClassifyContext, cfg 
 	body, err := postClassifier(ctx, label, endpoint, payload, cfg)
 	if err != nil {
 		return fail(err)
+	}
+	if model.API == "cloudflare-workers-ai-system-one" {
+		body, err = unwrapCloudflare(body)
+		if err != nil {
+			return fail(err)
+		}
 	}
 	if usage := parseClassifierUsage(body["usage"], model.Cost); usage != nil {
 		out.Usage = usage
@@ -315,6 +338,62 @@ func predicateInstructions(q classifyQuestion) string {
 		return q.instructions
 	}
 	return q.instructions + "\n\n" + strings.Join(lines, "\n")
+}
+
+func cloudflarePayload(model models.Model, req ClassifyContext, questions []classifyQuestion) (any, error) {
+	inner, err := systemOnePayload(model, req, questions)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := inner.(map[string]any)
+	return map[string]any{
+		"model": model.ID,
+		"input": map[string]any{"state": body["state"], "questions": body["questions"]},
+	}, nil
+}
+
+func unwrapCloudflare(body map[string]any) (map[string]any, error) {
+	if success, ok := body["success"].(bool); ok && !success {
+		return nil, fmt.Errorf("cloudflare workers ai error: %s", cloudflareErrorMessage(body["errors"]))
+	}
+	result, ok := body["result"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("cloudflare workers ai returned an unexpected response")
+	}
+	if _, ok := result["answers"]; ok {
+		return result, nil
+	}
+	state, _ := result["state"].(string)
+	if state != "Completed" {
+		if state == "" {
+			state = "unknown"
+		}
+		return nil, fmt.Errorf("cloudflare workers ai run did not complete (state: %s)", state)
+	}
+	inner, ok := result["result"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("cloudflare workers ai returned an unexpected response")
+	}
+	return inner, nil
+}
+
+func cloudflareErrorMessage(value any) string {
+	items, _ := value.([]any)
+	var parts []string
+	for _, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		msg, _ := obj["message"].(string)
+		if msg != "" {
+			parts = append(parts, msg)
+		}
+	}
+	if len(parts) == 0 {
+		return "request failed"
+	}
+	return strings.Join(parts, "; ")
 }
 
 func systemOnePayload(model models.Model, req ClassifyContext, questions []classifyQuestion) (any, error) {

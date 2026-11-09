@@ -59,6 +59,14 @@ func registerBuiltins() {
 		},
 	})
 	registerProvider(Provider{
+		ID: "typesafe",
+		APIKey: &APIKeyHandler{
+			Name:  "TypeSafe API key",
+			Env:   []string{"TYPESAFE_API_KEY"},
+			Login: promptAPIKey("TypeSafe API key"),
+		},
+	})
+	registerProvider(Provider{
 		ID:    "github-copilot",
 		OAuth: githubCopilotOAuth{},
 	})

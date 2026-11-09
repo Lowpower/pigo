@@ -11,6 +11,23 @@ import (
 	"github.com/Lowpower/pigo/internal/models"
 )
 
+func argFloat(args map[string]any, key string) float64 {
+	if args == nil {
+		return 0
+	}
+	switch n := args[key].(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case json.Number:
+		f, _ := n.Float64()
+		return f
+	default:
+		return 0
+	}
+}
+
 func filterProvider(list []models.Model, provider string) []models.Model {
 	if provider == "" {
 		return list
@@ -108,9 +125,10 @@ func (e *Engine) doHostClassify(args map[string]any) map[string]any {
 		}
 	}
 	res := ai.Classify(context.Background(), model, ai.ClassifyContext{
-		State:     asStringMap(args["state"]),
-		Questions: asStringMap(args["questions"]),
-		Images:    images,
+		State:       asStringMap(args["state"]),
+		Questions:   asStringMap(args["questions"]),
+		Images:      images,
+		Temperature: argFloat(args, "temperature"),
 	}, cfg)
 	if e.Opts.Session != nil && res.Usage != nil {
 		_, _ = e.Opts.Session.AppendUsage("classify", res.Provider, res.Model, *res.Usage, "")

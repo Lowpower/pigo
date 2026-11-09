@@ -40,16 +40,21 @@ func ApplyLlamaCatalog(c *llama.Client, store CatalogStore) error {
 			cw = int(n)
 		}
 		base := llama.InferenceURL(c.ServerURL)
+		clf := Model{
+			Provider:      llama.ProviderID,
+			ID:            m.ID,
+			Type:          "classifier",
+			API:           "llama-cpp-classify",
+			BaseURL:       c.ServerURL,
+			Input:         []string{"text"},
+			ContextWindow: cw,
+		}
+		if llama.HasOutputModality(m, "decisions") {
+			clf.API = "typesafe-system-one"
+			clf.BaseURL = base
+		}
 		if llama.DecisionOnly(m) {
-			out = append(out, Model{
-				Provider:      llama.ProviderID,
-				ID:            m.ID,
-				Type:          "classifier",
-				API:           "typesafe-system-one",
-				BaseURL:       base,
-				Input:         []string{"text"},
-				ContextWindow: cw,
-			})
+			out = append(out, clf)
 			continue
 		}
 		out = append(out, Model{
@@ -58,7 +63,7 @@ func ApplyLlamaCatalog(c *llama.Client, store CatalogStore) error {
 			API:           "openai-completions",
 			BaseURL:       base,
 			ContextWindow: cw,
-		})
+		}, clf)
 	}
 	SetRemoteOverlay(llama.ProviderID, out)
 	if store != nil {

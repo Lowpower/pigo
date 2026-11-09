@@ -53,7 +53,17 @@ a chat model. `image` and `classifier` are stored and omitted from
 refresh still applies. The same provider and id can exist once per type.
 `openai/gpt-6-luna` is both a chat model and an `openai-decisions` classifier.
 A llama.cpp model whose `output_modalities` are only `decisions` is registered
-as a `typesafe-system-one` classifier and is not a chat model.
+as a `typesafe-system-one` classifier and is not a chat model. A model that
+also lists `text` stays a chat model and gains the same System One classifier.
+Every other selectable llama.cpp model gains a `llama-cpp-classify` row, which
+reads next-token label probabilities from the server root (`/tokenize`,
+`/apply-template`, `/completion`) and does not report token usage.
+
+Built-in classifiers besides GPT-6 Luna are TypeSafe `jev-latest`, OpenRouter
+`typesafe/jev-1.13` and `~typesafe/jev-latest`, Cloudflare Workers AI
+`typesafe/jev`, `@cf/cloudflare/clef`, and `@cf/cloudflare/clef-flash`, Vercel
+`typesafe-ai/jev`, and OpenCode Zen `jev-1.13` and `jev-1.13-free`. They use
+System One. Cloudflare posts to the account `/ai/run` endpoint.
 
 OpenRouter reasoning levels are a second snapshot,
 `internal/models/openrouter_reasoning.json`, taken from

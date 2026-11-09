@@ -416,22 +416,23 @@ func ContextLabel(m ModelInfo) string {
 	return strconv.FormatInt(ctx, 10)
 }
 
-// DecisionOnly reports a model that llama.cpp serves only through /v1/systemone.
-// A model that also lists "text" stays available for chat.
-func DecisionOnly(m ModelInfo) bool {
+// HasOutputModality reports one architecture.output_modalities entry.
+func HasOutputModality(m ModelInfo, name string) bool {
 	if m.Architecture == nil {
 		return false
 	}
-	decisions, text := false, false
 	for _, kind := range m.Architecture.OutputModalities {
-		switch strings.ToLower(kind) {
-		case "decisions":
-			decisions = true
-		case "text":
-			text = true
+		if strings.EqualFold(kind, name) {
+			return true
 		}
 	}
-	return decisions && !text
+	return false
+}
+
+// DecisionOnly reports a model that llama.cpp serves only through /v1/systemone.
+// A model that also lists "text" stays available for chat.
+func DecisionOnly(m ModelInfo) bool {
+	return HasOutputModality(m, "decisions") && !HasOutputModality(m, "text")
 }
 
 // Selectable reports whether a router model can be used for inference.

@@ -7,6 +7,7 @@ func init() {
 		panic(err)
 	}
 	appendOpenAIClassifier()
+	appendBuiltinClassifiers()
 }
 
 // appendOpenAIClassifier adds the Decisions model next to the chat GPT-6 Luna row.
@@ -30,6 +31,48 @@ func appendOpenAIClassifier() {
 			Tiers: []CostTier{{InputTokensAbove: 272000, Input: 0.2}},
 		},
 	})
+	RegisterProvider(spec)
+}
+
+func appendBuiltinClassifiers() {
+	RegisterProvider(ProviderSpec{
+		ID:         "typesafe",
+		Name:       "TypeSafe API key",
+		Env:        []string{"TYPESAFE_API_KEY"},
+		BaseURL:    "https://api.typesafe.ai/v1",
+		DefaultAPI: "typesafe-system-one",
+	})
+	appendProviderModels("typesafe", classifierModel("typesafe", "jev-latest", "Jev", "typesafe-system-one", "https://api.typesafe.ai/v1", 64000, nil))
+	appendProviderModels("openrouter",
+		classifierModel("openrouter", "typesafe/jev-1.13", "Jev", "typesafe-system-one", "https://openrouter.ai/api/v1", 32000, nil),
+		classifierModel("openrouter", "~typesafe/jev-latest", "Jev", "typesafe-system-one", "https://openrouter.ai/api/v1", 32000, nil),
+	)
+	cfBase := "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai"
+	appendProviderModels("cloudflare-workers-ai",
+		classifierModel("cloudflare-workers-ai", "typesafe/jev", "Jev", "cloudflare-workers-ai-system-one", cfBase, 64000, nil),
+		classifierModel("cloudflare-workers-ai", "@cf/cloudflare/clef", "Clef", "cloudflare-workers-ai-system-one", cfBase, 64000, &Cost{Input: 0.24}),
+		classifierModel("cloudflare-workers-ai", "@cf/cloudflare/clef-flash", "Clef Flash", "cloudflare-workers-ai-system-one", cfBase, 64000, &Cost{Input: 0.09}),
+	)
+	appendProviderModels("vercel-ai-gateway", classifierModel("vercel-ai-gateway", "typesafe-ai/jev", "Jev", "typesafe-system-one", "https://ai-gateway.vercel.sh/typesafe/v1", 32000, nil))
+	appendProviderModels("opencode",
+		classifierModel("opencode", "jev-1.13", "Jev", "typesafe-system-one", "https://opencode.ai/inference/v1", 32000, nil),
+		classifierModel("opencode", "jev-1.13-free", "Jev", "typesafe-system-one", "https://opencode.ai/inference/v1", 32000, nil),
+	)
+}
+
+func classifierModel(provider, id, name, api, base string, window int, cost *Cost) Model {
+	return Model{
+		Provider: provider, ID: id, Name: name, Type: "classifier", API: api,
+		BaseURL: base, Input: []string{"text"}, ContextWindow: window, Cost: cost,
+	}
+}
+
+func appendProviderModels(provider string, extra ...Model) {
+	spec, ok := LookupProvider(provider)
+	if !ok {
+		return
+	}
+	spec.Models = append(spec.Models, extra...)
 	RegisterProvider(spec)
 }
 
