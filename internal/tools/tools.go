@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	"github.com/invopop/jsonschema"
 
@@ -22,6 +23,7 @@ type Tool interface {
 
 // Registry holds a set of tools in a stable order.
 type Registry struct {
+	mu     sync.RWMutex
 	byName map[string]Tool
 	order  []Tool
 }
@@ -73,45 +75,102 @@ func NewBuiltins(opt Options) *Registry {
 
 // AITools returns the tools as provider-neutral ai.Tool definitions.
 func (r *Registry) AITools() []ai.Tool {
-	out := make([]ai.Tool, 0, len(r.order))
-	for _, t := range r.order {
-		out = append(out, ai.Tool{
-			Name:                t.Name(),
-			Description:         t.Description(),
-			Parameters:          t.Schema(),
-			ConstrainedSampling: preferConstrainedSampling(t.Name()),
-		})
-	}
-	return out
+	return defsOf(r.List())
 }
 
 // Has reports whether a tool with this name is registered.
 func (r *Registry) Has(name string) bool {
-	if r == nil {
-		return false
-	}
-	_, ok := r.byName[name]
+	_, ok := r.get(name)
 	return ok
 }
 
 // AIToolsNamed returns registered tools whose names are in names, in registry
 // order. A nil names slice means all tools.
 func (r *Registry) AIToolsNamed(names []string) []ai.Tool {
-	if r == nil {
-		return nil
-	}
+	all := r.List()
 	if names == nil {
-		return r.AITools()
+		return defsOf(all)
 	}
 	allow := make(map[string]bool, len(names))
 	for _, n := range names {
 		allow[n] = true
 	}
-	out := make([]ai.Tool, 0, len(names))
+	kept := make([]Tool, 0, len(names))
+	for _, t := range all {
+		if allow[t.Name()] {
+			kept = append(kept, t)
+		}
+	}
+	return defsOf(kept)
+}
+
+// List returns tools in registration order.
+func (r *Registry) List() []Tool {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]Tool, len(r.order))
+	copy(out, r.order)
+	return out
+}
+
+// Upsert inserts or replaces a tool by name. An existing name keeps its place.
+func (r *Registry) Upsert(tool Tool) {
+	if r == nil || tool == nil || tool.Name() == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.byName == nil {
+		r.byName = map[string]Tool{}
+	}
+	name := tool.Name()
+	if _, ok := r.byName[name]; !ok {
+		r.order = append(r.order, tool)
+	} else {
+		for i, existing := range r.order {
+			if existing.Name() == name {
+				r.order[i] = tool
+				break
+			}
+		}
+	}
+	r.byName[name] = tool
+}
+
+// Drop removes tools whose names are set in names.
+func (r *Registry) Drop(names map[string]bool) {
+	if r == nil || len(names) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	next := make([]Tool, 0, len(r.order))
 	for _, t := range r.order {
-		if !allow[t.Name()] {
+		if names[t.Name()] {
+			delete(r.byName, t.Name())
 			continue
 		}
+		next = append(next, t)
+	}
+	r.order = next
+}
+
+func (r *Registry) get(name string) (Tool, bool) {
+	if r == nil {
+		return nil, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t, ok := r.byName[name]
+	return t, ok
+}
+
+func defsOf(list []Tool) []ai.Tool {
+	out := make([]ai.Tool, 0, len(list))
+	for _, t := range list {
 		out = append(out, ai.Tool{
 			Name:                t.Name(),
 			Description:         t.Description(),
@@ -119,13 +178,6 @@ func (r *Registry) AIToolsNamed(names []string) []ai.Tool {
 			ConstrainedSampling: preferConstrainedSampling(t.Name()),
 		})
 	}
-	return out
-}
-
-// List returns tools in registration order.
-func (r *Registry) List() []Tool {
-	out := make([]Tool, len(r.order))
-	copy(out, r.order)
 	return out
 }
 
@@ -149,7 +201,7 @@ func (r *Registry) Ready(name string, args map[string]any) (call ReadyCall, resu
 	if r == nil {
 		return ReadyCall{}, "unknown tool: " + name, true, false
 	}
-	t, found := r.byName[name]
+	t, found := r.get(name)
 	if !found {
 		return ReadyCall{}, "unknown tool: " + name, true, false
 	}

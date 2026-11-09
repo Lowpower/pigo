@@ -59,6 +59,18 @@ err := ext.Serve(ext.Handler{
 })
 ```
 
+An extension can register MCP servers for the session. The fields match one
+`mcpServers` entry in [`mcp.json`](mcp.md). A file entry with the same name wins.
+
+```go
+MCPServers: []ext.MCPServerDef{{
+    Name: "demo",
+    Config: map[string]any{"command": "demo-server"},
+}},
+```
+
+That sends `register_mcp_server` during the handshake.
+
 `ext.Serve` refuses tools whose `Schema` is missing or not `"type": "object"`.
 The host also ignores such `register_tool` frames and notifies an error.
 
@@ -123,7 +135,8 @@ can opt in with `compat.deferredToolsMode: "kimi"` instead.
 `project_trust`, `user_bash`, `before_provider_headers`,
 `before_provider_request`, `after_provider_response`, `provider_stream_event`, `model_select`,
 `thinking_level_select`, `ui_prompt_start`, `ui_prompt_end`,
-`telemetry_span`, `agent_settled`, `cache_warming_decision`.
+`telemetry_span`, `agent_settled`, `cache_warming_decision`,
+`mcp_servers_change`.
 
 `telemetry_span` is fire-and-forget (`EmitEvent`, no `event_result`). The
 payload is a `SpanRecord`: `name`, `trace_id`, `span_id`, `parent_span_id`,

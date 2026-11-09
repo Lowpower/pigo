@@ -10,6 +10,7 @@ const (
 	SectionPreamble       = "preamble"
 	SectionAppend         = "append"
 	SectionTools          = "tools"
+	SectionMCPServers     = "mcp_servers"
 	SectionGuidelines     = "guidelines"
 	SectionProjectContext = "project_context"
 	SectionSkills         = "skills"
@@ -22,6 +23,7 @@ var SectionOrder = []string{
 	SectionPreamble,
 	SectionAppend,
 	SectionTools,
+	SectionMCPServers,
 	SectionGuidelines,
 	SectionProjectContext,
 	SectionSkills,

@@ -70,8 +70,11 @@ yields the current prompt and tools. `replace: true` discards earlier state.
 {"type":"message","message":{"role":"system","content":"","sections":{"skills":null},"toolsRemoved":[{"name":"write"}],"timestamp":1733234640000}}
 ```
 
-Section names pigo writes: `preamble`, `append`, `tools`, `project_context`,
-`skills`, `cwd`, `date`. Unknown names are kept in first-seen order.
+Section names pigo writes: `preamble`, `append`, `tools`, `mcp_servers`,
+`guidelines`, `project_context`, `skills`, `cwd`, `date`. Unknown names are
+kept in first-seen order. `mcp_servers` is one line per enabled MCP server.
+When it changes, pigo appends a system message and leaves earlier lines in
+place.
 
 A compaction entry may include `systemMessage`, a complete checkpoint (every
 current section and the full `toolsAdded` list). Replay starts from that

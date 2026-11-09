@@ -62,6 +62,9 @@ func (e *Engine) toolInfo(name string) (ext.ToolInfo, bool) {
 	if e == nil {
 		return ext.ToolInfo{}, false
 	}
+	if info, ok := e.mcpInfo(name); ok {
+		return info, true
+	}
 	var found ext.ToolInfo
 	ok := false
 	for _, h := range e.Hosts {
@@ -83,6 +86,9 @@ func (e *Engine) LookupTool(name string) (ext.ToolInfo, bool) {
 	if e == nil || name == "" {
 		return ext.ToolInfo{}, false
 	}
+	if info, ok := e.mcpInfo(name); ok {
+		return info, true
+	}
 	var alias ext.ToolInfo
 	haveAlias := false
 	for _, h := range e.Hosts {
@@ -99,6 +105,11 @@ func (e *Engine) LookupTool(name string) (ext.ToolInfo, bool) {
 		if !haveAlias {
 			alias = info
 			haveAlias = true
+		}
+	}
+	if !haveAlias {
+		if info, ok := e.mcpAlias(name); ok {
+			return info, true
 		}
 	}
 	return alias, haveAlias
@@ -120,7 +131,7 @@ func (e *Engine) ToolsInNamespace(ns string) []ext.ToolInfo {
 			}
 		}
 	}
-	return out
+	return append(out, e.mcpNamespace(ns)...)
 }
 
 // ReachesTools returns the tools one call of name may reach.
