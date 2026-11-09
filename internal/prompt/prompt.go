@@ -23,6 +23,8 @@ type Options struct {
 	IncludeToolHints bool
 	// Guidelines is turn-only tool guidance. It is omitted when empty.
 	Guidelines string
+	// MCPServers is the mcp_servers section. Empty omits it.
+	MCPServers string
 }
 
 // Build returns the system prompt.
@@ -86,6 +88,9 @@ func Collect(opts Options) SectionSet {
 		s.Set(SectionCwd, "Current working directory: "+opts.Cwd)
 	}
 	s.Set(SectionDate, "Current date: "+time.Now().Format("2006-01-02"))
+	if text := strings.TrimSpace(opts.MCPServers); text != "" {
+		s.Set(SectionMCPServers, text)
+	}
 	return s
 }
 

@@ -26,6 +26,7 @@ subprocess binaries that speak the framed JSON protocol (`internal/ext`).
 - [Providers](providers.md)
 - [Keybindings](keybindings.md)
 - [Tools](tools.md) — sandbox and [Docker isolation](tools.md#docker-tools-in-container)
+- [MCP](mcp.md)
 - [Auth](auth.md)
 
 ## Platforms and ops

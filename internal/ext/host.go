@@ -115,6 +115,8 @@ type Host struct {
 	providerHook    func(id string, args map[string]any, drop bool)
 	virtualHook     func(VirtualModelDef, bool)
 	activeToolsHook func([]string)
+	mcpHook         func(name string, args map[string]any)
+	mcpServers      []MCPRegistration
 	busSubs         map[string]bool
 }
 
@@ -268,6 +270,15 @@ func (h *Host) readLoop(r *bufio.Reader, signalReady func(error)) {
 				h.subscribed[ev] = true
 			}
 			h.mu.Unlock()
+		case protocol.TypeRegisterMCPServer:
+			reg := MCPRegistration{Name: m.Name, Args: copyArgs(m.Args)}
+			h.mu.Lock()
+			h.mcpServers = append(h.mcpServers, reg)
+			hook := h.mcpHook
+			h.mu.Unlock()
+			if hook != nil {
+				hook(reg.Name, reg.Args)
+			}
 		case protocol.TypeRegisterProvider:
 			h.mu.Lock()
 			h.providers = append(h.providers, registeredProvider{id: m.Name, args: m.Args})
@@ -539,6 +550,43 @@ func (h *Host) SetNotify(fn func(level, text string)) {
 func (h *Host) SetStatus(fn func(key, text string)) {
 	h.mu.Lock()
 	h.status = fn
+	h.mu.Unlock()
+}
+
+func copyArgs(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// MCPRegistration is one register_mcp_server message.
+type MCPRegistration struct {
+	Name string
+	Args map[string]any
+}
+
+// MCPServers returns servers registered during and after the handshake.
+func (h *Host) MCPServers() []MCPRegistration {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]MCPRegistration, len(h.mcpServers))
+	copy(out, h.mcpServers)
+	return out
+}
+
+// SetMCPHook is called for register_mcp_server after the hook is installed.
+// Servers that arrived during the handshake are only in MCPServers.
+func (h *Host) SetMCPHook(fn func(name string, args map[string]any)) {
+	h.mu.Lock()
+	h.mcpHook = fn
 	h.mu.Unlock()
 }
 

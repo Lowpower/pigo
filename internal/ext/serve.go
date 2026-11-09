@@ -47,6 +47,13 @@ func Flag(name string) (any, bool) {
 	return v, ok
 }
 
+// MCPServerDef is a server registered with the host for this session.
+// Config uses the same fields as one mcpServers entry.
+type MCPServerDef struct {
+	Name   string
+	Config map[string]any
+}
+
 // ToolDef is a tool an extension exposes.
 // Fn is the text result. Run, when set, is used instead and may also return
 // structured content and usage.
@@ -73,6 +80,7 @@ type Handler struct {
 	Flags           []FlagDef
 	Providers       []ProviderDef
 	VirtualModels   []VirtualModelDef
+	MCPServers      []MCPServerDef
 	Events          []string
 	OnEvent         func(event string, payload map[string]any) map[string]any
 	OnOAuth         func(kind string, cred map[string]any) map[string]any
@@ -190,6 +198,13 @@ func serveRW(h Handler, in io.Reader, out io.Writer) error {
 				}
 				break
 			}
+		}
+	}
+	for _, s := range h.MCPServers {
+		if err := protocol.WriteMessage(out, protocol.Message{
+			Type: protocol.TypeRegisterMCPServer, Name: s.Name, Args: s.Config,
+		}); err != nil {
+			return err
 		}
 	}
 	for _, p := range h.Providers {
