@@ -6,6 +6,31 @@ func init() {
 	if err := applyEmbeddedCatalog(); err != nil {
 		panic(err)
 	}
+	appendOpenAIClassifier()
+}
+
+// appendOpenAIClassifier adds the Decisions model next to the chat GPT-6 Luna row.
+// pi v1.3.0 prices it at $0.10 / million input, doubling after 272K tokens.
+func appendOpenAIClassifier() {
+	spec, ok := LookupProvider("openai")
+	if !ok {
+		return
+	}
+	spec.Models = append(spec.Models, Model{
+		Provider:      "openai",
+		ID:            "gpt-6-luna",
+		Name:          "GPT-6 Luna",
+		Type:          "classifier",
+		API:           "openai-decisions",
+		BaseURL:       "https://api.openai.com/v1",
+		Input:         []string{"text", "image"},
+		ContextWindow: 922000,
+		Cost: &Cost{
+			Input: 0.1,
+			Tiers: []CostTier{{InputTokensAbove: 272000, Input: 0.2}},
+		},
+	})
+	RegisterProvider(spec)
 }
 
 func anthropicPromptCache() *PromptCache {

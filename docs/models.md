@@ -44,8 +44,16 @@ go run ./internal/models/cataloggen
 CI checks the committed snapshot: it parses, each matched provider is non-empty,
 and that provider's default model has a non-zero context window and max token
 cap. Price, input types, and effort `thinkingLevelMap` values are copied when
-models.dev has them. Image-generation and classifier models are left out.
-`compat` is not filled from this snapshot.
+models.dev has them. Image-generation and classifier models from that snapshot
+are left out. `compat` is not filled from this snapshot.
+
+Remote refresh asks for `types=chat,image,classifier`. A row with no `type` is
+a chat model. `image` and `classifier` are stored and omitted from
+`--list-models` and `/model`. Any other `type` is skipped, and the rest of the
+refresh still applies. The same provider and id can exist once per type.
+`openai/gpt-6-luna` is both a chat model and an `openai-decisions` classifier.
+A llama.cpp model whose `output_modalities` are only `decisions` is registered
+as a `typesafe-system-one` classifier and is not a chat model.
 
 OpenRouter reasoning levels are a second snapshot,
 `internal/models/openrouter_reasoning.json`, taken from

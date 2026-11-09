@@ -233,7 +233,7 @@ func RefreshProvider(ctx context.Context, store CatalogStore, baseURL, providerI
 		return nil
 	}
 
-	u := fmt.Sprintf("%s/api/models/providers/%s", trimSlash(baseURL), providerID)
+	u := fmt.Sprintf("%s/api/models/providers/%s?types=chat,image,classifier", trimSlash(baseURL), providerID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err
@@ -336,7 +336,7 @@ func parseCatalog(providerID string, raw []byte) ([]Model, error) {
 func stampProvider(providerID string, models []Model) []Model {
 	out := make([]Model, 0, len(models))
 	for _, m := range models {
-		if m.ID == "" {
+		if m.ID == "" || !KnownModelType(m.Type) {
 			continue
 		}
 		m.Provider = providerID

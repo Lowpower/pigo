@@ -275,6 +275,40 @@ func (e *Engine) HandleHostCall(h *ext.Host, name string, args map[string]any) m
 	case "model.getAvailable":
 		ids := auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))
 		return map[string]any{"models": modelsToAny(e.sessionModels(e.mergeVirtual(models.Available(ids))))}
+	case "model.getAllModels":
+		return map[string]any{"models": modelsToAny(e.sessionModels(e.mergeVirtual(models.AllModels())))}
+	case "model.getAllAvailable":
+		return map[string]any{"models": modelsToAny(e.sessionModels(e.mergeVirtual(e.availableModels(""))))}
+	case "model.getModelsOfType":
+		kind := argString(args, "type")
+		if kind == "" {
+			return map[string]any{"error": "type is required"}
+		}
+		list := filterProvider(models.OfType(kind), argString(args, "provider"))
+		return map[string]any{"models": modelsToAny(e.sessionModels(e.mergeVirtual(list)))}
+	case "model.getModelOfType":
+		kind := argString(args, "type")
+		provider := argString(args, "provider")
+		if kind == "" {
+			return map[string]any{"error": "type is required"}
+		}
+		if e.disableLlama && provider == llama.ProviderID {
+			return map[string]any{}
+		}
+		m, ok := models.ModelOfType(kind, provider, argString(args, "id"))
+		if !ok {
+			return map[string]any{}
+		}
+		return map[string]any{"model": modelToAny(m)}
+	case "model.getAvailableOfType":
+		kind := argString(args, "type")
+		if kind == "" {
+			return map[string]any{"error": "type is required"}
+		}
+		list := filterProvider(e.availableModels(kind), argString(args, "provider"))
+		return map[string]any{"models": modelsToAny(e.sessionModels(e.mergeVirtual(list)))}
+	case "model.classify":
+		return e.doHostClassify(args)
 	case "model.find":
 		provider := argString(args, "provider")
 		id := argString(args, "id")
