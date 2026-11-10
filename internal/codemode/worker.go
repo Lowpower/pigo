@@ -2,6 +2,7 @@ package codemode
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -45,13 +46,9 @@ func runWorker() int {
 	return 0
 }
 
-type waiter struct {
-	ch   chan wire
-	once sync.Once
-}
-
-func (w *waiter) send(m wire) {
-	w.once.Do(func() { w.ch <- m })
+type hostCall struct {
+	resolve func(any) error
+	reject  func(any) error
 }
 
 func serve() error {
@@ -65,37 +62,52 @@ func serve() error {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	vm := goja.New()
+	jobs := newJobQueue()
 
-	var mu sync.Mutex
-	pending := map[int]*waiter{}
-	failAll := func(err string) {
-		mu.Lock()
-		defer mu.Unlock()
-		for id, w := range pending {
+	pending := map[int]hostCall{}
+	var stop error
+	rejectPending := func(reason string) {
+		for id, c := range pending {
 			delete(pending, id)
-			w.send(wire{OK: false, Error: err})
+			_ = c.reject(reason)
 		}
+	}
+	finish := func(reason string) {
+		if stop == nil {
+			stop = errors.New(reason)
+		}
+		rejectPending(reason)
 	}
 	go func() {
 		for {
 			var msg wire
 			if err := dec.Decode(&msg); err != nil {
 				vm.Interrupt("parent closed")
-				failAll("parent closed")
+				jobs.push(func() { finish("parent closed") })
 				return
 			}
 			switch msg.Op {
 			case "interrupt":
 				vm.Interrupt("interrupted")
-				failAll("interrupted")
+				jobs.push(func() { finish("interrupted") })
 			case "hostResult":
-				mu.Lock()
-				w := pending[msg.ID]
-				delete(pending, msg.ID)
-				mu.Unlock()
-				if w != nil {
-					w.send(msg)
-				}
+				msg := msg
+				jobs.push(func() {
+					c, ok := pending[msg.ID]
+					if !ok {
+						return
+					}
+					delete(pending, msg.ID)
+					var err error
+					if msg.OK {
+						err = c.resolve(msg.Value)
+					} else {
+						err = c.reject(msg.Error)
+					}
+					if err != nil && stop == nil {
+						stop = err
+					}
+				})
 			}
 		}
 	}()
@@ -105,12 +117,10 @@ func serve() error {
 	for _, name := range start.Hosts {
 		name := name
 		if err := host.Set(name, func(call goja.FunctionCall) goja.Value {
+			promise, resolve, reject := vm.NewPromise()
 			nextID++
 			id := nextID
-			w := &waiter{ch: make(chan wire, 1)}
-			mu.Lock()
-			pending[id] = w
-			mu.Unlock()
+			pending[id] = hostCall{resolve: resolve, reject: reject}
 			args := make([]any, len(call.Arguments))
 			for i, arg := range call.Arguments {
 				if arg != nil {
@@ -120,11 +130,7 @@ func serve() error {
 			if err := enc.Encode(wire{Op: "call", ID: id, Name: name, Args: args}); err != nil {
 				panic(vm.ToValue(err.Error()))
 			}
-			rep := <-w.ch
-			if !rep.OK {
-				panic(vm.ToValue(rep.Error))
-			}
-			return vm.ToValue(rep.Value)
+			return vm.ToValue(promise)
 		}); err != nil {
 			return err
 		}
@@ -139,7 +145,94 @@ func serve() error {
 	if err != nil {
 		return writeDone(enc, "", err)
 	}
+	value, err = settle(jobs, value, pending, func() error { return stop })
+	if err != nil {
+		return writeDone(enc, "", err)
+	}
 	return writeDone(enc, exportValue(value), nil)
+}
+
+// settle waits until value is not a pending promise and every host call has
+// finished. Host results are applied on this goroutine, which is the only one
+// allowed to touch the VM.
+func settle(jobs *jobQueue, value goja.Value, pending map[int]hostCall, stopped func() error) (goja.Value, error) {
+	for {
+		if err := stopped(); err != nil {
+			return nil, err
+		}
+		if p := asPromise(value); p != nil {
+			switch p.State() {
+			case goja.PromiseStateRejected:
+				return nil, errors.New(textOf(p.Result()))
+			case goja.PromiseStateFulfilled:
+				value = p.Result()
+				continue
+			}
+		} else if len(pending) == 0 {
+			return value, nil
+		}
+		fn, ok := jobs.pop()
+		if !ok {
+			return nil, errors.New("parent closed")
+		}
+		fn()
+	}
+}
+
+func asPromise(v goja.Value) *goja.Promise {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return nil
+	}
+	p, _ := v.Export().(*goja.Promise)
+	return p
+}
+
+func textOf(v goja.Value) string {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return ""
+	}
+	if s, ok := v.Export().(string); ok {
+		return s
+	}
+	return v.String()
+}
+
+// jobQueue is an unbounded list of VM-thread callbacks. The reader goroutine
+// only pushes; the VM goroutine pops.
+type jobQueue struct {
+	mu     sync.Mutex
+	cond   *sync.Cond
+	jobs   []func()
+	closed bool
+}
+
+func newJobQueue() *jobQueue {
+	q := &jobQueue{}
+	q.cond = sync.NewCond(&q.mu)
+	return q
+}
+
+func (q *jobQueue) push(fn func()) {
+	q.mu.Lock()
+	if !q.closed {
+		q.jobs = append(q.jobs, fn)
+	}
+	q.cond.Signal()
+	q.mu.Unlock()
+}
+
+func (q *jobQueue) pop() (func(), bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for len(q.jobs) == 0 && !q.closed {
+		q.cond.Wait()
+	}
+	if len(q.jobs) == 0 {
+		return nil, false
+	}
+	fn := q.jobs[0]
+	q.jobs = q.jobs[1:]
+	return fn, true
 }
 
 func writeDone(enc *json.Encoder, value string, err error) error {
