@@ -240,6 +240,11 @@ func (m *Manager) AppendCustomEntry(customType string, data any) (*Entry, error)
 
 // AppendCustomMessage records a custom_message that participates in LLM context.
 func (m *Manager) AppendCustomMessage(customType, content string, display bool) (*Entry, error) {
+	return m.AppendCustomMessageDetails(customType, content, display, nil)
+}
+
+// AppendCustomMessageDetails is AppendCustomMessage with the optional details object.
+func (m *Manager) AppendCustomMessageDetails(customType, content string, display bool, details any) (*Entry, error) {
 	raw, err := json.Marshal(content)
 	if err != nil {
 		return nil, err
@@ -252,6 +257,13 @@ func (m *Manager) AppendCustomMessage(customType, content string, display bool) 
 		CustomType: customType,
 		Content:    raw,
 		Display:    &d,
+	}
+	if details != nil {
+		b, err := json.Marshal(details)
+		if err != nil {
+			return nil, err
+		}
+		e.Details = b
 	}
 	return m.appendEntry(e)
 }

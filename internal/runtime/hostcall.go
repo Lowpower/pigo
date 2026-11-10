@@ -22,6 +22,110 @@ func (e *Engine) setBusy(v bool) {
 	e.mu.Unlock()
 }
 
+// customRun is an idle sendMessage(triggerTurn) waiting to start a run.
+type customRun struct {
+	CustomType string
+	Content    string
+	Display    bool
+	Details    any
+}
+
+func (e *Engine) beginRunStart() {
+	e.mu.Lock()
+	e.busy = true
+	e.runStarting = true
+	e.abortRequested = false
+	e.mu.Unlock()
+}
+
+func (e *Engine) finishRunStart() {
+	e.mu.Lock()
+	e.runStarting = false
+	e.mu.Unlock()
+}
+
+func (e *Engine) isRunStarting() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.runStarting
+}
+
+func (e *Engine) consumeAbortRequested() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	v := e.abortRequested
+	e.abortRequested = false
+	return v
+}
+
+// PeekCustomTrigger reports the custom message armed for the next run.
+func (e *Engine) PeekCustomTrigger() (string, bool) {
+	if e == nil {
+		return "", false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.customTrigger == nil {
+		return "", false
+	}
+	return e.customTrigger.Content, true
+}
+
+// claimCustomTrigger takes the armed custom run when this call is that kick.
+// A different user prompt leaves it in place so the kick can still start it.
+func (e *Engine) claimCustomTrigger(user string, images []ai.ImageContent) *customRun {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	t := e.customTrigger
+	if t == nil || len(images) > 0 {
+		return nil
+	}
+	if user != "" && user != t.Content {
+		return nil
+	}
+	e.customTrigger = nil
+	return t
+}
+
+func (e *Engine) armCustomTrigger(t customRun) {
+	e.mu.Lock()
+	e.customTrigger = &t
+	e.mu.Unlock()
+}
+
+func (e *Engine) hasKick() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.kickFn != nil
+}
+
+func (e *Engine) skipNextUserPersist(texts ...string) {
+	if len(texts) == 0 {
+		return
+	}
+	e.mu.Lock()
+	e.skipPersist = append(e.skipPersist, texts...)
+	e.mu.Unlock()
+}
+
+func (e *Engine) consumeSkipPersist(text string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for i, s := range e.skipPersist {
+		if s == text {
+			e.skipPersist = append(e.skipPersist[:i], e.skipPersist[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func abortedRunStream(ctx context.Context, _ ai.Context, _ ai.Options) (*ai.EventStream, error) {
+	return ai.EmitMessage(ctx, &ai.AssistantMessage{
+		Role: ai.RoleAssistant, StopReason: ai.StopAborted, ErrorMessage: "aborted",
+	}), nil
+}
+
 // IsIdle reports whether no agent turn is in flight.
 func (e *Engine) IsIdle() bool {
 	e.mu.Lock()
@@ -143,6 +247,12 @@ func (e *Engine) HandleHostCall(h *ext.Host, name string, args map[string]any) m
 	case "abort":
 		e.mu.Lock()
 		fn := e.runAbort
+		if e.runStarting {
+			// The agent loop does not exist yet. Remember the abort and stop
+			// the run when it starts, instead of cancelling hook delivery.
+			e.abortRequested = true
+			fn = nil
+		}
 		e.mu.Unlock()
 		if fn != nil {
 			fn()
@@ -466,10 +576,13 @@ func (e *Engine) doSendMessage(args map[string]any) map[string]any {
 		deliverAs = "steer"
 	}
 	trigger := argBool(args, "triggerTurn", false)
-	if e.Opts.Session != nil && customType != "" {
-		_, _ = e.Opts.Session.AppendCustomMessage(customType, content, display)
-	}
+	details := args["details"]
 	busy := !e.IsIdle()
+	// Steer during preparation is recorded by the loop as one user message.
+	// A custom_message written now would be restored again on the next History.
+	if e.Opts.Session != nil && customType != "" && (!e.isRunStarting() || deliverAs != "steer") {
+		_, _ = e.Opts.Session.AppendCustomMessageDetails(customType, content, display, details)
+	}
 	switch deliverAs {
 	case "nextTurn":
 		e.mu.Lock()
@@ -484,10 +597,41 @@ func (e *Engine) doSendMessage(args map[string]any) map[string]any {
 			e.PushSteer(content)
 		}
 	}
-	if trigger && !busy && deliverAs != "nextTurn" {
+	if trigger && !busy && deliverAs != "nextTurn" && e.hasKick() {
+		e.armCustomTrigger(customRun{
+			CustomType: customType, Content: content, Display: display, Details: details,
+		})
 		e.kick("", nil)
 	}
 	return map[string]any{"ok": true}
+}
+
+func (e *Engine) takeHookMessages(start map[string]any, trigger *customRun) ([]ai.Message, []string) {
+	m := asMap(start["message"])
+	if m == nil {
+		return nil, nil
+	}
+	customType := asString(m["customType"])
+	content := asString(m["content"])
+	if customType == "" && content == "" {
+		return nil, nil
+	}
+	// The custom event already carries its trigger under message. A handler that
+	// does not return one leaves that object in place; it is not a new message.
+	if trigger != nil && customType == trigger.CustomType && content == trigger.Content {
+		return nil, nil
+	}
+	display := true
+	if v, ok := m["display"].(bool); ok {
+		display = v
+	}
+	if e.Opts.Session != nil {
+		_, _ = e.Opts.Session.AppendCustomMessageDetails(customType, content, display, m["details"])
+	}
+	if content == "" {
+		return nil, nil
+	}
+	return []ai.Message{{Role: ai.RoleUser, Content: content}}, []string{content}
 }
 
 func (e *Engine) doSendUserMessage(_ *ext.Host, args map[string]any) map[string]any {
