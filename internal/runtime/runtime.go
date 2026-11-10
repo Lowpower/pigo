@@ -16,6 +16,7 @@ import (
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/bugreport"
 	"github.com/Lowpower/pigo/internal/cachewarm"
+	"github.com/Lowpower/pigo/internal/codescript"
 	"github.com/Lowpower/pigo/internal/compaction"
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
@@ -131,6 +132,8 @@ type Engine struct {
 	uiHandler      uiHandlerFunc
 
 	toolRunner tools.Runner
+	// scriptStore keeps codemode store()/load() values for this session.
+	scriptStore *codescript.Store
 
 	// BeforeTree / AfterTree are optional NavigateTree hooks (#15 will wire extensions).
 	BeforeTree func(session.TreePrep) session.TreeHookResult
@@ -594,7 +597,7 @@ func (e *Engine) setExtLoadWarnings(w []string) {
 }
 
 func (e *Engine) builtinRegistry() *tools.Registry {
-	return tools.NewBuiltins(tools.Options{
+	base := tools.NewBuiltins(tools.Options{
 		AutoResize: e.Opts.Config.AutoResize(),
 		ImageResize: func() *models.ImageResize {
 			return e.currentModel().ImageResize()
@@ -605,6 +608,7 @@ func (e *Engine) builtinRegistry() *tools.Registry {
 		ImageCapable: func() bool { return e.currentModel().SupportsImage() },
 		Runner:       e.toolRunner,
 	})
+	return tools.NewRegistry(append(base.List(), codeTool{engine: e})...)
 }
 
 func (e *Engine) syncToolRunner() {

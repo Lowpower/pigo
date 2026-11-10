@@ -1,7 +1,8 @@
 # Tools
 
 Default allowlist (`settings.defaultTools`): `read`, `bash`, `edit`, `write`.
-Also built in: `grep`, `find`, `ls`, and `powershell` (Windows).
+Also built in: `grep`, `find`, `ls`, `powershell` (Windows), and `codemode`
+(off unless named in `defaultTools` or `--tools`; see [codemode.md](codemode.md)).
 
 | Flag | Effect |
 | --- | --- |
@@ -23,6 +24,7 @@ Also built in: `grep`, `find`, `ls`, and `powershell` (Windows).
 | `grep` | `pattern`, `path?`, `glob?`, `ignoreCase?`, `literal?`, `context?`, `limit?` — gitignore only inside a git repo |
 | `find` | `pattern`, `path?`, `limit?` — gitignore even outside git |
 | `ls` | `path?`, `limit?` |
+| `codemode` | `code` (JavaScript; off by default, see [codemode.md](codemode.md)) |
 
 `images.blockImages` rejects image reads. `terminal.showImages` controls TUI
 display.
