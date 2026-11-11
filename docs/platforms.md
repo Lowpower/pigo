@@ -64,6 +64,7 @@ OSC 8 hyperlinks and true color still follow the settings below.
 | `--tui-mode` / `settings.tuiMode` | `regular` / `fullscreen` | `regular` |
 | `settings.terminal.showImages` | bool | TUI image display |
 | `settings.terminal.imageWidthCells` | int | 60 |
+| `PIGO_PROGRAM_STATUS` | `1` / `0` | unset (query the terminal) |
 
 `PIGO_*` wins over `PI_*` and over `settings.json`. See
 [environment.md](environment.md) and [settings.md](settings.md).
@@ -74,6 +75,12 @@ hyperlinks are enabled. Other terminals keep glamour's link text.
 
 `terminal.showTerminalProgress` emits OSC 9;4 when enabled.
 `terminal.clearOnShrink` clears on a smaller size.
+
+`PIGO_PROGRAM_STATUS` reports program status with OSC 7501 (`idle`,
+`working`, `blocked`, `done`, `error`). Unset queries the terminal and stays
+off when it does not answer, including inside tmux and screen. `1` sends
+reports without asking. `0` turns them off. Exit and suspend send `clear`.
+`PI_PROGRAM_STATUS` is not read.
 
 ## Shell aliases
 

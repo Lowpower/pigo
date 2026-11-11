@@ -160,6 +160,8 @@ type Model struct {
 	border        borderStatus
 	anthropicWarn bool
 	clipOSC       string
+	prog          *programStatus // OSC 7501; shared by model copies
+	statusSeq     string         // one program-status report for the next view
 	copyFlash     string
 	copyFlashTree bool
 	copyFlashGen  int
@@ -213,6 +215,7 @@ func New(cfg config.Config) Model {
 		altScreen:    useAltScreen(cfg),
 		hideThinking: cfg.HideThinking(),
 		complete:     completer{maxVisible: cfg.AutocompleteVisible()},
+		prog:         newProgramStatus(),
 	}
 	m.glam = newRenderer(80)
 	applyTrueColor(cfg)
@@ -340,7 +343,7 @@ func isTermQueryLeak(msg tea.KeyMsg) bool {
 		return false
 	}
 	s := string(msg.Runes)
-	if strings.Contains(s, "]11;") || strings.Contains(s, "rgb:0000/") {
+	if strings.Contains(s, "]11;") || strings.Contains(s, "rgb:0000/") || strings.Contains(s, "]7501;") {
 		return true
 	}
 	if cellSizeLeakRe.MatchString(s) {
@@ -408,6 +411,7 @@ func withHardwareCursor(out tea.Model, wasOverlay bool, cmd tea.Cmd) tea.Cmd {
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 	wasOverlay := m.overlayVisible()
+	m.statusSeq = ""
 	defer func() {
 		rec := recover()
 		if rec != nil {
@@ -416,6 +420,10 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 			out = m
 			nextCmd = tea.Quit
 			return
+		}
+		if mm, ok := out.(Model); ok {
+			mm.publishProgramStatus()
+			out = mm
 		}
 		nextCmd = withHardwareCursor(out, wasOverlay, nextCmd)
 	}()
@@ -450,6 +458,13 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		wrap := m.layoutWidth() - m.cfg.OutputPadN()
 		m.glam = newRenderer(wrap)
 		return m, tea.Batch(cmds...)
+
+	case tea.ResumeMsg:
+		if m.prog != nil {
+			m.prog.force = true
+			m.prog.report()
+		}
+		return m, nil
 
 	case externalEditorDoneMsg:
 		if msg.ok {
@@ -574,6 +589,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 				return m, nil
 			}
 			if m.running && m.cancel != nil {
+				if m.prog != nil {
+					m.prog.markAborted()
+				}
 				m.cancel()
 				return m, nil
 			}
@@ -602,6 +620,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 			return m, nil
 		}
 		if m.keyIs(msg, "app.suspend") {
+			if m.prog != nil {
+				m.prog.queueClear()
+			}
 			return m, func() tea.Msg { return tea.Suspend() }
 		}
 		if m.altScreen {
@@ -680,11 +701,15 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		return m, waitForAgentEvent(m.agentEvents)
 
 	case agentClosedMsg:
+		wasRunning := m.running
 		m.running = false
 		m.streamingActive = false
 		m.streaming = ""
 		m.agentEvents = nil
 		m.cancel = nil
+		if len(m.queued) == 0 && wasRunning && m.prog != nil {
+			m.prog.noteSettle()
+		}
 		if m.pendingNav != nil {
 			nav := *m.pendingNav
 			m.pendingNav = nil
@@ -725,6 +750,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		if msg.stream == nil {
 			m.running = false
 			m.cancel = nil
+			if m.prog != nil {
+				m.prog.noteSettle()
+			}
 			return m, nil
 		}
 		m.agentEvents = msg.stream.Events()
@@ -873,6 +901,9 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	}
 	m.history = nil
 	m.transcript = nil
+	if m.prog != nil {
+		m.prog.reset()
+	}
 	return note("started a new session")
 }
 
@@ -1254,6 +1285,10 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.running = true
+	if m.prog != nil {
+		m.prog.aborted = false
+		m.prog.noteRunStart()
+	}
 	m.streaming = ""
 	m.streamingThinking = ""
 	m.streamingActive = false
@@ -1294,6 +1329,11 @@ func waitForAgentEvent(ch <-chan agent.Event) tea.Cmd {
 
 func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 	switch ev.Type {
+	case agent.EventAgentStart:
+		if m.prog != nil {
+			m.prog.noteRunStart()
+		}
+
 	case agent.EventMessageStart:
 		m.streaming = ""
 		m.streamingThinking = ""
@@ -1311,6 +1351,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		m.streamingActive = false
 		m.streaming = ""
 		m.streamingThinking = ""
+		if m.prog != nil {
+			m.prog.noteAssistant(ev.Assistant)
+		}
 		if ev.Assistant != nil {
 			addUsage(&m.usage, ev.Assistant.Usage)
 			for _, c := range ev.Assistant.Content {
@@ -1396,6 +1439,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		m.running = false
 		m.streamingActive = false
+		if m.prog != nil {
+			m.prog.noteSettle()
+		}
 		if m.cfg.CacheMissNotices() {
 			m.appendCacheMissNotice()
 		}
@@ -1437,6 +1483,9 @@ func (m Model) handleAfterAgentEnd(msg afterAgentEndMsg) (tea.Model, tea.Cmd) {
 	m.running = false
 	m.streamingActive = false
 	m.cancel = nil
+	if m.prog != nil && len(m.queued) == 0 {
+		m.prog.noteSettle()
+	}
 	if m.cfg.CacheMissNotices() {
 		m.appendCacheMissNotice()
 	}
@@ -1549,7 +1598,7 @@ func (m Model) View() string {
 		return m.present(m.loginView())
 	}
 	if m.extUI.active {
-		return m.extUIView()
+		return m.finishView(m.extUIView())
 	}
 	if s := m.visibleOverlay(); s != nil {
 		return m.present(m.extCustomView(s))
@@ -1870,12 +1919,16 @@ func RunEngineResumePicker(cfg config.Config, eng *runtime.Engine) error {
 }
 
 func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err error) {
+	statusOn := false
 	defer func() {
 		rec := recover()
 		if rec == nil {
 			return
 		}
 		fmt.Fprint(os.Stderr, "\x1b[?25h\x1b[0m\x1b[?1049l\n")
+		if statusOn {
+			fmt.Fprint(os.Stdout, programStatusClearSequence())
+		}
 		recordTUIPanic(eng, rec)
 		err = fmt.Errorf("pigo panicked: %v", rec)
 	}()
@@ -1910,6 +1963,13 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 		m = next.(Model)
 	}
 	drainPendingTTY()
+	// PIGO_PROGRAM_STATUS only. PI_PROGRAM_STATUS is not an alias.
+	statusOn = readProgramStatus(os.Stdin, os.Stdout, terminalColorQueryTimeout, os.Getenv("PIGO_PROGRAM_STATUS"))
+	if m.prog != nil {
+		m.prog.setEnabled(statusOn)
+		m.statusSeq = m.prog.takePending()
+	}
+	drainPendingTTY()
 	var opts []tea.ProgramOption
 	if useAltScreen(m.cfg) {
 		opts = append(opts, tea.WithAltScreen())
@@ -1940,6 +2000,9 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 		})
 	}
 	final, err := p.Run()
+	if statusOn {
+		fmt.Fprint(os.Stdout, programStatusClearSequence())
+	}
 	if errors.Is(err, tea.ErrProgramPanic) {
 		recordCaughtPanic(eng, err)
 	}
