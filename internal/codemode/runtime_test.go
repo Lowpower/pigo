@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,76 @@ func echoHost(calls *int) map[string]HostFunc {
 			}
 			return fmt.Sprint(args[0]), nil
 		},
+	}
+}
+
+func TestRunAsyncAwait(t *testing.T) {
+	got, err := RunAsync(context.Background(), `await host.echo("hi")`, echoHost(nil))
+	if err != nil || got != "hi" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+}
+
+func TestRunAsyncReturn(t *testing.T) {
+	got, err := RunAsync(context.Background(), "const v = await host.echo(\"hi\"); return v\n", echoHost(nil))
+	if err != nil || got != "hi" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+}
+
+func TestRunAsyncKeepsOptions(t *testing.T) {
+	_, err := RunAsync(context.Background(), "await host.echo(\"no\")\n// @options: {\"timeout_ms\": 5}\n", echoHost(nil))
+	if err == nil {
+		t.Fatal("expected a parse error")
+	}
+}
+
+func TestHostErrorRejects(t *testing.T) {
+	host := map[string]HostFunc{
+		"echo": func(context.Context, []any) (string, error) {
+			return "", errors.New("nope")
+		},
+	}
+	_, err := Run(context.Background(), `host.echo("x")`, host)
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestTimeoutWhileAwaiting(t *testing.T) {
+	start := time.Now()
+	_, err := Run(context.Background(), "// @options: {\"timeout_ms\": 200}\n(async () => { await new Promise(() => {}); })()\n", nil)
+	var timeout *TimeoutError
+	if !errors.As(err, &timeout) || timeout.Waiting {
+		t.Fatalf("err %v", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("await ran for %s", time.Since(start))
+	}
+}
+
+func TestHostCallsOverlap(t *testing.T) {
+	h := newHold()
+	defer h.releaseAll()
+	done := make(chan struct{})
+	var got string
+	var err error
+	go func() {
+		defer close(done)
+		got, err = Run(context.Background(), `(async () => {
+			const both = await Promise.all([host.echo("a"), host.echo("b")]);
+			return both.join("");
+		})()`, h.hosts())
+	}()
+	h.waitEntered(t, 2)
+	h.releaseAll()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("overlapped calls did not finish")
+	}
+	if err != nil || got != "okok" {
+		t.Fatalf("got %q err %v", got, err)
 	}
 }
 

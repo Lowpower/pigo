@@ -17,7 +17,7 @@ func TestToolModifiersAdjustDefault(t *testing.T) {
 		NoExtensions: true,
 		ToolAllow:    []string{"+codemode", "-write"},
 	})
-	if strings.Join(enabledNames(e), ",") != "read,edit,bash" {
+	if strings.Join(enabledNames(e), ",") != "read,edit,bash,codemode" {
 		t.Fatalf("enabled=%v", enabledNames(e))
 	}
 	if !strings.Contains(strings.Join(toolNames(e), ","), "write") {
