@@ -13,10 +13,10 @@ import (
 
 const shellUpdateThrottle = 100 * time.Millisecond
 
-// formatDuration matches the shell-tool footer used by bash and powershell.
+// FormatDuration is the shell-tool duration text shared by Took and Elapsed.
 // Under a minute it keeps one decimal second. At a minute it switches to
 // minutes and seconds, and at an hour it includes hours.
-func formatDuration(d time.Duration) string {
+func FormatDuration(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
@@ -32,6 +32,8 @@ func formatDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dh %dm %ds", minutes/60, minutes%60, remainder)
 }
+
+func formatDuration(d time.Duration) string { return FormatDuration(d) }
 
 func appendDuration(result string, d time.Duration) string {
 	return result + "\nTook " + formatDuration(d)
