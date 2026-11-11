@@ -46,6 +46,9 @@ type entry struct {
 	thinking   string // raw thinking block (Ctrl+T)
 	toolOut    string // raw tool result (Ctrl+O)
 	toolCallID string
+	toolName   string
+	startedAt  time.Time
+	shellLive  bool // bash/powershell call still running; Elapsed is drawn from startedAt
 	partial    bool
 	isError    bool
 
@@ -146,8 +149,14 @@ type Model struct {
 	bashEvents  chan tea.Msg
 	bashLive    string
 	bashCommand string
-	lastClear   time.Time
-	login       loginState
+
+	// now is the clock for the shell elapsed line. Tests replace it.
+	now           func() time.Time
+	shellTicking  bool
+	shellTimerGen int
+
+	lastClear time.Time
+	login     loginState
 
 	overlay       overlayKind
 	tree          treeOverlay
@@ -703,10 +712,17 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 
 	case agentEventMsg:
 		cmd := m.applyAgentEvent(msg.ev)
+		tick := m.armShellTimer()
 		if cmd != nil {
-			return m, cmd
+			return m, tea.Batch(cmd, tick)
 		}
-		return m, waitForAgentEvent(m.agentEvents)
+		return m, tea.Batch(waitForAgentEvent(m.agentEvents), tick)
+
+	case shellTimerMsg:
+		if msg.gen != m.shellTimerGen || !m.anyShellLive() {
+			return m, nil
+		}
+		return m, m.shellTimerCmd()
 
 	case agentClosedMsg:
 		wasRunning := m.running
@@ -1420,11 +1436,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 				rendered = m.toolStyle.Render(custom)
 			}
 		}
-		m.transcript = append(m.transcript, entry{
+		ent := entry{
 			role:       "tool",
 			toolCallID: ev.ToolCallID,
 			rendered:   rendered,
-		})
+		}
+		if isShellTool(ev.ToolName) {
+			ent.toolName = ev.ToolName
+			ent.startedAt = m.clock()
+			ent.shellLive = true
+		}
+		m.transcript = append(m.transcript, ent)
 
 	case agent.EventToolUpdate:
 		for i, e := range m.transcript {
@@ -1437,11 +1459,22 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		}
 
 	case agent.EventToolEnd:
+		clearedShell := false
 		for i, e := range m.transcript {
-			if e.toolCallID == ev.ToolCallID && e.partial {
+			if e.toolCallID != ev.ToolCallID || ev.ToolCallID == "" {
+				continue
+			}
+			if e.partial {
 				m.transcript[i].toolOut = ""
 				m.transcript[i].partial = false
 			}
+			if e.shellLive {
+				m.transcript[i].shellLive = false
+				clearedShell = true
+			}
+		}
+		if clearedShell {
+			m.disarmShellTimer()
 		}
 		style := m.toolStyle
 		mark := "→"
@@ -1720,6 +1753,7 @@ func (m Model) rawChatBody() (string, map[int]string) {
 					write("\n")
 					write(m.toolStyle.Render(indent(out)))
 				}
+				m.writeShellElapsed(write, e)
 			} else if e.toolOut != "" {
 				style := m.toolStyle
 				mark := "→"
@@ -1744,6 +1778,7 @@ func (m Model) rawChatBody() (string, map[int]string) {
 				}
 			} else {
 				write(e.rendered)
+				m.writeShellElapsed(write, e)
 			}
 		default:
 			write(e.rendered)
