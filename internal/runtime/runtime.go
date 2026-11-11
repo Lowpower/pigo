@@ -169,16 +169,20 @@ type Engine struct {
 	mcpSectionText string
 	mcpEventNames  []string
 
-	busy         bool
-	runAbort     context.CancelFunc
-	kickFn       func(user string, images []ai.ImageContent)
-	wantShutdown bool
-	nextTurn     []ai.Message
-	msgRenderers map[string]*ext.Host
-	entryRender  map[string]*ext.Host
-	toolRender   map[string]*ext.Host
-	mdTransforms []*ext.Host
-	autoComplete []autoCompleteReg
+	busy           bool
+	runStarting    bool
+	abortRequested bool
+	customTrigger  *customRun
+	skipPersist    []string
+	runAbort       context.CancelFunc
+	kickFn         func(user string, images []ai.ImageContent)
+	wantShutdown   bool
+	nextTurn       []ai.Message
+	msgRenderers   map[string]*ext.Host
+	entryRender    map[string]*ext.Host
+	toolRender     map[string]*ext.Host
+	mdTransforms   []*ext.Host
+	autoComplete   []autoCompleteReg
 
 	warmer     *cachewarm.Warmer
 	warmReq    []ai.Message
@@ -1389,23 +1393,51 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 	e.stopAfterTools = false
 	e.mu.Unlock()
 
-	if prepare {
+	// A custom sendMessage(triggerTurn) bypasses user-input preparation. The
+	// message is already a custom_message; the empty user string from kick is not a prompt.
+	trigger := e.claimCustomTrigger(user, images)
+	if prepare && trigger == nil {
 		prep, err := e.preparePrompt(ctx, user, images)
 		if err != nil || prep.Handled {
 			return agent.Finished(nil)
 		}
 		user, images = prep.User, prep.Images
 	}
-	user, images = e.FitPromptImages(user, images)
+	if trigger == nil {
+		user, images = e.FitPromptImages(user, images)
+	}
 	if err := e.waitDirectMCP(ctx); err != nil {
 		return agent.Finished(nil)
 	}
 	e.installMCPTools()
 
+	// Busy from preparation, including before_agent_start, so a second
+	// sendMessage steers into this run instead of starting another.
+	e.beginRunStart()
+	loopStarted := false
+	defer func() {
+		if !loopStarted {
+			e.finishRunStart()
+			e.setBusy(false)
+		}
+	}()
+
 	sent := e.System
-	start := e.DispatchEvent(ctx, "before_agent_start", map[string]any{
-		"prompt": user, "images": imagesPayload(images), "systemPrompt": sent,
-	})
+	payload := map[string]any{
+		"messageType": "user", "prompt": user, "images": imagesPayload(images), "systemPrompt": sent,
+	}
+	if trigger != nil {
+		msg := map[string]any{
+			"customType": trigger.CustomType, "content": trigger.Content, "display": trigger.Display,
+		}
+		if trigger.Details != nil {
+			msg["details"] = trigger.Details
+		}
+		payload = map[string]any{
+			"messageType": "custom", "message": msg, "systemPrompt": sent,
+		}
+	}
+	start := e.DispatchEvent(ctx, "before_agent_start", payload)
 	// systemPrompt is already on the outbound payload, so an unchanged echo is
 	// not a turn override. A different value replaces this request only.
 	returned := asString(start["systemPrompt"])
@@ -1420,15 +1452,41 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 
 	e.overflowAttempted = false
 	queued := e.fitMessages(e.TakeNextTurn())
-	userMsg := ai.Message{Role: ai.RoleUser, Content: user, Images: images}
+	hookMsgs, hookTexts := e.takeHookMessages(start, trigger)
+	var head []ai.Message
+	var skip []string
+	if trigger != nil {
+		if trigger.Content != "" && !historyEndsWith(history, trigger.Content) {
+			head = append(head, ai.Message{Role: ai.RoleUser, Content: trigger.Content})
+			skip = append(skip, trigger.Content)
+		}
+	} else {
+		head = append(head, ai.Message{Role: ai.RoleUser, Content: user, Images: images})
+	}
+	head = append(head, hookMsgs...)
+	skip = append(skip, hookTexts...)
+	// nextTurn stays ahead of the starting message. Hook messages follow it.
 	history = append(append([]ai.Message(nil), history...), queued...)
-	history = append(history, userMsg)
-	newUsers := append(append([]ai.Message(nil), queued...), userMsg)
+	history = append(history, head...)
+	newUsers := append(append([]ai.Message(nil), queued...), head...)
+	e.skipNextUserPersist(skip...)
 	compacted, _, err := e.MaybeCompact(ctx, history)
 	if err == nil {
 		history = compacted
 	}
+	// End the starting phase before the loop so a later abort cancels the run
+	// instead of sticking to the next one. The hook's abort flag stays set.
+	e.finishRunStart()
+	loopStarted = true
 	return e.runLoopWithSystem(ctx, history, newUsers, sys)
+}
+
+func historyEndsWith(history []ai.Message, content string) bool {
+	if content == "" || len(history) == 0 {
+		return false
+	}
+	last := history[len(history)-1]
+	return last.Role == ai.RoleUser && last.Content == content && len(last.Images) == 0
 }
 
 func (e *Engine) runLoop(ctx context.Context, history, newUsers []ai.Message) *agent.Stream {
@@ -1442,7 +1500,11 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 		req.Tools = tools
 	}
 	sf := e.Stream
-	if sf == nil {
+	if e.consumeAbortRequested() {
+		// Abort during before_agent_start is applied once the run exists.
+		// Cancelling ctx here would drop agent_end, so the turn stops itself.
+		sf = abortedRunStream
+	} else if sf == nil {
 		sf, _ = ai.DefaultStreamFn()
 	}
 	return agent.Run(ctx, sf, req, e.Executor(), agent.Config{
@@ -1831,7 +1893,15 @@ func (e *Engine) PersistTranscript(msgs []agent.Msg) {
 // the prefix index no longer lines up (for example after compaction shrinks
 // history), so the turn-end persist keeps those lines.
 func (e *Engine) persistPendingUsers(history []ai.Message) {
-	if e == nil || e.Opts.Session == nil || e.persisted > len(history) {
+	if e == nil {
+		return
+	}
+	defer func() {
+		e.mu.Lock()
+		e.skipPersist = nil
+		e.mu.Unlock()
+	}()
+	if e.Opts.Session == nil || e.persisted > len(history) {
 		return
 	}
 	pending := history[e.persisted:]
@@ -1841,6 +1911,10 @@ func (e *Engine) persistPendingUsers(history []ai.Message) {
 		}
 	}
 	for _, m := range pending {
+		if len(m.Images) == 0 && e.consumeSkipPersist(m.Content) {
+			e.persisted++
+			continue
+		}
 		entry, err := e.Opts.Session.AppendMessage("user", userSessionPayload(m.Content, m.Images))
 		if err != nil || entry == nil {
 			return

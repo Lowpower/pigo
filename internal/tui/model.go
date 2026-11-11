@@ -430,6 +430,14 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.engine != nil {
+			if content, ok := m.engine.PeekCustomTrigger(); ok {
+				if strings.TrimSpace(content) == "" {
+					return m.startCustomTurn()
+				}
+				return m.startTurn(content, nil)
+			}
+		}
 		return m.startTurn(msg.user, msg.images)
 	case extShutdownMsg:
 		m.quitting = true
@@ -1230,6 +1238,34 @@ func (m Model) handleImageGen(msg imageGenMsg) (tea.Model, tea.Cmd) {
 	}
 	m.transcript = append(m.transcript, entry{role: "assistant", rendered: rendered})
 	return m, nil
+}
+
+// startCustomTurn runs an extension triggerTurn without painting an empty user line.
+func (m Model) startCustomTurn() (tea.Model, tea.Cmd) {
+	if m.border.kind == statusBranch {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while a branch summary is in progress.")})
+		return m, nil
+	}
+	if m.border.kind == statusCompact || (m.engine != nil && m.engine.Compacting()) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while compaction is in progress.")})
+		return m, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.running = true
+	m.streaming = ""
+	m.streamingThinking = ""
+	m.streamingActive = false
+	if m.engine == nil {
+		return m, nil
+	}
+	m.engine.SetRunAbort(cancel)
+	m.provider = m.engine.Provider
+	hist := append([]ai.Message(nil), m.history...)
+	eng := m.engine
+	return m, func() tea.Msg {
+		return promptReadyMsg{stream: eng.RunPrompt(ctx, hist, "", nil)}
+	}
 }
 
 func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.Cmd) {
