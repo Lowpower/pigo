@@ -115,6 +115,47 @@ func TestRefreshAllEmptyBaseURL(t *testing.T) {
 	}
 }
 
+func TestRefreshProviderSkipsUnknownModelTypes(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		_ = json.NewEncoder(w).Encode([]Model{
+			{ID: "kept", API: "openai-responses"},
+			{ID: "pic", Type: "image", API: "openrouter-images"},
+			{ID: "judge", Type: "classifier", API: "openai-decisions"},
+			{ID: "widget", Type: "widget", API: "nope"},
+		})
+	}))
+	defer srv.Close()
+	if err := RefreshProvider(context.Background(), &MemoryStore{}, srv.URL, "openai", true); err != nil {
+		t.Fatal(err)
+	}
+	if query != "types=chat,image,classifier" {
+		t.Fatalf("query = %q", query)
+	}
+	if _, ok := Lookup("openai", "kept"); !ok {
+		t.Fatal("chat model dropped")
+	}
+	if _, ok := Lookup("openai", "widget"); ok {
+		t.Fatal("unknown type kept in the chat catalog")
+	}
+	if _, ok := Lookup("openai", "pic"); ok {
+		t.Fatal("image model listed as chat")
+	}
+	if _, ok := Lookup("openai", "judge"); ok {
+		t.Fatal("classifier listed as chat")
+	}
+	pic, ok := ModelOfType("image", "openai", "pic")
+	if !ok || pic.API != "openrouter-images" {
+		t.Fatalf("image = %+v ok=%v", pic, ok)
+	}
+	judge, ok := ModelOfType("classifier", "openai", "judge")
+	if !ok || judge.API != "openai-decisions" {
+		t.Fatalf("classifier = %+v ok=%v", judge, ok)
+	}
+}
+
 func TestRefreshAllSkipsNetworkWhenOfflinePrepare(t *testing.T) {
 	t.Cleanup(ClearOverlays)
 	var hits int

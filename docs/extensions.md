@@ -59,6 +59,18 @@ err := ext.Serve(ext.Handler{
 })
 ```
 
+An extension can register MCP servers for the session. The fields match one
+`mcpServers` entry in [`mcp.json`](mcp.md). A file entry with the same name wins.
+
+```go
+MCPServers: []ext.MCPServerDef{{
+    Name: "demo",
+    Config: map[string]any{"command": "demo-server"},
+}},
+```
+
+That sends `register_mcp_server` during the handshake.
+
 `ext.Serve` refuses tools whose `Schema` is missing or not `"type": "object"`.
 The host also ignores such `register_tool` frames and notifies an error.
 
@@ -123,7 +135,8 @@ can opt in with `compat.deferredToolsMode: "kimi"` instead.
 `project_trust`, `user_bash`, `before_provider_headers`,
 `before_provider_request`, `after_provider_response`, `provider_stream_event`, `model_select`,
 `thinking_level_select`, `ui_prompt_start`, `ui_prompt_end`,
-`telemetry_span`, `agent_settled`, `cache_warming_decision`.
+`telemetry_span`, `agent_settled`, `cache_warming_decision`,
+`mcp_servers_change`.
 
 `telemetry_span` is fire-and-forget (`EmitEvent`, no `event_result`). The
 payload is a `SpanRecord`: `name`, `trace_id`, `span_id`, `parent_span_id`,
@@ -239,12 +252,24 @@ must not insert between a tool call and its result (steering is drained after
 tools). Idle `steer` with `triggerTurn:true` starts a turn.
 
 Model registry: `model.list` / `model.getAll`, `model.getAvailable`,
+`model.getAllModels`, `model.getAllAvailable`, `model.getModelsOfType`,
+`model.getModelOfType`, `model.getAvailableOfType`, `model.classify`,
 `model.find`, `model.hasConfiguredAuth`, `model.stream` / `model.streamSimple`
 (events via `host_event` `model.stream`), `model.complete`, `model.refresh`,
 `model.getApiKeyAndHeaders`, `model.getProviderAuth`,
 `model.getApiKeyForProvider` (these three return an error; credentials stay
 on the host), `model.isUsingOAuth`, `model.getProvider`,
 `model.getProviderDisplayName`, `model.getProviderAuthStatus`.
+
+`model.list` and `model.getAll` stay chat-only. `model.getAllModels` returns
+chat, image, and classifier rows. `type` is `chat`, `image`, or `classifier`.
+`model.classify` takes `provider`, `id` (or `model`), `state`, `questions`,
+and optional `images`. It returns `stopReason` `stop` or `error` and does not
+use the `error` field for provider failures. Token usage is appended to the
+session as a `usage` entry with `kind` `classify`, including when answers
+fail after the service reports usage. OpenAI Decisions is hidden from
+`model.getAvailableOfType` while the stored OpenAI credential is ChatGPT
+OAuth; `--api-key` still lists it. Image generation is not this call.
 
 Render / complete: `registerMessageRenderer`, `registerEntryRenderer`,
 `registerMarkdownTransformer`, `registerToolRenderer`,

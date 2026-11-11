@@ -26,6 +26,7 @@ var modelsDevLocalOnly = map[string]bool{
 	"openai-codex":               true,
 	"llama.cpp":                  true,
 	"radius":                     true,
+	"typesafe":                   true,
 }
 
 // DevProviderID reports the models.dev provider id for a pigo provider.

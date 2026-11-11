@@ -23,10 +23,17 @@ const (
 
 // ModelInfo is one llama.cpp router catalog entry.
 type ModelInfo struct {
-	ID     string      `json:"id"`
-	Source string      `json:"source,omitempty"`
-	Status ModelStatus `json:"status"`
-	Meta   *ModelMeta  `json:"meta,omitempty"`
+	ID           string             `json:"id"`
+	Source       string             `json:"source,omitempty"`
+	Status       ModelStatus        `json:"status"`
+	Meta         *ModelMeta         `json:"meta,omitempty"`
+	Architecture *ModelArchitecture `json:"architecture,omitempty"`
+}
+
+// ModelArchitecture is llama.cpp modality metadata.
+// Since llama.cpp 0.6, decision models list "decisions" in output_modalities.
+type ModelArchitecture struct {
+	OutputModalities []string `json:"output_modalities,omitempty"`
 }
 
 // ModelMeta is optional llama.cpp model metadata.
@@ -407,6 +414,25 @@ func ContextLabel(m ModelInfo) string {
 		return strconv.FormatInt((ctx+500)/1000, 10) + "k"
 	}
 	return strconv.FormatInt(ctx, 10)
+}
+
+// HasOutputModality reports one architecture.output_modalities entry.
+func HasOutputModality(m ModelInfo, name string) bool {
+	if m.Architecture == nil {
+		return false
+	}
+	for _, kind := range m.Architecture.OutputModalities {
+		if strings.EqualFold(kind, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// DecisionOnly reports a model that llama.cpp serves only through /v1/systemone.
+// A model that also lists "text" stays available for chat.
+func DecisionOnly(m ModelInfo) bool {
+	return HasOutputModality(m, "decisions") && !HasOutputModality(m, "text")
 }
 
 // Selectable reports whether a router model can be used for inference.

@@ -154,6 +154,7 @@ func TestOfflineDefaultIDs(t *testing.T) {
 		"qwen-token-plan-individual": "qwen3.8-max",
 		"radius":                     "balanced",
 		"together":                   "moonshotai/Kimi-K3",
+		"typesafe":                   "",
 		"vercel-ai-gateway":          "zai/glm-5.1",
 		"xai":                        "grok-4.7",
 		"xiaomi":                     "mimo-v2.5-pro",

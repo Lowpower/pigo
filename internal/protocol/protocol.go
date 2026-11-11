@@ -17,6 +17,7 @@ const (
 	TypeReady                  = "ready"                    // host -> ext: handshake accepted
 	TypeInitialized            = "initialized"              // ext -> host: finished registering
 	TypeRegisterTool           = "register_tool"            // ext -> host: { Name, Description, Schema, optional exposure fields }
+	TypeRegisterMCPServer      = "register_mcp_server"      // ext -> host: { Name, Args } same fields as one mcpServers entry
 	TypeRegisterLoadout        = "register_loadout"         // ext -> host: this extension implements prepare_loadout
 	TypeRegisterCommand        = "register_command"         // ext -> host: { Name, Description }
 	TypeRegisterShortcut       = "register_shortcut"        // ext -> host: { Name, Description }

@@ -20,6 +20,7 @@ import (
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/llama"
+	"github.com/Lowpower/pigo/internal/mcp"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/prompt"
@@ -158,6 +159,13 @@ type Engine struct {
 	preambleAnchor string
 	sawPreamble    bool
 
+	mcp            *mcp.Manager
+	mcpMu          sync.RWMutex
+	mcpNames       map[string]bool
+	mcpInfos       map[string]ext.ToolInfo
+	mcpSectionText string
+	mcpEventNames  []string
+
 	busy           bool
 	runStarting    bool
 	abortRequested bool
@@ -294,6 +302,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.rebuildCommands()
 	e.applyProjectTrust(ctx)
 	e.bindExtensionHooks()
+	e.startMCP(ctx)
 	e.wireTelemetry()
 	if fn := e.bindStream(e.Provider); fn != nil {
 		e.Stream = fn
@@ -1156,6 +1165,7 @@ func (t extTool) Execute(ctx context.Context, args map[string]any) (string, bool
 
 // Close flushes telemetry then stops extension subprocesses.
 func (e *Engine) Close() {
+	e.closeMCP()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = telemetry.Shutdown(ctx)
@@ -1260,6 +1270,7 @@ func (e *Engine) runRegisteredTool(ctx context.Context, name string, args map[st
 	if e == nil || e.Tools == nil {
 		return "", true, nil
 	}
+	e.waitMCPForCall(ctx, name, args)
 	call, result, isErr, ok := e.Tools.Ready(name, args)
 	if !ok {
 		return result, isErr, nil
@@ -1391,6 +1402,10 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 	if trigger == nil {
 		user, images = e.FitPromptImages(user, images)
 	}
+	if err := e.waitDirectMCP(ctx); err != nil {
+		return agent.Finished(nil)
+	}
+	e.installMCPTools()
 
 	// Busy from preparation, including before_agent_start, so a second
 	// sendMessage steers into this run instead of starting another.
