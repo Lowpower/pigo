@@ -9,8 +9,8 @@ import (
 	"golang.org/x/term"
 )
 
-// drainPendingTTY drops unread terminal replies (OSC 11, CSI 6n) so they
-// are not delivered as key events after bubbletea takes stdin.
+// drainPendingTTY drops unread terminal replies (OSC 11, OSC 7501, CSI 6n)
+// so they are not delivered as key events after bubbletea takes stdin.
 func drainPendingTTY() {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {

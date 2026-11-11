@@ -52,6 +52,9 @@ func (m Model) finishView(s string) string {
 	if m.cfg.TerminalProgress() {
 		s = progressOSC(m.running || m.bashRunning) + s
 	}
+	if m.statusSeq != "" {
+		s = m.statusSeq + s
+	}
 	return m.withClip(s)
 }
 
