@@ -111,16 +111,13 @@ func (e *Engine) scriptModels(typ, provider string) ([]codescript.ModelInfo, err
 	default:
 		return nil, fmt.Errorf("unknown model type %q", typ)
 	}
-	if typ != "chat" {
-		return []codescript.ModelInfo{}, nil
-	}
 	var out []codescript.ModelInfo
-	for _, m := range models.Available(auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))) {
+	for _, m := range models.AvailableOfType(typ, auth.AuthenticatedIDs(auth.Open(e.Opts.AgentDir))) {
 		if provider != "" && m.Provider != provider {
 			continue
 		}
 		out = append(out, codescript.ModelInfo{
-			Type:          "chat",
+			Type:          m.ModelType(),
 			Provider:      m.Provider,
 			ID:            m.ID,
 			Name:          m.Name,

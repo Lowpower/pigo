@@ -21,6 +21,7 @@ func (e *Engine) promptSections() prompt.SectionSet {
 		Skills:           e.Skills,
 		Tools:            toolDefs,
 		IncludeToolHints: true,
+		MCPServers:       e.mcpSection(),
 	})
 }
 

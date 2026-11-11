@@ -23,7 +23,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `compactionEnabled` / `compaction.{enabled,reserveTokens,keepRecentTokens,modelOverrides}` | [compaction.md](compaction.md) |
 | `steeringMode` / `followUpMode` | Queue behaviour while streaming |
 | `retry.{enabled,maxRetries,baseDelayMs,maxAgentDelayMs}` and `retry.provider.{timeoutMs,maxRetries,maxRetryDelayMs}` | Agent retry (maxAgentDelayMs default 60000) |
-| `defaultTools` | Built-in tool allowlist (default `read,bash,edit,write`) |
+| `defaultTools` | Built-ins enabled at startup. Unset means `read,bash,edit,write`. `+name` / `-name` adjust the previous layer; any other list replaces it. `*` is a pattern in a replacement list |
 | `enabledModels` | Ctrl+P cycle allowlist (globs) |
 | `defaultProjectTrust` | `ask` \| `always` \| `never` (global only) |
 | `sessionDir` | Session storage root |

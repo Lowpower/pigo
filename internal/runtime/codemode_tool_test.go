@@ -19,8 +19,13 @@ func TestCodemodeStaysOffByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	if findBuiltin(e, "codemode") != nil {
-		t.Fatal("codemode is in the default tool set")
+	if findBuiltin(e, "codemode") == nil {
+		t.Fatal("codemode is not registered")
+	}
+	for _, name := range e.activeSnapshot() {
+		if name == "codemode" {
+			t.Fatal("codemode is enabled by default")
+		}
 	}
 	if strings.Contains(e.System, "await searchTools()") {
 		t.Fatal("default system prompt describes codemode")

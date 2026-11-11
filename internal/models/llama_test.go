@@ -49,6 +49,62 @@ func TestApplyLlamaCatalogOverlaysSelectableModels(t *testing.T) {
 	}
 }
 
+func TestApplyLlamaCatalogHidesDecisionOnlyModelsFromChat(t *testing.T) {
+	ClearOverlays()
+	t.Cleanup(ClearOverlays)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": "qwen", "status": map[string]any{"value": "loaded"}, "architecture": map[string]any{"output_modalities": []string{"text"}}},
+					{"id": "julia", "status": map[string]any{"value": "loaded"}, "architecture": map[string]any{"output_modalities": []string{"decisions"}}},
+					{"id": "both", "status": map[string]any{"value": "loaded"}, "architecture": map[string]any{"output_modalities": []string{"text", "decisions"}}},
+				},
+			})
+		case "/props":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models_autoload": false})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c, err := llama.NewClient(srv.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyLlamaCatalog(c, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range Catalog() {
+		if m.Provider == llama.ProviderID && m.ID == "julia" {
+			t.Fatalf("decision-only model in chat catalog: %+v", m)
+		}
+	}
+	chat, ok := Lookup(llama.ProviderID, "qwen")
+	if !ok || chat.ModelType() != "chat" {
+		t.Fatalf("chat qwen = %+v ok=%v", chat, ok)
+	}
+	if _, ok := Lookup(llama.ProviderID, "both"); !ok {
+		t.Fatal("text+decisions model should stay in the chat catalog")
+	}
+	got, ok := ModelOfType("classifier", llama.ProviderID, "julia")
+	if !ok || got.API != "typesafe-system-one" || got.ModelType() != "classifier" {
+		t.Fatalf("julia = %+v ok=%v", got, ok)
+	}
+	if got.BaseURL != llama.InferenceURL(c.ServerURL) {
+		t.Fatalf("base = %q", got.BaseURL)
+	}
+	qwen, ok := ModelOfType("classifier", llama.ProviderID, "qwen")
+	if !ok || qwen.API != "llama-cpp-classify" || qwen.BaseURL != c.ServerURL {
+		t.Fatalf("qwen classifier = %+v ok=%v", qwen, ok)
+	}
+	both, ok := ModelOfType("classifier", llama.ProviderID, "both")
+	if !ok || both.API != "typesafe-system-one" {
+		t.Fatalf("both classifier = %+v ok=%v", both, ok)
+	}
+}
+
 func TestApplyLlamaCatalogWritesContextWindow(t *testing.T) {
 	ClearOverlays()
 	t.Cleanup(ClearOverlays)

@@ -433,13 +433,15 @@ func DefaultBuiltinTools() []string {
 	return []string{"read", "bash", "edit", "write"}
 }
 
-// InitialBuiltinTools is settings.defaultTools when set (including an empty list),
-// otherwise read/bash/edit/write.
+// InitialBuiltinTools resolves settings.defaultTools into the built-in names
+// enabled at startup. Unset settings resolve to read, bash, edit, write.
+// An empty list resolves to no names. +name and -name adjust that base.
+// The raw entries stay on DefaultTools.
 func (c Config) InitialBuiltinTools() []string {
-	if c.DefaultTools != nil {
-		return append([]string(nil), (*c.DefaultTools)...)
+	if c.DefaultTools == nil {
+		return DefaultBuiltinTools()
 	}
-	return DefaultBuiltinTools()
+	return ResolveDefaultTools(*c.DefaultTools)
 }
 
 // ShowImages reports whether the TUI should inline tool-result images (default true).

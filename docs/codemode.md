@@ -1,8 +1,8 @@
 # Codemode
 
 `codemode` runs one JavaScript script that can call the session's other tools.
-It is built in and off by default. Add it to `defaultTools` or pass it in
-`--tools` (that flag replaces the allowlist, so name the other tools too).
+It is built in and off by default. Add it with `defaultTools` or `--tools +codemode`.
+A plain `--tools` list replaces the enabled set, so name the other tools too.
 
 The tool argument is `{ "code": "<javascript>" }`. The script is the body of an
 async function: top-level `await` and `return` work. A single expression is the
@@ -21,7 +21,7 @@ short.
 | `searchTools(query, { limit?, namespace? })` | Async. Resolves to `{ name, description }[]`. Default limit is 8. |
 | `describeTool(name)` | Async. Resolves to `{ description, declaration }`, or `null`. |
 | `describeNamespace(name)` | Async. Resolves to `{ name, description?, instructions?, tools }`, or `null`. |
-| `models.getAvailableOfType(type, provider?)` | Async. `chat` lists catalog models whose provider has credentials. `classifier` and `image` are empty until those models exist. |
+| `models.getAvailableOfType(type, provider?)` | Async. Lists `chat`, `classifier`, or `image` models whose provider has credentials. |
 | `models.classify(model, context)` | Async. Resolves to `{ stopReason: "error", errorMessage: "not implemented" }`. |
 | `models.generateImages(model, context)` | Async. Same not-implemented result as `classify`. |
 

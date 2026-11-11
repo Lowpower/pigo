@@ -21,6 +21,7 @@ import (
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/llama"
+	"github.com/Lowpower/pigo/internal/mcp"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/prompt"
@@ -161,6 +162,13 @@ type Engine struct {
 	preambleAnchor string
 	sawPreamble    bool
 
+	mcp            *mcp.Manager
+	mcpMu          sync.RWMutex
+	mcpNames       map[string]bool
+	mcpInfos       map[string]ext.ToolInfo
+	mcpSectionText string
+	mcpEventNames  []string
+
 	busy         bool
 	runAbort     context.CancelFunc
 	kickFn       func(user string, images []ai.ImageContent)
@@ -185,6 +193,9 @@ type autoCompleteReg struct {
 
 // New applies auth, discovers skills, loads tools/extensions, and builds the prompt.
 func New(ctx context.Context, opts Options) (*Engine, error) {
+	if err := config.ValidateToolList(opts.ToolAllow); err != nil {
+		return nil, err
+	}
 	if opts.Cwd == "" {
 		opts.Cwd, _ = os.Getwd()
 	}
@@ -236,12 +247,8 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	}
 	e.syncToolRunner()
 	reg := e.builtinRegistry()
-	if opts.NoTools {
+	if opts.NoTools || opts.NoBuiltinTools {
 		reg = tools.NewRegistry()
-	} else if opts.NoBuiltinTools {
-		reg = tools.NewRegistry()
-	} else {
-		reg = filterTools(reg, builtinAllow(opts), opts.ToolDeny)
 	}
 
 	extSpecs, err := collectExtensionSpecs(ctx, opts, rs)
@@ -261,6 +268,9 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	tpls, promptDiags := loadTemplates(opts, rs)
 	themeFiles := loadThemeFiles(opts, rs)
 
+	e.Tools = reg
+	e.Hosts = hosts
+	e.installActiveTools(e.selectedActiveNames())
 	sys := prompt.Build(prompt.Options{
 		Cwd:              opts.Cwd,
 		AgentDir:         opts.AgentDir,
@@ -269,12 +279,10 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		NoContextFiles:   opts.NoContextFiles,
 		ProjectTrusted:   opts.ProjectTrusted,
 		Skills:           sk,
-		Tools:            reg.AITools(),
+		Tools:            e.durableTools(),
 		IncludeToolHints: true,
 	})
 
-	e.Tools = reg
-	e.Hosts = hosts
 	kept, omitWarn := omitReplacedBuiltins(e.builtinExts, hosts)
 	e.builtinExts = kept
 	extWarn = append(extWarn, omitWarn...)
@@ -293,6 +301,7 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	e.rebuildCommands()
 	e.applyProjectTrust(ctx)
 	e.bindExtensionHooks()
+	e.startMCP(ctx)
 	e.wireTelemetry()
 	if fn := e.bindStream(e.Provider); fn != nil {
 		e.Stream = fn
@@ -316,7 +325,10 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	})
 	e.warmer = e.newCacheWarmer()
 	e.extendResourcesFromExtensions(ctx, "startup")
-	e.rebuildSystemPrompt()
+	e.applySessionToolPolicy(e.Opts.Session)
+	if e.Opts.Session == nil || !session.ReplaySystem(e.Opts.Session.GetBranch("")).Declared {
+		e.rebuildSystemPrompt()
+	}
 	return e, nil
 }
 
@@ -1151,38 +1163,9 @@ func (t extTool) Execute(ctx context.Context, args map[string]any) (string, bool
 	return res.Text, res.IsError
 }
 
-func filterTools(reg *tools.Registry, allow, deny []string) *tools.Registry {
-	all := reg.List()
-	denySet := map[string]bool{}
-	for _, d := range deny {
-		denySet[d] = true
-	}
-	allowSet := map[string]bool{}
-	for _, a := range allow {
-		allowSet[a] = true
-	}
-	var keep []tools.Tool
-	for _, t := range all {
-		if denySet[t.Name()] {
-			continue
-		}
-		if !allowSet[t.Name()] {
-			continue
-		}
-		keep = append(keep, t)
-	}
-	return tools.NewRegistry(keep...)
-}
-
-func builtinAllow(opts Options) []string {
-	if len(opts.ToolAllow) > 0 {
-		return opts.ToolAllow
-	}
-	return opts.Config.InitialBuiltinTools()
-}
-
 // Close flushes telemetry then stops extension subprocesses.
 func (e *Engine) Close() {
+	e.closeMCP()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = telemetry.Shutdown(ctx)
@@ -1287,6 +1270,7 @@ func (e *Engine) runRegisteredTool(ctx context.Context, name string, args map[st
 	if e == nil || e.Tools == nil {
 		return "", true, nil
 	}
+	e.waitMCPForCall(ctx, name, args)
 	call, result, isErr, ok := e.Tools.Ready(name, args)
 	if !ok {
 		return result, isErr, nil
@@ -1413,6 +1397,10 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 		user, images = prep.User, prep.Images
 	}
 	user, images = e.FitPromptImages(user, images)
+	if err := e.waitDirectMCP(ctx); err != nil {
+		return agent.Finished(nil)
+	}
+	e.installMCPTools()
 
 	sent := e.System
 	start := e.DispatchEvent(ctx, "before_agent_start", map[string]any{
@@ -1510,8 +1498,7 @@ func (e *Engine) AdoptSession(s *session.Manager) {
 		return
 	}
 	e.persisted = len(session.ModelMessages(session.ContextEntries(s)))
-	e.restoreActiveTools(s)
-	e.restoreSystem(s)
+	e.applySessionToolPolicy(s)
 	e.restoreSessionSelection()
 }
 
@@ -1683,6 +1670,17 @@ func (e *Engine) History() []ai.Message {
 // A settings load or project-overlay error is returned after the rest of reload runs.
 func (e *Engine) Reload() error {
 	ctx := context.Background()
+	prevActive := append([]string(nil), e.activeSnapshot()...)
+	prevRegistered := map[string]bool{}
+	for _, name := range registeredNames(e) {
+		prevRegistered[name] = true
+	}
+	prevDefault := map[string]bool{}
+	if !e.explicitToolSelection() {
+		for _, name := range e.effectiveDefaultNames() {
+			prevDefault[name] = true
+		}
+	}
 	var loadErr error
 	if e.Opts.AgentDir != "" {
 		loaded, err := config.Load(e.Opts.AgentDir)
@@ -1737,12 +1735,8 @@ func (e *Engine) Reload() error {
 	e.extStreams = nil
 	e.syncToolRunner()
 	reg := e.builtinRegistry()
-	if e.Opts.NoTools {
+	if e.Opts.NoTools || e.Opts.NoBuiltinTools {
 		reg = tools.NewRegistry()
-	} else if e.Opts.NoBuiltinTools {
-		reg = tools.NewRegistry()
-	} else {
-		reg = filterTools(reg, builtinAllow(e.Opts), e.Opts.ToolDeny)
 	}
 	var loadWarn []string
 	if !e.Opts.NoTools {
@@ -1782,6 +1776,7 @@ func (e *Engine) Reload() error {
 		"reason":    "reload",
 	})
 	e.extendResourcesFromExtensions(ctx, "reload")
+	e.resetActiveToolsAfterReload(prevActive, prevRegistered, prevDefault)
 	e.rebuildSystemPrompt()
 	return loadErr
 }

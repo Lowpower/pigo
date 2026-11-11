@@ -1,15 +1,20 @@
 # Tools
 
-Default allowlist (`settings.defaultTools`): `read`, `bash`, `edit`, `write`.
-Also built in: `grep`, `find`, `ls`, `powershell` (Windows), and `codemode`
+Built-in tools stay registered: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `powershell` (Windows), and `codemode`
 (off unless named in `defaultTools` or `--tools`; see [codemode.md](codemode.md)).
+`settings.defaultTools` chooses which built-ins start enabled. Unset means `read`, `bash`, `edit`, `write`.
 
 | Flag | Effect |
 | --- | --- |
-| `--no-tools` | No tools |
-| `--tools a,b` | Allowlist |
-| `--exclude-tools a,b` | Denylist |
-| `--no-builtin-tools` | Only extension tools |
+| `--no-tools` | No tools, and extensions are not loaded |
+| `--tools a,b` | Replace the enabled set. `*` matches any characters (`ba*`, `mcp__radius__*`) |
+| `--tools +a,-b` | Add and remove on top of the resolved default. Exact names only, and not mixed with plain names |
+| `--exclude-tools a,b*` | Drop matching tools from the enabled set |
+| `--no-builtin-tools` | No built-in tools (extensions still register) |
+
+`defaultTools` uses the same entries. A list of only `+name` / `-name` adjusts the previous layer: the built-in default when the user did not set one, otherwise the user list when a trusted project sets it. Any other list, including `[]`, replaces that layer. A plain `--tools` list, `--no-tools`, or `--no-builtin-tools` replaces the enabled set and does not restore a session's tools. `--tools +name,-name` restores the session's enabled tools first, then applies those changes.
+
+`/reload` enables tools the resolved default newly gained. Tools removed from settings stay enabled. Tools turned off in the session stay off unless the new default adds them.
 
 `/tools` lists what the current session actually has.
 

@@ -777,10 +777,13 @@ func TestDefaultLoadsBuiltinTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	got := toolNames(e)
+	got := enabledNames(e)
 	want := []string{"read", "write", "edit", "bash"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("tools=%v, want default read/write/edit/bash (got %v)", got, want)
+		t.Fatalf("enabled=%v, want default read/write/edit/bash", got)
+	}
+	if !strings.Contains(strings.Join(toolNames(e), ","), "grep") {
+		t.Fatalf("registry = %v, builtins should stay registered", toolNames(e))
 	}
 }
 
@@ -817,8 +820,11 @@ func TestProjectSettingsDefaultToolsWhenTrusted(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	if strings.Join(toolNames(e), ",") != "grep" {
-		t.Fatalf("trusted project defaultTools = %v", toolNames(e))
+	if strings.Join(enabledNames(e), ",") != "grep" {
+		t.Fatalf("trusted project defaultTools = %v", enabledNames(e))
+	}
+	if !strings.Contains(strings.Join(toolNames(e), ","), "read") {
+		t.Fatalf("registry = %v, builtins should stay registered", toolNames(e))
 	}
 }
 
@@ -835,9 +841,9 @@ func TestDefaultToolsSetting(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	got := toolNames(e)
+	got := enabledNames(e)
 	if strings.Join(got, ",") != "grep,find" {
-		t.Fatalf("tools=%v", got)
+		t.Fatalf("enabled=%v", got)
 	}
 }
 
@@ -855,9 +861,12 @@ func TestToolsFlagOverridesDefaultTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	got := toolNames(e)
+	got := enabledNames(e)
 	if strings.Join(got, ",") != "read" {
-		t.Fatalf("tools=%v", got)
+		t.Fatalf("enabled=%v", got)
+	}
+	if !strings.Contains(strings.Join(toolNames(e), ","), "grep") {
+		t.Fatalf("registry = %v, --tools should not drop other builtins", toolNames(e))
 	}
 }
 
@@ -874,8 +883,11 @@ func TestEmptyDefaultToolsDisablesBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	if n := len(e.Tools.List()); n != 0 {
-		t.Fatalf("tools=%d, empty defaultTools should disable builtins", n)
+	if n := len(enabledNames(e)); n != 0 {
+		t.Fatalf("enabled=%d, empty defaultTools should enable no builtins", n)
+	}
+	if len(e.Tools.List()) == 0 {
+		t.Fatal("empty defaultTools should leave builtins registered")
 	}
 }
 
@@ -883,6 +895,14 @@ func toolNames(e *Engine) []string {
 	var names []string
 	for _, t := range e.Tools.List() {
 		names = append(names, t.Name())
+	}
+	return names
+}
+
+func enabledNames(e *Engine) []string {
+	var names []string
+	for _, t := range e.providerTools() {
+		names = append(names, t.Name)
 	}
 	return names
 }

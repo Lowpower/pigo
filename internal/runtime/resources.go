@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/pkgmgr"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/skills"
@@ -206,19 +205,5 @@ func (e *Engine) extendResourcesFromExtensions(ctx context.Context, reason strin
 }
 
 func (e *Engine) rebuildSystemPrompt() {
-	var toolDefs []ai.Tool
-	if e.Tools != nil {
-		toolDefs = e.durableTools()
-	}
-	e.System = prompt.Build(prompt.Options{
-		Cwd:              e.Opts.Cwd,
-		AgentDir:         e.Opts.AgentDir,
-		Custom:           e.Opts.SystemPrompt,
-		Append:           e.Opts.AppendSystem,
-		NoContextFiles:   e.Opts.NoContextFiles,
-		ProjectTrusted:   e.Opts.ProjectTrusted,
-		Skills:           e.Skills,
-		Tools:            toolDefs,
-		IncludeToolHints: true,
-	})
+	e.System = e.promptSections().Render()
 }

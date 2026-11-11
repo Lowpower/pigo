@@ -247,8 +247,7 @@ func applyOverlay(user Config, over projectOverlay) Config {
 		out.ShellPath = over.ShellPath
 	}
 	if over.DefaultTools != nil {
-		tools := append([]string(nil), (*over.DefaultTools)...)
-		out.DefaultTools = &tools
+		out.DefaultTools = MergeDefaultTools(user.DefaultTools, over.DefaultTools)
 	}
 	if over.EnabledModels != nil {
 		out.EnabledModels = append([]string(nil), over.EnabledModels...)
