@@ -1,6 +1,7 @@
 # Tools
 
-Built-in tools stay registered: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, and `powershell` (Windows).
+Built-in tools stay registered: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `powershell` (Windows), and `codemode`
+(off unless named in `defaultTools` or `--tools`; see [codemode.md](codemode.md)).
 `settings.defaultTools` chooses which built-ins start enabled. Unset means `read`, `bash`, `edit`, `write`.
 
 | Flag | Effect |
@@ -28,6 +29,7 @@ Built-in tools stay registered: `read`, `write`, `edit`, `bash`, `grep`, `find`,
 | `grep` | `pattern`, `path?`, `glob?`, `ignoreCase?`, `literal?`, `context?`, `limit?` — gitignore only inside a git repo |
 | `find` | `pattern`, `path?`, `limit?` — gitignore even outside git |
 | `ls` | `path?`, `limit?` |
+| `codemode` | `code` (JavaScript; off by default, see [codemode.md](codemode.md)) |
 
 `images.blockImages` rejects image reads. `terminal.showImages` controls TUI
 display.

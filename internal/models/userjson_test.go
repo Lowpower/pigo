@@ -482,6 +482,62 @@ func TestLoadUserJSONSamplingParams(t *testing.T) {
 	}
 }
 
+func TestLoadUserJSONSamplingParamsByThinkingLevel(t *testing.T) {
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("samp-level-json")
+	})
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	body := `{
+  "providers": {
+    "samp-level-json": {
+      "api": "openai-completions",
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "models": [
+        {
+          "id": "local",
+          "samplingParams": {"temperature": 1, "top_p": 0.95},
+          "samplingParamsByThinkingLevel": {
+            "off": {"temperature": 0.7, "top_k": 0},
+            "high": {"top_p": 0.5},
+            "low": null
+          }
+        },
+        {"id": "plain", "samplingParams": {"temperature": 0.3}}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := Lookup("samp-level-json", "local")
+	if !ok {
+		t.Fatal("local missing")
+	}
+	off := m.SamplingParamsByThinkingLevel["off"]
+	if off["temperature"] != float64(0.7) || off["top_k"] != float64(0) {
+		t.Fatalf("off = %#v", off)
+	}
+	if m.SamplingParamsByThinkingLevel["high"]["top_p"] != float64(0.5) {
+		t.Fatalf("high = %#v", m.SamplingParamsByThinkingLevel["high"])
+	}
+	if _, present := m.SamplingParamsByThinkingLevel["low"]; present {
+		t.Fatalf("null level kept: %#v", m.SamplingParamsByThinkingLevel["low"])
+	}
+	if m.SamplingParams["temperature"] != float64(1) || m.SamplingParams["top_p"] != 0.95 {
+		t.Fatalf("model params = %#v", m.SamplingParams)
+	}
+	plain, ok := Lookup("samp-level-json", "plain")
+	if !ok || len(plain.SamplingParamsByThinkingLevel) != 0 || plain.SamplingParams["temperature"] != 0.3 {
+		t.Fatalf("plain = %#v byLevel=%#v ok=%v", plain.SamplingParams, plain.SamplingParamsByThinkingLevel, ok)
+	}
+}
+
 func TestLoadUserJSONForceAdaptiveThinkingFalse(t *testing.T) {
 	on := true
 	RegisterProvider(ProviderSpec{

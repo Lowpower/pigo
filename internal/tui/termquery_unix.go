@@ -76,3 +76,47 @@ func readTerminalColors(in, out *os.File, timeout time.Duration) theme.SystemInp
 	}
 	return finishSystemInput(parsed)
 }
+
+// readProgramStatus reports whether OSC 7501 reports should be sent.
+// env is PIGO_PROGRAM_STATUS: "1" forces them on, "0" forces them off, and
+// any other value queries the terminal. A missing TTY cannot answer, so the
+// query stays off. PI_PROGRAM_STATUS is not read.
+func readProgramStatus(in, out *os.File, timeout time.Duration, env string) bool {
+	switch env {
+	case "1":
+		return true
+	case "0":
+		return false
+	}
+	if in == nil || !term.IsTerminal(int(in.Fd())) {
+		return false
+	}
+	w := out
+	if w == nil || !term.IsTerminal(int(w.Fd())) {
+		w = in
+	}
+	if _, err := w.Write([]byte(programStatusProbeRequest())); err != nil {
+		return false
+	}
+	if err := in.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return false
+	}
+	defer func() { _ = in.SetReadDeadline(time.Time{}) }()
+	buf := make([]byte, 0, 256)
+	tmp := make([]byte, 256)
+	supported := false
+	for {
+		n, err := in.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+			var done bool
+			supported, done = parseProgramStatusProbe(buf)
+			if done {
+				return supported
+			}
+		}
+		if err != nil {
+			return supported
+		}
+	}
+}

@@ -7,17 +7,37 @@ import (
 	"github.com/openai/openai-go/responses"
 )
 
-// ResolveSamplingParams merges the catalog model's samplingParams with
+// ResolveSamplingParams merges the catalog model's samplingParams, the
+// samplingParamsByThinkingLevel entry for the clamped thinking level, and
 // per-request overrides. Caller keys win. An empty result is nil.
 // Models whose API is not OpenAI-compatible contribute no defaults.
-func ResolveSamplingParams(provider, modelID string, caller map[string]any) map[string]any {
+// An empty thinking level is off. A missing or null level entry does not
+// replace samplingParams; keys the entry omits stay.
+func ResolveSamplingParams(provider, modelID, thinking string, caller map[string]any) map[string]any {
 	var base map[string]any
 	if provider != "" && modelID != "" {
 		if m, ok := models.Lookup(provider, modelID); ok && samplingParamsAPI(m.API) {
 			base = m.SamplingParams
+			if entry, ok := samplingParamsForThinking(m, thinking); ok {
+				base = models.MergeSamplingParams(base, entry)
+			}
 		}
 	}
 	return models.MergeSamplingParams(base, caller)
+}
+
+// samplingParamsForThinking is the level entry selected the way pi clamps a
+// thinking level. off that the model marks unsupported moves to the next
+// supported level. The wire effort still uses RequestThinkingLevel.
+func samplingParamsForThinking(m models.Model, thinking string) (map[string]any, bool) {
+	if len(m.SamplingParamsByThinkingLevel) == 0 {
+		return nil, false
+	}
+	entry, ok := m.SamplingParamsByThinkingLevel[models.ClampThinking(thinking, m)]
+	if !ok || len(entry) == 0 {
+		return nil, false
+	}
+	return entry, true
 }
 
 func samplingParamsAPI(api string) bool {
@@ -76,7 +96,7 @@ func applyResponsesSampling(params *responses.ResponseNewParams, extra map[strin
 	for k := range extra {
 		skip[k] = true
 	}
-	for k, v := range ResolveSamplingParams(opts.Provider, opts.Model, opts.SamplingParams) {
+	for k, v := range ResolveSamplingParams(opts.Provider, opts.Model, opts.Thinking, opts.SamplingParams) {
 		if skip[k] {
 			continue
 		}

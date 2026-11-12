@@ -126,7 +126,7 @@ func streamStartOptions(provider string, opts ai.Options) map[string]any {
 	if p == "" {
 		p = provider
 	}
-	if sp := ai.ResolveSamplingParams(p, opts.Model, opts.SamplingParams); len(sp) > 0 {
+	if sp := ai.ResolveSamplingParams(p, opts.Model, opts.Thinking, opts.SamplingParams); len(sp) > 0 {
 		out["samplingParams"] = sp
 	}
 	return out

@@ -13,10 +13,13 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/dop251/goja/parser"
 )
 
-// HostFunc is one synchronous function the script calls as host.<name>(...).
-// args are JSON values. The returned string is the JavaScript result.
+// HostFunc is one function the script calls as host.<name>(...).
+// The call returns a promise immediately, so several calls can run at once.
+// args are JSON values. The returned string is the resolved JavaScript value.
 type HostFunc func(ctx context.Context, args []any) (string, error)
 
 var workerSpawns atomic.Int64
@@ -28,6 +31,17 @@ var childBudgetNS atomic.Int64
 // Run executes source. Parsing happens before a worker slot is taken, and a
 // slot is taken before the child process starts. host may be nil.
 func Run(ctx context.Context, source string, host map[string]HostFunc) (string, error) {
+	return start(ctx, source, host, false)
+}
+
+// RunAsync parses source the same way as Run, then runs it as an async function
+// body so top-level await and return work. A script that is a single expression
+// resolves to that expression.
+func RunAsync(ctx context.Context, source string, host map[string]HostFunc) (string, error) {
+	return start(ctx, source, host, true)
+}
+
+func start(ctx context.Context, source string, host map[string]HostFunc, async bool) (string, error) {
 	if os.Getenv(workerEnv) == "1" {
 		return "", errors.New("codemode worker cannot run a nested script")
 	}
@@ -37,6 +51,9 @@ func Run(ctx context.Context, source string, host map[string]HostFunc) (string, 
 	code, opt, err := Parse(source)
 	if err != nil {
 		return "", err
+	}
+	if async {
+		code = wrapAsync(code)
 	}
 	wait := maxWorkerWait
 	var configured time.Duration
@@ -287,6 +304,17 @@ func execute(ctx context.Context, code string, host map[string]HostFunc, budget,
 			}
 		}
 	}
+}
+
+// wrapAsync turns a script into an async function call. An expression script
+// returns that expression, so `await host.echo("hi")` resolves to the echo.
+// A statement script, including one that uses return, is the function body.
+func wrapAsync(code string) string {
+	expr := "(async () => {\nreturn (\n" + code + "\n);\n})()"
+	if _, err := parser.ParseFile(nil, "", expr, 0); err == nil {
+		return expr
+	}
+	return "(async () => {\n" + code + "\n})()"
 }
 
 func withoutEnv(env []string, key string) []string {

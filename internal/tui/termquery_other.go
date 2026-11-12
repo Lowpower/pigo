@@ -16,3 +16,7 @@ func readTerminalCellSize(_, _ *os.File, _ time.Duration) (int, int, bool) {
 func readTerminalColors(_, _ *os.File, _ time.Duration) theme.SystemInput {
 	return finishSystemInput(theme.SystemInput{})
 }
+
+func readProgramStatus(_, _ *os.File, _ time.Duration, env string) bool {
+	return env == "1"
+}

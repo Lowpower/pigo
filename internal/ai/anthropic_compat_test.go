@@ -220,6 +220,31 @@ func TestAnthropicTemperatureCompat(t *testing.T) {
 	}
 }
 
+func TestAnthropicIgnoresSamplingParamsByThinkingLevel(t *testing.T) {
+	registerAnthropicModels(t, "temp-level", []models.Model{{
+		Provider: "temp-level", ID: "m", API: "anthropic-messages",
+		SamplingParams: map[string]any{"temperature": 0.2},
+		SamplingParamsByThinkingLevel: map[string]map[string]any{
+			"off":  {"temperature": 0.9},
+			"high": {"temperature": 0.1},
+		},
+	}})
+
+	off := decodeReq(t, mustAnthropicBody(t, userHi(), Options{
+		Provider: "temp-level", Model: "m", Thinking: "off",
+	}))
+	if off["temperature"] != 0.2 {
+		t.Fatalf("temperature = %#v", off["temperature"])
+	}
+
+	high := decodeReq(t, mustAnthropicBody(t, userHi(), Options{
+		Provider: "temp-level", Model: "m", Thinking: "high",
+	}))
+	if _, ok := high["temperature"]; ok {
+		t.Fatalf("thinking temperature = %#v", high["temperature"])
+	}
+}
+
 func TestAnthropicStrictTools(t *testing.T) {
 	on := true
 	registerAnthropicCompat(t, "strict-flag", map[string]*models.Compat{

@@ -42,6 +42,11 @@ func eventString(v map[string]any, key string) string {
 	return s
 }
 
+func eventBool(v map[string]any, key string) bool {
+	b, _ := v[key].(bool)
+	return b
+}
+
 func eventInt(v map[string]any, key string) int {
 	switch n := v[key].(type) {
 	case int:
@@ -58,6 +63,9 @@ func eventInt(v map[string]any, key string) int {
 }
 
 func (m *Model) applySessionEvent(ev sessionEventMsg) {
+	if m.prog != nil {
+		m.prog.handleSession(ev)
+	}
 	switch eventString(ev, "type") {
 	case "compaction_start":
 		m.setBorder(statusCompact, eventString(ev, "reason"))

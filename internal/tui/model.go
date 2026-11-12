@@ -46,6 +46,9 @@ type entry struct {
 	thinking   string // raw thinking block (Ctrl+T)
 	toolOut    string // raw tool result (Ctrl+O)
 	toolCallID string
+	toolName   string
+	startedAt  time.Time
+	shellLive  bool // bash/powershell call still running; Elapsed is drawn from startedAt
 	partial    bool
 	isError    bool
 
@@ -147,8 +150,14 @@ type Model struct {
 	bashEvents  chan tea.Msg
 	bashLive    string
 	bashCommand string
-	lastClear   time.Time
-	login       loginState
+
+	// now is the clock for the shell elapsed line. Tests replace it.
+	now           func() time.Time
+	shellTicking  bool
+	shellTimerGen int
+
+	lastClear time.Time
+	login     loginState
 
 	overlay       overlayKind
 	tree          treeOverlay
@@ -161,6 +170,8 @@ type Model struct {
 	border        borderStatus
 	anthropicWarn bool
 	clipOSC       string
+	prog          *programStatus // OSC 7501; shared by model copies
+	statusSeq     string         // one program-status report for the next view
 	copyFlash     string
 	copyFlashTree bool
 	copyFlashGen  int
@@ -214,6 +225,7 @@ func New(cfg config.Config) Model {
 		altScreen:    useAltScreen(cfg),
 		hideThinking: cfg.HideThinking(),
 		complete:     completer{maxVisible: cfg.AutocompleteVisible()},
+		prog:         newProgramStatus(),
 	}
 	m.glam = newRenderer(80)
 	applyTrueColor(cfg)
@@ -341,7 +353,7 @@ func isTermQueryLeak(msg tea.KeyMsg) bool {
 		return false
 	}
 	s := string(msg.Runes)
-	if strings.Contains(s, "]11;") || strings.Contains(s, "rgb:0000/") {
+	if strings.Contains(s, "]11;") || strings.Contains(s, "rgb:0000/") || strings.Contains(s, "]7501;") {
 		return true
 	}
 	if cellSizeLeakRe.MatchString(s) {
@@ -409,6 +421,7 @@ func withHardwareCursor(out tea.Model, wasOverlay bool, cmd tea.Cmd) tea.Cmd {
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 	wasOverlay := m.overlayVisible()
+	m.statusSeq = ""
 	defer func() {
 		rec := recover()
 		if rec != nil {
@@ -417,6 +430,10 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 			out = m
 			nextCmd = tea.Quit
 			return
+		}
+		if mm, ok := out.(Model); ok {
+			mm.publishProgramStatus()
+			out = mm
 		}
 		nextCmd = withHardwareCursor(out, wasOverlay, nextCmd)
 	}()
@@ -430,6 +447,14 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 				m.engine.PushSteerImages(msg.user, msg.images)
 			}
 			return m, nil
+		}
+		if m.engine != nil {
+			if content, ok := m.engine.PeekCustomTrigger(); ok {
+				if strings.TrimSpace(content) == "" {
+					return m.startCustomTurn()
+				}
+				return m.startTurn(content, nil)
+			}
 		}
 		return m.startTurn(msg.user, msg.images)
 	case extShutdownMsg:
@@ -451,6 +476,13 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		wrap := m.layoutWidth() - m.cfg.OutputPadN()
 		m.glam = newRenderer(wrap)
 		return m, tea.Batch(cmds...)
+
+	case tea.ResumeMsg:
+		if m.prog != nil {
+			m.prog.force = true
+			m.prog.report()
+		}
+		return m, nil
 
 	case externalEditorDoneMsg:
 		if msg.ok {
@@ -575,6 +607,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 				return m, nil
 			}
 			if m.running && m.cancel != nil {
+				if m.prog != nil {
+					m.prog.markAborted()
+				}
 				m.cancel()
 				return m, nil
 			}
@@ -603,6 +638,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 			return m, nil
 		}
 		if m.keyIs(msg, "app.suspend") {
+			if m.prog != nil {
+				m.prog.queueClear()
+			}
 			return m, func() tea.Msg { return tea.Suspend() }
 		}
 		if m.altScreen {
@@ -675,17 +713,28 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 
 	case agentEventMsg:
 		cmd := m.applyAgentEvent(msg.ev)
+		tick := m.armShellTimer()
 		if cmd != nil {
-			return m, cmd
+			return m, tea.Batch(cmd, tick)
 		}
-		return m, waitForAgentEvent(m.agentEvents)
+		return m, tea.Batch(waitForAgentEvent(m.agentEvents), tick)
+
+	case shellTimerMsg:
+		if msg.gen != m.shellTimerGen || !m.anyShellLive() {
+			return m, nil
+		}
+		return m, m.shellTimerCmd()
 
 	case agentClosedMsg:
+		wasRunning := m.running
 		m.running = false
 		m.streamingActive = false
 		m.streaming = ""
 		m.agentEvents = nil
 		m.cancel = nil
+		if len(m.queued) == 0 && wasRunning && m.prog != nil {
+			m.prog.noteSettle()
+		}
 		if m.pendingNav != nil {
 			nav := *m.pendingNav
 			m.pendingNav = nil
@@ -726,6 +775,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		if msg.stream == nil {
 			m.running = false
 			m.cancel = nil
+			if m.prog != nil {
+				m.prog.noteSettle()
+			}
 			return m, nil
 		}
 		m.agentEvents = msg.stream.Events()
@@ -874,6 +926,9 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	}
 	m.history = nil
 	m.transcript = nil
+	if m.prog != nil {
+		m.prog.reset()
+	}
 	return note("started a new session")
 }
 
@@ -1254,6 +1309,34 @@ func (m Model) bindRunCancel(ctx context.Context, cancel context.CancelFunc) Mod
 	return m
 }
 
+// startCustomTurn runs an extension triggerTurn without painting an empty user line.
+func (m Model) startCustomTurn() (tea.Model, tea.Cmd) {
+	if m.border.kind == statusBranch {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while a branch summary is in progress.")})
+		return m, nil
+	}
+	if m.border.kind == statusCompact || (m.engine != nil && m.engine.Compacting()) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while compaction is in progress.")})
+		return m, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m = m.bindRunCancel(ctx, cancel)
+	m.running = true
+	m.streaming = ""
+	m.streamingThinking = ""
+	m.streamingActive = false
+	if m.engine == nil {
+		return m, nil
+	}
+	m.engine.BeginUserRun()
+	m.provider = m.engine.Provider
+	hist := append([]ai.Message(nil), m.history...)
+	eng := m.engine
+	return m, func() tea.Msg {
+		return promptReadyMsg{stream: eng.RunPrompt(ctx, hist, "", nil)}
+	}
+}
+
 func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.Cmd) {
 	if m.border.kind == statusBranch {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while a branch summary is in progress.")})
@@ -1276,6 +1359,10 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	ctx, cancel := context.WithCancel(context.Background())
 	m = m.bindRunCancel(ctx, cancel)
 	m.running = true
+	if m.prog != nil {
+		m.prog.aborted = false
+		m.prog.noteRunStart()
+	}
 	m.streaming = ""
 	m.streamingThinking = ""
 	m.streamingActive = false
@@ -1316,6 +1403,11 @@ func waitForAgentEvent(ch <-chan agent.Event) tea.Cmd {
 
 func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 	switch ev.Type {
+	case agent.EventAgentStart:
+		if m.prog != nil {
+			m.prog.noteRunStart()
+		}
+
 	case agent.EventMessageStart:
 		m.streaming = ""
 		m.streamingThinking = ""
@@ -1333,6 +1425,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		m.streamingActive = false
 		m.streaming = ""
 		m.streamingThinking = ""
+		if m.prog != nil {
+			m.prog.noteAssistant(ev.Assistant)
+		}
 		if ev.Assistant != nil {
 			addUsage(&m.usage, ev.Assistant.Usage)
 			for _, c := range ev.Assistant.Content {
@@ -1363,11 +1458,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 				rendered = m.toolStyle.Render(custom)
 			}
 		}
-		m.transcript = append(m.transcript, entry{
+		ent := entry{
 			role:       "tool",
 			toolCallID: ev.ToolCallID,
 			rendered:   rendered,
-		})
+		}
+		if isShellTool(ev.ToolName) {
+			ent.toolName = ev.ToolName
+			ent.startedAt = m.clock()
+			ent.shellLive = true
+		}
+		m.transcript = append(m.transcript, ent)
 
 	case agent.EventToolUpdate:
 		for i, e := range m.transcript {
@@ -1380,11 +1481,22 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		}
 
 	case agent.EventToolEnd:
+		clearedShell := false
 		for i, e := range m.transcript {
-			if e.toolCallID == ev.ToolCallID && e.partial {
+			if e.toolCallID != ev.ToolCallID || ev.ToolCallID == "" {
+				continue
+			}
+			if e.partial {
 				m.transcript[i].toolOut = ""
 				m.transcript[i].partial = false
 			}
+			if e.shellLive {
+				m.transcript[i].shellLive = false
+				clearedShell = true
+			}
+		}
+		if clearedShell {
+			m.disarmShellTimer()
 		}
 		style := m.toolStyle
 		mark := "→"
@@ -1419,6 +1531,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		m.running = false
 		m.streamingActive = false
+		if m.prog != nil {
+			m.prog.noteSettle()
+		}
 		if m.cfg.CacheMissNotices() {
 			m.appendCacheMissNotice()
 		}
@@ -1461,6 +1576,9 @@ func (m Model) handleAfterAgentEnd(msg afterAgentEndMsg) (tea.Model, tea.Cmd) {
 	m.streamingActive = false
 	m.cancel = nil
 	m.runCtx = nil
+	if m.prog != nil && len(m.queued) == 0 {
+		m.prog.noteSettle()
+	}
 	if m.cfg.CacheMissNotices() {
 		m.appendCacheMissNotice()
 	}
@@ -1573,7 +1691,7 @@ func (m Model) View() string {
 		return m.present(m.loginView())
 	}
 	if m.extUI.active {
-		return m.extUIView()
+		return m.finishView(m.extUIView())
 	}
 	if s := m.visibleOverlay(); s != nil {
 		return m.present(m.extCustomView(s))
@@ -1659,6 +1777,7 @@ func (m Model) rawChatBody() (string, map[int]string) {
 					write("\n")
 					write(m.toolStyle.Render(indent(out)))
 				}
+				m.writeShellElapsed(write, e)
 			} else if e.toolOut != "" {
 				style := m.toolStyle
 				mark := "→"
@@ -1683,6 +1802,7 @@ func (m Model) rawChatBody() (string, map[int]string) {
 				}
 			} else {
 				write(e.rendered)
+				m.writeShellElapsed(write, e)
 			}
 		default:
 			write(e.rendered)
@@ -1894,12 +2014,16 @@ func RunEngineResumePicker(cfg config.Config, eng *runtime.Engine) error {
 }
 
 func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err error) {
+	statusOn := false
 	defer func() {
 		rec := recover()
 		if rec == nil {
 			return
 		}
 		fmt.Fprint(os.Stderr, "\x1b[?25h\x1b[0m\x1b[?1049l\n")
+		if statusOn {
+			fmt.Fprint(os.Stdout, programStatusClearSequence())
+		}
 		recordTUIPanic(eng, rec)
 		err = fmt.Errorf("pigo panicked: %v", rec)
 	}()
@@ -1934,6 +2058,13 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 		m = next.(Model)
 	}
 	drainPendingTTY()
+	// PIGO_PROGRAM_STATUS only. PI_PROGRAM_STATUS is not an alias.
+	statusOn = readProgramStatus(os.Stdin, os.Stdout, terminalColorQueryTimeout, os.Getenv("PIGO_PROGRAM_STATUS"))
+	if m.prog != nil {
+		m.prog.setEnabled(statusOn)
+		m.statusSeq = m.prog.takePending()
+	}
+	drainPendingTTY()
 	var opts []tea.ProgramOption
 	if useAltScreen(m.cfg) {
 		opts = append(opts, tea.WithAltScreen())
@@ -1964,6 +2095,9 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 		})
 	}
 	final, err := p.Run()
+	if statusOn {
+		fmt.Fprint(os.Stdout, programStatusClearSequence())
+	}
 	if errors.Is(err, tea.ErrProgramPanic) {
 		recordCaughtPanic(eng, err)
 	}
