@@ -293,10 +293,25 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 			},
 		})
 	case "boundary":
+		events := []string{"turn_end", "agent_before_settle"}
+		if os.Getenv("PIGO_SETTLED_LOG") != "" {
+			events = append(events, "agent_settled")
+		}
 		_ = ext.Serve(ext.Handler{
 			Name:   "boundary-ext",
-			Events: []string{"turn_end", "agent_before_settle"},
+			Events: events,
 			OnEvent: func(event string, payload map[string]any) map[string]any {
+				if event == "agent_settled" {
+					if p := os.Getenv("PIGO_SETTLED_LOG"); p != "" {
+						b, _ := json.Marshal(payload)
+						f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+						if err == nil {
+							_, _ = f.Write(append(b, '\n'))
+							_ = f.Close()
+						}
+					}
+					return nil
+				}
 				mode := os.Getenv("PIGO_BOUNDARY")
 				mark := os.Getenv("PIGO_BOUNDARY_MARK")
 				seen := false
@@ -304,6 +319,9 @@ func TestRuntimeHelperProcess(_ *testing.T) {
 					if _, err := os.Stat(mark); err == nil {
 						seen = true
 					}
+				}
+				if mode == "always" && event == "agent_before_settle" {
+					return map[string]any{"continue": true}
 				}
 				if mode == "turn" && event == "turn_end" {
 					if seen {

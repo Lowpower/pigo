@@ -169,12 +169,19 @@ type Engine struct {
 	mcpSectionText string
 	mcpEventNames  []string
 
-	busy           bool
+	busy     bool
+	runAbort context.CancelFunc
+	// runActive is set for the whole user-level run, including before_agent_start,
+	// and cleared once the run settles. runAbortRequested records an abort that
+	// arrived while the run was active. agent_settled uses that flag, not stopReason.
+	runActive         bool
+	runAbortRequested bool
+	// runStarting is the window before the agent loop exists. abortRequested
+	// remembers an abort from that window so the loop stops itself.
 	runStarting    bool
 	abortRequested bool
 	customTrigger  *customRun
 	skipPersist    []string
-	runAbort       context.CancelFunc
 	kickFn         func(user string, images []ai.ImageContent)
 	wantShutdown   bool
 	nextTurn       []ai.Message
@@ -1503,6 +1510,8 @@ func (e *Engine) runLoopWithSystem(ctx context.Context, history, newUsers []ai.M
 	if e.consumeAbortRequested() {
 		// Abort during before_agent_start is applied once the run exists.
 		// Cancelling ctx here would drop agent_end, so the turn stops itself.
+		// The latch is what agent_settled reads; the context is still live.
+		e.latchRunAbort()
 		sf = abortedRunStream
 	} else if sf == nil {
 		sf, _ = ai.DefaultStreamFn()
@@ -2117,6 +2126,7 @@ func (e *Engine) PersistThinking(level string) error {
 
 // PrintText streams a prompt to out as plain text (--mode text / --print).
 func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Message, user string, images []ai.ImageContent) error {
+	e.BeginUserRun()
 	hist := history
 	first := true
 	for {
@@ -2146,7 +2156,8 @@ func (e *Engine) PrintText(ctx context.Context, out io.Writer, history []ai.Mess
 		cont := e.BeforeSettle(ctx)
 		if stopErr != nil {
 			if cont {
-				e.DispatchEvent(ctx, "agent_settled", map[string]any{})
+				e.DispatchEvent(settleNotifyCtx(ctx), "agent_settled", e.agentSettledPayload(ctx))
+				e.finishUserRun()
 			}
 			return stopErr
 		}
@@ -2228,6 +2239,7 @@ func (e *Engine) printJSON(ctx context.Context, out io.Writer, history []ai.Mess
 		e.onSessionEvent = write
 		defer func() { e.onSessionEvent = prev }()
 	}
+	e.BeginUserRun()
 	e.retryAttempt = 0
 	hist := history
 	continued := false
@@ -2271,13 +2283,15 @@ func (e *Engine) printJSON(ctx context.Context, out io.Writer, history []ai.Mess
 		} else {
 			e.PersistTranscript(last)
 		}
-		if e.prepareOverflow(ctx, last) {
+		// A cancel settles this run. Overflow recovery and auto-retry are further
+		// provider requests, so they are skipped the same way as continue.
+		if !e.runWasAborted(ctx) && e.prepareOverflow(ctx, last) {
 			hist = stripLastAssistant(last)
 			prefixLen = len(hist)
 			continued = true
 			continue
 		}
-		if e.prepareRetry(ctx, last) {
+		if !e.runWasAborted(ctx) && e.prepareRetry(ctx, last) {
 			hist = stripLastAssistant(last)
 			prefixLen = len(hist)
 			continued = true
@@ -2291,7 +2305,7 @@ func (e *Engine) printJSON(ctx context.Context, out io.Writer, history []ai.Mess
 		}
 		break
 	}
-	write(map[string]any{"type": "agent_settled"})
+	write(map[string]any{"type": "agent_settled", "aborted": e.runWasAborted(ctx)})
 	return printStopErr(last)
 }
 

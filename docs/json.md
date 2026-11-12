@@ -14,7 +14,7 @@ agent/session event shapes onto stdout while a turn runs.
 | `turn_start` / `turn_end` | One model+tools round (`turn_end` has `message`, `toolResults`) |
 | `message_start` / `message_update` / `message_end` | Streaming assistant (or user/toolResult on start/end) |
 | `tool_execution_start` / `update` / `end` | Tool call (`toolCallId`, `toolName`, `args`, `result`, `isError`) |
-| `agent_settled` | JSON print loop finished (retries/overflow included) |
+| `agent_settled` | JSON print loop finished (retries/overflow included). `aborted` is true when the user cancelled the run, and false when it finished or stopped on an error that was not a cancel |
 | `queue_update` | Steering / follow-up queues changed (`steering` and `followUp` string arrays) |
 | `compaction_start` | Compaction began (`reason`: `manual`, `threshold`, `overflow`, …) |
 | `compaction_end` | Compaction finished (`reason`, `result`, `aborted`, `willRetry`; failure may add `errorMessage`) |

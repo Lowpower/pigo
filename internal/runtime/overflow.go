@@ -65,6 +65,9 @@ func (e *Engine) Continue(ctx context.Context, hist []ai.Message) *agent.Stream 
 
 // AfterAgentEnd applies overflow compact-and-retry then auto-retry.
 func (e *Engine) AfterAgentEnd(ctx context.Context, last []agent.Msg) (hist []ai.Message, again bool) {
+	if e.runWasAborted(ctx) {
+		return nil, false
+	}
 	if e.prepareOverflow(ctx, last) {
 		return stripLastAssistant(last), true
 	}

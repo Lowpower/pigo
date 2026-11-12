@@ -512,6 +512,31 @@ func TestLoadAcceptsLineOverEightMiB(t *testing.T) {
 	}
 }
 
+func TestLoadSessionWithoutAbortedField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.jsonl")
+	body := strings.Join([]string{
+		`{"type":"session","version":3,"id":"old","timestamp":"2020-01-01T00:00:00.000Z","cwd":"/tmp"}`,
+		`{"type":"message","id":"m1","parentId":null,"timestamp":"2020-01-01T00:00:00.000Z","message":{"role":"assistant","content":"done","stopReason":"stop"}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	header, entries, skips, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skips) != 0 {
+		t.Fatalf("skips=%+v", skips)
+	}
+	if header.ID != "old" || header.Version != 3 {
+		t.Fatalf("header=%+v", header)
+	}
+	if len(entries) != 1 || entries[0].ID != "m1" {
+		t.Fatalf("entries=%+v", entries)
+	}
+}
+
 func TestLoadSkipsLineOverLimit(t *testing.T) {
 	m := flushedSession(t)
 	f, err := os.OpenFile(m.File(), os.O_APPEND|os.O_WRONLY, 0o600)
