@@ -543,6 +543,93 @@ func TestOverlayMergesSamplingParams(t *testing.T) {
 	}
 }
 
+func TestOverlayMergesSamplingParamsByThinkingLevel(t *testing.T) {
+	RegisterProvider(ProviderSpec{
+		ID: "samp-level", DefaultAPI: "openai-completions", DefaultID: "m",
+		Models: []Model{{
+			Provider: "samp-level", ID: "m",
+			SamplingParams: map[string]any{
+				"temperature": 1,
+				"top_p":       0.95,
+			},
+			SamplingParamsByThinkingLevel: map[string]map[string]any{
+				"off":  {"temperature": 0.7, "top_p": 0.8, "top_k": 0},
+				"high": {"temperature": 0.3},
+			},
+		}},
+	})
+	t.Cleanup(func() {
+		ClearOverlays()
+		UnregisterProvider("samp-level")
+	})
+	SetUserOverlay("samp-level", []Model{
+		{
+			ID: "m",
+			SamplingParamsByThinkingLevel: map[string]map[string]any{
+				"off": {"top_p": 0.5},
+				"low": {"temperature": 0.2, "min_p": nil},
+			},
+		},
+		{
+			ID: "fresh",
+			SamplingParamsByThinkingLevel: map[string]map[string]any{
+				"high": {"temperature": 0.4, "top_k": 0},
+			},
+		},
+		{
+			ID:                            "empty-only",
+			SamplingParams:                map[string]any{},
+			SamplingParamsByThinkingLevel: map[string]map[string]any{},
+		},
+	})
+
+	m, ok := Lookup("samp-level", "m")
+	if !ok {
+		t.Fatal("missing m")
+	}
+	off := m.SamplingParamsByThinkingLevel["off"]
+	if off["temperature"] != 0.7 || off["top_p"] != 0.5 || off["top_k"] != 0 {
+		t.Fatalf("off = %#v", off)
+	}
+	if m.SamplingParamsByThinkingLevel["high"]["temperature"] != 0.3 {
+		t.Fatalf("high = %#v", m.SamplingParamsByThinkingLevel["high"])
+	}
+	low := m.SamplingParamsByThinkingLevel["low"]
+	if low["temperature"] != 0.2 {
+		t.Fatalf("low = %#v", low)
+	}
+	if _, present := low["min_p"]; !present {
+		t.Fatal("null min_p was dropped")
+	}
+
+	fresh, ok := Lookup("samp-level", "fresh")
+	if !ok || fresh.SamplingParamsByThinkingLevel["high"]["temperature"] != 0.4 || fresh.SamplingParamsByThinkingLevel["high"]["top_k"] != 0 {
+		t.Fatalf("fresh = %#v ok=%v", fresh.SamplingParamsByThinkingLevel, ok)
+	}
+	empty, ok := Lookup("samp-level", "empty-only")
+	if !ok || len(empty.SamplingParamsByThinkingLevel) != 0 {
+		t.Fatalf("empty map = %#v ok=%v", empty.SamplingParamsByThinkingLevel, ok)
+	}
+
+	SetUserOverlay("samp-level", []Model{{
+		ID: "m",
+		SamplingParamsByThinkingLevel: map[string]map[string]any{
+			"off": {},
+		},
+	}})
+	kept, ok := Lookup("samp-level", "m")
+	if !ok {
+		t.Fatal("missing m after empty level")
+	}
+	keptOff := kept.SamplingParamsByThinkingLevel["off"]
+	if keptOff["temperature"] != 0.7 || keptOff["top_p"] != 0.8 || keptOff["top_k"] != 0 {
+		t.Fatalf("empty level cleared off: %#v", keptOff)
+	}
+	if kept.SamplingParamsByThinkingLevel["high"]["temperature"] != 0.3 {
+		t.Fatalf("high dropped: %#v", kept.SamplingParamsByThinkingLevel["high"])
+	}
+}
+
 func TestOverlayMergesAnthropicCompatFlags(t *testing.T) {
 	on := true
 	off := false

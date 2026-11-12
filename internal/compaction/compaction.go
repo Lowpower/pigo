@@ -380,7 +380,7 @@ func modelCallOptions(provider, model string, reserveTokens int) ai.Options {
 		Provider:       provider,
 		MaxTokens:      summaryMaxTokens(reserveTokens, models.MaxTokens(provider, model)),
 		CacheRetention: "none",
-		SamplingParams: ai.ResolveSamplingParams(provider, model, nil),
+		SamplingParams: ai.ResolveSamplingParams(provider, model, "", nil),
 	}
 }
 

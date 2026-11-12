@@ -368,10 +368,14 @@ func mergeOverlay(providerID string, base, extra []Model) []Model {
 			if len(m.SamplingParams) > 0 {
 				out[i].SamplingParams = MergeSamplingParams(out[i].SamplingParams, m.SamplingParams)
 			}
+			if len(m.SamplingParamsByThinkingLevel) > 0 {
+				out[i].SamplingParamsByThinkingLevel = mergeSamplingByLevel(out[i].SamplingParamsByThinkingLevel, m.SamplingParamsByThinkingLevel)
+			}
 			out[i] = fillOpus55ThinkingLevels(out[i])
 			continue
 		}
 		m.SamplingParams = MergeSamplingParams(nil, m.SamplingParams)
+		m.SamplingParamsByThinkingLevel = mergeSamplingByLevel(nil, m.SamplingParamsByThinkingLevel)
 		if m.Provider == "" {
 			m.Provider = providerID
 		}
@@ -418,6 +422,49 @@ func cloneSamplingParams(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
 	for k, v := range in {
 		out[k] = v
+	}
+	return out
+}
+
+// mergeSamplingByLevel overlays extra onto base, one thinking level at a time.
+// An empty extra leaves base unchanged. Inside a level, keys merge the same
+// way as MergeSamplingParams: an empty object does not clear that level, and
+// levels present only on base stay.
+func mergeSamplingByLevel(base, extra map[string]map[string]any) map[string]map[string]any {
+	if len(extra) == 0 {
+		return cloneSamplingByLevel(base)
+	}
+	out := cloneSamplingByLevel(base)
+	if out == nil {
+		out = make(map[string]map[string]any, len(extra))
+	}
+	for level, params := range extra {
+		merged := MergeSamplingParams(out[level], params)
+		if len(merged) == 0 {
+			continue
+		}
+		out[level] = merged
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func cloneSamplingByLevel(in map[string]map[string]any) map[string]map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]any, len(in))
+	for level, params := range in {
+		cloned := cloneSamplingParams(params)
+		if len(cloned) == 0 {
+			continue
+		}
+		out[level] = cloned
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

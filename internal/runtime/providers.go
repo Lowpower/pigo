@@ -316,12 +316,12 @@ func credPayload(c auth.Credential) map[string]any {
 }
 
 // withSamplingOpts fills an empty provider from the session and attaches the
-// catalog samplingParams. Caller keys already on opts win per field.
+// catalog samplingParams for opts.Thinking. Caller keys already on opts win per field.
 func (e *Engine) withSamplingOpts(opts ai.Options) ai.Options {
 	if opts.Provider == "" {
 		opts.Provider = e.activeProvider()
 	}
-	opts.SamplingParams = ai.ResolveSamplingParams(opts.Provider, opts.Model, opts.SamplingParams)
+	opts.SamplingParams = ai.ResolveSamplingParams(opts.Provider, opts.Model, opts.Thinking, opts.SamplingParams)
 	return opts
 }
 

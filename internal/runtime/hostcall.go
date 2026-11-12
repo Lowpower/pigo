@@ -823,7 +823,7 @@ func (e *Engine) doHostModelStream(h *ext.Host, name string, args map[string]any
 		Provider:        provider,
 		Thinking:        e.Opts.Config.Thinking,
 		ThinkingDisplay: e.Opts.Config.ThinkingDisplay,
-		SamplingParams:  ai.ResolveSamplingParams(provider, modelID, caller),
+		SamplingParams:  ai.ResolveSamplingParams(provider, modelID, e.Opts.Config.Thinking, caller),
 	})
 	if err != nil {
 		return map[string]any{"error": err.Error()}
