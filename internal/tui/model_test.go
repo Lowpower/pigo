@@ -158,6 +158,48 @@ func TestToolUpdateRendersPartialOutput(t *testing.T) {
 	}
 }
 
+func TestInterruptSkipsRetry(t *testing.T) {
+	delay := 1
+	cfg := testCfg()
+	cfg.Retry.BaseDelayMs = &delay
+	m := New(cfg)
+	m.engine = &runtime.Engine{Opts: runtime.Options{Config: cfg}}
+	next, cmd := m.startTurn("hi", nil)
+	m = next.(Model)
+	if cmd == nil || m.cancel == nil || m.runCtx == nil {
+		t.Fatal("turn did not start")
+	}
+	m.cancel()
+	if m.runCtx.Err() == nil {
+		t.Fatal("cancel did not cancel the turn context")
+	}
+	end := agent.Event{
+		Type: agent.EventAgentEnd,
+		Messages: []agent.Msg{{
+			Role: agent.RoleAssistant,
+			Assistant: &ai.AssistantMessage{
+				Role:         ai.RoleAssistant,
+				StopReason:   ai.StopError,
+				ErrorMessage: "overloaded_error",
+			},
+		}},
+	}
+	next, cmd = m.Update(agentEventMsg{ev: end})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("expected AfterAgentEnd cmd")
+	}
+	msg := cmd()
+	next, cmd = m.Update(msg)
+	m = next.(Model)
+	if m.running {
+		t.Fatal("cancelled run continued")
+	}
+	if cmd != nil {
+		t.Fatal("expected idle after cancel")
+	}
+}
+
 func TestAgentEndStopsRunning(t *testing.T) {
 	m := New(testCfg())
 	m.running = true

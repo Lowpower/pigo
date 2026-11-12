@@ -18,17 +18,30 @@ func (e *Engine) onTurnBoundary(ctx context.Context, ev agent.Event, transcript 
 
 // BeforeSettle is the last actionable extension boundary. Entries are stored
 // even when the run is already cancelled. continue asks for one more provider
-// request; a cancelled context suppresses that request. agent_settled is
-// dispatched when the run will not continue.
+// request; a user abort or a cancelled context suppresses that request.
+// agent_settled is dispatched when the run will not continue. Its aborted
+// field is true only for that cancel, not for an assistant error.
 func (e *Engine) BeforeSettle(ctx context.Context) bool {
 	cont := e.runBoundary(ctx, "agent_before_settle", nil)
-	if ctx.Err() != nil {
+	if e.runWasAborted(ctx) {
 		cont = false
 	}
 	if !cont {
-		e.DispatchEvent(ctx, "agent_settled", map[string]any{})
+		// The run context is often already cancelled. The notification still
+		// has to reach extensions; cancellation is reported in the payload.
+		e.DispatchEvent(settleNotifyCtx(ctx), "agent_settled", e.agentSettledPayload(ctx))
+		e.finishUserRun()
 	}
 	return cont
+}
+
+// settleNotifyCtx keeps context values but not cancellation, so agent_settled
+// is delivered after the user cancels the run.
+func settleNotifyCtx(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
 }
 
 func (e *Engine) refreshModelMessages(msgs []ai.Message) []ai.Message {

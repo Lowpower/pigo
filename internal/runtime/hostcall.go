@@ -37,10 +37,80 @@ func (e *Engine) SetKick(fn func(user string, images []ai.ImageContent)) {
 }
 
 // SetRunAbort stores the cancel func for the in-flight turn.
-func (e *Engine) SetRunAbort(fn context.CancelFunc) {
+// The returned func records a user abort, then cancels. Callers that cancel
+// the turn themselves should invoke the returned func so the abort is visible
+// when settle runs against a different context.
+func (e *Engine) SetRunAbort(fn context.CancelFunc) context.CancelFunc {
+	if e == nil {
+		return fn
+	}
+	if fn == nil {
+		e.mu.Lock()
+		e.runAbort = nil
+		e.mu.Unlock()
+		return nil
+	}
+	wrapped := func() {
+		e.noteRunAbort()
+		fn()
+	}
 	e.mu.Lock()
-	e.runAbort = fn
+	e.runAbort = wrapped
 	e.mu.Unlock()
+	return wrapped
+}
+
+// BeginUserRun marks the start of one user-level run. Abort requests after
+// this, including during before_agent_start, are reported on agent_settled.
+// A later continue or retry stays in the same run and does not clear the flag.
+func (e *Engine) BeginUserRun() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.runActive = true
+	e.runAbortRequested = false
+	e.mu.Unlock()
+}
+
+func (e *Engine) finishUserRun() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.runActive = false
+	e.mu.Unlock()
+}
+
+func (e *Engine) noteRunAbort() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	if e.runActive {
+		e.runAbortRequested = true
+	}
+	e.mu.Unlock()
+}
+
+// runWasAborted reports a user cancel of this run. Assistant stopReason is
+// not consulted: a closed extension stream can be StopAborted without a
+// cancel, and an error can be present at the same time as a cancel.
+func (e *Engine) runWasAborted(ctx context.Context) bool {
+	if e == nil {
+		return ctx != nil && ctx.Err() != nil
+	}
+	e.mu.Lock()
+	requested := e.runAbortRequested
+	e.mu.Unlock()
+	if requested {
+		return true
+	}
+	return ctx != nil && ctx.Err() != nil
+}
+
+func (e *Engine) agentSettledPayload(ctx context.Context) map[string]any {
+	return map[string]any{"aborted": e.runWasAborted(ctx)}
 }
 
 func (e *Engine) requestShutdown() {
@@ -146,6 +216,8 @@ func (e *Engine) HandleHostCall(h *ext.Host, name string, args map[string]any) m
 		e.mu.Unlock()
 		if fn != nil {
 			fn()
+		} else {
+			e.noteRunAbort()
 		}
 		e.AbortRetry()
 		e.AbortCompact()

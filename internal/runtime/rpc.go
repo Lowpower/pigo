@@ -140,6 +140,7 @@ func (e *Engine) ServeRPC(ctx context.Context, in io.Reader, out io.Writer) erro
 			return nil
 		case "abort":
 			e.AbortCompact()
+			e.noteRunAbort()
 			stateMu.Lock()
 			if cancel != nil {
 				cancel()

@@ -120,6 +120,7 @@ type Model struct {
 
 	agentEvents <-chan agent.Event
 	cancel      context.CancelFunc
+	runCtx      context.Context // context of the in-flight user run; nil when idle
 
 	width, height int
 	quitting      bool
@@ -1232,6 +1233,27 @@ func (m Model) handleImageGen(msg imageGenMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// turnCtx is the context of the run that just finished or is still in flight.
+// Settle and retry decisions use it so a cancel is visible after the turn ends.
+func (m Model) turnCtx() context.Context {
+	if m.runCtx != nil {
+		return m.runCtx
+	}
+	return context.Background()
+}
+
+// bindRunCancel stores ctx and a cancel func that also records a user abort.
+func (m Model) bindRunCancel(ctx context.Context, cancel context.CancelFunc) Model {
+	m.runCtx = ctx
+	m.cancel = cancel
+	if m.engine != nil {
+		if wrapped := m.engine.SetRunAbort(cancel); wrapped != nil {
+			m.cancel = wrapped
+		}
+	}
+	return m
+}
+
 func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.Cmd) {
 	if m.border.kind == statusBranch {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while a branch summary is in progress.")})
@@ -1252,13 +1274,13 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
+	m = m.bindRunCancel(ctx, cancel)
 	m.running = true
 	m.streaming = ""
 	m.streamingThinking = ""
 	m.streamingActive = false
 	if m.engine != nil {
-		m.engine.SetRunAbort(cancel)
+		m.engine.BeginUserRun()
 		m.provider = m.engine.Provider
 		// history already contains the user turn; RunPrompt appends user again, so pass without last
 		hist := m.history[:len(m.history)-1]
@@ -1388,9 +1410,10 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		if m.engine != nil {
 			eng := m.engine
 			last := ev.Messages
+			turnCtx := m.turnCtx()
 			m.streamingActive = false
 			return func() tea.Msg {
-				hist, again := eng.AfterAgentEnd(context.Background(), last)
+				hist, again := eng.AfterAgentEnd(turnCtx, last)
 				return afterAgentEndMsg{hist: hist, again: again}
 			}
 		}
@@ -1410,7 +1433,7 @@ func (m Model) handleAfterAgentEnd(msg afterAgentEndMsg) (tea.Model, tea.Cmd) {
 		m.history = msg.hist
 		m.retryPrefix = len(msg.hist)
 		ctx, cancel := context.WithCancel(context.Background())
-		m.cancel = cancel
+		m = m.bindRunCancel(ctx, cancel)
 		stream := m.engine.Continue(ctx, msg.hist)
 		m.agentEvents = stream.Events()
 		m.running = true
@@ -1420,11 +1443,11 @@ func (m Model) handleAfterAgentEnd(msg afterAgentEndMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForAgentEvent(m.agentEvents)
 	}
-	if m.engine != nil && m.engine.BeforeSettle(context.Background()) {
+	if m.engine != nil && m.engine.BeforeSettle(m.turnCtx()) {
 		m.history = m.engine.History()
 		m.retryPrefix = len(m.history)
 		ctx, cancel := context.WithCancel(context.Background())
-		m.cancel = cancel
+		m = m.bindRunCancel(ctx, cancel)
 		stream := m.engine.Continue(ctx, m.history)
 		m.agentEvents = stream.Events()
 		m.running = true
@@ -1437,6 +1460,7 @@ func (m Model) handleAfterAgentEnd(msg afterAgentEndMsg) (tea.Model, tea.Cmd) {
 	m.running = false
 	m.streamingActive = false
 	m.cancel = nil
+	m.runCtx = nil
 	if m.cfg.CacheMissNotices() {
 		m.appendCacheMissNotice()
 	}
