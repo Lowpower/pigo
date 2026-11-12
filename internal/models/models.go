@@ -54,6 +54,11 @@ type Model struct {
 	// SamplingParams are free-form OpenAI-compatible request fields
 	// (temperature, top_p, top_k, and unknown keys). An empty map is unset.
 	SamplingParams map[string]any `json:"samplingParams,omitempty"`
+	// SamplingParamsByThinkingLevel overrides SamplingParams for one thinking
+	// level on OpenAI-compatible APIs. Keys are thinking levels. A missing or
+	// null entry leaves SamplingParams in place. Listed keys replace that
+	// level; unlisted keys stay.
+	SamplingParamsByThinkingLevel map[string]map[string]any `json:"samplingParamsByThinkingLevel,omitempty"`
 }
 
 // InputLimits is per-model provider input metadata from the catalog overlay.

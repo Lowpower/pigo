@@ -190,7 +190,7 @@ func buildOpenAIRequestAt(reqCtx Context, opts Options, baseURL string) ([]byte,
 	if gateway := vercelGatewayOptions(compat.vercel); gateway != nil {
 		req["providerOptions"] = map[string]any{"gateway": gateway}
 	}
-	applySamplingParams(req, ResolveSamplingParams(opts.Provider, opts.Model, opts.SamplingParams))
+	applySamplingParams(req, ResolveSamplingParams(opts.Provider, opts.Model, opts.Thinking, opts.SamplingParams))
 	if limited {
 		if compat.maxTokensField != "max_tokens" {
 			delete(req, "max_tokens")
