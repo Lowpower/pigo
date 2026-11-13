@@ -33,6 +33,16 @@ func TestStoreKeysDoNotOverwrite(t *testing.T) {
 		t.Fatalf("beta = %+v ok=%v err=%v", gotB.Tokens, ok, err)
 	}
 
+	if err := s.Delete("alpha", raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.Load("alpha", raw); err != nil || ok {
+		t.Fatalf("alpha still stored ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := s.Load("beta", "https://mcp.example.com/mcp"); err != nil || !ok {
+		t.Fatalf("beta removed ok=%v err=%v", ok, err)
+	}
+
 	st, err := statPerm(filepath.Join(dir, FileName))
 	if err != nil {
 		t.Fatal(err)

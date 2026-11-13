@@ -90,6 +90,7 @@ type cliFlags struct {
 	name            string
 	apiKey          string
 	noBuiltinTools  bool
+	noMCP           bool
 	modelsFlag      string
 	promptTemplates []string
 	noPromptTpls    bool
@@ -161,6 +162,7 @@ Environment:
 	cmd.Flags().StringVarP(&f.name, "name", "n", "", "set session display name")
 	cmd.Flags().StringVar(&f.apiKey, "api-key", "", "API key for this process (does not persist or enter the environment)")
 	cmd.Flags().BoolVar(&f.noBuiltinTools, "no-builtin-tools", false, "disable built-in tools (extensions still load)")
+	cmd.Flags().BoolVar(&f.noMCP, "no-mcp", false, "do not load MCP servers for this run")
 	cmd.Flags().StringVar(&f.modelsFlag, "models", "", "comma-separated model patterns for Ctrl+P cycling")
 	cmd.Flags().StringArrayVar(&f.promptTemplates, "prompt-template", nil, "load a prompt template file or directory")
 	cmd.Flags().BoolVar(&f.noPromptTpls, "no-prompt-templates", false, "disable prompt template discovery")
@@ -172,7 +174,7 @@ Environment:
 	cmd.Flags().BoolVar(&f.verbose, "verbose", false, "force verbose startup (overrides quietStartup)")
 	cmd.Flags().BoolP("version", "v", false, "print version and exit")
 
-	cmd.AddCommand(newAuthCmd(), newConfigCmd(), newServerCmd(), newClientCmd(), newEvalCmd())
+	cmd.AddCommand(newAuthCmd(), newConfigCmd(), newServerCmd(), newClientCmd(), newEvalCmd(), newMCPCmd())
 	addPackageCommands(cmd)
 	return cmd
 }
@@ -456,6 +458,7 @@ func runRoot(cmd *cobra.Command, args []string, f cliFlags) error {
 		SkillPaths:     f.skills,
 		NoTools:        f.noTools,
 		NoBuiltinTools: f.noBuiltinTools,
+		NoMCP:          f.noMCP,
 		ToolAllow:      splitCSV(f.tools),
 		ToolDeny:       splitCSV(f.excludeTools),
 		CLIExtensions:  exts,

@@ -44,7 +44,7 @@ type CallResult struct {
 func dial(ctx context.Context, client *sdkmcp.Client, srv Server, workDir string) (*sdkmcp.ClientSession, *bodyCapture, error) {
 	cfg := srv.Config
 	if cfg.URL != "" {
-		capture := &bodyCapture{base: http.DefaultTransport, header: cfg.Headers}
+		capture := &bodyCapture{base: http.DefaultTransport, header: requestHeaders(cfg)}
 		transport := &sdkmcp.StreamableClientTransport{
 			Endpoint:             cfg.URL,
 			HTTPClient:           &http.Client{Transport: capture},
@@ -165,6 +165,29 @@ func structuredFromJSON(body []byte) (json.RawMessage, bool) {
 		return nil, false
 	}
 	return append(json.RawMessage(nil), msg.Result.Structured...), true
+}
+
+func requestHeaders(cfg Config) map[string]string {
+	out := map[string]string{}
+	for key, val := range cfg.Headers {
+		out[key] = val
+	}
+	name := strings.TrimSpace(cfg.BearerTokenEnvVar)
+	if name == "" {
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	if _, ok := out["Authorization"]; !ok {
+		if tok := os.Getenv(name); tok != "" {
+			out["Authorization"] = "Bearer " + tok
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func mergeEnv(extra map[string]string) []string {

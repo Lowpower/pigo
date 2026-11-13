@@ -413,21 +413,26 @@ func (m Model) loginView() string {
 }
 
 func (m Model) copyLoginAuthURL() (tea.Model, tea.Cmd) {
-	osc, err := copyToClipboard(m.login.authURL, clipboardGOOS, clipboardGetenv)
-	if err != nil {
-		m.clipOSC = ""
-		m.login.copyHint = err.Error()
-		m.login.copyFailed = true
-		return m, nil
-	}
+	osc, hint, failed := m.copyURL(m.login.authURL)
 	m.clipOSC = osc
-	m.login.copyHint = "Copied URL to clipboard"
-	m.login.copyFailed = false
+	m.login.copyHint = hint
+	m.login.copyFailed = failed
 	return m, nil
 }
 
+func (m Model) copyURL(url string) (osc, hint string, failed bool) {
+	copied, err := copyToClipboard(url, clipboardGOOS, clipboardGetenv)
+	if err != nil {
+		return "", err.Error(), true
+	}
+	return copied, "Copied URL to clipboard", false
+}
+
 func (m Model) loginAuthBlock() string {
-	url := m.login.authURL
+	return m.authURLBlock(m.login.authURL, m.login.copyHint, m.login.copyFailed)
+}
+
+func (m Model) authURLBlock(url, hint string, failed bool) string {
 	if url == "" {
 		return ""
 	}
@@ -437,12 +442,12 @@ func (m Model) loginAuthBlock() string {
 		shown = osc8(shown, url)
 		click = osc8(click, url)
 	}
-	suffix := m.login.copyHint
+	suffix := hint
 	if suffix == "" {
 		suffix = startupKeyHint(m.keys, "app.message.copy", "to copy")
 	}
 	suffixStyle := m.metaStyle
-	if m.login.copyFailed {
+	if failed {
 		suffixStyle = m.errStyle
 	}
 	var b strings.Builder

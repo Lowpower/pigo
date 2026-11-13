@@ -82,6 +82,7 @@ func Builtins() []Command {
 		{Name: "clone", Description: "duplicate the current session at the current position"},
 		{Name: "trust", Description: "trust this project and write trust.json (restart to load resources)"},
 		{Name: "login", Description: "configure provider authentication"},
+		{Name: "mcp", Description: "list and control MCP servers"},
 		{Name: "logout", Description: "remove provider authentication"},
 		{Name: "new", Description: "start a new session"},
 		{Name: "compact", Description: "manually compact the session context"},

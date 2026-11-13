@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/Lowpower/pigo/internal/mcp"
 	"github.com/Lowpower/pigo/internal/session"
 )
 
@@ -518,7 +519,7 @@ func formatToolCall(name string, args map[string]any, link pathLink) string {
 		if visibleWidth(s) > 40 {
 			s = truncateDisplay(s, 40, "...")
 		}
-		return "[" + name + ": " + s + "]"
+		return "[" + mcp.DisplayTitle(name) + ": " + s + "]"
 	}
 }
 

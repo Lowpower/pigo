@@ -511,7 +511,12 @@ func transcriptFromMessages(m Model, msgs []ai.Message) []entry {
 			}
 		default:
 			if msg.Text() != "" {
-				out = append(out, entry{role: "tool", rendered: m.toolStyle.Render(toolResultBody(msg.Text(), false))})
+				out = append(out, entry{
+					role:     "tool",
+					toolName: msg.ToolName,
+					toolOut:  msg.Text(),
+					rendered: m.toolStyle.Render(toolResultBodyLines(msg.Text(), false, toolPreviewLines(msg.ToolName))),
+				})
 			}
 		}
 	}

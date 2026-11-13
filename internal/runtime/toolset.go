@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"strings"
+
 	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/session"
@@ -41,7 +43,7 @@ func (e *Engine) selectedActiveNames() []string {
 		return config.RejectToolNames(e.visibleNames(registered), e.Opts.ToolDeny)
 	}
 	if e.explicitToolSelection() {
-		matched := config.MatchingToolNames(e.Opts.ToolAllow, registered)
+		matched := selectExplicitTools(e.Opts.ToolAllow, registered)
 		return config.RejectToolNames(matched, e.Opts.ToolDeny)
 	}
 	builtins := e.builtinNames()
@@ -62,6 +64,31 @@ func (e *Engine) selectedActiveNames() []string {
 		}
 	}
 	return config.RejectToolNames(selected, e.Opts.ToolDeny)
+}
+
+// selectExplicitTools applies a plain --tools list. Built-in and extension
+// names must match the list. MCP tools stay unless some entry starts with
+// mcp__, in which case only the matching MCP tools stay.
+func selectExplicitTools(allow, registered []string) []string {
+	var patterns []string
+	for _, item := range allow {
+		if strings.HasPrefix(item, "mcp__") {
+			patterns = append(patterns, item)
+		}
+	}
+	var out []string
+	for _, name := range registered {
+		if strings.HasPrefix(name, "mcp__") {
+			if len(patterns) == 0 || config.ToolMatchesAny(patterns, name) {
+				out = append(out, name)
+			}
+			continue
+		}
+		if config.ToolMatchesAny(allow, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func registeredNames(e *Engine) []string {

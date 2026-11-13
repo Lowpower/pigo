@@ -26,6 +26,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/keys"
 	"github.com/Lowpower/pigo/internal/llama"
+	"github.com/Lowpower/pigo/internal/mcp"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/prompt"
 	"github.com/Lowpower/pigo/internal/runtime"
@@ -164,6 +165,7 @@ type Model struct {
 	fork          forkOverlay
 	settings      settingsPicker
 	llama         llamaOverlay
+	mcp           mcpScreen
 	lastEscape    time.Time
 	summaryCancel context.CancelFunc
 	pendingNav    *pendingNav
@@ -384,7 +386,7 @@ func (m Model) Init() tea.Cmd {
 
 // overlayVisible reports whether a fullscreen layer is covering the editor.
 func (m Model) overlayVisible() bool {
-	if m.sessionPickerActive() || m.settingsActive() || m.llamaActive() || m.scopedModelsActive() ||
+	if m.sessionPickerActive() || m.settingsActive() || m.llamaActive() || m.mcpActive() || m.scopedModelsActive() ||
 		m.modelPickerActive() || m.thinkingPickerActive() || m.loginActive() || m.extUI.active {
 		return true
 	}
@@ -511,6 +513,10 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		m.copyFlashTree = false
 		return m, nil
 
+	case mcpTickMsg, mcpAuthURLMsg, mcpLoginDoneMsg:
+		next, cmd := m.handleMCPMsg(msg)
+		return next, cmd
+
 	case tea.KeyMsg:
 		if isTermQueryLeak(msg) {
 			return m, nil
@@ -523,6 +529,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		}
 		if m.llamaActive() {
 			return m.handleLlamaKey(msg)
+		}
+		if m.mcpActive() {
+			return m.handleMCPKey(msg)
 		}
 		if m.settingsActive() {
 			return m.handleSettingsKey(msg)
@@ -1117,6 +1126,8 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 			_ = session.UpdateHeader(m.engine.Opts.Session.File(), func(h *session.Header) { h.Name = cmd.Rest })
 		}
 		return note("session name = " + m.engine.Opts.Session.Name())
+	case "mcp":
+		return m.openMCP()
 	case "login":
 		return m.startLogin(cmd.Rest)
 	case "logout":
@@ -1452,7 +1463,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		if p, ok := ev.Args["path"].(string); ok && p != "" {
 			label = strings.Replace(label, p, m.linkPath(p, p), 1)
 		}
-		rendered := m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", ev.ToolName, label))
+		rendered := m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", mcp.DisplayTitle(ev.ToolName), label))
 		if m.engine != nil {
 			if custom := m.engine.RenderTool("call", ev.ToolName, ev.Args, "", nil); custom != "" {
 				rendered = m.toolStyle.Render(custom)
@@ -1461,6 +1472,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		ent := entry{
 			role:       "tool",
 			toolCallID: ev.ToolCallID,
+			toolName:   ev.ToolName,
 			rendered:   rendered,
 		}
 		if isShellTool(ev.ToolName) {
@@ -1506,6 +1518,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		m.transcript = append(m.transcript, entry{
 			role:     "tool",
+			toolName: ev.ToolName,
 			toolOut:  ev.Result,
 			isError:  ev.IsError,
 			rendered: style.Render(fmt.Sprintf("  %s %s", mark, firstLine(ev.Result))),
@@ -1678,6 +1691,9 @@ func (m Model) View() string {
 	if m.llamaActive() {
 		return m.present(m.llama.view())
 	}
+	if m.mcpActive() {
+		return m.present(m.mcpView())
+	}
 	if m.scopedModelsActive() {
 		return m.present(m.scoped.view())
 	}
@@ -1787,7 +1803,7 @@ func (m Model) rawChatBody() (string, map[int]string) {
 				}
 				text, imgs := splitToolImages(e.toolOut)
 				if text != "" || len(imgs) == 0 {
-					write(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBody(text, m.toolsExpanded))))
+					write(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBodyLines(text, m.toolsExpanded, toolPreviewLines(e.toolName)))))
 				} else {
 					write(style.Render("  " + mark))
 				}

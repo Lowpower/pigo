@@ -45,18 +45,19 @@ type ExposureRule struct {
 // Config is one MCP server. Raw is the original JSON object, including
 // fields this package does not interpret (auth, oauth).
 type Config struct {
-	Command        string
-	Args           []string
-	Env            map[string]string
-	Cwd            string
-	URL            string
-	Headers        map[string]string
-	TimeoutSeconds int
-	Enabled        bool
-	Exposure       string
-	ToolExposure   []ExposureRule
-	Description    string
-	Raw            json.RawMessage
+	Command           string
+	Args              []string
+	Env               map[string]string
+	Cwd               string
+	URL               string
+	Headers           map[string]string
+	BearerTokenEnvVar string
+	TimeoutSeconds    int
+	Enabled           bool
+	Exposure          string
+	ToolExposure      []ExposureRule
+	Description       string
+	Raw               json.RawMessage
 }
 
 // Timeout is the connect and call deadline. Zero means 60 seconds.
@@ -519,6 +520,8 @@ func applyField(cfg *Config, key string, raw json.RawMessage) error {
 		return decodeStringMap(raw, &cfg.Env)
 	case "headers":
 		return decodeStringMap(raw, &cfg.Headers)
+	case "bearerTokenEnvVar":
+		return decodeString(raw, &cfg.BearerTokenEnvVar)
 	case "timeout":
 		var n int
 		if err := json.Unmarshal(raw, &n); err != nil || n < 0 {

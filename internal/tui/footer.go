@@ -88,7 +88,18 @@ func expandTool(s string) string {
 	return out
 }
 
+func toolPreviewLines(name string) int {
+	if strings.HasPrefix(name, "mcp__") {
+		return 5
+	}
+	return 1
+}
+
 func toolResultBody(raw string, expanded bool) string {
+	return toolResultBodyLines(raw, expanded, 1)
+}
+
+func toolResultBodyLines(raw string, expanded bool, lines int) string {
 	body, took := splitTrailingTook(raw)
 	if expanded {
 		shown := expandTool(body)
@@ -100,13 +111,35 @@ func toolResultBody(raw string, expanded bool) string {
 		}
 		return shown + "\n" + took
 	}
-	if took == "" {
-		return firstLine(raw)
+	if lines <= 1 {
+		if took == "" {
+			return firstLine(raw)
+		}
+		if strings.TrimSpace(body) == "" {
+			return took
+		}
+		return firstLine(body) + "  " + took
 	}
-	if strings.TrimSpace(body) == "" {
+	shown := headLines(body, lines)
+	if took == "" {
+		return shown
+	}
+	if strings.TrimSpace(shown) == "" {
 		return took
 	}
-	return firstLine(body) + "  " + took
+	return shown + "\n" + took
+}
+
+func headLines(s string, n int) string {
+	s = strings.TrimRight(s, "\n")
+	if s == "" || n <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[:n], "\n")
 }
 
 // splitTrailingTook lifts a final "Took …" line off a shell tool result so the

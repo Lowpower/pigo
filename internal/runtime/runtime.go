@@ -48,6 +48,7 @@ type Options struct {
 	SkillPaths     []string
 	NoTools        bool
 	NoBuiltinTools bool
+	NoMCP          bool
 	ToolAllow      []string
 	ToolDeny       []string
 	Extensions     []string // argv[0] of each extension binary (CLI -e plus discovered)
