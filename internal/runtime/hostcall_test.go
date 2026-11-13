@@ -44,14 +44,14 @@ func TestGetContextUsageUsesLastUsage(t *testing.T) {
 	}
 	usage := e.HandleHostCall(nil, "getContextUsage", nil)
 	// Last assistant usage is 9100; the earlier 850 is not added again. The
-	// tool result is 40 chars (10 tokens). The system prompt is already inside
-	// that usage.
-	if usage["tokens"] != 9110 {
+	// tool result is 40 chars (ceil(40/3.5) = 12 tokens). The system prompt is
+	// already inside that usage.
+	if usage["tokens"] != 9112 {
 		t.Fatalf("usage=%v", usage)
 	}
 
 	empty := (&Engine{System: "abcdefgh", Opts: Options{ContextWindow: 1000}}).HandleHostCall(nil, "getContextUsage", nil)
-	if empty["tokens"] != 2 {
+	if empty["tokens"] != 3 {
 		t.Fatalf("no usage=%v", empty)
 	}
 }

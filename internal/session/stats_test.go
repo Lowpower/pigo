@@ -273,13 +273,13 @@ func TestCollectStatsContextUsesUsage(t *testing.T) {
 		{Role: ai.RoleToolResult, Content: "abcdefgh"},
 	}
 	got := CollectStats(nil, msgs, 200, strings.Repeat("s", 400), nil)
-	if got.ContextUsage == nil || got.ContextUsage.Tokens == nil || *got.ContextUsage.Tokens != 42 {
+	if got.ContextUsage == nil || got.ContextUsage.Tokens == nil || *got.ContextUsage.Tokens != 43 {
 		t.Fatalf("context = %+v", got.ContextUsage)
 	}
 
 	plain := []ai.Message{{Role: ai.RoleUser, Content: "abcd"}}
 	noUsage := CollectStats(nil, plain, 200, "abcd", nil)
-	if noUsage.ContextUsage == nil || noUsage.ContextUsage.Tokens == nil || *noUsage.ContextUsage.Tokens != 2 {
+	if noUsage.ContextUsage == nil || noUsage.ContextUsage.Tokens == nil || *noUsage.ContextUsage.Tokens != 4 {
 		t.Fatalf("no usage = %+v", noUsage.ContextUsage)
 	}
 }
