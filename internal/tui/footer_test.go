@@ -69,6 +69,17 @@ func TestCtrlTHidesThinking(t *testing.T) {
 	}
 }
 
+func TestMCPResultFoldsToFiveLines(t *testing.T) {
+	var b strings.Builder
+	for i := 1; i <= 8; i++ {
+		b.WriteString("row\n")
+	}
+	got := toolResultBodyLines(b.String(), false, 5)
+	if strings.Count(got, "row") != 5 {
+		t.Fatalf("folded = %q", got)
+	}
+}
+
 func TestCollapsedToolResultKeepsTook(t *testing.T) {
 	raw := "line-one\nline-two\nTook 1m 5s"
 	got := toolResultBody(raw, false)
