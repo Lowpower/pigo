@@ -12,9 +12,35 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/cachewarm"
+	"github.com/Lowpower/pigo/internal/compaction"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
 )
+
+// contextSafetyTokens is the fixed margin pi v1.3.0 keeps below the window
+// when it turns an input estimate into an output cap.
+const contextSafetyTokens = 4096
+
+// clampMaxTokensToContext fits outputCap into the context window.
+// A non-positive outputCap stays unset. A non-positive window does not
+// subtract the estimate. Otherwise the result is
+// min(outputCap, max(1, window-estimated-margin)).
+func clampMaxTokensToContext(window, estimated, outputCap int) int {
+	if outputCap <= 0 {
+		return 0
+	}
+	if window <= 0 {
+		return outputCap
+	}
+	available := window - estimated - contextSafetyTokens
+	if available < 1 {
+		available = 1
+	}
+	if outputCap < available {
+		return outputCap
+	}
+	return available
+}
 
 type providerBackup struct {
 	id      string
@@ -346,6 +372,7 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 		opts = e.withSamplingOpts(opts)
 		req = e.withToolTimeline(req, opts)
 		if cachewarm.IsRefresh(ctx) {
+			// A refresh asks for one token. That replaces the context clamp.
 			opts.MaxTokens = 1
 			return fn(ctx, req, opts)
 		}
@@ -412,10 +439,57 @@ func (e *Engine) gatedStream(fn ai.StreamFn) ai.StreamFn {
 				})
 			}
 		}
+		opts.MaxTokens = e.clampRequestMaxTokens(req, opts)
 		stream, err := fn(ctx, req, opts)
 		if err != nil || stream == nil {
 			return stream, err
 		}
 		return e.observeCacheWarm(ctx, stream, req, opts), nil
 	}
+}
+
+// clampRequestMaxTokens limits this request's output to the room left in the
+// window. The estimate counts provider usage first, then unmetered text at
+// 3.5 characters per token. A caller MaxTokens is the cap; otherwise the
+// catalog output limit is. Neither means the field stays unset.
+func (e *Engine) clampRequestMaxTokens(req ai.Context, opts ai.Options) int {
+	return clampMaxTokensToContext(
+		e.requestContextWindow(opts),
+		compaction.ContextTokens(req.Messages, req.System, req.Tools),
+		e.requestOutputCap(opts),
+	)
+}
+
+func (e *Engine) requestContextWindow(opts ai.Options) int {
+	provider, id := e.streamTarget(opts)
+	if vm, ok := e.lookupVirtual(provider, id); ok && vm.ContextWindow > 0 {
+		return vm.ContextWindow
+	}
+	if m, ok := models.Lookup(provider, id); ok && m.ContextWindow > 0 {
+		return m.ContextWindow
+	}
+	return e.ContextWindow()
+}
+
+func (e *Engine) requestOutputCap(opts ai.Options) int {
+	if opts.MaxTokens > 0 {
+		return opts.MaxTokens
+	}
+	provider, id := e.streamTarget(opts)
+	if vm, ok := e.lookupVirtual(provider, id); ok && vm.MaxTokens > 0 {
+		return vm.MaxTokens
+	}
+	return models.MaxTokens(provider, id)
+}
+
+func (e *Engine) streamTarget(opts ai.Options) (provider, id string) {
+	provider = opts.Provider
+	if provider == "" {
+		provider = e.activeProvider()
+	}
+	id = opts.Model
+	if id == "" {
+		id = e.Opts.Config.ResolvedModel()
+	}
+	return provider, id
 }

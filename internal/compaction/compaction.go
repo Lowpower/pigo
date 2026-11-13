@@ -54,16 +54,23 @@ func DefaultSettings() Settings {
 	return Settings{ReserveTokens: 16384, KeepRecentTokens: 20000}
 }
 
-// estimatedImageChars is the fixed per-image stand-in used before dividing by 4
-// (1200 tokens). It matches pi's ESTIMATED_IMAGE_CHARS.
+// estimatedImageChars is the fixed per-image stand-in (pi's ESTIMATED_IMAGE_CHARS).
+// Token count is ceil(estimatedImageChars/3.5).
 const estimatedImageChars = 4800
 
-// EstimateTokens approximates a message's token count as ceil(chars/4).
+// EstimateTokens approximates a message's token count as ceil(chars/3.5).
 // Assistant messages include thinking and tool-call arguments. Each image adds
 // estimatedImageChars. Display text (Message.Text) stays text-only.
 func EstimateTokens(m ai.Message) int {
-	chars := estimateChars(m)
-	return ceilDiv(chars, 4)
+	return estimateTextTokens(estimateChars(m))
+}
+
+// estimateTextTokens is ceil(chars/3.5), computed as ceil(2*chars/7).
+func estimateTextTokens(chars int) int {
+	if chars <= 0 {
+		return 0
+	}
+	return int((int64(chars)*2 + 6) / 7)
 }
 
 func estimateChars(m ai.Message) int {
@@ -150,7 +157,7 @@ func estimateOverhead(system string, tools []ai.Tool) int {
 			chars += len(raw)
 		}
 	}
-	return ceilDiv(chars, 4)
+	return estimateTextTokens(chars)
 }
 
 // ShouldCompact reports whether the context should be compacted:
@@ -640,11 +647,4 @@ func ParseStoredFiles(raw []byte) (FileLists, bool) {
 		return FileLists{}, false
 	}
 	return lists, true
-}
-
-func ceilDiv(a, b int) int {
-	if a <= 0 {
-		return 0
-	}
-	return (a + b - 1) / b
 }

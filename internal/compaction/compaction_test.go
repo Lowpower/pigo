@@ -11,11 +11,14 @@ import (
 )
 
 func TestEstimateTokens(t *testing.T) {
-	if got := EstimateTokens(ai.Message{Content: "abcdefgh"}); got != 2 { // ceil(8/4)
-		t.Errorf("EstimateTokens(8 chars) = %d, want 2", got)
+	if got := EstimateTokens(ai.Message{Content: "abcdefgh"}); got != 3 { // ceil(8/3.5)
+		t.Errorf("EstimateTokens(8 chars) = %d, want 3", got)
 	}
-	if got := EstimateTokens(ai.Message{Content: "abcde"}); got != 2 { // ceil(5/4)
+	if got := EstimateTokens(ai.Message{Content: "abcde"}); got != 2 { // ceil(5/3.5)
 		t.Errorf("EstimateTokens(5 chars) = %d, want 2", got)
+	}
+	if got := EstimateTokens(ai.Message{Content: strings.Repeat("x", 3500)}); got != 1000 { // ceil(3500/3.5)
+		t.Errorf("EstimateTokens(3500 chars) = %d, want 1000", got)
 	}
 	if got := EstimateTokens(ai.Message{Content: ""}); got != 0 {
 		t.Errorf("EstimateTokens(empty) = %d, want 0", got)
@@ -32,8 +35,8 @@ func TestEstimateTokensIncludesThinkingToolArgsAndImages(t *testing.T) {
 			},
 		},
 	}
-	if got := EstimateTokens(thinking); got != 2 {
-		t.Fatalf("thinking+text = %d, want 2", got)
+	if got := EstimateTokens(thinking); got != 3 {
+		t.Fatalf("thinking+text = %d, want 3", got)
 	}
 
 	wide := strings.Repeat("x", 4000)
@@ -50,22 +53,22 @@ func TestEstimateTokensIncludesThinkingToolArgsAndImages(t *testing.T) {
 	if tool.Text() != "" {
 		t.Fatalf("Text() = %q, want empty", tool.Text())
 	}
-	// "write" + {"content":"<4000 x>"} = 5 + 4013 = 4018 chars → 1005 tokens.
-	if got := EstimateTokens(tool); got != 1005 {
-		t.Fatalf("tool args = %d, want 1005", got)
+	// "write" + {"content":"<4000 x>"} = 5 + 4014 = 4019 chars → ceil(4019/3.5) = 1149.
+	if got := EstimateTokens(tool); got != 1149 {
+		t.Fatalf("tool args = %d, want 1149", got)
 	}
 
 	img := ai.Message{
 		Content: "ab",
 		Images:  []ai.ImageContent{{Type: "image", Data: "xx", MimeType: "image/png"}},
 	}
-	// 2 chars + 4800 image chars → 1201 tokens.
-	if got := EstimateTokens(img); got != 1201 {
-		t.Fatalf("image = %d, want 1201", got)
+	// 2 chars + 4800 image chars → ceil(4802/3.5) = 1372 tokens.
+	if got := EstimateTokens(img); got != 1372 {
+		t.Fatalf("image = %d, want 1372", got)
 	}
 	two := ai.Message{Images: []ai.ImageContent{{}, {}}}
-	if got := EstimateTokens(two); got != 2400 {
-		t.Fatalf("two images = %d, want 2400", got)
+	if got := EstimateTokens(two); got != 2743 {
+		t.Fatalf("two images = %d, want 2743", got)
 	}
 }
 
@@ -76,13 +79,13 @@ func TestContextTokensUsesLastUsagePlusTrailing(t *testing.T) {
 		{Role: ai.RoleToolResult, Content: "abcdefgh"},
 	}
 	tools := []ai.Tool{{Name: "read", Description: "desc", Parameters: map[string]any{}}}
-	if got := ContextTokens(msgs, strings.Repeat("s", 4000), tools); got != 22 {
-		t.Fatalf("ContextTokens = %d, want 22 (usage 20 + trailing 2, system/tools excluded)", got)
+	if got := ContextTokens(msgs, strings.Repeat("s", 4000), tools); got != 23 {
+		t.Fatalf("ContextTokens = %d, want 23 (usage 20 + trailing 3, system/tools excluded)", got)
 	}
 
 	msgs[1] = usageMessage(ai.Usage{Input: 10, Output: 5, CacheRead: 3, CacheWrite: 2}, "hi")
-	if got := ContextTokens(msgs, "", nil); got != 22 {
-		t.Fatalf("summed usage = %d, want 22", got)
+	if got := ContextTokens(msgs, "", nil); got != 23 {
+		t.Fatalf("summed usage = %d, want 23", got)
 	}
 
 	later := append(append([]ai.Message{}, msgs...), usageMessage(ai.Usage{TotalTokens: 30}, "next"))
@@ -106,34 +109,34 @@ func TestContextTokensNoUsageIncludesPrompt(t *testing.T) {
 		},
 	}
 	tools := []ai.Tool{{Name: "read", Description: "desc", Parameters: map[string]any{}}}
-	// thinking 1 + image message 1201 + ceil((4 + 54 tool JSON) / 4) = 1217.
-	if got := ContextTokens(msgs, "abcd", tools); got != 1217 {
-		t.Fatalf("ContextTokens = %d, want 1217", got)
+	// thinking 2 + image message 1372 + ceil((4 + 54 tool JSON) / 3.5) = 1391.
+	if got := ContextTokens(msgs, "abcd", tools); got != 1391 {
+		t.Fatalf("ContextTokens = %d, want 1391", got)
 	}
 }
 
 func TestContextTokensRejectsInvalidUsage(t *testing.T) {
 	text := ai.Message{Role: ai.RoleUser, Content: "abcdefgh"}
 	zero := usageMessage(ai.Usage{}, "abcdefgh")
-	if got := ContextTokens([]ai.Message{text, zero}, "abcd", nil); got != 5 {
-		t.Fatalf("zero usage = %d, want 5", got)
+	if got := ContextTokens([]ai.Message{text, zero}, "abcd", nil); got != 8 {
+		t.Fatalf("zero usage = %d, want 8", got)
 	}
 	aborted := usageMessage(ai.Usage{TotalTokens: 99999}, "abcdefgh")
 	aborted.Assistant.StopReason = ai.StopAborted
-	if got := ContextTokens([]ai.Message{aborted}, "", nil); got != 2 {
-		t.Fatalf("aborted usage = %d, want 2", got)
+	if got := ContextTokens([]ai.Message{aborted}, "", nil); got != 3 {
+		t.Fatalf("aborted usage = %d, want 3", got)
 	}
 	errored := usageMessage(ai.Usage{TotalTokens: 99999}, "abcdefgh")
 	errored.Assistant.StopReason = ai.StopError
-	if got := ContextTokens([]ai.Message{errored}, "", nil); got != 2 {
-		t.Fatalf("error usage = %d, want 2", got)
+	if got := ContextTokens([]ai.Message{errored}, "", nil); got != 3 {
+		t.Fatalf("error usage = %d, want 3", got)
 	}
 
 	valid := usageMessage(ai.Usage{TotalTokens: 50}, "hi")
 	zeroAfter := usageMessage(ai.Usage{}, "abcdefgh")
 	trail := ai.Message{Role: ai.RoleToolResult, Content: "abcdefgh"}
-	if got := ContextTokens([]ai.Message{valid, trail, zeroAfter}, strings.Repeat("s", 400), nil); got != 54 {
-		t.Fatalf("usage then invalid = %d, want 54", got)
+	if got := ContextTokens([]ai.Message{valid, trail, zeroAfter}, strings.Repeat("s", 400), nil); got != 56 {
+		t.Fatalf("usage then invalid = %d, want 56", got)
 	}
 }
 
@@ -176,15 +179,15 @@ func TestShouldCompact(t *testing.T) {
 }
 
 func TestFindCutPointKeepsUserBoundary(t *testing.T) {
-	// 30 messages of 4000 chars each = 1000 tokens each, alternating user/assistant.
+	// 30 messages of 4000 chars each = 1143 tokens each, alternating user/assistant.
 	msgs := makeMessages(30, 4000)
-	// keepRecent 20000 -> the last 20 messages reach the threshold, cut at index 10.
+	// keepRecent 20000 -> 18 messages cross the threshold, cut at index 12.
 	got, err := FindCutPoint(msgs, 20000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Skip || got.Split || got.Index != 10 || got.TurnStart != -1 {
-		t.Fatalf("cut = %+v, want index 10", got)
+	if got.Skip || got.Split || got.Index != 12 || got.TurnStart != -1 {
+		t.Fatalf("cut = %+v, want index 12", got)
 	}
 	if msgs[got.Index].Role != ai.RoleUser {
 		t.Fatalf("cut role = %s, want user", msgs[got.Index].Role)
@@ -248,8 +251,8 @@ func TestFindCutPointConsecutiveToolResults(t *testing.T) {
 }
 
 func TestFindCutPointSplitsOversizedTurn(t *testing.T) {
-	// One user span. Each message is 100 tokens. keep 250 crosses on a tool result
-	// and the next legal cut is the following assistant.
+	// One user span. Each message is ceil(400/3.5) tokens. keep 250 crosses on a
+	// tool result and the next legal cut is the following assistant.
 	msgs := []ai.Message{
 		{Role: ai.RoleUser, Content: strings.Repeat("u", 400)},
 		{Role: ai.RoleAssistant, Content: strings.Repeat("a", 400)},
@@ -281,7 +284,7 @@ func TestFindCutPointNoLegalCut(t *testing.T) {
 }
 
 func TestCompactReplacesOldWithSummary(t *testing.T) {
-	msgs := makeMessages(30, 4000) // 30000 tokens total
+	msgs := makeMessages(30, 4000)
 	summarizer := ai.ScriptedStreamFn("## Goal\nFinish pigo. Done.", 0)
 
 	before := EstimateContextTokens(msgs)
@@ -293,9 +296,9 @@ func TestCompactReplacesOldWithSummary(t *testing.T) {
 	if summary == "" || !strings.Contains(summary, "Goal") {
 		t.Errorf("summary = %q, want the scripted summary", summary)
 	}
-	// summary message + last 20 kept = 21 messages.
-	if len(compacted) != 21 {
-		t.Fatalf("compacted len = %d, want 21", len(compacted))
+	// summary message + last 18 kept = 19 messages.
+	if len(compacted) != 19 {
+		t.Fatalf("compacted len = %d, want 19", len(compacted))
 	}
 	if !strings.HasPrefix(compacted[0].Content, SummaryMarker) || !strings.Contains(compacted[0].Content, "Goal") {
 		t.Errorf("compacted[0] = %q, want summary marker + summary", compacted[0].Content)
@@ -477,7 +480,7 @@ func TestCompactMergesSplitTurnSummaries(t *testing.T) {
 		{Role: ai.RoleAssistant, Content: strings.Repeat("a", 400)},
 		{Role: ai.RoleToolResult, Content: strings.Repeat("t", 400)},
 	}
-	// 400 chars = 100 tokens, plus a few for the prefixes and tool-call args.
+	// 400 chars is ceil(400/3.5) tokens, plus a few for the prefixes and tool-call args.
 	// The tail assistant+tool is under 250; including the previous tool crosses it.
 	var prompts []string
 	sf := func(ctx context.Context, req ai.Context, opts ai.Options) (*ai.EventStream, error) {

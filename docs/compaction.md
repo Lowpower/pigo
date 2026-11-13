@@ -7,7 +7,7 @@ pigo has two summarizers:
 | Compaction | Estimated context exceeds the threshold, or `/compact` | Replace older messages with a checkpoint |
 | Branch summary | `/tree` navigation when a summary is requested | Keep context from the branch being left |
 
-Token estimates are `chars/4`. Compaction runs when
+Token estimates are `ceil(chars/3.5)`. Compaction runs when
 `contextTokens > contextWindow - reserveTokens`.
 
 ## Settings (defaults)
