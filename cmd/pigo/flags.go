@@ -11,7 +11,7 @@ var extraFlags []ext.UnknownFlag
 var rootSubcommands = map[string]bool{
 	"auth": true, "config": true, "install": true, "remove": true,
 	"list": true, "update": true, "help": true, "completion": true,
-	"server": true, "client": true, "eval": true,
+	"server": true, "client": true, "eval": true, "mcp": true,
 }
 
 var knownBoolFlags = map[string]bool{
@@ -20,6 +20,7 @@ var knownBoolFlags = map[string]bool{
 	"no-extensions": true, "no-themes": true, "list-models": true,
 	"offline": true, "no-builtin-tools": true, "no-prompt-templates": true,
 	"no-sandbox": true, "approve": true, "no-approve": true, "verbose": true,
+	"no-mcp":  true,
 	"version": true, "help": true,
 }
 

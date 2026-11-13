@@ -154,6 +154,70 @@ func TestNonDirectDoesNotBlockAndCloseStopsHandshake(t *testing.T) {
 	}
 }
 
+func TestOperateOneServerWhileAnotherConnects(t *testing.T) {
+	ctx := context.Background()
+	m := New([]Server{
+		{
+			Name: "slow",
+			Config: Config{
+				Command: os.Args[0],
+				Env:     map[string]string{"PIGO_MCP_FAKE": "slow"},
+				Enabled: true,
+			},
+		},
+		{
+			Name: "fast",
+			Config: Config{
+				Command: os.Args[0],
+				Env:     map[string]string{"PIGO_MCP_FAKE": "stdio"},
+				Enabled: true,
+			},
+		},
+	}, "")
+	m.Start(ctx)
+	t.Cleanup(m.Close)
+	if err := m.SetEnabled("fast", false); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	fast := statusNamed(m, "fast")
+	for time.Now().Before(deadline) && fast.Status != "disabled" {
+		time.Sleep(20 * time.Millisecond)
+		fast = statusNamed(m, "fast")
+	}
+	if fast.Status != "disabled" {
+		t.Fatalf("fast=%+v", fast)
+	}
+	if st := statusNamed(m, "slow"); st.Status != "connecting" {
+		t.Fatalf("slow=%+v", st)
+	}
+	if err := m.SetEnabled("fast", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reconnect("fast"); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && statusNamed(m, "fast").Status != "ready" {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if st := statusNamed(m, "fast"); st.Status != "ready" {
+		t.Fatalf("fast after reconnect=%+v", st)
+	}
+	if st := statusNamed(m, "slow"); st.Status != "connecting" {
+		t.Fatalf("slow changed while fast reconnected: %+v", st)
+	}
+}
+
+func statusNamed(m *Manager, name string) Status {
+	for _, st := range m.Statuses() {
+		if st.Name == name {
+			return st
+		}
+	}
+	return Status{}
+}
+
 func TestToolSearchWaitsForNamedServer(t *testing.T) {
 	ctx := context.Background()
 	m := New([]Server{{

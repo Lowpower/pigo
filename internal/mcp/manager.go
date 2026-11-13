@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +55,7 @@ type running struct {
 	status       string
 	hasResources bool
 	instructions string
+	cancel       context.CancelFunc
 }
 
 // New builds a manager. Call Start to connect. Disabled servers are not connected.
@@ -109,7 +111,7 @@ func (m *Manager) Start(parent context.Context) {
 	servers := append([]*running(nil), m.servers...)
 	m.mu.Unlock()
 	for _, srv := range servers {
-		go srv.run(ctx)
+		m.launch(srv)
 	}
 }
 
@@ -150,11 +152,114 @@ func (m *Manager) Add(srv Server) {
 	}
 	m.mu.Lock()
 	m.servers = append(m.servers, r)
-	ctx := m.ctx
+	m.mu.Unlock()
+	m.launch(r)
+}
+
+// SetEnabled turns one server on or off without touching the others.
+// The list updates as soon as this returns; a disabled server does not connect.
+func (m *Manager) SetEnabled(name string, enabled bool) error {
+	return m.swap(name, &enabled)
+}
+
+// Reconnect drops one server's session and connects it again.
+// Other servers keep the connections they already have.
+func (m *Manager) Reconnect(name string) error {
+	return m.swap(name, nil)
+}
+
+// Server returns the configured entry for name.
+func (m *Manager) Server(name string) (Server, bool) {
+	srv := m.serverByName(name)
+	if srv == nil {
+		return Server{}, false
+	}
+	return srv.spec, true
+}
+
+// WaitSettled blocks until every server has finished connecting, failed, or
+// been left disabled. It does not require them to succeed.
+func (m *Manager) WaitSettled(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	for _, srv := range m.snapshot() {
+		if err := srv.wait(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) swap(name string, enabled *bool) error {
+	if m == nil {
+		return errors.New("mcp manager is nil")
+	}
+	m.mu.Lock()
+	idx := -1
+	for i, srv := range m.servers {
+		if srv.name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		m.mu.Unlock()
+		return fmt.Errorf("unknown mcp server %q", name)
+	}
+	old := m.servers[idx]
+	spec := old.spec
+	if enabled != nil {
+		spec.Config.Enabled = *enabled
+	}
+	status := "connecting"
+	if !spec.Config.Enabled {
+		status = "disabled"
+	}
+	next := &running{
+		owner:   m,
+		name:    spec.Name,
+		canon:   Canon(spec.Name),
+		spec:    spec,
+		done:    make(chan struct{}),
+		settled: make(chan struct{}),
+		status:  status,
+	}
+	m.servers[idx] = next
+	m.mu.Unlock()
+	old.stop()
+	m.launch(next)
+	m.notify()
+	return nil
+}
+
+func (m *Manager) launch(s *running) {
+	if m == nil || s == nil {
+		return
+	}
+	m.mu.Lock()
+	parent := m.ctx
 	started := m.started
 	m.mu.Unlock()
-	if started && ctx != nil {
-		go r.run(ctx)
+	if !started || parent == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(parent)
+	s.mu.Lock()
+	s.cancel = cancel
+	s.mu.Unlock()
+	go s.run(ctx)
+}
+
+func (s *running) stop() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	cancel := s.cancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 

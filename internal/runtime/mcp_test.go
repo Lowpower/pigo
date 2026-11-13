@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -72,6 +73,36 @@ func TestOldSessionAppendsMCPSection(t *testing.T) {
 	replay := session.ReplaySystem(sess.GetBranch(""))
 	if replay.Sections[prompt.SectionMCPServers] == "" || replay.Sections[prompt.SectionPreamble] == "" {
 		t.Fatalf("sections=%v", replay.Sections)
+	}
+}
+
+func TestNoMCPHidesServersFromTheModel(t *testing.T) {
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	body := `{"mcpServers":{"demo":{"command":"missing-mcp-server","exposure":"direct"}}}`
+	if err := os.WriteFile(filepath.Join(agent, "mcp.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(context.Background(), Options{
+		AgentDir:     agent,
+		Cwd:          cwd,
+		NoExtensions: true,
+		NoSkills:     true,
+		NoPromptTpls: true,
+		NoThemes:     true,
+		NoMCP:        true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { e.Close() })
+	if len(e.MCPStatuses()) != 0 {
+		t.Fatalf("statuses=%+v", e.MCPStatuses())
+	}
+	for _, tool := range e.Tools.List() {
+		if strings.HasPrefix(tool.Name(), "mcp__") {
+			t.Fatalf("model can see %s", tool.Name())
+		}
 	}
 }
 
@@ -159,6 +190,43 @@ func TestMCPStructuredContentAndDirectWait(t *testing.T) {
 	}
 	if _, ok := e.LookupTool("mcp__web__box"); !ok {
 		t.Fatal("lookup missed the tool")
+	}
+}
+
+func TestLateDirectToolsFollowToolsFlag(t *testing.T) {
+	srv := httptest.NewServer(boxMCPServer(0))
+	t.Cleanup(srv.Close)
+	mgr := mcp.New([]mcp.Server{{
+		Name: "one",
+		Config: mcp.Config{
+			URL: srv.URL, Enabled: true, Exposure: "direct",
+		},
+	}}, t.TempDir())
+	mgr.Start(context.Background())
+	t.Cleanup(mgr.Close)
+	if err := mgr.WaitDirect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{
+		mcp:   mgr,
+		Tools: tools.NewBuiltins(tools.Options{}),
+		Opts:  Options{ToolAllow: []string{"read", "mcp__one__*"}},
+	}
+	e.installActiveTools(e.selectedActiveNames())
+	e.installMCPTools()
+	if strings.Join(enabledNames(e), ",") != "read,mcp__one__box,mcp__one__ping" {
+		t.Fatalf("enabled=%v", enabledNames(e))
+	}
+
+	kept := &Engine{
+		mcp:   mgr,
+		Tools: tools.NewBuiltins(tools.Options{}),
+		Opts:  Options{ToolAllow: []string{"read"}},
+	}
+	kept.installActiveTools(kept.selectedActiveNames())
+	kept.installMCPTools()
+	if strings.Join(enabledNames(kept), ",") != "read,mcp__one__box,mcp__one__ping" {
+		t.Fatalf("kept=%v", enabledNames(kept))
 	}
 }
 

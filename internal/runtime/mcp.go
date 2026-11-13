@@ -3,15 +3,19 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 
+	"github.com/Lowpower/pigo/internal/config"
 	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/mcp"
+	"github.com/Lowpower/pigo/internal/mcp/oauth"
 )
 
 func (e *Engine) startMCP(ctx context.Context) {
-	if e == nil || e.Opts.NoTools {
+	if e == nil || e.Opts.NoTools || e.Opts.NoMCP {
 		return
 	}
 	var regs []mcp.Server
@@ -69,6 +73,60 @@ func (e *Engine) addExtensionMCP(name string, args map[string]any) {
 		}
 	}
 	e.mcp.Add(srv)
+}
+
+// MCPStatuses is the current server list. It is empty when MCP is not loaded.
+func (e *Engine) MCPStatuses() []mcp.Status {
+	if e == nil || e.mcp == nil {
+		return nil
+	}
+	return e.mcp.Statuses()
+}
+
+// MCPServer returns one configured server, including extension registrations.
+func (e *Engine) MCPServer(name string) (mcp.Server, bool) {
+	if e == nil || e.mcp == nil {
+		return mcp.Server{}, false
+	}
+	return e.mcp.Server(name)
+}
+
+// SetMCPEnabled turns one server on or off. File-backed servers are written
+// back to the mcp.json that defines them. Extension servers change this session.
+func (e *Engine) SetMCPEnabled(name string, enabled bool) error {
+	if e == nil || e.mcp == nil {
+		return errors.New("mcp is not loaded")
+	}
+	srv, ok := e.mcp.Server(name)
+	if !ok {
+		return fmt.Errorf("unknown mcp server %q", name)
+	}
+	if srv.Source != mcp.SourceExtension && srv.File != "" {
+		if err := mcp.SetEnabled(srv.File, name, enabled); err != nil {
+			return err
+		}
+	}
+	return e.mcp.SetEnabled(name, enabled)
+}
+
+// ReconnectMCP connects one server again and leaves the others running.
+func (e *Engine) ReconnectMCP(name string) error {
+	if e == nil || e.mcp == nil {
+		return errors.New("mcp is not loaded")
+	}
+	return e.mcp.Reconnect(name)
+}
+
+// MCPLogin runs OAuth for one HTTP server. ctx limits the whole sign-in.
+func (e *Engine) MCPLogin(ctx context.Context, name string, prompt oauth.Prompt) error {
+	if e == nil || e.mcp == nil {
+		return errors.New("mcp is not loaded")
+	}
+	srv, ok := e.mcp.Server(name)
+	if !ok {
+		return fmt.Errorf("unknown mcp server %q", name)
+	}
+	return mcp.Login(ctx, e.Opts.AgentDir, srv, prompt)
 }
 
 func (e *Engine) closeMCP() {
@@ -161,8 +219,9 @@ func (e *Engine) installMCPTools() {
 		e.Tools.Upsert(mcpRuntimeTool{mgr: e.mcp, spec: spec})
 	}
 	e.mcpMu.Lock()
+	prev := e.mcpNames
 	drop := map[string]bool{}
-	for name := range e.mcpNames {
+	for name := range prev {
 		if !names[name] {
 			drop[name] = true
 		}
@@ -171,6 +230,39 @@ func (e *Engine) installMCPTools() {
 	e.mcpInfos = infos
 	e.mcpMu.Unlock()
 	e.Tools.Drop(drop)
+	e.adoptMCPTools(specs, prev)
+}
+
+// adoptMCPTools applies the --tools rule once a server has registered tools.
+// A plain list keeps MCP tools, or only the mcp__ matches. Otherwise a tool
+// joins the enabled set the first time it appears.
+func (e *Engine) adoptMCPTools(specs []mcp.ToolSpec, prev map[string]bool) {
+	if e == nil || e.Opts.NoTools || e.Tools == nil {
+		return
+	}
+	if e.explicitToolSelection() {
+		e.installActiveTools(e.selectedActiveNames())
+		return
+	}
+	names := e.activeSnapshot()
+	have := map[string]bool{}
+	for _, name := range names {
+		have[name] = true
+	}
+	changed := false
+	for _, spec := range specs {
+		if prev[spec.Name] || have[spec.Name] || config.ToolMatchesAny(e.Opts.ToolDeny, spec.Name) {
+			continue
+		}
+		if !e.modelVisible(spec.Name) {
+			continue
+		}
+		names = append(names, spec.Name)
+		changed = true
+	}
+	if changed {
+		e.installActiveTools(names)
+	}
 }
 
 func (e *Engine) mcpInfo(name string) (ext.ToolInfo, bool) {

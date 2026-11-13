@@ -56,6 +56,20 @@ func RegisteredToolNames(server string, tools []string) map[string]string {
 	return out
 }
 
+// DisplayTitle is the call title for a registered tool.
+// mcp__server__tool becomes server/tool. Other names are unchanged.
+func DisplayTitle(name string) string {
+	if !strings.HasPrefix(name, "mcp__") {
+		return name
+	}
+	rest := strings.TrimPrefix(name, "mcp__")
+	server, tool, ok := strings.Cut(rest, "__")
+	if !ok || server == "" || tool == "" {
+		return name
+	}
+	return server + "/" + tool
+}
+
 // ToolAlias is the dashed mcp__server__tool form when it differs from the
 // registered name.
 func ToolAlias(server, remote, registered string) string {

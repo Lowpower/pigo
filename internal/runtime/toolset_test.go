@@ -137,6 +137,25 @@ func TestGlobMatchesExtensionNames(t *testing.T) {
 	}
 }
 
+func TestPlainToolsKeepMCPUntilAnMCPPattern(t *testing.T) {
+	base := tools.NewBuiltins(tools.Options{})
+	reg := tools.NewRegistry(append(base.List(),
+		fnTool{name: "mcp__one__a", schema: objectSchema()},
+		fnTool{name: "mcp__two__b", schema: objectSchema()},
+		fnTool{name: "other", schema: objectSchema()},
+	)...)
+	keep := &Engine{Tools: reg, Opts: Options{ToolAllow: []string{"read"}}}
+	keep.installActiveTools(keep.selectedActiveNames())
+	if strings.Join(enabledNames(keep), ",") != "read,mcp__one__a,mcp__two__b" {
+		t.Fatalf("keep=%v", enabledNames(keep))
+	}
+	limit := &Engine{Tools: reg, Opts: Options{ToolAllow: []string{"read", "mcp__one__*"}}}
+	limit.installActiveTools(limit.selectedActiveNames())
+	if strings.Join(enabledNames(limit), ",") != "read,mcp__one__a" {
+		t.Fatalf("limit=%v", enabledNames(limit))
+	}
+}
+
 func TestDefaultSelectionKeepsExtensionTools(t *testing.T) {
 	base := tools.NewBuiltins(tools.Options{})
 	e := &Engine{Tools: tools.NewRegistry(append(base.List(),

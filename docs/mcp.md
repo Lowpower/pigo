@@ -4,8 +4,30 @@ pigo loads MCP servers from `~/.pigo/agent/mcp.json` and, once the project is
 trusted, from `.pigo/mcp.json`. An untrusted project does not read
 `.pigo/mcp.json` and does not start commands from it.
 
-OAuth is not part of this loader. `auth` and `oauth` fields are kept in the
-file and ignored until a later change.
+`auth` and `oauth` stay in the file. The loader does not interpret them.
+`pigo mcp login` reads `oauth` when it signs in.
+
+## Commands
+
+```text
+pigo mcp add <name> -- <command> [args...]
+pigo mcp add <name> --url <url>
+pigo mcp remove <name>
+pigo mcp list [--json]
+pigo mcp login <name> [--timeout 300s]
+pigo mcp logout <name>
+```
+
+`--local` on add and remove writes `.pigo/mcp.json`. An untrusted project is
+refused. `add` does not connect. `remove` leaves stored OAuth credentials.
+`list --json` reports `resources: true` when a server has resources, not a
+count. `login --timeout` limits the whole sign-in.
+
+`--no-mcp` skips MCP for that run. A plain `--tools` list keeps MCP tools.
+If any entry starts with `mcp__`, only the matching MCP tools stay.
+
+`/mcp` lists servers without waiting for every connection. Enable, disable,
+and reconnect update that server in place.
 
 ## File
 
@@ -24,7 +46,7 @@ file and ignored until a later change.
 `command` starts a stdio server. `url` is a streamable HTTP server. Both can
 set `timeout` (seconds, default 60), `enabled`, `exposure`, `toolExposure`,
 and `description`. Stdio also has `args`, `env`, and `cwd`. HTTP also has
-`headers`.
+`headers` and `bearerTokenEnvVar`.
 
 Omit `exposure` and the server defaults to `codemode`.
 

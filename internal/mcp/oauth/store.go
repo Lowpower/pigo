@@ -54,6 +54,27 @@ func (s *Store) Save(name, serverURL string, rec Record) error {
 	})
 }
 
+// Delete removes one server's record. A missing record is not an error.
+func (s *Store) Delete(name, serverURL string) error {
+	key, err := storageKey(name, serverURL)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.withLock(func() error {
+		data, err := s.read()
+		if err != nil {
+			return err
+		}
+		if _, ok := data[key]; !ok {
+			return nil
+		}
+		delete(data, key)
+		return s.write(data)
+	})
+}
+
 // Update reads and writes one server while holding the process and file locks.
 // fn returning a nil record leaves the file unchanged.
 func (s *Store) Update(name, serverURL string, fn func(*Record) (*Record, error)) error {
