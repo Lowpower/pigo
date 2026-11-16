@@ -68,6 +68,7 @@ type Config struct {
 	EnableInstallTelemetry    *bool                 `mapstructure:"enableInstallTelemetry"`
 	ShellPath                 string                `mapstructure:"shellPath"`
 	DefaultTools              *[]string             `mapstructure:"defaultTools"`
+	Codemode                  CodemodeSettings      `mapstructure:"codemode"`
 	EnabledModels             []string              `mapstructure:"enabledModels"`
 	DefaultProjectTrust       string                `mapstructure:"defaultProjectTrust"`
 	SessionDir                string                `mapstructure:"sessionDir"`
@@ -100,6 +101,29 @@ type Config struct {
 	NpmCommand []string       `mapstructure:"-" json:"npmCommand,omitempty"`
 
 	Container ContainerSettings `mapstructure:"container"`
+}
+
+// CodemodeSettings is settings.codemode.
+type CodemodeSettings struct {
+	Mode         string `mapstructure:"mode" json:"mode,omitempty"`
+	InlineBudget *int   `mapstructure:"inlineBudget" json:"inlineBudget,omitempty"`
+}
+
+// CodemodeMode is "on" or "only". Any other value is "on".
+func (c Config) CodemodeMode() string {
+	if strings.EqualFold(strings.TrimSpace(c.Codemode.Mode), "only") {
+		return "only"
+	}
+	return "on"
+}
+
+// CodemodeInlineBudget is the declaration budget for the codemode tool
+// description. Unset or negative means 3000. Zero lists namespaces only.
+func (c Config) CodemodeInlineBudget() int {
+	if c.Codemode.InlineBudget == nil || *c.Codemode.InlineBudget < 0 {
+		return 3000
+	}
+	return *c.Codemode.InlineBudget
 }
 
 // ContainerSettings is settings.container (opt-in Docker tool isolation).
@@ -779,6 +803,7 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		FullscreenScrollbar json.RawMessage `json:"fullscreenScrollbar"`
 		Compaction          json.RawMessage `json:"compaction"`
 		Container           json.RawMessage `json:"container"`
+		Codemode            json.RawMessage `json:"codemode"`
 	}
 	if err := json.Unmarshal(bom.Strip(b), &extra); err != nil {
 		return
@@ -834,6 +859,18 @@ func fillPackagesFromFile(configDir string, cfg *Config) {
 		var nested ContainerSettings
 		if json.Unmarshal(extra.Container, &nested) == nil {
 			cfg.Container = nested
+		}
+	}
+	if extra.Codemode != nil {
+		var nested CodemodeSettings
+		if json.Unmarshal(extra.Codemode, &nested) == nil {
+			if nested.Mode != "" {
+				cfg.Codemode.Mode = nested.Mode
+			}
+			if nested.InlineBudget != nil {
+				n := *nested.InlineBudget
+				cfg.Codemode.InlineBudget = &n
+			}
 		}
 	}
 }
@@ -937,6 +974,16 @@ func mergeSaveMap(existing map[string]any, cfg Config) {
 	}
 	if cfg.DefaultTools != nil {
 		existing["defaultTools"] = *cfg.DefaultTools
+	}
+	if cfg.Codemode.Mode != "" || cfg.Codemode.InlineBudget != nil {
+		codemode := map[string]any{}
+		if cfg.Codemode.Mode != "" {
+			codemode["mode"] = cfg.Codemode.Mode
+		}
+		if cfg.Codemode.InlineBudget != nil {
+			codemode["inlineBudget"] = *cfg.Codemode.InlineBudget
+		}
+		existing["codemode"] = codemode
 	}
 	if cfg.SessionDir != "" {
 		existing["sessionDir"] = cfg.SessionDir

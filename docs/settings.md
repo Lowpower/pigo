@@ -24,6 +24,8 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `steeringMode` / `followUpMode` | Queue behaviour while streaming |
 | `retry.{enabled,maxRetries,baseDelayMs,maxAgentDelayMs}` and `retry.provider.{timeoutMs,maxRetries,maxRetryDelayMs}` | Agent retry (maxAgentDelayMs default 60000) |
 | `defaultTools` | Built-ins enabled at startup. Unset means `read,bash,edit,write`. `+name` / `-name` adjust the previous layer; any other list replaces it. `*` is a pattern in a replacement list |
+| `codemode.mode` | `on` (default) or `only`, when `codemode` is enabled. `on` keeps other tools declared and notes the script call. `only` declares only `codemode` |
+| `codemode.inlineBudget` | Estimated tokens (characters / 4) the `codemode` description may spend on tool declarations. Default 3000. `0` lists namespaces only |
 | `enabledModels` | Ctrl+P cycle allowlist (globs) |
 | `defaultProjectTrust` | `ask` \| `always` \| `never` (global only) |
 | `sessionDir` | Session storage root |

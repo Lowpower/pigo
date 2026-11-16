@@ -42,22 +42,8 @@ type Env struct {
 type Result struct {
 	Value   string
 	Texts   []string
-	Images  []json.RawMessage
+	Images  []Image
 	Console []string
-}
-
-// Render joins the return value with collected text, console lines, and images.
-func (r Result) Render() string {
-	var parts []string
-	if r.Value != "" {
-		parts = append(parts, r.Value)
-	}
-	parts = append(parts, r.Texts...)
-	parts = append(parts, r.Console...)
-	for _, img := range r.Images {
-		parts = append(parts, string(img))
-	}
-	return strings.Join(parts, "\n")
 }
 
 // Run executes source with the script globals installed.
@@ -73,10 +59,21 @@ func Run(ctx context.Context, source string, env Env) (Result, error) {
 		"bridge": state.bridge,
 	})
 	state.mu.Lock()
+	if err == nil && state.limitErr == nil && got != "" {
+		if accErr := state.addChars(ctx, charCount(got)); accErr != nil {
+			state.mu.Unlock()
+			return state.result, accErr
+		}
+		state.result.Value = got
+	}
 	res := state.result
+	limitErr := state.limitErr
 	state.mu.Unlock()
-	res.Value = got
+	if limitErr != nil {
+		return res, limitErr
+	}
 	if err != nil {
+		res.Value = got
 		return res, err
 	}
 	return res, nil
@@ -109,13 +106,17 @@ func wrapUser(code string) string {
 }
 
 type runner struct {
-	mu      sync.Mutex
-	env     Env
-	visible []Tool
-	byName  map[string]Tool
-	byJS    map[string]Tool
-	groups  []nsGroup
-	result  Result
+	mu       sync.Mutex
+	env      Env
+	visible  []Tool
+	byName   map[string]Tool
+	byJS     map[string]Tool
+	groups   []nsGroup
+	result   Result
+	items    int
+	chars    int
+	stopped  bool
+	limitErr error
 }
 
 func (r *runner) index() {
@@ -204,24 +205,11 @@ func (r *runner) bridge(ctx context.Context, args []any) (string, error) {
 		name, _ := body["name"].(string)
 		return "", fmt.Errorf("%s", suggest(name, r.visible))
 	case "text":
-		r.mu.Lock()
-		r.result.Texts = append(r.result.Texts, display(body["value"]))
-		r.mu.Unlock()
-		return "null", nil
+		return r.addText(ctx, display(body["value"]))
 	case "image":
-		raw, err := json.Marshal(body["value"])
-		if err != nil {
-			return "", err
-		}
-		r.mu.Lock()
-		r.result.Images = append(r.result.Images, raw)
-		r.mu.Unlock()
-		return "null", nil
+		return r.addImage(ctx, body["value"])
 	case "console":
-		r.mu.Lock()
-		r.result.Console = append(r.result.Console, consoleLine(body))
-		r.mu.Unlock()
-		return "null", nil
+		return r.addConsole(ctx, consoleLine(body))
 	case "store":
 		return r.store(body)
 	case "load":
