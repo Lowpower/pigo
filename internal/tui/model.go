@@ -1131,18 +1131,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 	case "login":
 		return m.startLogin(cmd.Rest)
 	case "logout":
-		prov := cmd.Rest
-		if prov == "" {
-			prov = m.cfg.ResolvedProvider()
-		}
-		dir := config.DefaultConfigDir()
-		if m.engine != nil {
-			dir = m.engine.Opts.AgentDir
-		}
-		if err := auth.Delete(dir, prov); err != nil {
-			return note("logout error: " + err.Error())
-		}
-		return note("removed stored key for " + prov)
+		return m.startLogout(cmd.Rest)
 	case "trust":
 		dir := config.DefaultConfigDir()
 		cwd := ""

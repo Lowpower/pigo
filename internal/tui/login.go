@@ -3,7 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +23,7 @@ const (
 	loginPickProvider
 	loginPrompting
 	loginRunning
+	logoutPick
 )
 
 type loginState struct {
@@ -44,6 +47,7 @@ type loginState struct {
 type loginOption struct {
 	id    string
 	label string
+	kind  string
 }
 
 type loginPromptMsg struct {
@@ -193,7 +197,7 @@ func (m Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.copyLoginAuthURL()
 	}
 	switch m.login.phase {
-	case loginPickType, loginPickProvider:
+	case loginPickType, loginPickProvider, logoutPick:
 		switch msg.String() {
 		case "up", "k":
 			if m.login.selected > 0 {
@@ -210,6 +214,9 @@ func (m Model) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.login.reply = nil
 				m.login.phase = loginRunning
 				return m, waitLogin(m.login.inbox)
+			}
+			if m.login.phase == logoutPick {
+				return m.confirmLogout()
 			}
 			return m.chooseLoginOption()
 		case "esc", "escape":
@@ -255,17 +262,20 @@ func (m Model) chooseLoginOption() (tea.Model, tea.Cmd) {
 		if m.login.provider != "" {
 			return m.beginProviderLogin(m.login.provider, opt.id)
 		}
+		store := auth.Open(configDir(m))
 		var opts []loginOption
 		for _, p := range auth.Providers() {
+			chk := auth.CheckAuth(store, p.ID)
+			sub := providerSubscription(p)
 			if opt.id == auth.TypeOAuth && p.OAuth != nil {
 				label := p.ID
 				if p.OAuth.Name() != "" {
 					label = p.OAuth.Name()
 				}
-				opts = append(opts, loginOption{id: p.ID, label: label})
+				opts = append(opts, loginOption{id: p.ID, label: formatAuthRow(label, auth.TypeOAuth, sub, chk)})
 			}
 			if opt.id == auth.TypeAPIKey && p.APIKey != nil && p.APIKey.Login != nil {
-				opts = append(opts, loginOption{id: p.ID, label: p.APIKey.Name})
+				opts = append(opts, loginOption{id: p.ID, label: formatAuthRow(p.APIKey.Name, auth.TypeAPIKey, sub, chk)})
 			}
 		}
 		m.login.phase = loginPickProvider
@@ -387,7 +397,7 @@ func (m Model) loginView() string {
 		b.WriteString(m.metaStyle.Render(line))
 		b.WriteString("\n")
 	}
-	if m.login.phase == loginPickType || m.login.phase == loginPickProvider {
+	if m.login.phase == loginPickType || m.login.phase == loginPickProvider || m.login.phase == logoutPick {
 		b.WriteString("\n")
 		for i, o := range m.login.options {
 			mark := "  "
@@ -465,4 +475,129 @@ func loginClickHint() string {
 		return "Cmd+click to open"
 	}
 	return "Ctrl+click to open"
+}
+
+// envCredentialSource matches pi v1.3.0: an env var name, or several separated by ", ".
+var envCredentialSource = regexp.MustCompile(`^[A-Z][A-Z0-9_]*(?:, [A-Z][A-Z0-9_]*)*$`)
+
+const logoutEmptyNotice = "No stored credentials to remove. /logout only removes credentials saved by /login; environment variables and models.json config are unchanged."
+
+func authTypeWord(authType string, subscription bool) string {
+	if authType == auth.TypeAPIKey {
+		return "API key"
+	}
+	if !subscription {
+		return "account"
+	}
+	return "subscription"
+}
+
+func authStatusSuffix(rowType string, subscription bool, chk *auth.Check) string {
+	if chk == nil {
+		return " • not configured"
+	}
+	if chk.Type != rowType {
+		return " • " + authTypeWord(chk.Type, subscription) + " configured"
+	}
+	src := chk.Source
+	if src == "" || src == "OAuth" || src == "stored credential" {
+		return " ✓ configured"
+	}
+	if envCredentialSource.MatchString(src) {
+		return " ✓ env: " + src
+	}
+	return " ✓ " + src
+}
+
+func formatAuthRow(name, authType string, subscription bool, chk *auth.Check) string {
+	return name + " [" + authTypeWord(authType, subscription) + "]" + authStatusSuffix(authType, subscription, chk)
+}
+
+func providerSubscription(p auth.Provider) bool {
+	return p.OAuth != nil && p.OAuth.IsSubscription()
+}
+
+func providerMethodName(p auth.Provider, authType string) string {
+	if authType == auth.TypeOAuth && p.OAuth != nil && p.OAuth.Name() != "" {
+		return p.OAuth.Name()
+	}
+	if p.APIKey != nil && p.APIKey.Name != "" {
+		return p.APIKey.Name
+	}
+	if p.OAuth != nil && p.OAuth.Name() != "" {
+		return p.OAuth.Name()
+	}
+	return p.ID
+}
+
+func (m Model) startLogout(rest string) (tea.Model, tea.Cmd) {
+	note := func(s string) (tea.Model, tea.Cmd) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		return m, nil
+	}
+	dir := configDir(m)
+	rest = strings.TrimSpace(rest)
+	if rest != "" {
+		if err := auth.Delete(dir, rest); err != nil {
+			return note("logout error: " + err.Error())
+		}
+		return note("removed stored key for " + rest)
+	}
+	infos, err := auth.Open(dir).List()
+	if err != nil {
+		return note("logout error: " + err.Error())
+	}
+	if len(infos) == 0 {
+		return note(logoutEmptyNotice)
+	}
+	opts := make([]loginOption, 0, len(infos))
+	for _, info := range infos {
+		name := info.ProviderID
+		sub := false
+		if p, ok := auth.Lookup(info.ProviderID); ok {
+			sub = providerSubscription(p)
+			name = providerMethodName(p, info.Type)
+		}
+		opts = append(opts, loginOption{
+			id:    info.ProviderID,
+			kind:  info.Type,
+			label: formatAuthRow(name, info.Type, sub, &auth.Check{Type: info.Type, Source: "stored credential"}),
+		})
+	}
+	sort.Slice(opts, func(i, j int) bool { return opts[i].label < opts[j].label })
+	m.login = loginState{
+		phase:   logoutPick,
+		title:   "Select provider to logout:",
+		options: opts,
+	}
+	return m, nil
+}
+
+func (m Model) confirmLogout() (tea.Model, tea.Cmd) {
+	note := func(s string) (tea.Model, tea.Cmd) {
+		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		return m, nil
+	}
+	if m.login.selected < 0 || m.login.selected >= len(m.login.options) {
+		m.login = loginState{}
+		return m, nil
+	}
+	opt := m.login.options[m.login.selected]
+	if err := auth.Delete(configDir(m), opt.id); err != nil {
+		m.login = loginState{}
+		return note("logout error: " + err.Error())
+	}
+	m.login = loginState{}
+	return note(logoutDoneText(opt.id, opt.kind))
+}
+
+func logoutDoneText(id, kind string) string {
+	name := id
+	if p, ok := auth.Lookup(id); ok {
+		name = providerMethodName(p, kind)
+	}
+	if kind == auth.TypeOAuth {
+		return "Logged out of " + name
+	}
+	return "Removed stored API key for " + name + ". Environment variables and models.json config are unchanged."
 }
