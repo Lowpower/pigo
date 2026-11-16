@@ -2,6 +2,7 @@ package codescript
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"sync"
@@ -162,7 +163,7 @@ func TestScriptPlainFailureRejects(t *testing.T) {
 func TestScriptStoreLoadAndConsole(t *testing.T) {
 	store := &Store{}
 	env := Env{Store: store}
-	if _, err := Run(context.Background(), `await store("k", {n: 1}); text("hello"); console.log("line"); image({type:"image", data:"aa"}); return "done";`, env); err != nil {
+	if _, err := Run(context.Background(), `await store("k", {n: 1}); text("hello"); console.log("line"); return "done";`, env); err != nil {
 		t.Fatal(err)
 	}
 	res, err := Run(context.Background(), `const v = await load("k"); return v.n;`, env)
@@ -179,13 +180,52 @@ func TestScriptStoreLoadAndConsole(t *testing.T) {
 }
 
 func TestScriptCollectsOutput(t *testing.T) {
-	res, err := Run(context.Background(), `await text("hello"); await console.log("line"); await image({type:"image"}); return "done";`, Env{})
+	res, err := Run(context.Background(), `await text("hello"); await console.log("line"); await image({type:"image", data:"`+png1x1+`", mimeType:"image/png"}); return "done";`, Env{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if len(res.Images) == 1 {
+			_ = os.Remove(res.Images[0].Path)
+		}
+	})
 	if res.Value != "done" || len(res.Texts) != 1 || res.Texts[0] != "hello" || len(res.Console) != 1 || !strings.Contains(res.Console[0], "line") || len(res.Images) != 1 {
 		t.Fatalf("%#v", res)
 	}
+	info, err := os.Stat(res.Images[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %o", info.Mode().Perm())
+	}
+	out := renderedText(res.Render())
+	if !strings.Contains(out, "==> text 1/2 <==") || !strings.Contains(out, "<console_output>") || !strings.Contains(out, res.Images[0].Path) {
+		t.Fatalf("render %s", out)
+	}
+}
+
+func renderedText(raw string) string {
+	var obj struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal([]byte(raw), &obj) != nil || len(obj.Content) == 0 {
+		return raw
+	}
+	var b strings.Builder
+	for _, block := range obj.Content {
+		if block.Type != "text" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(block.Text)
+	}
+	return b.String()
 }
 
 func TestScriptModels(t *testing.T) {

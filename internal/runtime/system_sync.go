@@ -117,7 +117,7 @@ func (e *Engine) requestTools() ([]ai.Tool, bool) {
 	if e.Opts.Session != nil {
 		st := session.ReplaySystem(e.Opts.Session.GetBranch(""))
 		if st.Declared {
-			return e.applyTurn(st.Tools), true
+			return e.applyTurn(e.presentTools(st.Tools)), true
 		}
 	}
 	if e.Tools == nil {

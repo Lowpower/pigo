@@ -13,7 +13,7 @@ const shellTimerInterval = time.Second
 type shellTimerMsg struct{ gen int }
 
 func isShellTool(name string) bool {
-	return name == "bash" || name == "powershell"
+	return name == "bash" || name == "powershell" || name == "codemode"
 }
 
 func (m Model) clock() time.Time {

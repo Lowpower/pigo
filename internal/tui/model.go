@@ -49,7 +49,7 @@ type entry struct {
 	toolCallID string
 	toolName   string
 	startedAt  time.Time
-	shellLive  bool // bash/powershell call still running; Elapsed is drawn from startedAt
+	shellLive  bool // bash/powershell/codemode call still running; Elapsed is drawn from startedAt
 	partial    bool
 	isError    bool
 
@@ -1789,7 +1789,13 @@ func (m Model) rawChatBody() (string, map[int]string) {
 		case "tool":
 			if e.partial {
 				write(e.rendered)
-				if out := strings.TrimRight(previewTail(e.toolOut, 20), "\n"); out != "" {
+				out := e.toolOut
+				if e.toolName == "codemode" {
+					out = visualTail(out, m.codemodePreviewWidth(), 20)
+				} else {
+					out = previewTail(out, 20)
+				}
+				if out = strings.TrimRight(out, "\n"); out != "" {
 					write("\n")
 					write(m.toolStyle.Render(indent(out)))
 				}
@@ -1803,7 +1809,7 @@ func (m Model) rawChatBody() (string, map[int]string) {
 				}
 				text, imgs := splitToolImages(e.toolOut)
 				if text != "" || len(imgs) == 0 {
-					write(style.Render(fmt.Sprintf("  %s %s", mark, toolResultBodyLines(text, m.toolsExpanded, toolPreviewLines(e.toolName)))))
+					write(style.Render(fmt.Sprintf("  %s %s", mark, m.toolResultText(e.toolName, text, m.toolsExpanded))))
 				} else {
 					write(style.Render("  " + mark))
 				}

@@ -160,6 +160,14 @@ func execute(ctx context.Context, code string, host map[string]HostFunc, budget,
 
 	hostCtx, hostCancel := context.WithCancel(ctx)
 	defer hostCancel()
+	stopC := make(chan struct{}, 1)
+	var stopH *stopHandle
+	hostCtx, stopH = withStop(hostCtx, func() {
+		select {
+		case stopC <- struct{}{}:
+		default:
+		}
+	})
 	var (
 		cancelC     = ctx.Done()
 		timerC      <-chan time.Time
@@ -204,6 +212,9 @@ func execute(ctx context.Context, code string, host map[string]HostFunc, budget,
 		}
 	}
 	fail := func(scriptErr string) error {
+		if msg := stopH.message(); msg != "" {
+			return errors.New(msg)
+		}
 		switch cause {
 		case "timeout":
 			limit := configured
@@ -244,6 +255,12 @@ func execute(ctx context.Context, code string, host map[string]HostFunc, budget,
 			timerC = nil
 			if cause == "" {
 				cause = "timeout"
+			}
+			interrupt()
+		case <-stopC:
+			stopC = nil
+			if cause == "" {
+				cause = "output"
 			}
 			interrupt()
 		case <-killC:
