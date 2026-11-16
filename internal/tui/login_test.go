@@ -10,6 +10,8 @@ import (
 
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/models"
+	pigoruntime "github.com/Lowpower/pigo/internal/runtime"
+	"github.com/Lowpower/pigo/internal/slash"
 )
 
 const loginTestURL = "https://example.test/oauth?code=login-403"
@@ -44,12 +46,169 @@ func TestLoginAccountListMarksCodexLegacy(t *testing.T) {
 			found[opt.id] = opt.label
 		}
 	}
-	if found["openai"] != "OpenAI (ChatGPT subscription)" {
+	if !strings.HasPrefix(found["openai"], "OpenAI (ChatGPT subscription) [subscription]") {
 		t.Fatalf("openai = %q", found["openai"])
 	}
-	if found["openai-codex"] != "OpenAI Codex (legacy)" {
+	if !strings.HasPrefix(found["openai-codex"], "OpenAI Codex (legacy) [subscription]") {
 		t.Fatalf("codex = %q", found["openai-codex"])
 	}
+}
+
+func TestLoginOAuthLabelsAccountAndSubscription(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := auth.Open(dir).Modify("anthropic", func(*auth.Credential) (*auth.Credential, error) {
+		return &auth.Credential{Type: auth.TypeOAuth, Access: "tok"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := loginModel(t, dir)
+	m.login = loginState{
+		phase:   loginPickType,
+		options: []loginOption{{id: auth.TypeOAuth, label: "Sign in with an account"}},
+	}
+	next, _ := m.chooseLoginOption()
+	got := next.(Model)
+	labels := loginLabels(got)
+	radius := labels["radius"]
+	if !strings.HasPrefix(radius, "Radius [account]") || !strings.Contains(radius, "not configured") || strings.Contains(radius, "subscription") {
+		t.Fatalf("radius = %q", radius)
+	}
+	anth := labels["anthropic"]
+	if !strings.HasPrefix(anth, "Anthropic (Claude Pro/Max) [subscription]") || !strings.Contains(anth, "✓ configured") || strings.Contains(anth, "not configured") {
+		t.Fatalf("anthropic = %q", anth)
+	}
+}
+
+func TestLoginAPIKeyLabelKeepsName(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	m := loginModel(t, t.TempDir())
+	m.login = loginState{
+		phase:   loginPickType,
+		options: []loginOption{{id: auth.TypeAPIKey, label: "Sign in with an API key"}},
+	}
+	next, _ := m.chooseLoginOption()
+	got := next.(Model)
+	label := loginLabels(got)["openai"]
+	if !strings.HasPrefix(label, "OpenAI API key [API key]") || !strings.Contains(label, "✓ env: OPENAI_API_KEY") {
+		t.Fatalf("openai = %q", label)
+	}
+}
+
+func TestLogoutEmptyExplainsScope(t *testing.T) {
+	m := loginModel(t, t.TempDir())
+	next, _ := m.handleSlash(slash.Command{Name: "logout"})
+	got := next.(Model)
+	if got.loginActive() {
+		t.Fatal("empty logout opened a list")
+	}
+	text := transcriptText(got)
+	if !strings.Contains(text, "No stored credentials to remove") || !strings.Contains(text, "models.json") {
+		t.Fatalf("transcript = %s", text)
+	}
+}
+
+func TestLogoutListsStoredCredentialType(t *testing.T) {
+	dir := t.TempDir()
+	store := auth.Open(dir)
+	if _, err := store.Modify("radius", func(*auth.Credential) (*auth.Credential, error) {
+		return &auth.Credential{Type: auth.TypeOAuth, Access: "tok"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Modify("anthropic", func(*auth.Credential) (*auth.Credential, error) {
+		return &auth.Credential{Type: auth.TypeOAuth, Access: "tok"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := loginModel(t, dir)
+	next, _ := m.handleSlash(slash.Command{Name: "logout"})
+	got := next.(Model)
+	if !got.loginActive() || got.login.title != "Select provider to logout:" {
+		t.Fatalf("phase %v title %q", got.login.phase, got.login.title)
+	}
+	labels := loginLabels(got)
+	if !strings.Contains(labels["radius"], "[account]") || !strings.Contains(labels["radius"], "✓ configured") {
+		t.Fatalf("radius = %q", labels["radius"])
+	}
+	if !strings.Contains(labels["anthropic"], "[subscription]") || !strings.Contains(labels["anthropic"], "✓ configured") {
+		t.Fatalf("anthropic = %q", labels["anthropic"])
+	}
+	if _, ok := labels["openai"]; ok {
+		t.Fatalf("unconfigured provider listed: %q", labels["openai"])
+	}
+}
+
+func TestLogoutSelectionRemovesStoredOAuth(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := auth.Open(dir).Modify("anthropic", func(*auth.Credential) (*auth.Credential, error) {
+		return &auth.Credential{Type: auth.TypeOAuth, Access: "tok"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := loginModel(t, dir)
+	next, _ := m.handleSlash(slash.Command{Name: "logout"})
+	got := send(next.(Model), tea.KeyMsg{Type: tea.KeyEnter})
+	if got.loginActive() {
+		t.Fatal("logout list stayed open")
+	}
+	if !transcriptContains(got, "Logged out of Anthropic (Claude Pro/Max)") {
+		t.Fatalf("transcript = %s", transcriptText(got))
+	}
+	if _, ok := auth.Get(dir, "anthropic"); ok {
+		t.Fatal("credential remains")
+	}
+}
+
+func TestAuthRowStatus(t *testing.T) {
+	if got := formatAuthRow("Radius", auth.TypeOAuth, false, nil); got != "Radius [account] • not configured" {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := authStatusSuffix(auth.TypeAPIKey, true, &auth.Check{Type: auth.TypeOAuth}); got != " • subscription configured" {
+		t.Fatalf("subscription mismatch = %q", got)
+	}
+	if got := authStatusSuffix(auth.TypeAPIKey, false, &auth.Check{Type: auth.TypeOAuth}); got != " • account configured" {
+		t.Fatalf("account mismatch = %q", got)
+	}
+	if got := authStatusSuffix(auth.TypeAPIKey, false, &auth.Check{Type: auth.TypeAPIKey, Source: "key in models.json"}); got != " ✓ key in models.json" {
+		t.Fatalf("models.json = %q", got)
+	}
+	if got := logoutDoneText("openai", auth.TypeAPIKey); got != "Removed stored API key for OpenAI API key. Environment variables and models.json config are unchanged." {
+		t.Fatalf("api key logout = %q", got)
+	}
+}
+
+func TestLogoutNamedProviderStillDeletes(t *testing.T) {
+	dir := t.TempDir()
+	if err := auth.SetAPIKey(dir, "openai", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	m := loginModel(t, dir)
+	next, _ := m.handleSlash(slash.Command{Name: "logout", Rest: "openai"})
+	got := next.(Model)
+	if got.loginActive() {
+		t.Fatal("named logout opened a list")
+	}
+	if !transcriptContains(got, "removed stored key for openai") {
+		t.Fatalf("transcript = %s", transcriptText(got))
+	}
+	if _, ok := auth.Get(dir, "openai"); ok {
+		t.Fatal("stored key remains")
+	}
+}
+
+func loginModel(t *testing.T, dir string) Model {
+	t.Helper()
+	m := New(testCfg())
+	m.engine = &pigoruntime.Engine{Opts: pigoruntime.Options{AgentDir: dir}}
+	return m
+}
+
+func loginLabels(m Model) map[string]string {
+	out := map[string]string{}
+	for _, opt := range m.login.options {
+		out[opt.id] = opt.label
+	}
+	return out
 }
 
 func TestLoginDoneWarnsWhenRadiusCatalogMissing(t *testing.T) {

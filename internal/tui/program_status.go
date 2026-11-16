@@ -445,7 +445,9 @@ func (m Model) loginDialog() *blockedDialog {
 		return nil
 	}
 	message := "Log in"
-	if provider := strings.TrimSpace(m.login.provider); provider != "" {
+	if m.login.phase == logoutPick {
+		message = "Log out"
+	} else if provider := strings.TrimSpace(m.login.provider); provider != "" {
 		message = "Log in to " + provider
 	}
 	return &blockedDialog{kind: kindAuth, message: message}
