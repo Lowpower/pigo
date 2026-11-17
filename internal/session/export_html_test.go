@@ -113,7 +113,7 @@ func TestRenderHTMLUsesDiskThemeColorTokens(t *testing.T) {
 			"error": "#ff0000",
 			"text": "#eeeeee",
 			"userMessageBg": "#111111",
-			"uniqueExportToken": "#123456"
+			"bashMode": "#123456"
 		},
 		"export": {"pageBg": "bg", "cardBg": "#0a0b0c"}
 	}`
@@ -126,8 +126,8 @@ func TestRenderHTMLUsesDiskThemeColorTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(html, "--uniqueExportToken: #123456") {
-		t.Fatalf("missing custom token: %s", html[strings.Index(html, ":root"):strings.Index(html, ":root")+800])
+	if !strings.Contains(html, "--bashMode: #123456") {
+		t.Fatalf("missing disk token: %s", html[strings.Index(html, ":root"):strings.Index(html, ":root")+800])
 	}
 	if !strings.Contains(html, "--accent: #abcdef") {
 		t.Fatal("missing accent from disk theme")
