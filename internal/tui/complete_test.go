@@ -46,6 +46,35 @@ func TestSlashSuggestionsRejectBareSlashLineWithArgs(t *testing.T) {
 	}
 }
 
+func TestSlashSuggestionsLeadingWhitespace(t *testing.T) {
+	cmds := slash.Builtins()
+	wantItems, wantPrefix, ok := slashSuggestions("/com", cmds)
+	if !ok || wantPrefix != "/com" {
+		t.Fatalf("baseline prefix=%q ok=%v", wantPrefix, ok)
+	}
+	items, prefix, ok := slashSuggestions(" /com", cmds)
+	if !ok || prefix != "/com" {
+		t.Fatalf("prefix=%q ok=%v", prefix, ok)
+	}
+	if strings.Join(completeValues(items), ",") != strings.Join(completeValues(wantItems), ",") {
+		t.Fatalf("items=%v want=%v", completeValues(items), completeValues(wantItems))
+	}
+	items, prefix, ok = slashSuggestions("\t/hotk", cmds)
+	if !ok || prefix != "/hotk" || len(items) == 0 || items[0].Value != "hotkeys" {
+		t.Fatalf("items=%v prefix=%q ok=%v", completeValues(items), prefix, ok)
+	}
+	got, col := applyComplete("  /com", "/com", len("  /com"), completeItem{Value: "hotkeys"})
+	if got != "  /hotkeys " || col != len("  /hotkeys ") {
+		t.Fatalf("applied %q col=%d", got, col)
+	}
+	if _, _, ok := slashSuggestions("  //x", cmds); ok {
+		t.Fatal("comment-like line is not a slash command")
+	}
+	if _, _, ok := slashSuggestions(" /model claude", cmds); ok {
+		t.Fatal("arguments are not slash-name completions")
+	}
+}
+
 func TestApplyCompleteSlashAndFile(t *testing.T) {
 	got, col := applyComplete("/hotk", "/hotk", 5, completeItem{Value: "hotkeys"})
 	if got != "/hotkeys " || col != len("/hotkeys ") {
