@@ -104,13 +104,16 @@ func slashCommands(extra []slash.Command) []slash.Command {
 }
 
 func slashSuggestions(before string, cmds []slash.Command) (items []completeItem, prefix string, ok bool) {
-	if !strings.HasPrefix(before, "/") || strings.HasPrefix(before, "//") {
+	// Leading spaces stay outside the replacement span, so accepting a match
+	// leaves them in place (pi v1.3.0).
+	body := strings.TrimLeft(before, " \t")
+	if !strings.HasPrefix(body, "/") || strings.HasPrefix(body, "//") {
 		return nil, "", false
 	}
-	if strings.ContainsAny(before[1:], " \t") {
+	if strings.ContainsAny(body[1:], " \t") {
 		return nil, "", false
 	}
-	q := before[1:]
+	q := body[1:]
 	// Skill commands are stored as skill:name. Rank by the bare name first so the
 	// fixed prefix does not outscore the skill, then match leftover skill commands
 	// on the full name so /skill and /skill: still list them.
@@ -135,7 +138,7 @@ func slashSuggestions(before string, cmds []slash.Command) (items []completeItem
 	if len(items) == 0 {
 		return nil, "", false
 	}
-	return items, before, true
+	return items, body, true
 }
 
 func skillBareName(name string) string {
