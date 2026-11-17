@@ -100,7 +100,10 @@ gateway. It does not inherit the public list, and `baseUrl` is required:
 
 ## User overlay
 
-`~/.pigo/agent/models.json`:
+`~/.pigo/agent/models.json`. Set `$schema` to
+`https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/models.schema.json`
+for editor completion. The key is ignored at runtime and is not rewritten
+when the file is loaded.
 
 ```json
 {

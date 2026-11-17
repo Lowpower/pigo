@@ -102,6 +102,7 @@ type Model struct {
 	cfg          config.Config
 	engine       *runtime.Engine
 	theme        theme.Theme
+	themeErrors  []string
 	termColors   theme.SystemInput
 	termColorsOK bool
 	editor       promptEditor
@@ -262,6 +263,12 @@ func styleFG(s lipgloss.Style, color string) lipgloss.Style {
 		return s
 	}
 	return s.Foreground(lipgloss.Color(color))
+}
+
+func (m *Model) loadTheme(name string) {
+	res := theme.LoadWithResult(m.themeOpts(name))
+	m.themeErrors = res.Errors
+	m.applyTheme(res.Theme)
 }
 
 func (m *Model) applyTheme(th theme.Theme) {
@@ -985,9 +992,13 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 	case "theme":
 		if cmd.Rest != "" {
 			m.cfg.Theme = cmd.Rest
-			m.applyTheme(theme.LoadWith(m.themeOpts(cmd.Rest)))
+			m.loadTheme(cmd.Rest)
 		}
-		return note("theme = " + m.theme.Name)
+		msg := "theme = " + m.theme.Name
+		if len(m.themeErrors) > 0 {
+			msg += "\n" + strings.Join(m.themeErrors, "\n")
+		}
+		return note(msg)
 	case "thinking":
 		if cmd.Rest != "" {
 			m.cfg.Thinking = cmd.Rest
@@ -1164,7 +1175,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		m.attachExtensions()
 		applyTrueColor(m.cfg)
-		m.applyTheme(theme.LoadWith(m.themeOpts(m.cfg.Theme)))
+		m.loadTheme(m.cfg.Theme)
 		msg := "reloaded keybindings, skills, settings, and context files"
 		if reloadErr != nil {
 			msg += "\n" + reloadErr.Error()
@@ -1177,6 +1188,9 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		}
 		if lines := m.engine.ExtensionWarnings(); len(lines) > 0 {
 			msg += "\n" + strings.Join(lines, "\n")
+		}
+		if len(m.themeErrors) > 0 {
+			msg += "\n" + strings.Join(m.themeErrors, "\n")
 		}
 		return note(msg)
 	case "copy":
@@ -2043,7 +2057,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 	if systemThemeSelected(cfg.Theme, m.theme.Name) {
 		m.termColors = readTerminalColors(os.Stdin, os.Stdout, terminalColorQueryTimeout)
 		m.termColorsOK = true
-		m.applyTheme(theme.LoadWith(m.themeOpts(cfg.Theme)))
+		m.loadTheme(cfg.Theme)
 	}
 	if m.imgProto == protoKitty && m.cfg.ShowImages() {
 		if w, h, ok := readTerminalCellSize(os.Stdin, os.Stdout, terminalColorQueryTimeout); ok {
@@ -2054,7 +2068,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 		m.provider = eng.Provider
 		m.reloadFromSession()
 		m.keys = keys.NewManager(eng.Opts.AgentDir)
-		m.applyTheme(theme.LoadWith(m.themeOpts(cfg.Theme)))
+		m.loadTheme(cfg.Theme)
 		m.refreshGit()
 		m.attachExtensions()
 		if trust.HasProjectResources(eng.Opts.Cwd) && !eng.Opts.ProjectTrusted {

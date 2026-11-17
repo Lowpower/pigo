@@ -1,0 +1,555 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/settings.schema.json",
+  "title": "pigo settings",
+  "description": "settings.json. $schema is ignored at runtime. Unknown keys are kept.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL. Ignored at runtime."
+    },
+    "provider": {
+      "type": "string",
+      "description": "Alias of defaultProvider."
+    },
+    "model": {
+      "type": "string",
+      "description": "Alias of defaultModel."
+    },
+    "defaultProvider": {
+      "type": "string",
+      "description": "Default provider id."
+    },
+    "defaultModel": {
+      "type": "string",
+      "description": "Default model id."
+    },
+    "theme": {
+      "type": "string",
+      "description": "TUI theme name."
+    },
+    "thinking": {
+      "type": "string",
+      "enum": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    "defaultThinkingLevel": {
+      "type": "string",
+      "enum": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    "thinkingDisplay": {
+      "type": "string",
+      "enum": [
+        "summarized",
+        "omitted"
+      ],
+      "description": "Anthropic thinking text. Any other value is ignored."
+    },
+    "thinkingBudgets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "Thinking level to token budget."
+    },
+    "modelThinkingLevels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "description": "Per-model default thinking level."
+    },
+    "contextWindow": {
+      "type": "integer",
+      "description": "Context window override. 200000 is treated as unset."
+    },
+    "compactionEnabled": {
+      "type": "boolean"
+    },
+    "compactionReserveTokens": {
+      "type": "integer"
+    },
+    "compactionKeepRecentTokens": {
+      "type": "integer"
+    },
+    "compaction": {
+      "type": "object",
+      "description": "Compaction settings.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "reserveTokens": {
+          "type": "integer"
+        },
+        "keepRecentTokens": {
+          "type": "integer"
+        },
+        "modelOverrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "description": "Per-model compaction token overrides.",
+            "properties": {
+              "reserveTokens": {
+                "type": "integer"
+              },
+              "keepRecentTokens": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "steeringMode": {
+      "type": "string",
+      "enum": [
+        "one-at-a-time",
+        "all"
+      ]
+    },
+    "followUpMode": {
+      "type": "string",
+      "enum": [
+        "one-at-a-time",
+        "all"
+      ]
+    },
+    "retry": {
+      "type": "object",
+      "description": "Agent and provider retry.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxRetries": {
+          "type": "integer"
+        },
+        "baseDelayMs": {
+          "type": "integer"
+        },
+        "maxAgentDelayMs": {
+          "type": "integer"
+        },
+        "provider": {
+          "type": "object",
+          "description": "Provider request retry.",
+          "properties": {
+            "timeoutMs": {
+              "type": "integer"
+            },
+            "maxRetries": {
+              "type": "integer"
+            },
+            "maxRetryDelayMs": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "defaultTools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Built-ins enabled at startup. +name and -name adjust the previous layer."
+    },
+    "codemode": {
+      "type": "object",
+      "description": "Codemode tool declaration.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "on",
+            "only"
+          ]
+        },
+        "inlineBudget": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "enabledModels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Model cycle allowlist (globs)."
+    },
+    "defaultProjectTrust": {
+      "type": "string",
+      "enum": [
+        "ask",
+        "always",
+        "never"
+      ],
+      "description": "Global file only."
+    },
+    "sessionDir": {
+      "type": "string"
+    },
+    "sessionShareDestination": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "gist",
+        "radius"
+      ]
+    },
+    "enableSkillCommands": {
+      "type": "boolean"
+    },
+    "shellPath": {
+      "type": "string"
+    },
+    "shellCommandPrefix": {
+      "type": "string"
+    },
+    "externalEditor": {
+      "type": "string"
+    },
+    "doubleEscapeAction": {
+      "type": "string",
+      "enum": [
+        "tree",
+        "fork",
+        "none"
+      ]
+    },
+    "treeFilterMode": {
+      "type": "string",
+      "enum": [
+        "default",
+        "no-tools",
+        "user-only",
+        "labeled-only",
+        "all"
+      ]
+    },
+    "branchSummary": {
+      "type": "object",
+      "description": "Fork and tree summaries.",
+      "properties": {
+        "skipPrompt": {
+          "type": "boolean"
+        },
+        "reserveTokens": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "terminal": {
+      "type": "object",
+      "description": "TUI terminal.",
+      "properties": {
+        "showImages": {
+          "type": "boolean"
+        },
+        "imageWidthCells": {
+          "type": "integer"
+        },
+        "hyperlinks": true,
+        "images": true,
+        "clearOnShrink": {
+          "type": "boolean"
+        },
+        "showTerminalProgress": {
+          "type": "boolean"
+        },
+        "trueColor": true
+      },
+      "additionalProperties": true
+    },
+    "markdown": {
+      "type": "object",
+      "description": "Markdown rendering.",
+      "properties": {
+        "mermaid": {
+          "type": "string",
+          "enum": [
+            "off",
+            "final",
+            "streaming"
+          ]
+        },
+        "codeBlockIndent": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "images": {
+      "type": "object",
+      "description": "Image attachments.",
+      "properties": {
+        "blockImages": {
+          "type": "boolean"
+        },
+        "autoResize": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "tuiMode": {
+      "type": "string",
+      "enum": [
+        "regular",
+        "fullscreen"
+      ]
+    },
+    "fullscreenExitOutput": {
+      "type": "string",
+      "enum": [
+        "transcript",
+        "resume-hint"
+      ]
+    },
+    "fullscreenScrollbar": {
+      "description": "auto, always, hidden, or a boolean.",
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "hidden"
+          ]
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
+    "fullscreenCopyOnSelect": {
+      "type": "boolean"
+    },
+    "warnings": {
+      "type": "object",
+      "description": "Startup notices.",
+      "properties": {
+        "anthropicExtraUsage": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "quietStartup": {
+      "description": "false shows the startup listing, true hides it, header keeps the version and key hints.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string",
+          "const": "header"
+        }
+      ]
+    },
+    "httpProxy": {
+      "type": "string"
+    },
+    "httpIdleTimeoutMs": {
+      "type": "integer"
+    },
+    "websocketConnectTimeoutMs": {
+      "type": "integer"
+    },
+    "hideThinkingBlock": {
+      "type": "boolean"
+    },
+    "showCacheMissNotices": {
+      "type": "boolean"
+    },
+    "cacheWarming": {
+      "type": "string",
+      "enum": [
+        "off",
+        "streaming",
+        "idle"
+      ],
+      "description": "Global file only."
+    },
+    "lastChangelogVersion": {
+      "type": "string"
+    },
+    "collapseChangelog": {
+      "type": "boolean"
+    },
+    "enableInstallTelemetry": {
+      "type": "boolean"
+    },
+    "enableAnalytics": {
+      "type": "boolean"
+    },
+    "trackingId": {
+      "type": "string"
+    },
+    "deviceId": {
+      "type": "string",
+      "description": "Global file only."
+    },
+    "editorPaddingX": {
+      "type": "integer"
+    },
+    "outputPad": {
+      "type": "integer"
+    },
+    "autocompleteMaxVisible": {
+      "type": "integer"
+    },
+    "showHardwareCursor": {
+      "type": "boolean"
+    },
+    "transport": {
+      "type": "string"
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "description": "Package source with optional resource filters.",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "autoload": {
+                "type": "boolean"
+              },
+              "extensions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "prompts": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "themes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "extensions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "prompts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "themes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "npmCommand": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "container": {
+      "type": "object",
+      "description": "Opt-in Docker isolation for built-in tools.",
+      "properties": {
+        "image": {
+          "type": "string"
+        },
+        "mounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "Host to container bind.",
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "container": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "network": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

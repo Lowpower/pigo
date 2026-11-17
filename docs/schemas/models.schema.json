@@ -1,0 +1,596 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/models.schema.json",
+  "title": "pigo models",
+  "description": "models.json user overlay. $schema is ignored at runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL. Ignored at runtime."
+    },
+    "providers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "api": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": "string"
+          },
+          "oauth": {
+            "type": "string",
+            "description": "radius requires baseUrl."
+          },
+          "compat": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "thinkingFormat": {
+                "type": "string"
+              },
+              "supportsMidConvoEffort": {
+                "type": "boolean"
+              },
+              "supportsMidConvoSystemMessages": {
+                "type": "boolean"
+              },
+              "supportsMidConvoToolChanges": {
+                "type": "boolean"
+              },
+              "forceAdaptiveThinking": {
+                "type": "boolean"
+              },
+              "supportsReasoningEffort": {
+                "type": "boolean"
+              },
+              "supportsExplicitPromptCacheMode": {
+                "type": "boolean"
+              },
+              "vllmPriority": true,
+              "chatTemplateKwargs": true,
+              "chatTemplateArgs": true,
+              "supportsLongCacheRetention": {
+                "type": "boolean"
+              },
+              "supportsMaxOutputTokens": {
+                "type": "boolean"
+              },
+              "sessionAffinityFormat": {
+                "type": "string"
+              },
+              "sendSessionAffinityHeaders": {
+                "type": "boolean"
+              },
+              "supportsToolReferences": {
+                "type": "boolean"
+              },
+              "supportsAdditionalTools": {
+                "type": "boolean"
+              },
+              "supportsToolSearch": {
+                "type": "boolean"
+              },
+              "deferredToolsMode": {
+                "type": "string"
+              },
+              "supportsStrictMode": {
+                "type": "boolean"
+              },
+              "allowedFallbackModels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "provider": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "cost": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "input": {
+                          "type": "number"
+                        },
+                        "output": {
+                          "type": "number"
+                        },
+                        "cacheRead": {
+                          "type": "number"
+                        },
+                        "cacheWrite": {
+                          "type": "number"
+                        },
+                        "tiers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "inputTokensAbove": {
+                                "type": "integer"
+                              },
+                              "input": {
+                                "type": "number"
+                              },
+                              "output": {
+                                "type": "number"
+                              },
+                              "cacheRead": {
+                                "type": "number"
+                              },
+                              "cacheWrite": {
+                                "type": "number"
+                              }
+                            },
+                            "description": "Price used when total input exceeds inputTokensAbove."
+                          }
+                        }
+                      },
+                      "description": "Dollars per million tokens."
+                    }
+                  },
+                  "description": "Anthropic server-side fallback.",
+                  "required": [
+                    "model"
+                  ]
+                }
+              },
+              "supportsEagerToolInputStreaming": {
+                "type": "boolean"
+              },
+              "supportsCacheControlOnTools": {
+                "type": "boolean"
+              },
+              "supportsTemperature": {
+                "type": "boolean"
+              },
+              "allowEmptySignature": {
+                "type": "boolean"
+              },
+              "supportsStrictTools": {
+                "type": "boolean"
+              },
+              "supportsStore": {
+                "type": "boolean"
+              },
+              "supportsFinishReason": {
+                "type": "boolean"
+              },
+              "supportsUsageInStreaming": {
+                "type": "boolean"
+              },
+              "supportsDeveloperRole": {
+                "type": "boolean"
+              },
+              "maxTokensField": {
+                "type": "string"
+              },
+              "requiresToolResultName": {
+                "type": "boolean"
+              },
+              "requiresAssistantAfterToolResult": {
+                "type": "boolean"
+              },
+              "requiresThinkingAsText": {
+                "type": "boolean"
+              },
+              "requiresReasoningContentOnAssistantMessages": {
+                "type": "boolean"
+              },
+              "openRouterRouting": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "vercelGatewayRouting": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "only": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "order": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "description": "providerOptions.gateway when only or order is set."
+              },
+              "zaiToolStream": {
+                "type": "boolean"
+              },
+              "thinkingTokenBudgetField": {
+                "type": "string"
+              },
+              "supportsThinkingTokenBudget": {
+                "type": "boolean"
+              },
+              "cacheControlFormat": {
+                "type": "string"
+              }
+            },
+            "description": "Provider compat. supportsFinishReason is copied onto models that omit it. Unknown keys are kept."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "provider": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "chat",
+                    "image",
+                    "classifier"
+                  ],
+                  "description": "Empty means chat."
+                },
+                "api": {
+                  "type": "string"
+                },
+                "baseUrl": {
+                  "type": "string"
+                },
+                "cost": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "input": {
+                      "type": "number"
+                    },
+                    "output": {
+                      "type": "number"
+                    },
+                    "cacheRead": {
+                      "type": "number"
+                    },
+                    "cacheWrite": {
+                      "type": "number"
+                    },
+                    "tiers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "inputTokensAbove": {
+                            "type": "integer"
+                          },
+                          "input": {
+                            "type": "number"
+                          },
+                          "output": {
+                            "type": "number"
+                          },
+                          "cacheRead": {
+                            "type": "number"
+                          },
+                          "cacheWrite": {
+                            "type": "number"
+                          }
+                        },
+                        "description": "Price used when total input exceeds inputTokensAbove."
+                      }
+                    }
+                  },
+                  "description": "Dollars per million tokens."
+                },
+                "maxTokens": {
+                  "type": "integer"
+                },
+                "contextWindow": {
+                  "type": "integer"
+                },
+                "reasoning": {
+                  "type": "boolean"
+                },
+                "input": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "thinkingLevelMap": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "compat": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "thinkingFormat": {
+                      "type": "string"
+                    },
+                    "supportsMidConvoEffort": {
+                      "type": "boolean"
+                    },
+                    "supportsMidConvoSystemMessages": {
+                      "type": "boolean"
+                    },
+                    "supportsMidConvoToolChanges": {
+                      "type": "boolean"
+                    },
+                    "forceAdaptiveThinking": {
+                      "type": "boolean"
+                    },
+                    "supportsReasoningEffort": {
+                      "type": "boolean"
+                    },
+                    "supportsExplicitPromptCacheMode": {
+                      "type": "boolean"
+                    },
+                    "vllmPriority": true,
+                    "chatTemplateKwargs": true,
+                    "chatTemplateArgs": true,
+                    "supportsLongCacheRetention": {
+                      "type": "boolean"
+                    },
+                    "supportsMaxOutputTokens": {
+                      "type": "boolean"
+                    },
+                    "sessionAffinityFormat": {
+                      "type": "string"
+                    },
+                    "sendSessionAffinityHeaders": {
+                      "type": "boolean"
+                    },
+                    "supportsToolReferences": {
+                      "type": "boolean"
+                    },
+                    "supportsAdditionalTools": {
+                      "type": "boolean"
+                    },
+                    "supportsToolSearch": {
+                      "type": "boolean"
+                    },
+                    "deferredToolsMode": {
+                      "type": "string"
+                    },
+                    "supportsStrictMode": {
+                      "type": "boolean"
+                    },
+                    "allowedFallbackModels": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "cost": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "input": {
+                                "type": "number"
+                              },
+                              "output": {
+                                "type": "number"
+                              },
+                              "cacheRead": {
+                                "type": "number"
+                              },
+                              "cacheWrite": {
+                                "type": "number"
+                              },
+                              "tiers": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "inputTokensAbove": {
+                                      "type": "integer"
+                                    },
+                                    "input": {
+                                      "type": "number"
+                                    },
+                                    "output": {
+                                      "type": "number"
+                                    },
+                                    "cacheRead": {
+                                      "type": "number"
+                                    },
+                                    "cacheWrite": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "description": "Price used when total input exceeds inputTokensAbove."
+                                }
+                              }
+                            },
+                            "description": "Dollars per million tokens."
+                          }
+                        },
+                        "description": "Anthropic server-side fallback.",
+                        "required": [
+                          "model"
+                        ]
+                      }
+                    },
+                    "supportsEagerToolInputStreaming": {
+                      "type": "boolean"
+                    },
+                    "supportsCacheControlOnTools": {
+                      "type": "boolean"
+                    },
+                    "supportsTemperature": {
+                      "type": "boolean"
+                    },
+                    "allowEmptySignature": {
+                      "type": "boolean"
+                    },
+                    "supportsStrictTools": {
+                      "type": "boolean"
+                    },
+                    "supportsStore": {
+                      "type": "boolean"
+                    },
+                    "supportsFinishReason": {
+                      "type": "boolean"
+                    },
+                    "supportsUsageInStreaming": {
+                      "type": "boolean"
+                    },
+                    "supportsDeveloperRole": {
+                      "type": "boolean"
+                    },
+                    "maxTokensField": {
+                      "type": "string"
+                    },
+                    "requiresToolResultName": {
+                      "type": "boolean"
+                    },
+                    "requiresAssistantAfterToolResult": {
+                      "type": "boolean"
+                    },
+                    "requiresThinkingAsText": {
+                      "type": "boolean"
+                    },
+                    "requiresReasoningContentOnAssistantMessages": {
+                      "type": "boolean"
+                    },
+                    "openRouterRouting": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "vercelGatewayRouting": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "only": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "order": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "description": "providerOptions.gateway when only or order is set."
+                    },
+                    "zaiToolStream": {
+                      "type": "boolean"
+                    },
+                    "thinkingTokenBudgetField": {
+                      "type": "string"
+                    },
+                    "supportsThinkingTokenBudget": {
+                      "type": "boolean"
+                    },
+                    "cacheControlFormat": {
+                      "type": "string"
+                    }
+                  },
+                  "description": "Wire-protocol knobs. Unknown keys are kept."
+                },
+                "promptCache": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "short": {
+                      "type": "integer"
+                    },
+                    "long": {
+                      "type": "integer"
+                    }
+                  },
+                  "description": "Prompt-cache lifetime in seconds."
+                },
+                "inputLimits": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "images": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "resize": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "maxWidth": {
+                              "type": "integer"
+                            },
+                            "maxHeight": {
+                              "type": "integer"
+                            },
+                            "maxBytes": {
+                              "type": "integer"
+                            },
+                            "jpegQuality": {
+                              "type": "integer"
+                            }
+                          },
+                          "description": "Nil fields fall back to the global auto-resize edge (2000px)."
+                        }
+                      }
+                    }
+                  },
+                  "description": "Image resize profile applied to new images."
+                },
+                "samplingParams": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "Free-form request fields. Unknown keys are sent as-is."
+                }
+              },
+              "description": "One models[] entry. provider is filled from the providers map key when omitted.",
+              "required": [
+                "id"
+              ]
+            }
+          }
+        },
+        "description": "One providers entry."
+      },
+      "description": "Provider id to overlay."
+    }
+  }
+}

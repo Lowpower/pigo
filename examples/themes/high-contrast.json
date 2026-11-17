@@ -1,4 +1,5 @@
 {
+  "$schema": "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/theme.schema.json",
   "name": "high-contrast",
   "user": "51",
   "assistant": "255",

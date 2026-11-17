@@ -3,8 +3,10 @@ package theme
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -14,8 +16,8 @@ import (
 // Theme is a named colour set for the TUI.
 //
 // Disk files may be a 7-key colour object, or an extended theme
-// ({name, vars, colors}). Unknown keys are ignored. Known colour tokens
-// are kept in Colors and mapped onto the 7 TUI fields.
+// ({name, vars, colors, export}). Unknown keys are errors. Known colour
+// tokens are kept in Colors and mapped onto the 7 TUI fields.
 type Theme struct {
 	Name      string `json:"name"`
 	User      string `json:"user"`
@@ -60,9 +62,24 @@ func Load(name, cwd, agentDir string) Theme {
 	return LoadWith(LoadOptions{Name: name, Cwd: cwd, AgentDir: agentDir})
 }
 
+// LoadResult is a resolved theme plus file errors from the same scan.
+// Errors name the path and the rejected field. The theme is still a builtin
+// or another valid file when the requested file was rejected.
+type LoadResult struct {
+	Theme  Theme
+	Errors []string
+}
+
 // LoadWith searches extra --theme paths, then discovered dirs, then builtins.
 // An empty name and the reserved name "system" build the system theme.
 func LoadWith(opt LoadOptions) Theme {
+	return LoadWithResult(opt).Theme
+}
+
+// LoadWithResult is LoadWith plus theme-file errors from that scan.
+// Startup and /reload both use it, including when the selected theme is a builtin.
+func LoadWithResult(opt LoadOptions) LoadResult {
+	catalog, errs := collect(opt)
 	name := strings.TrimSpace(opt.Name)
 	if name == "" {
 		name = systemThemeName
@@ -74,21 +91,25 @@ func LoadWith(opt LoadOptions) Theme {
 			name = "dark"
 		}
 	}
+	res := LoadResult{Errors: errs}
 	if strings.EqualFold(name, systemThemeName) {
-		return System(opt.Terminal)
+		res.Theme = System(opt.Terminal)
+		return res
 	}
-	catalog := collect(opt)
 	for i := range catalog {
 		if strings.EqualFold(catalog[i].Name, name) {
-			return catalog[i]
+			res.Theme = catalog[i]
+			return res
 		}
 	}
 	for _, t := range builtins {
 		if strings.EqualFold(t.Name, name) {
-			return t
+			res.Theme = t
+			return res
 		}
 	}
-	return builtins[0]
+	res.Theme = builtins[0]
+	return res
 }
 
 // Names lists available theme names (builtins, discovered files, --theme extras).
@@ -109,7 +130,8 @@ func NamesWith(opt LoadOptions) []string {
 		out = append(out, n)
 	}
 	add(systemThemeName)
-	for _, t := range collect(opt) {
+	catalog, _ := collect(opt)
+	for _, t := range catalog {
 		add(t.Name)
 	}
 	for _, t := range builtins {
@@ -118,8 +140,9 @@ func NamesWith(opt LoadOptions) []string {
 	return out
 }
 
-func collect(opt LoadOptions) []Theme {
+func collect(opt LoadOptions) ([]Theme, []string) {
 	var out []Theme
+	var errs []string
 	seen := map[string]bool{}
 	add := func(t Theme) {
 		key := strings.ToLower(strings.TrimSpace(t.Name))
@@ -128,6 +151,17 @@ func collect(opt LoadOptions) []Theme {
 		}
 		seen[key] = true
 		out = append(out, t)
+	}
+	addFile := func(path string) {
+		t, lines := loadFile(path)
+		if len(lines) > 0 {
+			errs = append(errs, lines...)
+			return
+		}
+		if t.Name == "" {
+			return
+		}
+		add(t)
 	}
 	if !opt.NoDiscovery {
 		dirs := []string{filepath.Join(opt.AgentDir, "themes")}
@@ -138,7 +172,9 @@ func collect(opt LoadOptions) []Theme {
 			if opt.AgentDir == "" && strings.HasPrefix(dir, "themes") {
 				continue
 			}
-			for _, t := range loadDir(dir) {
+			themes, lines := loadDir(dir)
+			errs = append(errs, lines...)
+			for _, t := range themes {
 				add(t)
 			}
 		}
@@ -153,51 +189,65 @@ func collect(opt LoadOptions) []Theme {
 			continue
 		}
 		if info.IsDir() {
-			for _, t := range loadDir(p) {
+			themes, lines := loadDir(p)
+			errs = append(errs, lines...)
+			for _, t := range themes {
 				add(t)
 			}
 			continue
 		}
-		if t, ok := loadFile(p); ok {
-			add(t)
-		}
+		addFile(p)
 	}
-	return out
+	return out, errs
 }
 
-func loadDir(dir string) []Theme {
+func loadDir(dir string) ([]Theme, []string) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	var out []Theme
+	var errs []string
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".json") {
 			continue
 		}
-		if t, ok := loadFile(filepath.Join(dir, e.Name())); ok {
-			out = append(out, t)
+		t, lines := loadFile(filepath.Join(dir, e.Name()))
+		if len(lines) > 0 {
+			errs = append(errs, lines...)
+			continue
 		}
+		if t.Name == "" {
+			continue
+		}
+		out = append(out, t)
 	}
-	return out
+	return out, errs
 }
 
-func loadFile(path string) (Theme, bool) {
+func loadFile(path string) (Theme, []string) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return Theme{}, false
+		return Theme{}, []string{fmt.Sprintf("theme %s: %s", path, err)}
 	}
-	t, ok := parseThemeJSON(b)
-	if !ok {
-		return Theme{}, false
+	t, lines := parseThemeFile(bom.Strip(b))
+	if len(lines) > 0 {
+		out := make([]string, len(lines))
+		for i, line := range lines {
+			out[i] = fmt.Sprintf("theme %s: %s", path, line)
+		}
+		return Theme{}, out
+	}
+	if t.Name == "" && t.User == "" && t.Accent == "" {
+		return Theme{}, nil
 	}
 	if t.Name == "" {
 		t.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 	if strings.Contains(t.Name, "/") {
-		return Theme{}, false
+		return Theme{}, []string{fmt.Sprintf("theme %s: invalid name %q", path, t.Name)}
 	}
-	return t, true
+	return t, nil
 }
 
 type colorVal string
@@ -225,12 +275,12 @@ func (c *colorVal) UnmarshalJSON(b []byte) error {
 
 type fileTheme struct {
 	Name      string              `json:"name"`
-	User      string              `json:"user"`
-	Assistant string              `json:"assistant"`
-	Tool      string              `json:"tool"`
-	Error     string              `json:"error"`
-	Muted     string              `json:"muted"`
-	Accent    string              `json:"accent"`
+	User      colorVal            `json:"user"`
+	Assistant colorVal            `json:"assistant"`
+	Tool      colorVal            `json:"tool"`
+	Error     colorVal            `json:"error"`
+	Muted     colorVal            `json:"muted"`
+	Accent    colorVal            `json:"accent"`
 	Vars      map[string]colorVal `json:"vars"`
 	Colors    map[string]colorVal `json:"colors"`
 	Export    *struct {
@@ -240,27 +290,156 @@ type fileTheme struct {
 	} `json:"export"`
 }
 
-func parseThemeJSON(b []byte) (Theme, bool) {
-	var raw fileTheme
-	if json.Unmarshal(bom.Strip(b), &raw) != nil {
-		return Theme{}, false
+// themeFileKeys are the top-level keys a theme file may contain.
+// $schema is accepted and ignored.
+var themeFileKeys = map[string]bool{
+	"$schema": true, "name": true,
+	"user": true, "assistant": true, "tool": true,
+	"error": true, "muted": true, "accent": true,
+	"vars": true, "colors": true, "export": true,
+}
+
+// themeExportKeys are the only keys allowed under export.
+var themeExportKeys = map[string]bool{
+	"pageBg": true, "cardBg": true, "infoBg": true,
+}
+
+var shorthandColorKeys = []string{"user", "assistant", "tool", "error", "muted", "accent"}
+
+func colorTokenSet() map[string]bool {
+	set := make(map[string]bool, len(tokenFamilies))
+	for _, tf := range tokenFamilies {
+		set[tf.token] = true
+	}
+	return set
+}
+
+// parseThemeFile validates keys, then builds a theme.
+// A second empty result with no lines means the file has no theme content.
+// Lines are problems without the path prefix.
+func parseThemeFile(b []byte) (Theme, []string) {
+	problems, raw, ok := validateThemeJSON(b)
+	if len(problems) > 0 || !ok {
+		return Theme{}, problems
 	}
 	if len(raw.Colors) > 0 {
-		return fromPi(raw), true
+		return fromPi(raw), nil
 	}
 	t := Theme{
 		Name:      raw.Name,
-		User:      raw.User,
-		Assistant: raw.Assistant,
-		Tool:      raw.Tool,
-		Error:     raw.Error,
-		Muted:     raw.Muted,
-		Accent:    raw.Accent,
+		User:      string(raw.User),
+		Assistant: string(raw.Assistant),
+		Tool:      string(raw.Tool),
+		Error:     string(raw.Error),
+		Muted:     string(raw.Muted),
+		Accent:    string(raw.Accent),
 	}
 	if t.Name == "" && t.User == "" && t.Accent == "" {
-		return Theme{}, false
+		return Theme{}, nil
 	}
-	return overlayBuiltin(t), true
+	return overlayBuiltin(t), nil
+}
+
+func validateThemeJSON(b []byte) (problems []string, raw fileTheme, ok bool) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(b, &doc); err != nil || doc == nil {
+		return []string{"invalid JSON"}, fileTheme{}, false
+	}
+	tokens := colorTokenSet()
+	var unknown []string
+	for k := range doc {
+		if !themeFileKeys[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	sort.Strings(unknown)
+	for _, k := range unknown {
+		problems = append(problems, fmt.Sprintf("unknown field %q", k))
+	}
+	if rawName, exists := doc["name"]; exists && string(rawName) != "null" {
+		var name string
+		if json.Unmarshal(rawName, &name) != nil {
+			problems = append(problems, `invalid field "name"`)
+		}
+	}
+	if rawSchema, exists := doc["$schema"]; exists && string(rawSchema) != "null" {
+		var schema string
+		if json.Unmarshal(rawSchema, &schema) != nil {
+			problems = append(problems, `invalid field "$schema"`)
+		}
+	}
+	for _, key := range shorthandColorKeys {
+		rawColor, exists := doc[key]
+		if !exists || string(rawColor) == "null" {
+			continue
+		}
+		if !validColorRaw(rawColor) {
+			problems = append(problems, fmt.Sprintf("invalid color %q", key))
+		}
+	}
+	problems = append(problems, objectColorProblems("vars", doc["vars"], nil)...)
+	problems = append(problems, objectColorProblems("colors", doc["colors"], tokens)...)
+	problems = append(problems, objectColorProblems("export", doc["export"], themeExportKeys)...)
+	if len(problems) > 0 {
+		return problems, fileTheme{}, false
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return []string{"invalid JSON"}, fileTheme{}, false
+	}
+	return nil, raw, true
+}
+
+// objectColorProblems checks a nested object. allowed nil means any key
+// (vars). A missing raw value is not an error. null is treated as absent.
+func objectColorProblems(label string, raw json.RawMessage, allowed map[string]bool) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return []string{fmt.Sprintf("invalid field %q", label)}
+	}
+	var unknown []string
+	var problems []string
+	for k, v := range obj {
+		if allowed != nil && !allowed[k] {
+			unknown = append(unknown, k)
+			continue
+		}
+		if !validColorRaw(v) {
+			problems = append(problems, fmt.Sprintf("invalid color %q", k))
+		}
+	}
+	sort.Strings(unknown)
+	for _, k := range unknown {
+		if label == "colors" {
+			problems = append(problems, fmt.Sprintf("unknown color %q", k))
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("unknown field %q", k))
+	}
+	sort.Strings(problems)
+	return problems
+}
+
+func validColorRaw(raw json.RawMessage) bool {
+	if string(raw) == "null" {
+		return true
+	}
+	if len(raw) > 0 && raw[0] == '"' {
+		var s string
+		return json.Unmarshal(raw, &s) == nil
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	var n int
+	if err := dec.Decode(&n); err != nil {
+		return false
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != nil {
+		return err.Error() == "EOF"
+	}
+	return false
 }
 
 func fromPi(raw fileTheme) Theme {

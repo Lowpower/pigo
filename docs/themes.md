@@ -25,6 +25,12 @@ explicit `dark`, `light`, `default`, or custom theme does not query the terminal
 
 ## JSON
 
+Set `$schema` to
+`https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/theme.schema.json`
+for editor completion. The key is ignored at runtime. Unknown keys are errors
+when the file is loaded and again on `/reload`. The process still starts, and
+that file is left out of the theme list.
+
 Minimal 7-key file (name defaults to the file stem):
 
 ```json
@@ -39,6 +45,8 @@ Minimal 7-key file (name defaults to the file stem):
 ```
 
 Extended form: `{ "name", "vars", "colors", "export": { "pageBg", "cardBg", "infoBg" } }`.
-`vars` are expanded inside `colors`. Unknown keys are ignored.
+`vars` are expanded inside `colors`. A shorthand file may also include `colors`.
+`colors` only accepts known tokens. `export` only accepts `pageBg`, `cardBg`,
+and `infoBg`.
 
 A sample lives at [`examples/themes/high-contrast.json`](../examples/themes/high-contrast.json).

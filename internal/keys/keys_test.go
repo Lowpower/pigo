@@ -122,6 +122,43 @@ func TestRewriteLegacyFile(t *testing.T) {
 	}
 }
 
+func TestSchemaKeyIsNotABinding(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keybindings.json")
+	const schema = "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/keybindings.schema.json"
+	body := `{"$schema":"` + schema + `","selectModel":"ctrl+k"}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newManager(dir, false)
+	if _, ok := m.user["$schema"]; ok {
+		t.Fatal("$schema was stored as an action")
+	}
+	if !m.Matches("ctrl+k", "app.model.select") {
+		t.Fatal("binding next to $schema was ignored")
+	}
+	if !RewriteLegacyFile(path) {
+		t.Fatal("expected legacy rewrite")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), schema) {
+		t.Fatalf("rewrite dropped $schema: %s", b)
+	}
+	if strings.Contains(string(b), "selectModel") {
+		t.Fatalf("legacy name kept: %s", b)
+	}
+	m.Reload()
+	if _, ok := m.user["$schema"]; ok {
+		t.Fatal("reload stored $schema as an action")
+	}
+	if !m.Matches("ctrl+k", "app.model.select") {
+		t.Fatal("reload lost the migrated binding")
+	}
+}
+
 func TestWindowsCycleBackward(t *testing.T) {
 	m := newManager("", true)
 	if !m.Matches("alt+p", "app.model.cycleBackward") {

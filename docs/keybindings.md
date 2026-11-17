@@ -4,6 +4,11 @@ User file: `~/.pigo/agent/keybindings.json`. Map action id → string or
 string array. `/hotkeys` lists the bindings the editor currently honours.
 `/reload` re-reads the file.
 
+Set `$schema` to
+`https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/keybindings.schema.json`
+for editor completion. The key is not an action, and it is kept when a legacy
+file is rewritten.
+
 Extensions may `register_shortcut` with a key id; reserved host actions cannot
 be stolen.
 

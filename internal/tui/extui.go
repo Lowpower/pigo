@@ -470,7 +470,7 @@ func (m Model) handleThemeCall(method string, args map[string]any) map[string]an
 
 func (m *Model) applySetTheme(args map[string]any) map[string]any {
 	if name := strArg(args, "name"); name != "" {
-		m.applyTheme(theme.LoadWith(m.themeOpts(name)))
+		m.loadTheme(name)
 		m.cfg.Theme = name
 		return map[string]any{"success": true, "name": m.theme.Name}
 	}

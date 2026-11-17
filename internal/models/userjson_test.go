@@ -710,3 +710,36 @@ func TestLoadUserJSONKeepsKimiCodingBaseURL(t *testing.T) {
 		t.Fatalf("models.json rewritten:\n%s", got)
 	}
 }
+
+func TestLoadUserJSONKeepsSchema(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	path := filepath.Join(t.TempDir(), "models.json")
+	const schema = "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/models.schema.json"
+	body := `{
+  "$schema": "` + schema + `",
+  "providers": {
+    "local": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "models": [{"id": "my-model"}]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := Lookup("local", "my-model")
+	if !ok || m.BaseURL != "http://127.0.0.1:8080/v1" {
+		t.Fatalf("model = %+v ok=%v", m, ok)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != body {
+		t.Fatalf("models.json rewritten:\n%s", got)
+	}
+}
