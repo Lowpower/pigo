@@ -154,6 +154,62 @@ func TestStartupShowsSkillWarningEvenWhenQuiet(t *testing.T) {
 	}
 }
 
+func TestStartupShowsThemeFieldError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	path := filepath.Join(agent, "themes", "bad.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"name":"bad","accent":"1","appearance":"dark"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := runtime.New(context.Background(), runtime.Options{
+		AgentDir:     agent,
+		Cwd:          cwd,
+		Offline:      true,
+		NoTools:      true,
+		NoExtensions: true,
+		Config:       config.Config{Provider: "anthropic", Model: "claude-sonnet-4", Theme: "default"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	m := New(testCfg())
+	m.engine = eng
+	m.width = 500
+	m.loadTheme(m.cfg.Theme)
+	view := m.View()
+	if !strings.Contains(view, `unknown field "appearance"`) || !strings.Contains(view, path) {
+		t.Fatalf("startup missing theme error:\n%s", view)
+	}
+	if !strings.Contains(view, "look up its docs") {
+		t.Fatalf("startup header missing:\n%s", view)
+	}
+
+	m.cfg.QuietStartupFlag = true
+	quiet := m.View()
+	if !strings.Contains(quiet, `unknown field "appearance"`) || !strings.Contains(quiet, path) {
+		t.Fatalf("quiet startup hid theme error:\n%s", quiet)
+	}
+	if strings.Contains(quiet, "look up its docs") {
+		t.Fatalf("quiet startup still showed the listing:\n%s", quiet)
+	}
+
+	next, _ := m.handleSlash(slash.Command{Name: "reload"})
+	reloaded := next.(Model)
+	var note string
+	for _, ent := range reloaded.transcript {
+		note += ent.rendered
+	}
+	if !strings.Contains(note, "reloaded") || !strings.Contains(note, `unknown field "appearance"`) || !strings.Contains(note, path) {
+		t.Fatalf("reload note = %q", note)
+	}
+}
+
 func TestStartupResourcesCompactAndExpanded(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

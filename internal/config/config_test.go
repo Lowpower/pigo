@@ -1264,3 +1264,33 @@ func TestApplyProjectQuietStartupHeader(t *testing.T) {
 		t.Fatalf("invalid project err=%v", err)
 	}
 }
+
+func TestSaveKeepsSchema(t *testing.T) {
+	dir := t.TempDir()
+	const schema = "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/settings.schema.json"
+	raw := `{
+  "$schema": "` + schema + `",
+  "theme": "light",
+  "keepMe": true
+}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme != "light" {
+		t.Fatalf("theme=%q", cfg.Theme)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), schema) || !strings.Contains(string(b), `"keepMe": true`) {
+		t.Fatalf("save dropped $schema or keepMe: %s", b)
+	}
+}

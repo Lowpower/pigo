@@ -294,6 +294,9 @@ func loadFile(path string) map[string][]string {
 	}
 	out := map[string][]string{}
 	for k, v := range raw {
+		if k == "$schema" {
+			continue
+		}
 		if next, ok := legacyNames[k]; ok {
 			if _, exists := raw[next]; exists {
 				continue

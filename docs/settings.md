@@ -8,6 +8,11 @@ set `defaultProjectTrust`.
 Viper loads the JSON file, then applies `PIGO_`-prefixed environment variables
 that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 
+Set `$schema` to
+`https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/settings.schema.json`
+for editor completion. The key is ignored at runtime and kept when settings
+are saved. Unknown keys are kept.
+
 ## Common fields
 
 | Field | Notes |

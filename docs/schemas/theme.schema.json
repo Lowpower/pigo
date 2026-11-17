@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/theme.schema.json",
+  "title": "pigo theme",
+  "description": "Theme file. A 7-colour shorthand, an extended colors object, or both. Unknown keys are errors. Colour syntax is not checked.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL. Ignored at runtime."
+    },
+    "name": {
+      "type": "string",
+      "description": "Theme name. Must not contain '/'."
+    },
+    "user": {
+      "$ref": "#/$defs/color",
+      "description": "Shorthand colour. Used when colors is omitted."
+    },
+    "assistant": {
+      "$ref": "#/$defs/color",
+      "description": "Shorthand colour. Used when colors is omitted."
+    },
+    "tool": {
+      "$ref": "#/$defs/color",
+      "description": "Shorthand colour. Used when colors is omitted."
+    },
+    "error": {
+      "$ref": "#/$defs/color",
+      "description": "Shorthand colour. Used when colors is omitted."
+    },
+    "muted": {
+      "$ref": "#/$defs/color",
+      "description": "Shorthand colour. Used when colors is omitted."
+    },
+    "accent": {
+      "$ref": "#/$defs/color",
+      "description": "Shorthand colour. Used when colors is omitted."
+    },
+    "vars": {
+      "type": "object",
+      "description": "Reusable colour variables. Keys are names; values are colours.",
+      "additionalProperties": {
+        "$ref": "#/$defs/color"
+      }
+    },
+    "colors": {
+      "type": "object",
+      "description": "Colour tokens. Unknown tokens are errors. Every token is optional.",
+      "additionalProperties": false,
+      "properties": {
+        "selectedBg": {
+          "$ref": "#/$defs/color"
+        },
+        "searchMatchBg": {
+          "$ref": "#/$defs/color"
+        },
+        "userMessageBg": {
+          "$ref": "#/$defs/color"
+        },
+        "customMessageBg": {
+          "$ref": "#/$defs/color"
+        },
+        "toolPendingBg": {
+          "$ref": "#/$defs/color"
+        },
+        "toolSuccessBg": {
+          "$ref": "#/$defs/color"
+        },
+        "toolErrorBg": {
+          "$ref": "#/$defs/color"
+        },
+        "text": {
+          "$ref": "#/$defs/color"
+        },
+        "userMessageText": {
+          "$ref": "#/$defs/color"
+        },
+        "customMessageText": {
+          "$ref": "#/$defs/color"
+        },
+        "toolTitle": {
+          "$ref": "#/$defs/color"
+        },
+        "syntaxOperator": {
+          "$ref": "#/$defs/color"
+        },
+        "syntaxPunctuation": {
+          "$ref": "#/$defs/color"
+        },
+        "muted": {
+          "$ref": "#/$defs/color"
+        },
+        "dim": {
+          "$ref": "#/$defs/color"
+        },
+        "thinkingText": {
+          "$ref": "#/$defs/color"
+        },
+        "toolOutput": {
+          "$ref": "#/$defs/color"
+        },
+        "mdLinkUrl": {
+          "$ref": "#/$defs/color"
+        },
+        "mdQuote": {
+          "$ref": "#/$defs/color"
+        },
+        "mdQuoteBorder": {
+          "$ref": "#/$defs/color"
+        },
+        "mdHr": {
+          "$ref": "#/$defs/color"
+        },
+        "mdCodeBlockBorder": {
+          "$ref": "#/$defs/color"
+        },
+        "toolDiffContext": {
+          "$ref": "#/$defs/color"
+        },
+        "syntaxComment": {
+          "$ref": "#/$defs/color"
+        },
+        "scrollbarTrack": {
+          "$ref": "#/$defs/color"
+        },
+        "scrollbarThumb": {
+          "$ref": "#/$defs/color"
+        },
+        "searchMatchText": {
+          "$ref": "#/$defs/color"
+        },
+        "borderMuted": {
+          "$ref": "#/$defs/color"
+        },
+        "accent": {
+          "$ref": "#/$defs/color"
+        },
+        "borderAccent": {
+          "$ref": "#/$defs/color"
+        },
+        "customMessageLabel": {
+          "$ref": "#/$defs/color"
+        },
+        "mdCode": {
+          "$ref": "#/$defs/color"
+        },
+        "mdListBullet": {
+          "$ref": "#/$defs/color"
+        },
+        "syntaxType": {
+          "$ref": "#/$defs/color"
+        },
+        "border": {
+          "$ref": "#/$defs/color"
+        },
+        "mdLink": {
+          "$ref": "#/$defs/color"
+        },
+        "syntaxKeyword": {
+          "$ref": "#/$defs/color"
+        },
+        "syntaxVariable": {
+          "$ref": "#/$defs/color"
+        },
+        "success": {
+          "$ref": "#/$defs/color"
+        },
+        "mdCodeBlock": {
+          "$ref": "#/$defs/color"
+        },
+        "toolDiffAdded": {
+          "$ref": "#/$defs/color"
+        },
+        "bashMode": {
+          "$ref": "#/$defs/color"
+        },
+        "syntaxNumber": {
+          "$ref": "#/$defs/color"
+        },
+        "error": {
+          "$ref": "#/$defs/color"
+        },
+        "toolDiffRemoved": {
+          "$ref": "#/$defs/color"
+        },
+        "warning": {
+          "$ref": "#/$defs/color"
+        },
+        "mdHeading": {
+          "$ref": "#/$defs/color"
+        },
+        "syntaxFunction": {
+          "$ref": "#/$defs/color"
+        },
+        "syntaxString": {
+          "$ref": "#/$defs/color"
+        },
+        "thinkingOff": {
+          "$ref": "#/$defs/color"
+        },
+        "thinkingMinimal": {
+          "$ref": "#/$defs/color"
+        },
+        "thinkingLow": {
+          "$ref": "#/$defs/color"
+        },
+        "thinkingMedium": {
+          "$ref": "#/$defs/color"
+        },
+        "thinkingHigh": {
+          "$ref": "#/$defs/color"
+        },
+        "thinkingXhigh": {
+          "$ref": "#/$defs/color"
+        },
+        "thinkingMax": {
+          "$ref": "#/$defs/color"
+        }
+      }
+    },
+    "export": {
+      "type": "object",
+      "description": "Optional HTML export colours.",
+      "additionalProperties": false,
+      "properties": {
+        "pageBg": {
+          "$ref": "#/$defs/color"
+        },
+        "cardBg": {
+          "$ref": "#/$defs/color"
+        },
+        "infoBg": {
+          "$ref": "#/$defs/color"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "color": {
+      "description": "A colour string or an integer palette index. The string syntax is not checked.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        }
+      ]
+    }
+  }
+}

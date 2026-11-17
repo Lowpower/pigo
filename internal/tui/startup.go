@@ -46,6 +46,7 @@ func (m Model) skillWarningBlock() string {
 	}
 	lines := append([]string{}, m.engine.SkillWarnings()...)
 	lines = append(lines, m.engine.ExtensionWarnings()...)
+	lines = append(lines, m.themeErrors...)
 	if len(lines) == 0 {
 		return ""
 	}

@@ -261,7 +261,7 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 		patch(func(c *config.Config) { c.SessionShareDestination = value })
 	case "theme":
 		patch(func(c *config.Config) { c.Theme = value })
-		m.applyTheme(theme.LoadWith(m.themeOpts(value)))
+		m.loadTheme(value)
 	case "thinking":
 		patch(func(c *config.Config) { c.Thinking = value })
 	case "collapse-changelog":
