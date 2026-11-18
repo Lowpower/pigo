@@ -127,6 +127,19 @@ func oklabLightness(c RGB) float64 {
 	return rgbToOklab(c)[0]
 }
 
+// oklabLC is an sRGB color's OKLab lightness and chroma.
+func oklabLC(c RGB) (lightness, chroma float64) {
+	lab := rgbToOklab(c)
+	return lab[0], math.Hypot(lab[1], lab[2])
+}
+
+// oklchToRgb builds an sRGB color from OKLab lightness, chroma, and hue in degrees.
+func oklchToRgb(lightness, chroma, hue float64) RGB {
+	angle := (2 * math.Pi * mod360(hue)) / 360
+	lab := vec3{lightness, chroma * math.Cos(angle), chroma * math.Sin(angle)}
+	return linearSrgbToRgb(oklabToLinearSrgb(lab))
+}
+
 func lmsSlopes(a, b float64) vec3 {
 	var out vec3
 	for i := range labToLMS {
