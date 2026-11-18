@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -48,8 +50,43 @@ func TestSystemUsesPaletteHues(t *testing.T) {
 		Foreground: &RGB{R: 248, G: 248, B: 242},
 		Palette:    pal,
 	})
-	if th.Appearance != "dark" || th.Accent != "#ff5abe" || th.Error != "#f9756f" || th.Assistant != "" {
+	if th.Appearance != "dark" || th.Accent != "#f16cb9" || th.Error != "#f9756f" || th.Assistant != "" {
 		t.Fatalf("appearance=%q accent=%q error=%q text=%q", th.Appearance, th.Accent, th.Error, th.Assistant)
+	}
+}
+
+func TestSystemPastelPaletteKeepsChroma(t *testing.T) {
+	pal := []RGB{
+		rgbHex(t, "#51576d"), rgbHex(t, "#e78284"), rgbHex(t, "#a6d189"), rgbHex(t, "#e5c890"),
+		rgbHex(t, "#8caaee"), rgbHex(t, "#f4b8e4"), rgbHex(t, "#81c8be"), rgbHex(t, "#b5bfe2"),
+		rgbHex(t, "#626880"), rgbHex(t, "#e67172"), rgbHex(t, "#8ec772"), rgbHex(t, "#d9ba73"),
+		rgbHex(t, "#7b9ef0"), rgbHex(t, "#f2a4db"), rgbHex(t, "#5abfb5"), rgbHex(t, "#a5adce"),
+	}
+	background := rgbHex(t, "#303446")
+	foreground := rgbHex(t, "#c6d0f5")
+	th := System(SystemInput{
+		Background: &background,
+		Foreground: &foreground,
+		Palette:    pal,
+	})
+	pink := pal[5]
+	accent := rgbHex(t, th.Accent)
+	if oklabLightness(accent) >= oklabLightness(pink)-0.05 {
+		t.Fatalf("accent lightness %v, pink %v", oklabLightness(accent), oklabLightness(pink))
+	}
+	_, accentC := oklabLC(accent)
+	_, pinkC := oklabLC(pink)
+	if accentC > pinkC*1.03 {
+		t.Fatalf("accent chroma %v, pink %v", accentC, pinkC)
+	}
+	for _, token := range []string{"userMessageBg", "customMessageBg"} {
+		_, chroma := oklabLC(rgbHex(t, th.Colors[token]))
+		if chroma > 0.1 {
+			t.Fatalf("%s chroma %v color %s", token, chroma, th.Colors[token])
+		}
+	}
+	if th.Accent != "#cc92bd" || th.Colors["userMessageBg"] != "#283d73" || th.Colors["customMessageBg"] != "#5d2b52" {
+		t.Fatalf("accent=%s user=%s custom=%s", th.Accent, th.Colors["userMessageBg"], th.Colors["customMessageBg"])
 	}
 }
 
@@ -100,6 +137,16 @@ func TestExplicitDarkIgnoresTerminal(t *testing.T) {
 	if th.Name != "dark" || th.Accent != "205" {
 		t.Fatalf("%+v", th)
 	}
+}
+
+func rgbHex(t *testing.T, hex string) RGB {
+	t.Helper()
+	raw := strings.TrimPrefix(hex, "#")
+	n, err := strconv.ParseUint(raw, 16, 32)
+	if err != nil || len(raw) != 6 {
+		t.Fatalf("bad hex %q", hex)
+	}
+	return RGB{R: int(n >> 16), G: int(n >> 8 & 0xff), B: int(n & 0xff)}
 }
 
 func TestColorFgBgAppearance(t *testing.T) {

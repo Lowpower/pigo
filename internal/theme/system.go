@@ -442,11 +442,11 @@ func generateSystem(in SystemInput) generated {
 	if in.Background == nil {
 		return indexedColors(saturation, in.AppearanceHint)
 	}
-	var palette []okhsl
+	var palette []sourceColor
 	if len(in.Palette) == 16 {
-		palette = make([]okhsl, 16)
+		palette = make([]sourceColor, 16)
 		for i, c := range in.Palette {
-			palette[i] = rgbToOkhsl(c)
+			palette[i] = sourceOf(c)
 		}
 	}
 	background := *in.Background
@@ -517,7 +517,7 @@ func generateSystem(in SystemInput) generated {
 					result[token] = ""
 					continue
 				}
-				text = anchored(rgbToOkhsl(*in.Foreground), families["neutral"], oklabToOkhslLightness(needed), saturation)
+				text = anchored(sourceOf(*in.Foreground), families["neutral"], oklabToOkhslLightness(needed), saturation)
 				has = true
 			}
 		}
@@ -528,9 +528,20 @@ func generateSystem(in SystemInput) generated {
 	return generated{colors: result, appearance: appearance}
 }
 
+// sourceColor is a terminal color's OKHSL channels plus its OKLCH chroma.
+type sourceColor struct {
+	okhsl
+	chroma float64
+}
+
+func sourceOf(c RGB) sourceColor {
+	_, chroma := oklabLC(c)
+	return sourceColor{okhsl: rgbToOkhsl(c), chroma: chroma}
+}
+
 type sysSolver struct {
 	saturation  float64
-	palette     []okhsl
+	palette     []sourceColor
 	appearance  string
 	lighter     bool
 	extreme     float64
@@ -649,13 +660,24 @@ func surfacesOf(token string, solved map[string]RGB, background RGB) []RGB {
 	return out
 }
 
-func anchored(source okhsl, fam family, lightness, saturation float64) RGB {
+// anchored keeps a source color's hue at another OKHSL lightness. Saturation
+// applies at the source lightness and only falls off toward black and white.
+// OKHSL saturation is relative to the sRGB gamut, so the same saturation can
+// mean more chroma at another lightness. Chroma is capped at the source's,
+// with the same falloff, so a pastel palette stays pastel.
+func anchored(source sourceColor, fam family, lightness, saturation float64) RGB {
 	anchor := saturationCurve(fam, source.l)
 	falloff := 1.0
 	if anchor > 0 {
 		falloff = math.Min(1, saturationCurve(fam, lightness)/anchor)
 	}
-	return okhslToRgb(source.h, source.s*falloff*saturation, lightness)
+	color := okhslToRgb(source.h, source.s*falloff*saturation, lightness)
+	chromaCap := source.chroma * falloff * saturation
+	l, chroma := oklabLC(color)
+	if chroma <= chromaCap {
+		return color
+	}
+	return oklchToRgb(l, chromaCap, source.h)
 }
 
 func withTextContrast(color RGB, surfaces []RGB, lighter bool) RGB {
