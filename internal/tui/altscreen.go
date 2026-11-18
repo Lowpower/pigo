@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,6 +91,29 @@ func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.copyWithNotice(text, "copied last assistant message", copyNoticeTranscript)
+}
+
+func (m Model) wheelStep(direction int) (Model, int) {
+	n, auto := m.cfg.WheelScrollLines()
+	key := "auto"
+	lines := any("auto")
+	if !auto {
+		key = strconv.Itoa(n)
+		lines = n
+	}
+	if m.wheelAccel == nil || m.wheelKey != key {
+		if m.wheelAccel == nil {
+			m.wheelAccel = newWheelScrollAccelerator(lines, !terminalAcceleratesWheel())
+		} else {
+			m.wheelAccel.setLines(lines)
+		}
+		m.wheelKey = key
+	}
+	now := time.Now().UnixMilli()
+	if m.wheelNow != nil {
+		now = m.wheelNow()
+	}
+	return m, m.wheelAccel.next(direction, now)
 }
 
 func (m *Model) scrollBy(delta int) {
@@ -191,15 +215,20 @@ func (m Model) handleAltScreenKey(msg tea.KeyMsg) (tea.Model, bool) {
 func (m Model) handleAltScreenMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	ev := tea.MouseEvent(msg)
 	if ev.IsWheel() {
-		n := 1
-		if ev.Alt {
-			n = altWheelMultiplier
-		}
+		dir := 0
 		switch ev.Button {
 		case tea.MouseButtonWheelUp:
-			m.scrollBy(n)
+			dir = 1
 		case tea.MouseButtonWheelDown:
-			m.scrollBy(-n)
+			dir = -1
+		}
+		if dir != 0 {
+			var n int
+			m, n = m.wheelStep(dir)
+			if ev.Alt {
+				n *= altWheelMultiplier
+			}
+			m.scrollBy(dir * n)
 		}
 		return m, nil
 	}

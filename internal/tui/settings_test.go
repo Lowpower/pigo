@@ -173,6 +173,42 @@ func TestSettingsCyclesShareDestination(t *testing.T) {
 	}
 }
 
+func TestSettingsCyclesWheelScrollLines(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PIGO_CODING_AGENT_DIR", dir)
+	m := New(testCfg())
+	if got := strings.Join(m.settingChoices("fullscreen-wheel-scroll-lines"), ","); got != "auto,1,2,3,5,10" {
+		t.Fatalf("default choices = %s", got)
+	}
+	m.cfg.FullscreenWheelScrollLines = 7
+	if got := strings.Join(m.settingChoices("fullscreen-wheel-scroll-lines"), ","); got != "auto,1,2,3,5,7,10" {
+		t.Fatalf("custom choices = %s", got)
+	}
+	m = submit(m, "/settings")
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("wheel scrolling")})
+	if !strings.Contains(m.View(), "Fullscreen wheel scrolling") || !strings.Contains(m.View(), "7") {
+		t.Fatalf("menu:\n%s", m.View())
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if n, auto := m.cfg.WheelScrollLines(); auto || n != 10 {
+		t.Fatalf("cycle = %d auto=%v", n, auto)
+	}
+	loaded, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, auto := loaded.WheelScrollLines(); auto || n != 10 {
+		t.Fatalf("saved = %d auto=%v", n, auto)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"fullscreenWheelScrollLines": 10`) {
+		t.Fatalf("saved file: %s", b)
+	}
+}
+
 func TestSettingsCyclesScrollbarAndAnthropicWarning(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PIGO_CODING_AGENT_DIR", dir)

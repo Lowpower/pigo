@@ -191,6 +191,9 @@ type Model struct {
 	searchHits    []int
 	thinkingPick  listPicker
 	sel           textSel
+	wheelAccel    *wheelScrollAccelerator
+	wheelKey      string
+	wheelNow      func() int64 // injected clock for wheel acceleration; nil uses time.Now
 	blockOpen     map[string]bool
 
 	extHub            *extUIHub
@@ -935,6 +938,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	}
 	m.history = nil
 	m.transcript = nil
+	m.sel = textSel{}
 	if m.prog != nil {
 		m.prog.reset()
 	}
@@ -963,6 +967,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		return note(slash.HotkeysText())
 	case "clear":
 		m.transcript = nil
+		m.sel = textSel{}
 		return m, nil
 	case "session":
 		if m.engine != nil && m.engine.Opts.Session != nil {

@@ -838,6 +838,7 @@ func TestAltScreenWheelScroll(t *testing.T) {
 	m := New(testCfg())
 	m.altScreen = true
 	m.height = 10
+	m.wheelNow = func() int64 { return 0 }
 	m = send(m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
 	if m.scrollOff != 1 {
 		t.Fatalf("wheel up off=%d", m.scrollOff)
@@ -849,5 +850,35 @@ func TestAltScreenWheelScroll(t *testing.T) {
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnd})
 	if m.scrollOff != 0 {
 		t.Fatalf("end should jump to latest, off=%d", m.scrollOff)
+	}
+}
+
+func TestAltScreenWheelUsesConfiguredLines(t *testing.T) {
+	cfg := testCfg()
+	cfg.FullscreenWheelScrollLines = 3
+	m := New(cfg)
+	m.altScreen = true
+	m.height = 10
+	m = send(m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	if m.scrollOff != 3 {
+		t.Fatalf("wheel up off=%d", m.scrollOff)
+	}
+	m = send(m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress, Alt: true})
+	if m.scrollOff != 0 {
+		t.Fatalf("alt wheel down off=%d", m.scrollOff)
+	}
+}
+
+func TestAltScreenWheelScrollsUnderOverlay(t *testing.T) {
+	m := New(testCfg())
+	m.altScreen = true
+	m.height = 10
+	m = submit(m, "/settings")
+	if !m.overlayVisible() {
+		t.Fatal("settings should cover the editor")
+	}
+	m = send(m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	if m.scrollOff != 1 {
+		t.Fatalf("overlay wheel off=%d", m.scrollOff)
 	}
 }

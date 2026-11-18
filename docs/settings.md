@@ -40,6 +40,7 @@ that match field names (`PIGO_PROVIDER`, `PIGO_MODEL`, …).
 | `tuiMode` / `fullscreenExitOutput` | TUI layout (`regular` keeps native terminal selection; `fullscreen` uses the alternate screen) |
 | `fullscreenScrollbar` | `auto` \| `always` \| `hidden` (bool true/false still accepted; unset is `auto`) |
 | `fullscreenCopyOnSelect` | Fullscreen only: copy the mouse selection on release (default true). When false, the highlight stays and `Ctrl+X` copies it |
+| `fullscreenWheelScrollLines` | Lines per mouse-wheel event in fullscreen mode. `auto` (default) speeds up fast wheel spins where the terminal does not. A number is a fixed line count, clamped from 1 to 100. Alt+wheel moves five times as far |
 | `warnings.anthropicExtraUsage` | TUI notice when Anthropic subscription/OAuth auth is active (default true) |
 | `quietStartup` | Startup listing. `false` (default) shows it, `true` hides it, `"header"` keeps the version and key hints and hides the model scope and loaded resources |
 | `httpProxy` / `httpIdleTimeoutMs` / `websocketConnectTimeoutMs` | Networking |

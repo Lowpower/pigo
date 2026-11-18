@@ -873,6 +873,65 @@ func TestLoadCompactionModelOverridesRetryCapAndWarnings(t *testing.T) {
 	}
 }
 
+func TestLoadFullscreenWheelScrollLines(t *testing.T) {
+	var unset Config
+	if n, auto := unset.WheelScrollLines(); !auto || n != 0 {
+		t.Fatalf("unset = %d auto=%v", n, auto)
+	}
+
+	auto := Config{FullscreenWheelScrollLines: "auto"}
+	if n, isAuto := auto.WheelScrollLines(); !isAuto || n != 0 {
+		t.Fatalf("auto = %d auto=%v", n, isAuto)
+	}
+	bad := Config{FullscreenWheelScrollLines: "nope"}
+	if _, isAuto := bad.WheelScrollLines(); !isAuto {
+		t.Fatal("unrecognized wheel setting should be auto")
+	}
+	half := Config{FullscreenWheelScrollLines: 0.5}
+	if n, isAuto := half.WheelScrollLines(); isAuto || n != 1 {
+		t.Fatalf("0.5 = %d auto=%v", n, isAuto)
+	}
+	frac := Config{FullscreenWheelScrollLines: 3.7}
+	if n, isAuto := frac.WheelScrollLines(); isAuto || n != 3 {
+		t.Fatalf("3.7 = %d auto=%v", n, isAuto)
+	}
+	wide := Config{FullscreenWheelScrollLines: 150}
+	if n, isAuto := wide.WheelScrollLines(); isAuto || n != 100 {
+		t.Fatalf("150 = %d auto=%v", n, isAuto)
+	}
+
+	dir := t.TempDir()
+	raw := `{"fullscreenWheelScrollLines":3}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, isAuto := cfg.WheelScrollLines(); isAuto || n != 3 {
+		t.Fatalf("loaded = %d auto=%v", n, isAuto)
+	}
+	cfg.FullscreenWheelScrollLines = 150.9
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"fullscreenWheelScrollLines": 100`) {
+		t.Fatalf("saved = %s", b)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, isAuto := loaded.WheelScrollLines(); isAuto || n != 100 {
+		t.Fatalf("reloaded = %d auto=%v", n, isAuto)
+	}
+}
+
 func TestLoadFullscreenScrollbarModes(t *testing.T) {
 	var unset Config
 	if unset.ScrollbarMode() != "auto" || !unset.ScrollbarEnabled() || unset.ScrollbarVisible(0) || !unset.ScrollbarVisible(2) {
