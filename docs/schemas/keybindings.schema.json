@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/keybindings.schema.json",
+  "title": "pigo keybindings",
+  "description": "keybindings.json. Map an action id to a key string or an array of key strings. $schema is not an action.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL. Ignored at runtime."
+    }
+  },
+  "additionalProperties": {
+    "anyOf": [
+      {
+        "type": "string"
+      },
+      {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    ]
+  }
+}

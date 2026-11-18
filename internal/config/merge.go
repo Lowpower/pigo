@@ -39,6 +39,7 @@ type projectOverlay struct {
 	FullscreenExitOutput       string                 `json:"fullscreenExitOutput"`
 	ShellPath                  string                 `json:"shellPath"`
 	DefaultTools               *[]string              `json:"defaultTools"`
+	Codemode                   *CodemodeSettings      `json:"codemode"`
 	EnabledModels              []string               `json:"enabledModels"`
 	SessionDir                 string                 `json:"sessionDir"`
 	SessionShareDestination    string                 `json:"sessionShareDestination"`
@@ -249,6 +250,15 @@ func applyOverlay(user Config, over projectOverlay) Config {
 	}
 	if over.DefaultTools != nil {
 		out.DefaultTools = MergeDefaultTools(user.DefaultTools, over.DefaultTools)
+	}
+	if over.Codemode != nil {
+		if over.Codemode.Mode != "" {
+			out.Codemode.Mode = over.Codemode.Mode
+		}
+		if over.Codemode.InlineBudget != nil {
+			n := *over.Codemode.InlineBudget
+			out.Codemode.InlineBudget = &n
+		}
 	}
 	if over.EnabledModels != nil {
 		out.EnabledModels = append([]string(nil), over.EnabledModels...)

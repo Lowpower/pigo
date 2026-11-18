@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/codescript"
 	"github.com/Lowpower/pigo/internal/ext"
@@ -19,8 +21,6 @@ type codeTool struct {
 
 func (codeTool) Name() string { return "codemode" }
 
-func (codeTool) Description() string { return codescript.ToolDescription }
-
 func (codeTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -34,6 +34,18 @@ func (codeTool) Schema() map[string]any {
 	}
 }
 
+func (t codeTool) Description() string {
+	base := codescript.ToolDescription
+	if t.engine == nil {
+		return base
+	}
+	extra := t.engine.codemodeListing()
+	if extra == "" {
+		return base
+	}
+	return base + "\n\n" + extra
+}
+
 func (t codeTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
 	code, _ := args["code"].(string)
 	if strings.TrimSpace(code) == "" {
@@ -42,17 +54,12 @@ func (t codeTool) Execute(ctx context.Context, args map[string]any) (string, boo
 	if t.engine == nil {
 		return "codemode is not available", true
 	}
+	started := time.Now()
 	res, err := codescript.Run(ctx, code, t.engine.scriptEnv())
-	out := res.Render()
 	if err != nil {
-		if out == "" {
-			out = err.Error()
-		} else if !strings.Contains(out, err.Error()) {
-			out += "\n" + err.Error()
-		}
-		return out, true
+		return res.WithErrorTook(time.Since(started), err), true
 	}
-	return out, false
+	return res.WithTook(time.Since(started)), false
 }
 
 func (e *Engine) scriptEnv() codescript.Env {
@@ -69,9 +76,15 @@ func (e *Engine) scriptEnv() codescript.Env {
 	var list []codescript.Tool
 	if reg != nil {
 		for _, tool := range reg.List() {
+			// The model-facing codemode description lists other tools, so reading
+			// it here would call scriptEnv again.
+			desc := codescript.ToolDescription
+			if tool.Name() != "codemode" {
+				desc = tool.Description()
+			}
 			item := codescript.Tool{
 				Name:        tool.Name(),
-				Description: tool.Description(),
+				Description: desc,
 				Schema:      tool.Schema(),
 				Exposure:    ext.ExposureDirect,
 			}
@@ -130,4 +143,73 @@ func (e *Engine) scriptModels(typ, provider string) ([]codescript.ModelInfo, err
 		out = []codescript.ModelInfo{}
 	}
 	return out, nil
+}
+
+func (e *Engine) codemodeListing() string {
+	if !e.codemodeActive() {
+		return ""
+	}
+	env := e.scriptEnv()
+	tools := codescript.Callable(env)
+	if e.Opts.Config.CodemodeMode() != "only" {
+		declared := map[string]bool{}
+		for _, name := range e.modelFacingNames() {
+			declared[name] = true
+		}
+		kept := make([]codescript.Tool, 0, len(tools))
+		for _, tool := range tools {
+			if !declared[tool.Name] {
+				kept = append(kept, tool)
+			}
+		}
+		tools = kept
+	}
+	return codescript.FormatListing(tools, e.Opts.Config.CodemodeInlineBudget())
+}
+
+func (e *Engine) codemodeActive() bool {
+	if e == nil {
+		return false
+	}
+	for _, name := range e.activeSnapshot() {
+		if name == "codemode" {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) codemodeOnly() bool {
+	return e.codemodeActive() && e.Opts.Config.CodemodeMode() == "only"
+}
+
+// presentTools applies codemode.mode to the model-facing tool list.
+// on appends a script-call note. only keeps codemode when that tool is active.
+func (e *Engine) presentTools(tools []ai.Tool) []ai.Tool {
+	if e == nil || len(tools) == 0 {
+		return tools
+	}
+	if e.codemodeActive() && e.Opts.Config.CodemodeMode() == "on" {
+		out := append([]ai.Tool(nil), tools...)
+		for i, tool := range out {
+			if tool.Name == "" || tool.Name == "codemode" {
+				continue
+			}
+			note := "Callable from a codemode script as await tools." + codescript.JSName(tool.Name) + "(args)."
+			if strings.Contains(tool.Description, note) {
+				continue
+			}
+			if strings.TrimSpace(tool.Description) == "" {
+				tool.Description = note
+			} else {
+				tool.Description = tool.Description + " " + note
+			}
+			out[i] = tool
+		}
+		tools = out
+	}
+	if e.codemodeOnly() {
+		return filterAITools(tools, []string{"codemode"})
+	}
+	return tools
 }

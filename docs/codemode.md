@@ -15,7 +15,7 @@ short.
 | --- | --- |
 | `tools.<name>(args)` | Calls one tool. The name is the tool name with non-identifier characters replaced by `_`, so `mcp__dev-radius__search` is `tools.mcp__dev_radius__search`. |
 | `text(value)` | Adds text to the tool result. Strings are kept as written; other values are JSON. |
-| `image(value)` | Records an image value on the tool result. |
+| `image(value)` | Records an image on the tool result. The value is a base64 data URL, an `{ image_url }` object, or `{ type: "image", data, mimeType }`. PNG, JPEG, GIF, and WebP are accepted. Invalid base64 or mime is rejected and is not written into the result. A valid image is saved to a user-only temporary file, and the result names that path. |
 | `console.log/info/warn/error/debug` | Adds one line per call. |
 | `store(key, value)` / `load(key)` | Keeps one JSON value for later `codemode` calls in the same session. |
 | `searchTools(query, { limit?, namespace? })` | Async. Resolves to `{ name, description }[]`. Default limit is 8. |
@@ -52,6 +52,24 @@ Several `tools` and `models` calls may run at the same time via `Promise.all`.
 
 ## Output
 
-The tool result is the script's return value. Collected `text`, `console`, and
-`image` values are appended after it. Output caps, separators, and image files
-are not applied here.
+The tool result lists each `text()` value and then a non-empty return value.
+When that is more than one text item, every item starts with `==> text N/M <==`.
+`console` calls follow in one `<console_output>` block, one call per line.
+Each accepted image is a content block after the text, and the text names the
+temporary file.
+
+The script fails, and keeps the output collected so far, when `text()`,
+`image()`, and `console` together pass 100000 calls, or when the text plus
+base64 image data passes 16777216 characters. Catching the error does not
+resume output.
+
+While the tool is running the transcript shows `Elapsed`. The result ends with
+`Took` and the same duration text as bash.
+
+`settings.codemode.mode` is `on` or `only` (`on` when unset). `on` leaves the
+other tools declared and notes that a script can call them. The codemode
+description then lists tools that are not declared. `only`, when codemode
+itself is enabled, declares only codemode to the model. `settings.codemode.inlineBudget`
+is how many estimated tokens (characters / 4, default 3000) that description
+may spend on declarations. Declarations that do not fit are omitted. `0` lists
+namespace names only. Scripts find the rest with `searchTools()`.

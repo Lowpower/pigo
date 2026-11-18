@@ -558,6 +558,62 @@ func TestDefaultToolsLoadAndSave(t *testing.T) {
 	}
 }
 
+func TestCodemodeSettings(t *testing.T) {
+	fresh, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.CodemodeMode() != "on" || fresh.CodemodeInlineBudget() != 3000 {
+		t.Fatalf("defaults mode=%s budget=%d", fresh.CodemodeMode(), fresh.CodemodeInlineBudget())
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"codemode":{"mode":"only","inlineBudget":0}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CodemodeMode() != "only" || cfg.CodemodeInlineBudget() != 0 {
+		t.Fatalf("loaded mode=%s budget=%d", cfg.CodemodeMode(), cfg.CodemodeInlineBudget())
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.CodemodeMode() != "only" || again.CodemodeInlineBudget() != 0 {
+		t.Fatalf("saved mode=%s budget=%d", again.CodemodeMode(), again.CodemodeInlineBudget())
+	}
+	bad := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bad, "settings.json"), []byte(`{"codemode":{"mode":"sideways"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CodemodeMode() != "on" {
+		t.Fatalf("invalid mode %s", cfg.CodemodeMode())
+	}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(ProjectDir(cwd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ProjectDir(cwd), "settings.json"), []byte(`{"codemode":{"mode":"only"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	over, err := ApplyProject(fresh, cwd, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if over.CodemodeMode() != "only" || over.CodemodeInlineBudget() != 3000 {
+		t.Fatalf("overlay mode=%s budget=%d", over.CodemodeMode(), over.CodemodeInlineBudget())
+	}
+}
+
 func TestLoadNestedCompactionAndThinkingAlias(t *testing.T) {
 	dir := t.TempDir()
 	raw := `{"compaction":{"enabled":false,"reserveTokens":1,"keepRecentTokens":2},"defaultThinkingLevel":"high","sessionDir":"/tmp/sessions","quietStartup":true,"httpProxy":"http://127.0.0.1:9","enableSkillCommands":false,"enabledModels":["openai/*"]}`
@@ -1265,5 +1321,35 @@ func TestApplyProjectQuietStartupHeader(t *testing.T) {
 	}
 	if _, err := ApplyProject(user, cwd, true); err == nil || !strings.Contains(err.Error(), "quietStartup") {
 		t.Fatalf("invalid project err=%v", err)
+	}
+}
+
+func TestSaveKeepsSchema(t *testing.T) {
+	dir := t.TempDir()
+	const schema = "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/settings.schema.json"
+	raw := `{
+  "$schema": "` + schema + `",
+  "theme": "light",
+  "keepMe": true
+}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme != "light" {
+		t.Fatalf("theme=%q", cfg.Theme)
+	}
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), schema) || !strings.Contains(string(b), `"keepMe": true`) {
+		t.Fatalf("save dropped $schema or keepMe: %s", b)
 	}
 }

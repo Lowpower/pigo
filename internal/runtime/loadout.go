@@ -168,7 +168,7 @@ func (e *Engine) loadDeferredLocked(name string) {
 	e.loadedDeferred[name] = true
 }
 
-func (e *Engine) durableTools() []ai.Tool {
+func (e *Engine) modelFacingNames() []string {
 	if e == nil || e.Tools == nil {
 		return nil
 	}
@@ -190,8 +190,14 @@ func (e *Engine) durableTools() []ai.Tool {
 			exposure[tool.Name()] = info.Exposure
 		}
 	}
-	names := selectModelTools(order, exposure, loaded, active, activeSet, nil, false)
-	return e.decorate(e.Tools.AIToolsNamed(names))
+	return selectModelTools(order, exposure, loaded, active, activeSet, nil, false)
+}
+
+func (e *Engine) durableTools() []ai.Tool {
+	if e == nil || e.Tools == nil {
+		return nil
+	}
+	return e.presentTools(e.decorate(e.Tools.AIToolsNamed(e.modelFacingNames())))
 }
 
 func (e *Engine) applyTurn(tools []ai.Tool) []ai.Tool {

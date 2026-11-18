@@ -1,8 +1,11 @@
 package theme
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -43,8 +46,7 @@ func TestLoadPiSchema(t *testing.T) {
 			"userMessageText": "#abcdef",
 			"toolTitle": "#00ff00",
 			"thinkingXhigh": "#ff00ff",
-			"selectedBg": "#2d2d30",
-			"unknownToken": "#ffffff"
+			"selectedBg": "#2d2d30"
 		}
 	}`
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -68,9 +70,6 @@ func TestLoadPiSchema(t *testing.T) {
 	}
 	if th.Tool != "#00ff00" {
 		t.Fatalf("tool=%s", th.Tool)
-	}
-	if th.Colors["unknownToken"] != "#ffffff" {
-		t.Fatalf("unknown token dropped: %+v", th.Colors)
 	}
 	if th.Colors["thinkingMax"] != "#ff00ff" {
 		t.Fatalf("thinkingMax fallback = %q", th.Colors["thinkingMax"])
@@ -180,4 +179,168 @@ func TestNamesIncludesExtra(t *testing.T) {
 	if !found {
 		t.Fatalf("%v", got)
 	}
+}
+
+func TestThemeSchemaKeyAccepted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mine.json")
+	body := `{
+		"$schema": "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/theme.schema.json",
+		"name": "mine",
+		"user": 42,
+		"accent": "1"
+	}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := LoadWithResult(LoadOptions{Name: "mine", Extra: []string{path}, NoDiscovery: true})
+	if len(res.Errors) != 0 {
+		t.Fatal(res.Errors)
+	}
+	if res.Theme.Name != "mine" || res.Theme.User != "42" || res.Theme.Accent != "1" {
+		t.Fatalf("%+v", res.Theme)
+	}
+}
+
+func TestUnknownThemeFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	body := `{
+		"name": "bad",
+		"appearance": "dark",
+		"accent": "1",
+		"colors": {"accent": "#fff", "scrollbarThmb": "#000"},
+		"export": {"pageBg": "#111", "nope": "#222"}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := LoadWithResult(LoadOptions{Name: "system", Extra: []string{path}, NoDiscovery: true})
+	if res.Theme.Name == "bad" {
+		t.Fatal("invalid theme was loaded")
+	}
+	joined := strings.Join(res.Errors, "\n")
+	for _, want := range []string{path, `unknown field "appearance"`, `unknown color "scrollbarThmb"`, `unknown field "nope"`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in:\n%s", want, joined)
+		}
+	}
+	names := NamesWith(LoadOptions{Extra: []string{path}, NoDiscovery: true})
+	for _, n := range names {
+		if n == "bad" {
+			t.Fatalf("invalid theme listed: %v", names)
+		}
+	}
+}
+
+func TestHighContrastExampleLoads(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("no caller")
+	}
+	path := filepath.Join(filepath.Dir(file), "..", "..", "examples", "themes", "high-contrast.json")
+	res := LoadWithResult(LoadOptions{Name: "high-contrast", Extra: []string{path}, NoDiscovery: true})
+	if len(res.Errors) != 0 {
+		t.Fatal(res.Errors)
+	}
+	if res.Theme.Name != "high-contrast" || res.Theme.Accent != "213" {
+		t.Fatalf("%+v", res.Theme)
+	}
+}
+
+func TestThemeSchemaMatchesAllowList(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("no caller")
+	}
+	root := filepath.Join(filepath.Dir(file), "..", "..", "docs", "schemas")
+	raw, err := os.ReadFile(filepath.Join(root, "theme.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "pi.dev") {
+		t.Fatal("theme schema points at pi.dev")
+	}
+	var doc schemaDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	const wantID = "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/theme.schema.json"
+	if doc.ID != wantID {
+		t.Fatalf("$id = %s", doc.ID)
+	}
+	if doc.Additional == nil || *doc.Additional {
+		t.Fatal("theme schema must reject unknown keys")
+	}
+	if keys := mapKeys(doc.Properties); !sameKeys(keys, themeFileKeys) {
+		t.Fatalf("top-level properties = %v", keys)
+	}
+	colors := nestedSchema(t, doc.Properties["colors"])
+	if colors.Additional == nil || *colors.Additional {
+		t.Fatal("colors must reject unknown tokens")
+	}
+	if !sameKeys(mapKeys(colors.Properties), colorTokenSet()) {
+		t.Fatalf("color tokens = %v", mapKeys(colors.Properties))
+	}
+	export := nestedSchema(t, doc.Properties["export"])
+	if export.Additional == nil || *export.Additional {
+		t.Fatal("export must reject unknown keys")
+	}
+	if !sameKeys(mapKeys(export.Properties), themeExportKeys) {
+		t.Fatalf("export keys = %v", mapKeys(export.Properties))
+	}
+	for _, name := range []string{"settings.schema.json", "models.schema.json", "keybindings.schema.json"} {
+		b, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), "pi.dev") {
+			t.Fatalf("%s points at pi.dev", name)
+		}
+		var other struct {
+			ID string `json:"$id"`
+		}
+		if err := json.Unmarshal(b, &other); err != nil {
+			t.Fatal(err)
+		}
+		want := "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/" + name
+		if other.ID != want {
+			t.Fatalf("%s $id = %s", name, other.ID)
+		}
+	}
+}
+
+type schemaDoc struct {
+	ID         string                     `json:"$id"`
+	Additional *bool                      `json:"additionalProperties"`
+	Properties map[string]json.RawMessage `json:"properties"`
+}
+
+func nestedSchema(t *testing.T, raw json.RawMessage) schemaDoc {
+	t.Helper()
+	var doc schemaDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+func mapKeys[M ~map[string]V, V any](m M) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k := range m {
+		out[k] = true
+	}
+	return out
+}
+
+func sameKeys(got map[string]bool, want map[string]bool) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for k := range want {
+		if !got[k] {
+			return false
+		}
+	}
+	return true
 }

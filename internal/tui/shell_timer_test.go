@@ -70,6 +70,57 @@ func TestShellElapsedAdvancesThenUsesRecordedTook(t *testing.T) {
 	}
 }
 
+func TestCodemodeElapsedThenTook(t *testing.T) {
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	now := start
+	m := New(testCfg())
+	m.now = func() time.Time { return now }
+	m = send(m, agentEventMsg{agent.Event{
+		Type:       agent.EventToolStart,
+		ToolCallID: "code1",
+		ToolName:   "codemode",
+		Args:       map[string]any{"code": "return 1"},
+	}})
+	if !m.shellTicking || !strings.Contains(m.View(), "Elapsed 0.0s") {
+		t.Fatalf("missing elapsed:\n%s", m.View())
+	}
+	if strings.Contains(m.transcript[0].toolOut, "Elapsed") {
+		t.Fatal("elapsed leaked into tool output")
+	}
+	now = start.Add(2 * time.Second)
+	m = send(m, agentEventMsg{agent.Event{
+		Type:       agent.EventToolEnd,
+		ToolCallID: "code1",
+		ToolName:   "codemode",
+		Result:     "ok\nTook 1.5s",
+	}})
+	view := m.View()
+	if strings.Contains(view, "Elapsed") || !strings.Contains(view, "Took 1.5s") {
+		t.Fatalf("finished view:\n%s", view)
+	}
+	if m.shellTicking {
+		t.Fatal("timer still armed")
+	}
+}
+
+func TestCodemodePreviewWrapsVisualLines(t *testing.T) {
+	m := New(testCfg())
+	m.width = 24
+	long := strings.Repeat("a", 80)
+	collapsed := m.toolResultText("codemode", long, false)
+	if strings.Contains(collapsed, long) || !strings.Contains(collapsed, "…") || strings.Contains(collapsed, "\n") {
+		t.Fatalf("collapsed %q", collapsed)
+	}
+	expanded := m.toolResultText("codemode", long, true)
+	if strings.Count(expanded, "a") != len(long) || !strings.Contains(expanded, "\n") {
+		t.Fatalf("expanded %q", expanded)
+	}
+	bash := toolResultBodyLines(long, false, toolPreviewLines("bash"))
+	if bash != long {
+		t.Fatalf("bash preview %q", bash)
+	}
+}
+
 func TestReadToolHasNoElapsed(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	m := New(testCfg())

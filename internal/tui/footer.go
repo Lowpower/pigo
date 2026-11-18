@@ -99,6 +99,80 @@ func toolResultBody(raw string, expanded bool) string {
 	return toolResultBodyLines(raw, expanded, 1)
 }
 
+func (m Model) toolResultText(name, raw string, expanded bool) string {
+	if name != "codemode" {
+		return toolResultBodyLines(raw, expanded, toolPreviewLines(name))
+	}
+	return m.codemodeResultBody(raw, expanded)
+}
+
+func (m Model) codemodePreviewWidth() int {
+	w := m.transcriptWidth() - len("  → ")
+	if w < 1 {
+		return 1
+	}
+	return w
+}
+
+func visualLines(s string, width int) []string {
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
+		return nil
+	}
+	if width < 1 {
+		width = 1
+	}
+	return strings.Split(wrapDisplayBlock(s, width), "\n")
+}
+
+func (m Model) codemodeResultBody(raw string, expanded bool) string {
+	body, took := splitTrailingTook(raw)
+	lines := visualLines(body, m.codemodePreviewWidth())
+	if expanded {
+		const maxLines = 40
+		if len(lines) > maxLines {
+			lines = append(lines[:maxLines], " …")
+		}
+		shown := strings.Join(lines, "\n")
+		if len(shown) > 4000 {
+			shown = shown[:4000] + " …"
+		}
+		if took == "" {
+			return shown
+		}
+		if strings.TrimSpace(shown) == "" {
+			return took
+		}
+		return shown + "\n" + took
+	}
+	if len(lines) == 0 || strings.TrimSpace(body) == "" {
+		if took != "" {
+			return took
+		}
+		return "(no output)"
+	}
+	first := lines[0]
+	if len(lines) > 1 {
+		first += " …"
+	}
+	if took == "" {
+		return first
+	}
+	return first + "  " + took
+}
+
+func visualTail(s string, width, n int) string {
+	s = strings.TrimRight(s, "\n")
+	if s == "" || n <= 0 {
+		return s
+	}
+	lines := visualLines(s, width)
+	if len(lines) <= n {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
 func toolResultBodyLines(raw string, expanded bool, lines int) string {
 	body, took := splitTrailingTook(raw)
 	if expanded {
