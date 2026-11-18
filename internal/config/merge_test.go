@@ -196,13 +196,36 @@ func TestApplyProjectMergesCompactionOverridesAndWarnings(t *testing.T) {
 
 func TestCopyUISettingsCopiesScrollbarAndWarnings(t *testing.T) {
 	dst := Config{}
-	src := Config{FullscreenScrollbar: "hidden", Warnings: map[string]any{"anthropicExtraUsage": false}}
+	src := Config{FullscreenScrollbar: "hidden", FullscreenWheelScrollLines: 7, Warnings: map[string]any{"anthropicExtraUsage": false}}
 	CopyUISettings(&dst, src)
 	if dst.ScrollbarMode() != "hidden" {
 		t.Fatalf("scrollbar=%s", dst.ScrollbarMode())
 	}
+	if n, auto := dst.WheelScrollLines(); auto || n != 7 {
+		t.Fatalf("wheel = %d auto=%v", n, auto)
+	}
 	if dst.AnthropicExtraUsageWarning() {
 		t.Fatal("warning should copy")
+	}
+}
+
+func TestApplyProjectOverlaysWheelScrollLines(t *testing.T) {
+	user := Config{FullscreenWheelScrollLines: 3}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".pigo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"fullscreenWheelScrollLines":"auto"}`
+	if err := os.WriteFile(filepath.Join(cwd, ".pigo", "settings.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := mustApplyProject(t, user, cwd, true)
+	if _, auto := got.WheelScrollLines(); !auto {
+		t.Fatal("project auto should replace the user line count")
+	}
+	untouched := mustApplyProject(t, user, t.TempDir(), true)
+	if n, auto := untouched.WheelScrollLines(); auto || n != 3 {
+		t.Fatalf("missing project file = %d auto=%v", n, auto)
 	}
 }
 

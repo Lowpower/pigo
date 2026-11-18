@@ -2,6 +2,8 @@ package tui
 
 import (
 	"path/filepath"
+	"sort"
+	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -68,6 +70,7 @@ func (m *Model) refreshSettingsItems() {
 		{"fullscreen-exit-output", "Fullscreen exit output", "Print the transcript or a resume hint when leaving fullscreen", m.cfg.FullscreenExit()},
 		{"fullscreen-copy-on-select", "Copy on select", "Automatically copy selected text in fullscreen mode", boolText(m.cfg.CopyOnSelect())},
 		{"fullscreen-scrollbar", "Fullscreen scrollbar", "Show a scrollbar in fullscreen mode", m.cfg.ScrollbarMode()},
+		{"fullscreen-wheel-scroll-lines", "Fullscreen wheel scrolling", "Lines per mouse-wheel event in fullscreen mode; 'auto' speeds up fast wheel spins where the terminal does not", wheelScrollLabel(m.cfg)},
 		{"anthropic-extra-usage", "Anthropic extra-usage warning", "Warn when Anthropic subscription auth bills extra usage", boolText(m.cfg.AnthropicExtraUsageWarning())},
 	}
 	items := make([]pickerItem, 0, len(rows))
@@ -84,6 +87,54 @@ func (m *Model) refreshSettingsItems() {
 			return
 		}
 	}
+}
+
+func wheelScrollLabel(cfg config.Config) string {
+	n, auto := cfg.WheelScrollLines()
+	if auto {
+		return "auto"
+	}
+	return strconv.Itoa(n)
+}
+
+func wheelScrollChoices(cur string) []string {
+	nums := []int{1, 2, 3, 5, 10}
+	if n, err := strconv.Atoi(cur); err == nil {
+		found := false
+		for _, v := range nums {
+			if v == n {
+				found = true
+				break
+			}
+		}
+		if !found {
+			nums = append(nums, n)
+			sort.Ints(nums)
+		}
+	}
+	out := make([]string, 0, len(nums)+1)
+	out = append(out, "auto")
+	for _, n := range nums {
+		out = append(out, strconv.Itoa(n))
+	}
+	return out
+}
+
+func storedWheelScrollLines(value string) any {
+	if value == "auto" {
+		return "auto"
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return "auto"
+	}
+	if n < 1 {
+		n = 1
+	}
+	if n > 100 {
+		n = 100
+	}
+	return n
 }
 
 func boolText(v bool) string {
@@ -125,6 +176,8 @@ func (m Model) settingChoices(id string) []string {
 		return []string{"true", "false"}
 	case "fullscreen-scrollbar":
 		return []string{"always", "auto", "hidden"}
+	case "fullscreen-wheel-scroll-lines":
+		return wheelScrollChoices(m.settingCurrent(id))
 	case "steering-mode", "follow-up-mode":
 		return []string{"one-at-a-time", "all"}
 	case "mermaid-rendering":
@@ -203,6 +256,8 @@ func (m Model) settingCurrent(id string) string {
 		return boolText(m.cfg.CopyOnSelect())
 	case "fullscreen-scrollbar":
 		return m.cfg.ScrollbarMode()
+	case "fullscreen-wheel-scroll-lines":
+		return wheelScrollLabel(m.cfg)
 	case "anthropic-extra-usage":
 		return boolText(m.cfg.AnthropicExtraUsageWarning())
 	case "cache-warming":
@@ -284,6 +339,8 @@ func (m *Model) applySetting(id, value string) tea.Cmd {
 		patch(func(c *config.Config) { c.FullscreenCopyOnSelect = &on })
 	case "fullscreen-scrollbar":
 		patch(func(c *config.Config) { c.FullscreenScrollbar = value })
+	case "fullscreen-wheel-scroll-lines":
+		patch(func(c *config.Config) { c.FullscreenWheelScrollLines = storedWheelScrollLines(value) })
 	case "anthropic-extra-usage":
 		on := value == "true"
 		patch(func(c *config.Config) { c.SetAnthropicExtraUsageWarning(on) })

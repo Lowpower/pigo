@@ -359,6 +359,18 @@
     "fullscreenCopyOnSelect": {
       "type": "boolean"
     },
+    "fullscreenWheelScrollLines": {
+      "description": "Lines per fullscreen mouse-wheel event. auto accelerates fast spins. A number is a fixed count, floored and clamped to 1-100 when read.",
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
     "warnings": {
       "type": "object",
       "description": "Startup notices.",

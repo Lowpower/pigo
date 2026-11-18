@@ -492,6 +492,7 @@ func (m *Model) reloadFromSession() {
 	m.prevDropAssistant = nil
 	m.history = m.engine.History()
 	m.transcript = transcriptFromMessages(*m, m.history)
+	m.sel = textSel{}
 }
 
 func transcriptFromMessages(m Model, msgs []ai.Message) []entry {

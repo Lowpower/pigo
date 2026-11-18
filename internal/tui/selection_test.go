@@ -11,6 +11,8 @@ import (
 
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/config"
+	"github.com/Lowpower/pigo/internal/runtime"
+	"github.com/Lowpower/pigo/internal/session"
 )
 
 func TestUseMouseTrackingFollowsFullscreenOnly(t *testing.T) {
@@ -214,6 +216,32 @@ func cmdTypes(t *testing.T, cmd tea.Cmd) []string {
 	}
 	walk(cmd)
 	return out
+}
+
+func TestNewAndClearDropSelection(t *testing.T) {
+	for _, cmd := range []string{"/new", "/clear"} {
+		t.Run(cmd, func(t *testing.T) {
+			m := New(fullscreenCfg())
+			m.sel = textSel{active: true, dragged: true, ax: 1, ay: 1, fx: 4, fy: 2}
+			m.transcript = []entry{{role: "assistant", rendered: "old"}}
+			m = submit(m, cmd)
+			if m.sel.has() {
+				t.Fatalf("%s should clear the selection", cmd)
+			}
+		})
+	}
+}
+
+func TestReloadFromSessionDropsSelection(t *testing.T) {
+	sess := session.New(t.TempDir(), t.TempDir())
+	m := New(fullscreenCfg())
+	m.engine = &runtime.Engine{Opts: runtime.Options{Session: sess}}
+	m.sel = textSel{active: true, dragged: true, ax: 1, ay: 1, fx: 4, fy: 2}
+	m.transcript = []entry{{role: "assistant", rendered: "old"}}
+	m.reloadFromSession()
+	if m.sel.has() {
+		t.Fatal("reloading the session should clear the selection")
+	}
 }
 
 func containsType(types []string, name string) bool {

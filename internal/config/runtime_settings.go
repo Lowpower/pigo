@@ -3,7 +3,9 @@ package config
 import (
 	"crypto/rand"
 	"fmt"
+	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -244,6 +246,70 @@ func (c Config) TrueColorMode() string {
 		return trueColorMode(v)
 	}
 	return trueColorMode(c.Terminal.TrueColor)
+}
+
+// WheelScrollLines is the fullscreen wheel step. auto is true for the default
+// and for any value that is not a finite number. Otherwise n is that number
+// floored and clamped to 1–100.
+func (c Config) WheelScrollLines() (n int, auto bool) {
+	if c.FullscreenWheelScrollLines == nil {
+		return 0, true
+	}
+	return normalizeWheelScrollLines(c.FullscreenWheelScrollLines)
+}
+
+// wheelScrollSaveValue is the JSON value to persist. ok is false when the key
+// was never set, so a save leaves the file untouched.
+func (c Config) wheelScrollSaveValue() (any, bool) {
+	if c.FullscreenWheelScrollLines == nil {
+		return nil, false
+	}
+	n, auto := normalizeWheelScrollLines(c.FullscreenWheelScrollLines)
+	if auto {
+		return "auto", true
+	}
+	return n, true
+}
+
+func normalizeWheelScrollLines(v any) (n int, auto bool) {
+	switch x := v.(type) {
+	case string:
+		s := strings.ToLower(strings.TrimSpace(x))
+		if s == "" || s == "auto" {
+			return 0, true
+		}
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, true
+		}
+		return clampWheelScrollLines(f), false
+	case float64:
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return 0, true
+		}
+		return clampWheelScrollLines(x), false
+	case float32:
+		return clampWheelScrollLines(float64(x)), false
+	case int:
+		return clampWheelScrollLines(float64(x)), false
+	case int64:
+		return clampWheelScrollLines(float64(x)), false
+	case int32:
+		return clampWheelScrollLines(float64(x)), false
+	default:
+		return 0, true
+	}
+}
+
+func clampWheelScrollLines(f float64) int {
+	n := int(math.Floor(f))
+	if n < 1 {
+		return 1
+	}
+	if n > 100 {
+		return 100
+	}
+	return n
 }
 
 // CopyOnSelect reports whether fullscreen mouse-select copy is enabled (default true).
