@@ -544,7 +544,7 @@ func addSummaryUsage(a, b ai.Usage) ai.Usage {
 func turnPrefixUserContent(msgs []ai.Message) string {
 	var b strings.Builder
 	b.WriteString("<conversation>\n")
-	b.WriteString(serializeConversation(msgs))
+	b.WriteString(SerializeConversation(msgs))
 	b.WriteString("\n</conversation>\n\n")
 	b.WriteString(TurnPrefixSummarizationPrompt)
 	return b.String()
@@ -553,7 +553,7 @@ func turnPrefixUserContent(msgs []ai.Message) string {
 func summaryUserContent(msgs []ai.Message, previous, extra string) string {
 	var b strings.Builder
 	b.WriteString("<conversation>\n")
-	b.WriteString(serializeConversation(msgs))
+	b.WriteString(SerializeConversation(msgs))
 	b.WriteString("\n</conversation>\n\n")
 	prompt := SummarizationPrompt
 	if previous != "" {

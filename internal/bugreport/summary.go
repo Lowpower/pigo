@@ -64,24 +64,8 @@ func SummaryUserPrompt(msgs []ai.Message, hint string, total int) string {
 		fmt.Fprintf(&b, "Note: only the last %d of %d messages are shown.\n\n", len(msgs), total)
 	}
 	b.WriteString("<conversation>\n")
-	for _, m := range msgs {
-		role := m.Role
-		if role == "" {
-			role = "message"
-		}
-		text := m.Text()
-		if text == "" && m.Assistant != nil {
-			text = m.Assistant.Text()
-			if text == "" && m.Assistant.ErrorMessage != "" {
-				text = m.Assistant.ErrorMessage
-			}
-		}
-		b.WriteString(role)
-		b.WriteString(": ")
-		b.WriteString(text)
-		b.WriteByte('\n')
-	}
-	b.WriteString("</conversation>")
+	b.WriteString(compaction.SerializeConversation(msgs))
+	b.WriteString("\n</conversation>")
 	if strings.TrimSpace(hint) != "" {
 		b.WriteString("\n\n<user-report>\n")
 		b.WriteString(strings.TrimSpace(hint))
