@@ -6,12 +6,14 @@ TUI colour sets. Built-ins: `system` (default), `default`, `dark`, `light`.
 to `default`.
 
 `system` is reserved: a theme file of that name is ignored. It is built from
-the terminal when the TUI starts (OSC 10, OSC 11, and ANSI colors 0–15, at
-most 100ms). Light or dark follows the background color, not the terminal's
-light/dark report alone. With a background and a full palette, hues come from
-the palette. With only a background, hues come from built-in families. With
-neither, tokens use ANSI indexes and the terminal's own default colors. An
-explicit `dark`, `light`, `default`, or custom theme does not query the terminal.
+the terminal when the TUI starts (mode 2031, OSC 10, OSC 11, and ANSI colors
+0–15, at most 100ms). Light or dark follows the background color when the
+terminal reports one. Otherwise it follows the terminal's light/dark report,
+then `COLORFGBG`, then dark. With a background and a full palette, hues come
+from the palette. With only a background, hues come from built-in families.
+With neither, tokens use ANSI indexes and the terminal's own default colors.
+An explicit `dark`, `light`, `default`, or custom theme does not query the
+terminal.
 
 ## Discovery
 

@@ -53,6 +53,7 @@ func readTerminalColors(in, out *os.File, timeout time.Duration) theme.SystemInp
 	if _, err := w.Write([]byte(terminalColorQuery)); err != nil {
 		return finishSystemInput(theme.SystemInput{})
 	}
+	defer func() { _, _ = w.Write([]byte(terminalColorSchemeDisable)) }()
 	if err := in.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return finishSystemInput(theme.SystemInput{})
 	}
@@ -60,20 +61,21 @@ func readTerminalColors(in, out *os.File, timeout time.Duration) theme.SystemInp
 	buf := make([]byte, 0, 4096)
 	tmp := make([]byte, 4096)
 	var parsed theme.SystemInput
-	done := false
-	for !done {
+	for {
 		n, err := in.Read(tmp)
 		if n > 0 {
 			buf = append(buf, tmp[:n]...)
-			parsed, done = parseColorReplies(buf)
+			var colorDone bool
+			parsed, colorDone = parseColorReplies(buf)
+			if colorQueryStop(parsed, colorDone) {
+				return finishSystemInput(parsed)
+			}
 		}
 		if err != nil {
 			break
 		}
 	}
-	if !done {
-		parsed, _ = parseColorReplies(buf)
-	}
+	parsed, _ = parseColorReplies(buf)
 	return finishSystemInput(parsed)
 }
 

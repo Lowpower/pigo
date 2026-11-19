@@ -16,12 +16,16 @@ type RGB struct {
 
 // SystemInput is what the terminal reported. A nil background selects the
 // ANSI-index fallback. Saturation nil means 1.
+// ReportedAppearance is the terminal light/dark report ("dark" or "light").
+// The theme uses AppearanceHint, not this field. Callers copy the report into
+// AppearanceHint only when Background is nil.
 type SystemInput struct {
-	Foreground     *RGB
-	Background     *RGB
-	Palette        []RGB
-	Saturation     *float64
-	AppearanceHint string
+	Foreground         *RGB
+	Background         *RGB
+	Palette            []RGB
+	Saturation         *float64
+	AppearanceHint     string
+	ReportedAppearance string
 }
 
 type family struct {
