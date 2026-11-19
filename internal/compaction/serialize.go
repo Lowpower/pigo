@@ -18,10 +18,12 @@ const SummarizationSystemPrompt = `You are a context summarization assistant. Yo
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`
 
-// serializeConversation renders messages as plain text so the summarizer cannot
-// treat them as a live conversation. Empty sections are omitted. Tool results
-// longer than toolResultMaxChars keep their prefix and record the cut length.
-func serializeConversation(msgs []ai.Message) string {
+// SerializeConversation renders messages as plain text so the summarizer cannot
+// treat them as a live conversation. Empty sections are omitted. Thinking is
+// omitted; the transcript keeps visible text, tool calls, and tool results.
+// Tool results longer than toolResultMaxChars keep their prefix and record the
+// cut length.
+func SerializeConversation(msgs []ai.Message) string {
 	var parts []string
 	for _, msg := range msgs {
 		switch msg.Role {
@@ -48,7 +50,6 @@ func userText(msg ai.Message) string {
 }
 
 func assistantParts(msg ai.Message) []string {
-	var thinking []string
 	var toolCalls []string
 	var hasText bool
 	var text string
@@ -58,10 +59,6 @@ func assistantParts(msg ai.Message) []string {
 				continue
 			}
 			switch block.Type {
-			case ai.KindThinking:
-				if block.Thinking != "" {
-					thinking = append(thinking, block.Thinking)
-				}
 			case ai.KindText:
 				hasText = true
 				text += block.Text
@@ -75,9 +72,6 @@ func assistantParts(msg ai.Message) []string {
 		text = msg.Content
 	}
 	var parts []string
-	if len(thinking) > 0 {
-		parts = append(parts, "[Assistant thinking]: "+strings.Join(thinking, "\n"))
-	}
 	if hasText {
 		parts = append(parts, "[Assistant]: "+text)
 	}

@@ -741,6 +741,7 @@ func TestSerializeConversation(t *testing.T) {
 			Role: ai.RoleAssistant,
 			Assistant: &ai.AssistantMessage{Content: []*ai.Content{
 				{Type: ai.KindThinking, Thinking: "plan"},
+				{Type: ai.KindThinking, Redacted: true, Thinking: "[Reasoning redacted]"},
 				{Type: ai.KindText, Text: "running"},
 				{Type: ai.KindToolCall, ToolName: "read", Arguments: map[string]any{"path": "foo.ts"}},
 				{Type: ai.KindToolCall, ToolName: "bash", Arguments: map[string]any{"command": "ls", "block": false}},
@@ -750,10 +751,9 @@ func TestSerializeConversation(t *testing.T) {
 		{Role: ai.RoleUser, Content: ""},
 		{Role: ai.RoleToolResult, Content: ""},
 	}
-	got := serializeConversation(msgs)
+	got := SerializeConversation(msgs)
 	want := strings.Join([]string{
 		"[User]: do it",
-		"[Assistant thinking]: plan",
 		"[Assistant]: running",
 		`[Assistant tool calls]: read(path="foo.ts"); bash(block=false, command="ls")`,
 		"[Tool result]: file contents",
@@ -761,11 +761,14 @@ func TestSerializeConversation(t *testing.T) {
 	if got != want {
 		t.Fatalf("serialized =\n%s\nwant\n%s", got, want)
 	}
+	if strings.Contains(got, "plan") || strings.Contains(got, "[Reasoning redacted]") || strings.Contains(got, "[Assistant thinking]") {
+		t.Fatalf("thinking leaked into transcript:\n%s", got)
+	}
 }
 
 func TestSerializeConversationTruncatesToolResults(t *testing.T) {
 	exact := strings.Repeat("b", toolResultMaxChars)
-	got := serializeConversation([]ai.Message{{Role: ai.RoleToolResult, Content: exact}})
+	got := SerializeConversation([]ai.Message{{Role: ai.RoleToolResult, Content: exact}})
 	if got != "[Tool result]: "+exact {
 		t.Fatalf("exact result was truncated: len=%d", len(got))
 	}
@@ -774,7 +777,7 @@ func TestSerializeConversationTruncatesToolResults(t *testing.T) {
 	}
 
 	body := strings.Repeat("a", toolResultMaxChars+1)
-	got = serializeConversation([]ai.Message{{Role: ai.RoleToolResult, Content: body}})
+	got = SerializeConversation([]ai.Message{{Role: ai.RoleToolResult, Content: body}})
 	prefix := "[Tool result]: " + strings.Repeat("a", toolResultMaxChars)
 	if !strings.HasPrefix(got, prefix) {
 		t.Fatalf("truncated result does not keep the first %d characters", toolResultMaxChars)

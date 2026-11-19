@@ -130,7 +130,7 @@ func GenerateBranchSummary(ctx context.Context, sf ai.StreamFn, model string, ms
 	} else if opts.CustomInstructions != "" {
 		instructions = BranchSummaryPrompt + "\n\nAdditional focus: " + opts.CustomInstructions
 	}
-	prompt := "# Conversation\n" + serializeConversation(msgs[oldest:]) + "\n\n# Instructions\n" + instructions
+	prompt := "# Conversation\n" + SerializeConversation(msgs[oldest:]) + "\n\n# Instructions\n" + instructions
 
 	stream, err := sf(ctx, ai.Context{
 		System:   SummarizationSystemPrompt,
