@@ -13,9 +13,11 @@ import (
 
 const terminalColorQueryTimeout = 100 * time.Millisecond
 
-// OSC 10, OSC 11, OSC 4;0-15, then DA1. DA1 is answered even when color queries are ignored.
+// Mode 2031 asks for the light/dark report, then OSC 10, OSC 11, OSC 4;0-15,
+// then DA1. DA1 is answered even when color queries are ignored.
 var terminalColorQuery = func() string {
 	var b strings.Builder
+	b.WriteString("\x1b[?2031h")
 	b.WriteString("\x1b]10;?\x07\x1b]11;?\x07")
 	for i := 0; i < 16; i++ {
 		b.WriteString("\x1b]4;")
@@ -26,9 +28,13 @@ var terminalColorQuery = func() string {
 	return b.String()
 }()
 
+// terminalColorSchemeDisable turns mode 2031 notifications off after the startup query.
+const terminalColorSchemeDisable = "\x1b[?2031l"
+
 var (
-	oscColorPattern = regexp.MustCompile(`(?i)^(?:(1[01])|4;(\d{1,3}));(.*)$`)
-	da1Pattern      = regexp.MustCompile(`^\x1b\[\?[\d;]*c$`)
+	oscColorPattern          = regexp.MustCompile(`(?i)^(?:(1[01])|4;(\d{1,3}));(.*)$`)
+	da1Pattern               = regexp.MustCompile(`^\x1b\[\?[\d;]*c$`)
+	colorSchemeReportPattern = regexp.MustCompile(`^\x1b\[\?997;([12])n$`)
 )
 
 type colorQueryState struct {
@@ -37,6 +43,7 @@ type colorQueryState struct {
 	palette    [16]theme.RGB
 	have       [16]bool
 	replied    map[string]bool
+	reported   string
 	done       bool
 }
 
@@ -45,7 +52,11 @@ func newColorQueryState() *colorQueryState {
 }
 
 func (q *colorQueryState) result() (theme.SystemInput, bool) {
-	in := theme.SystemInput{Foreground: q.foreground, Background: q.background}
+	in := theme.SystemInput{
+		Foreground:         q.foreground,
+		Background:         q.background,
+		ReportedAppearance: q.reported,
+	}
 	complete := true
 	for _, ok := range q.have {
 		if !ok {
@@ -64,7 +75,8 @@ func (q *colorQueryState) result() (theme.SystemInput, bool) {
 func parseColorReplies(data []byte) (theme.SystemInput, bool) {
 	q := newColorQueryState()
 	rest := data
-	for len(rest) > 0 && !q.done {
+	// Keep scanning after DA1 so a light/dark report in the same buffer is kept.
+	for len(rest) > 0 {
 		i := bytes.IndexByte(rest, 0x1b)
 		if i < 0 {
 			break
@@ -85,6 +97,9 @@ func parseColorReplies(data []byte) (theme.SystemInput, bool) {
 			end, ok := csiEnd(rest)
 			if !ok {
 				return q.result()
+			}
+			if scheme, ok := colorSchemeReport(rest[:end]); ok {
+				q.reported = scheme
 			}
 			if da1Pattern.Match(rest[:end]) {
 				q.done = true
@@ -107,6 +122,17 @@ func oscEnd(buf []byte) (content, next int, ok bool) {
 		}
 	}
 	return 0, 0, false
+}
+
+func colorSchemeReport(seq []byte) (string, bool) {
+	m := colorSchemeReportPattern.FindSubmatch(seq)
+	if m == nil {
+		return "", false
+	}
+	if string(m[1]) == "2" {
+		return "light", true
+	}
+	return "dark", true
 }
 
 func csiEnd(buf []byte) (int, bool) {
@@ -233,9 +259,24 @@ func finishSystemInput(in theme.SystemInput) theme.SystemInput {
 	if in.Background != nil || in.AppearanceHint != "" {
 		return in
 	}
+	if in.ReportedAppearance == "dark" || in.ReportedAppearance == "light" {
+		in.AppearanceHint = in.ReportedAppearance
+		return in
+	}
 	in.AppearanceHint = theme.ColorFgBgAppearance(os.Getenv("COLORFGBG"))
 	if in.AppearanceHint == "" {
 		in.AppearanceHint = "dark"
 	}
 	return in
+}
+
+// colorQueryStop reports whether the startup read can return. A scheme report
+// does not finish the color query. After the color query, a background or a
+// scheme report is enough; otherwise the caller keeps the remaining timeout
+// for a late report.
+func colorQueryStop(in theme.SystemInput, colorDone bool) bool {
+	if !colorDone {
+		return false
+	}
+	return in.Background != nil || in.ReportedAppearance == "dark" || in.ReportedAppearance == "light"
 }
