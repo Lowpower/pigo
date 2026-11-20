@@ -55,7 +55,7 @@ func resolveExportColors(themeName, cwd, agentDir string) exportColors {
 		raw, _ = htmlFS.ReadFile("html/themes/dark.json")
 	}
 	base := parseThemeFile(raw)
-	isLight := fileName == "light.json"
+	isLight := strings.EqualFold(th.Appearance, "light") || (th.Appearance == "" && fileName == "light.json")
 	if len(th.Colors) > 0 {
 		for k, v := range th.Colors {
 			if css := colorToCSS(v, isLight); css != "" {

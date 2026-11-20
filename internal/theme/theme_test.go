@@ -10,9 +10,23 @@ import (
 )
 
 func TestLoadBuiltin(t *testing.T) {
-	th := Load("light", "", "")
-	if th.Name != "light" || th.Accent != "162" {
-		t.Fatalf("%+v", th)
+	light := Load("light", "", "")
+	if light.Name != "light" || light.Appearance != "light" || light.Accent != formatHex(okhslToRgb(295, 0.60, 0.46)) {
+		t.Fatalf("light = %+v", light)
+	}
+	if light.Colors["text"] != formatHex(okhslToRgb(225, 0.05, 0.27)) || light.ExportPageBg == "" {
+		t.Fatalf("light tokens = %+v", light)
+	}
+	dark := Load("dark", "", "")
+	if dark.Name != "dark" || dark.Appearance != "dark" || dark.Accent != formatHex(okhslToRgb(295, 0.50, 0.67)) {
+		t.Fatalf("dark = %+v", dark)
+	}
+	if dark.Error != formatHex(okhslToRgb(20, 0.72, 0.67)) {
+		t.Fatalf("dark error = %s", dark.Error)
+	}
+	def := Load("default", "", "")
+	if def.Name != "default" || def.Accent != "205" || def.Colors != nil {
+		t.Fatalf("default = %+v", def)
 	}
 }
 
@@ -207,7 +221,7 @@ func TestUnknownThemeFields(t *testing.T) {
 	path := filepath.Join(dir, "bad.json")
 	body := `{
 		"name": "bad",
-		"appearance": "dark",
+		"extra": true,
 		"accent": "1",
 		"colors": {"accent": "#fff", "scrollbarThmb": "#000"},
 		"export": {"pageBg": "#111", "nope": "#222"}
@@ -220,7 +234,7 @@ func TestUnknownThemeFields(t *testing.T) {
 		t.Fatal("invalid theme was loaded")
 	}
 	joined := strings.Join(res.Errors, "\n")
-	for _, want := range []string{path, `unknown field "appearance"`, `unknown color "scrollbarThmb"`, `unknown field "nope"`} {
+	for _, want := range []string{path, `unknown field "extra"`, `unknown color "scrollbarThmb"`, `unknown field "nope"`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in:\n%s", want, joined)
 		}

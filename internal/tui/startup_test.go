@@ -162,7 +162,7 @@ func TestStartupShowsThemeFieldError(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"name":"bad","accent":"1","appearance":"dark"}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"name":"bad","accent":"1","nope":true}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	eng, err := runtime.New(context.Background(), runtime.Options{
@@ -183,7 +183,7 @@ func TestStartupShowsThemeFieldError(t *testing.T) {
 	m.width = 500
 	m.loadTheme(m.cfg.Theme)
 	view := m.View()
-	if !strings.Contains(view, `unknown field "appearance"`) || !strings.Contains(view, path) {
+	if !strings.Contains(view, `unknown field "nope"`) || !strings.Contains(view, path) {
 		t.Fatalf("startup missing theme error:\n%s", view)
 	}
 	if !strings.Contains(view, "look up its docs") {
@@ -192,7 +192,7 @@ func TestStartupShowsThemeFieldError(t *testing.T) {
 
 	m.cfg.QuietStartupFlag = true
 	quiet := m.View()
-	if !strings.Contains(quiet, `unknown field "appearance"`) || !strings.Contains(quiet, path) {
+	if !strings.Contains(quiet, `unknown field "nope"`) || !strings.Contains(quiet, path) {
 		t.Fatalf("quiet startup hid theme error:\n%s", quiet)
 	}
 	if strings.Contains(quiet, "look up its docs") {
@@ -205,7 +205,7 @@ func TestStartupShowsThemeFieldError(t *testing.T) {
 	for _, ent := range reloaded.transcript {
 		note += ent.rendered
 	}
-	if !strings.Contains(note, "reloaded") || !strings.Contains(note, `unknown field "appearance"`) || !strings.Contains(note, path) {
+	if !strings.Contains(note, "reloaded") || !strings.Contains(note, `unknown field "nope"`) || !strings.Contains(note, path) {
 		t.Fatalf("reload note = %q", note)
 	}
 }

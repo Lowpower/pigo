@@ -134,7 +134,7 @@ func TestExplicitDarkIgnoresTerminal(t *testing.T) {
 		Name:     "dark",
 		Terminal: SystemInput{Background: &RGB{R: 255, G: 255, B: 255}},
 	})
-	if th.Name != "dark" || th.Accent != "205" {
+	if th.Name != "dark" || th.Appearance != "dark" || th.Accent != formatHex(okhslToRgb(295, 0.50, 0.67)) {
 		t.Fatalf("%+v", th)
 	}
 }

@@ -1,9 +1,10 @@
 # Themes
 
 TUI colour sets. Built-ins: `system` (default), `default`, `dark`, `light`.
-`default`, `dark`, and `light` are seven ANSI colour numbers (`user`,
-`assistant`, `tool`, `error`, `muted`, `accent`). An unknown name falls back
-to `default`.
+`default` is seven ANSI colour numbers (`user`, `assistant`, `tool`, `error`,
+`muted`, `accent`) and fills those fields when a shorthand file omits them.
+`dark` and `light` are the pi v1.3.0 OKHSL palettes. An unknown name falls
+back to `default`.
 
 `system` is reserved: a theme file of that name is ignored. It is built from
 the terminal when the TUI starts (mode 2031, OSC 10, OSC 11, and ANSI colors
@@ -46,9 +47,34 @@ Minimal 7-key file (name defaults to the file stem):
 }
 ```
 
-Extended form: `{ "name", "vars", "colors", "export": { "pageBg", "cardBg", "infoBg" } }`.
+Extended form: `{ "name", "appearance", "vars", "colors", "export": { "pageBg", "cardBg", "infoBg" } }`.
 `vars` are expanded inside `colors`. A shorthand file may also include `colors`.
 `colors` only accepts known tokens. `export` only accepts `pageBg`, `cardBg`,
 and `infoBg`.
+
+`appearance` is `"dark"` or `"light"`: the background the theme is designed for.
+When it is omitted, pigo detects it from the lightness of the theme's own
+foreground and background colours. Palette indexes 0–15 are ignored for that
+detection. Any other value is an error. A setting such as `light/dark` still
+selects the name after the slash.
+
+A colour is one of:
+
+| Form | Example |
+| --- | --- |
+| RGB hexadecimal | `"#0af"` or `"#00aaff"` |
+| OKLCH | `"oklch(62% 0.1 200)"` |
+| OKHSL | `"okhsl(250 60% 55%)"` |
+| 256-colour index | `39` or `"39"` |
+| Variable reference | `"primary"` |
+| Terminal default | `""` |
+
+`#rgb` is stored as `#rrggbb`. `oklch()` and `okhsl()` are converted to
+`#rrggbb` (out-of-gamut OKLCH keeps its hue and loses chroma until it fits).
+An index stays an index, so the terminal's own palette draws it. An empty
+string stays empty and the terminal default colour is used. A missing
+variable, a circular variable, or any other syntax is an error at load and
+on `/reload`. HTML export uses these same resolved values. OKHSL in an export
+colour is already hexadecimal because CSS does not support it.
 
 A sample lives at [`examples/themes/high-contrast.json`](../examples/themes/high-contrast.json).

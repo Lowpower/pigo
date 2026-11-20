@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/Lowpower/pigo/main/docs/schemas/theme.schema.json",
   "title": "pigo theme",
-  "description": "Theme file. A 7-colour shorthand, an extended colors object, or both. Unknown keys are errors. Colour syntax is not checked.",
+  "description": "Theme file. A 7-colour shorthand, an extended colors object, or both. Unknown keys are errors. Colour syntax is checked when the file is loaded.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -13,6 +13,11 @@
     "name": {
       "type": "string",
       "description": "Theme name. Must not contain '/'."
+    },
+    "appearance": {
+      "type": "string",
+      "enum": ["dark", "light"],
+      "description": "Background the theme is designed for. Detected from the theme colors when omitted."
     },
     "user": {
       "$ref": "#/$defs/color",
@@ -239,13 +244,15 @@
   },
   "$defs": {
     "color": {
-      "description": "A colour string or an integer palette index. The string syntax is not checked.",
+      "description": "Hex (#rgb or #rrggbb), oklch(), okhsl(), a variable name, an empty string for the terminal default, or an integer palette index 0-255. Syntax is checked when the file is loaded.",
       "anyOf": [
         {
           "type": "string"
         },
         {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
         }
       ]
     }
