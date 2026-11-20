@@ -16,8 +16,10 @@ import (
 // Theme is a named colour set for the TUI.
 //
 // Disk files may be a 7-key colour object, or an extended theme
-// ({name, vars, colors, export}). Unknown keys are errors. Known colour
-// tokens are kept in Colors and mapped onto the 7 TUI fields.
+// ({name, appearance, vars, colors, export}). Unknown keys are errors.
+// Colours may be a palette index, #rgb, #rrggbb, oklch(), okhsl(), a var
+// name, or "" for the terminal default. Known colour tokens are kept in
+// Colors and mapped onto the 7 TUI fields.
 type Theme struct {
 	Name      string `json:"name"`
 	User      string `json:"user"`
@@ -51,10 +53,10 @@ type LoadOptions struct {
 	Terminal    SystemInput
 }
 
+// default is the shorthand fallback. dark and light are appended from the
+// embedded v1.3.0 theme files.
 var builtins = []Theme{
 	{Name: "default", User: "42", Assistant: "252", Tool: "178", Error: "196", Muted: "244", Accent: "205"},
-	{Name: "dark", User: "42", Assistant: "252", Tool: "178", Error: "196", Muted: "244", Accent: "205"},
-	{Name: "light", User: "22", Assistant: "235", Tool: "130", Error: "160", Muted: "240", Accent: "162"},
 }
 
 // Load returns the named theme, searching agentDir/themes and cwd/.pigo/themes.
@@ -250,40 +252,46 @@ func loadFile(path string) (Theme, []string) {
 	return t, nil
 }
 
-type colorVal string
+// colorVal is one JSON color. Set is false for a missing key or null.
+type colorVal struct {
+	Value string
+	Set   bool
+}
 
 func (c *colorVal) UnmarshalJSON(b []byte) error {
 	if string(b) == "null" {
-		*c = ""
+		*c = colorVal{}
 		return nil
 	}
+	c.Set = true
 	if len(b) > 0 && b[0] == '"' {
 		var s string
 		if err := json.Unmarshal(b, &s); err != nil {
 			return err
 		}
-		*c = colorVal(s)
+		c.Value = s
 		return nil
 	}
 	var n int
 	if err := json.Unmarshal(b, &n); err != nil {
 		return err
 	}
-	*c = colorVal(strconv.Itoa(n))
+	c.Value = strconv.Itoa(n)
 	return nil
 }
 
 type fileTheme struct {
-	Name      string              `json:"name"`
-	User      colorVal            `json:"user"`
-	Assistant colorVal            `json:"assistant"`
-	Tool      colorVal            `json:"tool"`
-	Error     colorVal            `json:"error"`
-	Muted     colorVal            `json:"muted"`
-	Accent    colorVal            `json:"accent"`
-	Vars      map[string]colorVal `json:"vars"`
-	Colors    map[string]colorVal `json:"colors"`
-	Export    *struct {
+	Name       string              `json:"name"`
+	Appearance string              `json:"appearance"`
+	User       colorVal            `json:"user"`
+	Assistant  colorVal            `json:"assistant"`
+	Tool       colorVal            `json:"tool"`
+	Error      colorVal            `json:"error"`
+	Muted      colorVal            `json:"muted"`
+	Accent     colorVal            `json:"accent"`
+	Vars       map[string]colorVal `json:"vars"`
+	Colors     map[string]colorVal `json:"colors"`
+	Export     *struct {
 		PageBg colorVal `json:"pageBg"`
 		CardBg colorVal `json:"cardBg"`
 		InfoBg colorVal `json:"infoBg"`
@@ -297,6 +305,7 @@ var themeFileKeys = map[string]bool{
 	"user": true, "assistant": true, "tool": true,
 	"error": true, "muted": true, "accent": true,
 	"vars": true, "colors": true, "export": true,
+	"appearance": true,
 }
 
 // themeExportKeys are the only keys allowed under export.
@@ -322,22 +331,7 @@ func parseThemeFile(b []byte) (Theme, []string) {
 	if len(problems) > 0 || !ok {
 		return Theme{}, problems
 	}
-	if len(raw.Colors) > 0 {
-		return fromPi(raw), nil
-	}
-	t := Theme{
-		Name:      raw.Name,
-		User:      string(raw.User),
-		Assistant: string(raw.Assistant),
-		Tool:      string(raw.Tool),
-		Error:     string(raw.Error),
-		Muted:     string(raw.Muted),
-		Accent:    string(raw.Accent),
-	}
-	if t.Name == "" && t.User == "" && t.Accent == "" {
-		return Theme{}, nil
-	}
-	return overlayBuiltin(t), nil
+	return materialize(raw)
 }
 
 func validateThemeJSON(b []byte) (problems []string, raw fileTheme, ok bool) {
@@ -366,6 +360,12 @@ func validateThemeJSON(b []byte) (problems []string, raw fileTheme, ok bool) {
 		var schema string
 		if json.Unmarshal(rawSchema, &schema) != nil {
 			problems = append(problems, `invalid field "$schema"`)
+		}
+	}
+	if rawAppearance, exists := doc["appearance"]; exists && string(rawAppearance) != "null" {
+		var appearance string
+		if json.Unmarshal(rawAppearance, &appearance) != nil || (appearance != "dark" && appearance != "light") {
+			problems = append(problems, `invalid field "appearance"`)
 		}
 	}
 	for _, key := range shorthandColorKeys {
@@ -442,93 +442,203 @@ func validColorRaw(raw json.RawMessage) bool {
 	return false
 }
 
-func fromPi(raw fileTheme) Theme {
-	vars := map[string]string{}
-	for k, v := range raw.Vars {
-		vars[k] = string(v)
+func materialize(raw fileTheme) (Theme, []string) {
+	vars := varMap(raw.Vars)
+	if len(raw.Colors) > 0 {
+		return materializeExtended(raw, vars)
 	}
-	colors := map[string]string{}
-	for k, v := range raw.Colors {
-		colors[k] = resolveRef(string(v), vars, nil)
-	}
-	if _, ok := colors["thinkingMax"]; !ok {
-		colors["thinkingMax"] = colors["thinkingXhigh"]
-	}
-	if _, ok := colors["scrollbarThumb"]; !ok {
-		colors["scrollbarThumb"] = colors["selectedBg"]
-	}
-	if _, ok := colors["searchMatchBg"]; !ok {
-		colors["searchMatchBg"] = colors["selectedBg"]
-	}
-	if _, ok := colors["searchMatchText"]; !ok {
-		colors["searchMatchText"] = colors["text"]
-	}
-	t := Theme{Name: raw.Name, Colors: colors}
-	if c := colors["userMessageText"]; c != "" {
-		t.User = c
-	} else {
-		t.User = colors["accent"]
-	}
-	t.Assistant = colors["text"]
-	t.Tool = colors["toolTitle"]
-	t.Error = colors["error"]
-	t.Muted = colors["muted"]
-	t.Accent = colors["accent"]
-	if raw.Export != nil {
-		t.ExportPageBg = resolveRef(string(raw.Export.PageBg), vars, nil)
-		t.ExportCardBg = resolveRef(string(raw.Export.CardBg), vars, nil)
-		t.ExportInfoBg = resolveRef(string(raw.Export.InfoBg), vars, nil)
-	}
-	return overlayBuiltin(t)
+	return materializeShorthand(raw, vars)
 }
 
-func overlayBuiltin(t Theme) Theme {
+func varMap(raw map[string]colorVal) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		if v.Set {
+			out[k] = v.Value
+		}
+	}
+	return out
+}
+
+func materializeShorthand(raw fileTheme, vars map[string]string) (Theme, []string) {
+	t := Theme{Name: raw.Name}
+	set := map[string]bool{}
+	var problems []string
+	apply := func(dst *string, key string, cv colorVal) {
+		if !cv.Set {
+			return
+		}
+		n, err := resolveColor(cv.Value, vars, nil)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("invalid color %q: %s", key, err))
+			return
+		}
+		*dst = n
+		set[key] = true
+	}
+	apply(&t.User, "user", raw.User)
+	apply(&t.Assistant, "assistant", raw.Assistant)
+	apply(&t.Tool, "tool", raw.Tool)
+	apply(&t.Error, "error", raw.Error)
+	apply(&t.Muted, "muted", raw.Muted)
+	apply(&t.Accent, "accent", raw.Accent)
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return Theme{}, problems
+	}
+	if t.Name == "" && !set["user"] && !set["accent"] {
+		return Theme{}, nil
+	}
+	t.Appearance = raw.Appearance
+	if t.Appearance == "" {
+		var fg []string
+		add := func(key, value string) {
+			if set[key] {
+				fg = append(fg, value)
+			}
+		}
+		add("user", t.User)
+		add("assistant", t.Assistant)
+		add("tool", t.Tool)
+		add("error", t.Error)
+		add("muted", t.Muted)
+		add("accent", t.Accent)
+		t.Appearance = detectAppearance(fg, nil)
+	}
+	return overlayUnset(t, set), nil
+}
+
+func materializeExtended(raw fileTheme, vars map[string]string) (Theme, []string) {
+	colors := map[string]string{}
+	var problems []string
+	keys := make([]string, 0, len(raw.Colors))
+	for k := range raw.Colors {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		cv := raw.Colors[k]
+		if !cv.Set {
+			continue
+		}
+		n, err := resolveColor(cv.Value, vars, nil)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("invalid color %q: %s", k, err))
+			continue
+		}
+		colors[k] = n
+	}
+	var page, card, info string
+	pageSet, cardSet, infoSet := false, false, false
+	if raw.Export != nil {
+		page, pageSet = resolveField(&problems, "pageBg", raw.Export.PageBg, vars)
+		card, cardSet = resolveField(&problems, "cardBg", raw.Export.CardBg, vars)
+		info, infoSet = resolveField(&problems, "infoBg", raw.Export.InfoBg, vars)
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return Theme{}, problems
+	}
+	applyColorFallbacks(colors)
+	base := builtins[0]
+	t := Theme{Name: raw.Name, Colors: colors}
+	if t.Name == "" {
+		t.Name = base.Name
+	}
+	t.User = pickColor(colors, "userMessageText", "accent", base.User)
+	t.Assistant = pickColor(colors, "text", "", base.Assistant)
+	t.Tool = pickColor(colors, "toolTitle", "", base.Tool)
+	t.Error = pickColor(colors, "error", "", base.Error)
+	t.Muted = pickColor(colors, "muted", "", base.Muted)
+	t.Accent = pickColor(colors, "accent", "", base.Accent)
+	t.Appearance = raw.Appearance
+	if t.Appearance == "" {
+		var fg, bg []string
+		for token, color := range colors {
+			if backgroundTokens[token] {
+				bg = append(bg, color)
+				continue
+			}
+			fg = append(fg, color)
+		}
+		t.Appearance = detectAppearance(fg, bg)
+	}
+	if pageSet {
+		t.ExportPageBg = page
+	}
+	if cardSet {
+		t.ExportCardBg = card
+	}
+	if infoSet {
+		t.ExportInfoBg = info
+	}
+	return t, nil
+}
+
+func resolveField(problems *[]string, key string, cv colorVal, vars map[string]string) (string, bool) {
+	if !cv.Set {
+		return "", false
+	}
+	n, err := resolveColor(cv.Value, vars, nil)
+	if err != nil {
+		*problems = append(*problems, fmt.Sprintf("invalid color %q: %s", key, err))
+		return "", false
+	}
+	return n, true
+}
+
+func applyColorFallbacks(colors map[string]string) {
+	copyMissing := func(key, fallback string) {
+		if _, ok := colors[key]; ok {
+			return
+		}
+		if v, ok := colors[fallback]; ok {
+			colors[key] = v
+		}
+	}
+	copyMissing("thinkingMax", "thinkingXhigh")
+	copyMissing("scrollbarThumb", "selectedBg")
+	copyMissing("searchMatchBg", "selectedBg")
+	copyMissing("searchMatchText", "text")
+}
+
+func pickColor(colors map[string]string, primary, secondary, fallback string) string {
+	if v, ok := colors[primary]; ok {
+		return v
+	}
+	if secondary != "" {
+		if v, ok := colors[secondary]; ok {
+			return v
+		}
+	}
+	return fallback
+}
+
+func overlayUnset(t Theme, set map[string]bool) Theme {
 	base := builtins[0]
 	if t.Name == "" {
 		t.Name = base.Name
 	}
-	if t.User == "" {
+	if !set["user"] {
 		t.User = base.User
 	}
-	if t.Assistant == "" {
+	if !set["assistant"] {
 		t.Assistant = base.Assistant
 	}
-	if t.Tool == "" {
+	if !set["tool"] {
 		t.Tool = base.Tool
 	}
-	if t.Error == "" {
+	if !set["error"] {
 		t.Error = base.Error
 	}
-	if t.Muted == "" {
+	if !set["muted"] {
 		t.Muted = base.Muted
 	}
-	if t.Accent == "" {
+	if !set["accent"] {
 		t.Accent = base.Accent
 	}
 	return t
-}
-
-func resolveRef(v string, vars map[string]string, seen map[string]bool) string {
-	v = strings.TrimSpace(v)
-	if v == "" || strings.HasPrefix(v, "#") {
-		return v
-	}
-	if _, err := strconv.Atoi(v); err == nil {
-		return v
-	}
-	if vars == nil {
-		return v
-	}
-	next, ok := vars[v]
-	if !ok {
-		return v
-	}
-	if seen == nil {
-		seen = map[string]bool{}
-	}
-	if seen[v] {
-		return ""
-	}
-	seen[v] = true
-	return resolveRef(next, vars, seen)
 }

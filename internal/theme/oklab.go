@@ -134,10 +134,41 @@ func oklabLC(c RGB) (lightness, chroma float64) {
 }
 
 // oklchToRgb builds an sRGB color from OKLab lightness, chroma, and hue in degrees.
+// Out-of-gamut colors keep their hue and drop chroma until they fit.
 func oklchToRgb(lightness, chroma, hue float64) RGB {
 	angle := (2 * math.Pi * mod360(hue)) / 360
-	lab := vec3{lightness, chroma * math.Cos(angle), chroma * math.Sin(angle)}
-	return linearSrgbToRgb(oklabToLinearSrgb(lab))
+	cos := math.Cos(angle)
+	sin := math.Sin(angle)
+	atChroma := func(c float64) vec3 {
+		return oklabToLinearSrgb(vec3{lightness, c * cos, c * sin})
+	}
+	direct := atChroma(chroma)
+	if inGamut(direct) {
+		return linearSrgbToRgb(direct)
+	}
+	linear := atChroma(0)
+	low, high := 0.0, chroma
+	for range 20 {
+		mid := (low + high) / 2
+		candidate := atChroma(mid)
+		if inGamut(candidate) {
+			low = mid
+			linear = candidate
+			continue
+		}
+		high = mid
+	}
+	return linearSrgbToRgb(linear)
+}
+
+func inGamut(linear vec3) bool {
+	const epsilon = 1e-7
+	for _, channel := range linear {
+		if channel < -epsilon || channel > 1+epsilon {
+			return false
+		}
+	}
+	return true
 }
 
 func lmsSlopes(a, b float64) vec3 {
