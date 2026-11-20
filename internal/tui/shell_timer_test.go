@@ -115,9 +115,12 @@ func TestCodemodePreviewWrapsVisualLines(t *testing.T) {
 	if strings.Count(expanded, "a") != len(long) || !strings.Contains(expanded, "\n") {
 		t.Fatalf("expanded %q", expanded)
 	}
-	bash := toolResultBodyLines(long, false, toolPreviewLines("bash"))
-	if bash != long {
+	bash := m.toolResultText("bash", long, false)
+	if strings.Contains(bash, long) || !strings.Contains(bash, "…") || strings.Contains(bash, "\n") {
 		t.Fatalf("bash preview %q", bash)
+	}
+	if visibleWidth(bash) > m.toolPreviewWidth() {
+		t.Fatalf("bash preview width %d", visibleWidth(bash))
 	}
 }
 
