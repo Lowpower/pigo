@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -48,6 +50,8 @@ type entry struct {
 	toolOut    string // raw tool result (Ctrl+O)
 	toolCallID string
 	toolName   string
+	toolArgs   map[string]any
+	toolCustom bool // extension renderer owns the call line
 	startedAt  time.Time
 	shellLive  bool // bash/powershell/codemode call still running; Elapsed is drawn from startedAt
 	partial    bool
@@ -1448,24 +1452,19 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		}
 
 	case agent.EventToolStart:
-		label := compactArgs(ev.Args)
-		if p, ok := ev.Args["path"].(string); ok && p != "" {
-			label = strings.Replace(label, p, m.linkPath(p, p), 1)
-		}
-		rendered := m.toolStyle.Render(fmt.Sprintf("⚙ %s %s", mcp.DisplayTitle(ev.ToolName), label))
-		if m.engine != nil {
-			if custom := m.engine.RenderTool("call", ev.ToolName, ev.Args, "", nil); custom != "" {
-				rendered = m.toolStyle.Render(custom)
-			}
-		}
 		ent := entry{
 			role:       "tool",
 			toolCallID: ev.ToolCallID,
 			toolName:   ev.ToolName,
-			rendered:   rendered,
+			toolArgs:   ev.Args,
+		}
+		if m.engine != nil {
+			if custom := m.engine.RenderTool("call", ev.ToolName, ev.Args, "", nil); custom != "" {
+				ent.rendered = m.toolStyle.Render(custom)
+				ent.toolCustom = true
+			}
 		}
 		if isShellTool(ev.ToolName) {
-			ent.toolName = ev.ToolName
 			ent.startedAt = m.clock()
 			ent.shellLive = true
 		}
@@ -1777,7 +1776,7 @@ func (m Model) rawChatBody() (string, map[int]string) {
 			}
 		case "tool":
 			if e.partial {
-				write(e.rendered)
+				write(m.toolCallLine(e))
 				out := e.toolOut
 				if e.toolName == "codemode" {
 					out = visualTail(out, m.codemodePreviewWidth(), 20)
@@ -1812,7 +1811,7 @@ func (m Model) rawChatBody() (string, map[int]string) {
 					}
 				}
 			} else {
-				write(e.rendered)
+				write(m.toolCallLine(e))
 				m.writeShellElapsed(write, e)
 			}
 		default:
@@ -2323,13 +2322,82 @@ func firstLine(s string) string {
 	return s
 }
 
-func compactArgs(args map[string]any) string {
+const collapsedArgsChars = 100
+
+// formatToolCallWithArgs renders a tool that has no custom renderer.
+// Collapsed arguments are key=json pairs on the title line, cut to
+// collapsedArgsChars. Expanded, each argument is a key: value line.
+func formatToolCallWithArgs(title string, args map[string]any, expanded bool) string {
 	if len(args) == 0 {
-		return ""
+		return title
 	}
-	parts := make([]string, 0, len(args))
-	for k, v := range args {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
 	}
-	return "(" + strings.Join(parts, ", ") + ")"
+	sort.Strings(keys)
+	if expanded {
+		lines := make([]string, 0, len(keys)+1)
+		lines = append(lines, title)
+		for _, k := range keys {
+			lines = append(lines, expandedArg(k, args[k]))
+		}
+		return strings.Join(lines, "\n")
+	}
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + "=" + jsonText(args[k], false)
+	}
+	return title + " " + truncateRunes(strings.Join(parts, " "), collapsedArgsChars, "...")
+}
+
+func (m Model) toolCallLine(e entry) string {
+	if e.toolCustom {
+		return e.rendered
+	}
+	text := formatToolCallWithArgs("⚙ "+mcp.DisplayTitle(e.toolName), e.toolArgs, m.toolsExpanded)
+	if p, ok := e.toolArgs["path"].(string); ok && p != "" && strings.Contains(text, p) {
+		text = strings.Replace(text, p, m.linkPath(p, p), 1)
+	}
+	return m.toolStyle.Render(text)
+}
+
+func expandedArg(key string, value any) string {
+	text := argText(value)
+	text = strings.ReplaceAll(text, "\t", "   ")
+	text = strings.ReplaceAll(text, "\r", "")
+	text = strings.ReplaceAll(text, "\n", "\n    ")
+	return "  " + key + ": " + text
+}
+
+func argText(value any) string {
+	if s, ok := value.(string); ok {
+		return s
+	}
+	return jsonText(value, true)
+}
+
+func jsonText(value any, indent bool) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if indent {
+		enc.SetIndent("", "  ")
+	}
+	if err := enc.Encode(value); err != nil {
+		return fmt.Sprint(value)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func truncateRunes(s string, n int, tail string) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	keep := n - len([]rune(tail))
+	if keep < 0 {
+		keep = 0
+	}
+	return string(r[:keep]) + tail
 }

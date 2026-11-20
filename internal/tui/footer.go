@@ -100,10 +100,19 @@ func toolResultBody(raw string, expanded bool) string {
 }
 
 func (m Model) toolResultText(name, raw string, expanded bool) string {
-	if name != "codemode" {
-		return toolResultBodyLines(raw, expanded, toolPreviewLines(name))
+	if name == "codemode" {
+		return m.codemodeResultBody(raw, expanded)
 	}
-	return m.codemodeResultBody(raw, expanded)
+	return toolResultBodyLinesAt(raw, expanded, toolPreviewLines(name), m.toolPreviewWidth())
+}
+
+// toolPreviewWidth is the content width of a collapsed result after the "  → " prefix.
+func (m Model) toolPreviewWidth() int {
+	w := m.transcriptWidth() - visibleWidth("  → ")
+	if w < 1 {
+		return 1
+	}
+	return w
 }
 
 func (m Model) codemodePreviewWidth() int {
@@ -174,6 +183,10 @@ func visualTail(s string, width, n int) string {
 }
 
 func toolResultBodyLines(raw string, expanded bool, lines int) string {
+	return toolResultBodyLinesAt(raw, expanded, lines, 0)
+}
+
+func toolResultBodyLinesAt(raw string, expanded bool, lines, width int) string {
 	body, took := splitTrailingTook(raw)
 	if expanded {
 		shown := expandTool(body)
@@ -184,6 +197,9 @@ func toolResultBodyLines(raw string, expanded bool, lines int) string {
 			return took
 		}
 		return shown + "\n" + took
+	}
+	if width > 0 {
+		return collapseVisual(body, took, lines, width)
 	}
 	if lines <= 1 {
 		if took == "" {
@@ -202,6 +218,56 @@ func toolResultBodyLines(raw string, expanded bool, lines int) string {
 		return took
 	}
 	return shown + "\n" + took
+}
+
+// collapseVisual keeps the first `lines` visual rows of body. A single long
+// logical line cannot occupy more than that many terminal rows.
+func collapseVisual(body, took string, lines, width int) string {
+	if strings.TrimSpace(body) == "" {
+		if took != "" {
+			return took
+		}
+		return "(no output)"
+	}
+	if lines < 1 {
+		lines = 1
+	}
+	shown := capVisual(visualLines(body, width), lines, width)
+	if took == "" {
+		return shown
+	}
+	if strings.TrimSpace(shown) == "" {
+		return took
+	}
+	if lines <= 1 {
+		return shown + "  " + took
+	}
+	return shown + "\n" + took
+}
+
+func capVisual(lines []string, n, width int) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) <= n {
+		return strings.Join(lines, "\n")
+	}
+	kept := append([]string{}, lines[:n]...)
+	kept[n-1] = fitTail(kept[n-1], width, " …")
+	return strings.Join(kept, "\n")
+}
+
+// fitTail appends tail, shortening s so the visible width stays within width.
+func fitTail(s string, width int, tail string) string {
+	tw := visibleWidth(tail)
+	limit := width - tw
+	if limit < 1 {
+		return truncateDisplay(s, width, "")
+	}
+	if visibleWidth(s) > limit {
+		s = truncateDisplay(s, limit, "")
+	}
+	return s + tail
 }
 
 func headLines(s string, n int) string {

@@ -515,7 +515,7 @@ func transcriptFromMessages(m Model, msgs []ai.Message) []entry {
 					role:     "tool",
 					toolName: msg.ToolName,
 					toolOut:  msg.Text(),
-					rendered: m.toolStyle.Render(toolResultBodyLines(msg.Text(), false, toolPreviewLines(msg.ToolName))),
+					rendered: m.toolStyle.Render(toolResultBodyLinesAt(msg.Text(), false, toolPreviewLines(msg.ToolName), m.toolPreviewWidth())),
 				})
 			}
 		}
