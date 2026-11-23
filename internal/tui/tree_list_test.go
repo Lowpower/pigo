@@ -134,6 +134,56 @@ func TestFormatToolCallReadOmitsNullLineRange(t *testing.T) {
 			args: map[string]any{"path": "/tmp/a.go", "offset": nil, "limit": 5},
 			want: "[read: /tmp/a.go:1-5]",
 		},
+		{
+			name: "string offset and limit",
+			args: map[string]any{"path": "/tmp/a.go", "offset": "10", "limit": "5"},
+			want: "[read: /tmp/a.go:10-14]",
+		},
+		{
+			name: "string offset only",
+			args: map[string]any{"path": "/tmp/a.go", "offset": " 10 "},
+			want: "[read: /tmp/a.go:10]",
+		},
+		{
+			name: "string limit only",
+			args: map[string]any{"path": "/tmp/a.go", "limit": "5"},
+			want: "[read: /tmp/a.go:1-5]",
+		},
+		{
+			name: "unparsed offset hides range",
+			args: map[string]any{"path": "/tmp/a.go", "offset": "10abc", "limit": "5"},
+			want: "[read: /tmp/a.go]",
+		},
+		{
+			name: "unparsed limit hides range",
+			args: map[string]any{"path": "/tmp/a.go", "offset": 10, "limit": "nope"},
+			want: "[read: /tmp/a.go]",
+		},
+		{
+			name: "empty string hides range",
+			args: map[string]any{"path": "/tmp/a.go", "offset": "", "limit": "5"},
+			want: "[read: /tmp/a.go]",
+		},
+		{
+			name: "bool hides range",
+			args: map[string]any{"path": "/tmp/a.go", "offset": true, "limit": 5},
+			want: "[read: /tmp/a.go]",
+		},
+		{
+			name: "zero end keeps start only",
+			args: map[string]any{"path": "/tmp/a.go", "offset": 1, "limit": 0},
+			want: "[read: /tmp/a.go:1]",
+		},
+		{
+			name: "fractional numbers",
+			args: map[string]any{"path": "/tmp/a.go", "offset": 10.5, "limit": "2.0"},
+			want: "[read: /tmp/a.go:10.5-11.5]",
+		},
+		{
+			name: "float64 integers",
+			args: map[string]any{"path": "/tmp/a.go", "offset": 10.0, "limit": 5.0},
+			want: "[read: /tmp/a.go:10-14]",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -468,28 +469,7 @@ func formatToolCall(name string, args map[string]any, link pathLink) string {
 	switch name {
 	case "read":
 		path := shorten(argStr("path", "file_path"))
-		display := path
-		off, hasOff := args["offset"]
-		lim, hasLim := args["limit"]
-		// Strict schemas send JSON null for omitted optional fields.
-		if off == nil {
-			hasOff = false
-		}
-		if lim == nil {
-			hasLim = false
-		}
-		if hasOff || hasLim {
-			start := 1
-			if hasOff {
-				start = intFrom(args["offset"], 1)
-			}
-			if hasLim {
-				end := start + intFrom(args["limit"], 0) - 1
-				display += ":" + strconv.Itoa(start) + "-" + strconv.Itoa(end)
-			} else {
-				display += ":" + strconv.Itoa(start)
-			}
-		}
+		display := path + formatReadLineRange(args["offset"], args["limit"])
 		return "[read: " + link(display, argStr("path", "file_path")) + "]"
 	case "write":
 		path := argStr("path", "file_path")
@@ -523,17 +503,77 @@ func formatToolCall(name string, args map[string]any, link pathLink) string {
 	}
 }
 
-func intFrom(v any, fallback int) int {
-	switch t := v.(type) {
-	case int:
-		return t
-	case int64:
-		return int(t)
-	case float64:
-		return int(t)
-	default:
-		return fallback
+// formatReadLineRange labels a read call the same way pi v1.3.0 does.
+// Missing values and JSON null add nothing. A value that is not a finite
+// number hides the whole range. A zero end line keeps only the start.
+func formatReadLineRange(offset, limit any) string {
+	if offset == nil && limit == nil {
+		return ""
 	}
+	start := 1.0
+	if offset != nil {
+		n, ok := parseLineNumber(offset)
+		if !ok {
+			return ""
+		}
+		start = n
+	}
+	if limit == nil {
+		return ":" + formatLineNumber(start)
+	}
+	count, ok := parseLineNumber(limit)
+	if !ok {
+		return ""
+	}
+	end := start + count - 1
+	out := ":" + formatLineNumber(start)
+	if end != 0 {
+		out += "-" + formatLineNumber(end)
+	}
+	return out
+}
+
+func parseLineNumber(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return finiteLineNumber(n)
+	case json.Number:
+		f, err := n.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return finiteLineNumber(f)
+	case string:
+		s := strings.TrimSpace(n)
+		if s == "" {
+			return 0, false
+		}
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return 0, false
+		}
+		return finiteLineNumber(f)
+	default:
+		return 0, false
+	}
+}
+
+func finiteLineNumber(n float64) (float64, bool) {
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return 0, false
+	}
+	return n, true
+}
+
+func formatLineNumber(n float64) string {
+	if n == math.Trunc(n) && n >= -1e15 && n <= 1e15 {
+		return strconv.FormatInt(int64(n), 10)
+	}
+	return strconv.FormatFloat(n, 'f', -1, 64)
 }
 
 func orDefault(s, fallback string) string {
