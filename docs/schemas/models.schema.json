@@ -32,6 +32,13 @@
             "type": "string",
             "description": "radius requires baseUrl."
           },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Codex request headers. Model headers override these by name, ignoring letter case. Empty values are ignored."
+          },
           "compat": {
             "type": "object",
             "additionalProperties": true,
@@ -259,6 +266,13 @@
                 },
                 "baseUrl": {
                   "type": "string"
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Codex request headers. Replaces this model's header map and overrides provider headers of the same name, ignoring letter case. Empty values are ignored."
                 },
                 "cost": {
                   "type": "object",

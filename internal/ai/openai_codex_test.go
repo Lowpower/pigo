@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -108,6 +110,101 @@ func TestStreamForOpenAICodex(t *testing.T) {
 	_, final := stream.Collect()
 	if final == nil || final.Text() != "Hello, world" {
 		t.Fatalf("%+v", final)
+	}
+}
+
+func TestStreamForCodexModelsJSONHeaders(t *testing.T) {
+	orig, ok := models.LookupProvider("openai-codex")
+	if !ok {
+		t.Fatal("missing openai-codex")
+	}
+	t.Cleanup(func() {
+		models.ClearOverlays()
+		models.RegisterProvider(orig)
+	})
+	path := filepath.Join(t.TempDir(), "models.json")
+	body := `{
+  "providers": {
+    "openai-codex": {
+      "headers": {"originator": "from-provider", "User-Agent": "ua-provider"},
+      "models": [
+        {"id": "gpt-6.1-sol", "headers": {"Originator": "from-model"}},
+        {"id": "codex-empty-ua", "headers": {"User-Agent": ""}}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	var origin, ua, account, authz string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin = r.Header.Get("originator")
+		ua = r.Header.Get("User-Agent")
+		account = r.Header.Get("chatgpt-account-id")
+		authz = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(responsesFixture))
+	}))
+	defer srv.Close()
+	send := func(model string, extra map[string]string) {
+		t.Helper()
+		stream, err := StreamFor("openai-codex", ClientConfig{
+			APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client(), Transport: "sse",
+			Headers: map[string]string{"originator": "pigo", "chatgpt-account-id": "acct-1"},
+		})(context.Background(), Context{
+			Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		}, Options{Model: model, ExtraHeaders: extra})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, final := stream.Collect(); final == nil || final.Text() != "Hello, world" {
+			t.Fatalf("%s: %+v", model, final)
+		}
+	}
+	send("gpt-6.1-sol", nil)
+	if origin != "from-model" || ua != "ua-provider" || account != "acct-1" || authz != "Bearer k" {
+		t.Fatalf("model override: origin=%q ua=%q account=%q auth=%q", origin, ua, account, authz)
+	}
+	send("codex-empty-ua", nil)
+	if origin != "from-provider" || ua != "ua-provider" {
+		t.Fatalf("empty user-agent: origin=%q ua=%q", origin, ua)
+	}
+	send("not-listed", nil)
+	if origin != "from-provider" || ua != "ua-provider" {
+		t.Fatalf("unlisted model: origin=%q ua=%q", origin, ua)
+	}
+	send("gpt-6.1-sol", map[string]string{"originator": "from-request", "user-agent": "ua-request"})
+	if origin != "from-request" || ua != "ua-request" {
+		t.Fatalf("caller headers: origin=%q ua=%q", origin, ua)
+	}
+}
+
+func TestStreamForCodexDefaultOriginatorAndUserAgent(t *testing.T) {
+	var origin, ua string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin = r.Header.Get("originator")
+		ua = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(responsesFixture))
+	}))
+	defer srv.Close()
+	stream, err := StreamFor("openai-codex", ClientConfig{
+		APIKey: "k", BaseURL: srv.URL, HTTPClient: srv.Client(), Transport: "sse",
+	})(context.Background(), Context{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, Options{Model: "gpt-5.3-codex-spark"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, final := stream.Collect(); final == nil || final.Text() != "Hello, world" {
+		t.Fatalf("%+v", final)
+	}
+	if origin != "pigo" || ua != providerUserAgent() {
+		t.Fatalf("origin=%q ua=%q", origin, ua)
 	}
 }
 

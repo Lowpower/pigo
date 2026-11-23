@@ -111,27 +111,71 @@ func registerBuiltinAPIs() {
 		return (&PigoMessagesClient{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Headers: cfg.Headers, HTTPClient: httpClient(cfg)}).StreamFn()
 	})
 	RegisterAPI("openai-codex-responses", func(cfg ClientConfig) StreamFn {
-		headers := map[string]string{}
-		for k, v := range cfg.Headers {
-			headers[k] = v
-		}
-		if headers["originator"] == "" {
-			headers["originator"] = "pigo"
-		}
-		if headers["OpenAI-Beta"] == "" {
-			headers["OpenAI-Beta"] = openaiBetaSSE
-		}
-		if headers["chatgpt-account-id"] == "" {
-			if id := extractCodexAccountID(cfg.APIKey); id != "" {
-				headers["chatgpt-account-id"] = id
-			}
-		}
 		base := strings.TrimRight(cfg.BaseURL, "/")
 		if base == "" {
 			base = defaultCodexBaseURL
 		}
-		return (&OpenAICodexClient{BaseURL: base, APIKey: cfg.APIKey, Headers: headers, HTTPClient: httpClient(cfg), Transport: cfg.Transport}).StreamFn()
+		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+			c := &OpenAICodexClient{
+				BaseURL: base, APIKey: cfg.APIKey, Headers: codexHeaders(cfg, opts.Provider, opts.Model),
+				HTTPClient: httpClient(cfg), Transport: cfg.Transport,
+			}
+			return c.StreamFn()(ctx, reqCtx, opts)
+		}
 	})
+}
+
+// codexHeaders copies auth headers, then models.json provider headers, then the
+// model's headers. A non-empty value replaces the same name, ignoring letter case.
+// An empty value does not remove a header. originator falls back to pigo.
+func codexHeaders(cfg ClientConfig, provider, modelID string) map[string]string {
+	headers := make(map[string]string, len(cfg.Headers))
+	for k, v := range cfg.Headers {
+		headers[k] = v
+	}
+	if p, ok := models.UserJSONProviderByID(provider); ok {
+		overlayHeaders(headers, p.Headers)
+	}
+	if m, ok := models.Lookup(provider, modelID); ok {
+		overlayHeaders(headers, m.Headers)
+	}
+	if !nonEmptyHeader(headers, "originator") {
+		for k := range headers {
+			if strings.EqualFold(k, "originator") {
+				delete(headers, k)
+			}
+		}
+		headers["originator"] = "pigo"
+	}
+	if headers["OpenAI-Beta"] == "" {
+		headers["OpenAI-Beta"] = openaiBetaSSE
+	}
+	if headers["chatgpt-account-id"] == "" {
+		if id := extractCodexAccountID(cfg.APIKey); id != "" {
+			headers["chatgpt-account-id"] = id
+		}
+	}
+	return headers
+}
+
+// overlayHeaders merges src onto dst. Empty values are skipped.
+func overlayHeaders(dst, src map[string]string) {
+	for name, value := range src {
+		if value == "" {
+			continue
+		}
+		for existing := range dst {
+			if strings.EqualFold(existing, name) && existing != name {
+				delete(dst, existing)
+			}
+		}
+		dst[name] = value
+	}
+}
+
+func nonEmptyHeader(h map[string]string, name string) bool {
+	v, ok := lookupHeader(h, name)
+	return ok && v != ""
 }
 
 // RegisterAPI adds or replaces an API stream factory.
