@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -419,6 +420,77 @@ func dumpContains(v any, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestExportTemplateReadLineRangeSource(t *testing.T) {
+	js := string(readTemplateJS(t))
+	if strings.Contains(js, "offset !== undefined") {
+		t.Fatal("read range still treats null as present")
+	}
+	for _, needle := range []string{
+		"function formatReadLineRange(offset, limit)",
+		"return `[read: ${path}${formatReadLineRange(args.offset, args.limit)}]`",
+		"const readLineRange = formatReadLineRange(args.offset, args.limit)",
+	} {
+		if !strings.Contains(js, needle) {
+			t.Fatalf("template.js missing %s", needle)
+		}
+	}
+}
+
+func TestExportTemplateReadLineRangeNode(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available")
+	}
+	script := extractReadLineRangeJS(t, string(readTemplateJS(t))) + `
+const cases = [
+  [null, null, ""],
+  [undefined, undefined, ""],
+  ["10", "5", ":10-14"],
+  [" 10 ", undefined, ":10"],
+  [undefined, "5", ":1-5"],
+  ["10abc", "5", ""],
+  [10, "nope", ""],
+  ["", "5", ""],
+  [true, 5, ""],
+  [1, 0, ":1"],
+  [10.5, "2.0", ":10.5-11.5"],
+  [10, 5, ":10-14"],
+  [null, 5, ":1-5"],
+  [10, null, ":10"],
+];
+for (const [offset, limit, want] of cases) {
+  const got = formatReadLineRange(offset, limit);
+  if (got !== want) {
+    console.error(JSON.stringify({offset, limit, got, want}));
+    process.exit(1);
+  }
+}
+`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+}
+
+func readTemplateJS(t *testing.T) []byte {
+	t.Helper()
+	src, err := os.ReadFile("html/template.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return src
+}
+
+func extractReadLineRangeJS(t *testing.T, js string) string {
+	t.Helper()
+	start := strings.Index(js, "function parseLineNumber(")
+	end := strings.Index(js, "function getLanguageFromPath(")
+	if start < 0 || end < start {
+		t.Fatal("read line range helpers missing from template.js")
+	}
+	return js[start:end]
 }
 
 func mustJSONL(t *testing.T, m *Manager) []byte {
