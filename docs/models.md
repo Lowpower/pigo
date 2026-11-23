@@ -118,6 +118,19 @@ when the file is loaded.
 }
 ```
 
+`headers` on a provider are sent on Codex requests for every model of that provider, including models not listed under `models`. `headers` on a model replace that model's header map. On a Codex request, a non-empty model header overrides the provider header of the same name, ignoring letter case. An empty value does not remove a header. `originator` and `User-Agent` stay at pigo's defaults when both layers omit them. Other providers do not read these `headers`.
+
+```json
+{
+  "providers": {
+    "openai-codex": {
+      "headers": { "originator": "my-agent", "User-Agent": "my-agent/1.0" },
+      "models": [{ "id": "gpt-6.1-sol", "headers": { "originator": "my-agent-model" } }]
+    }
+  }
+}
+```
+
 A model may declare prompt-cache lifetimes in seconds. Built-in Anthropic models use `short` 300 and `long` 3600. Other built-ins are unannotated. Cache warming runs only when the active retention tier has a lifetime.
 
 ```json

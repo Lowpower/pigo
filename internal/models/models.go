@@ -36,12 +36,16 @@ func NextThinkingLevel(current string) string {
 // Model is a known catalog entry used by --list-models and /model.
 // Type is chat, image, or classifier. Empty means chat.
 type Model struct {
-	Provider         string             `json:"provider,omitempty"`
-	ID               string             `json:"id"`
-	Name             string             `json:"name,omitempty"`
-	Type             string             `json:"type,omitempty"`
-	API              string             `json:"api,omitempty"`
-	BaseURL          string             `json:"baseUrl,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	Type     string `json:"type,omitempty"`
+	API      string `json:"api,omitempty"`
+	BaseURL  string `json:"baseUrl,omitempty"`
+	// Headers are models.json request headers used by Codex.
+	// A listed model replaces this map. Provider headers stay on UserJSONProvider
+	// and are applied later, so an omitted name keeps the provider value.
+	Headers          map[string]string  `json:"headers,omitempty"`
 	Cost             *Cost              `json:"cost,omitempty"`
 	MaxTokens        int                `json:"maxTokens,omitempty"`
 	ContextWindow    int                `json:"contextWindow,omitempty"`

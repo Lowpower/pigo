@@ -661,6 +661,75 @@ func assertCompatBool(t *testing.T, got *bool, want bool) {
 	}
 }
 
+func TestLoadUserJSONReadsHeaders(t *testing.T) {
+	origCodex, _ := LookupProvider("openai-codex")
+	origNvidia, ok := LookupProvider("nvidia")
+	if !ok || origNvidia.Headers["NVCF-POLL-SECONDS"] != "3600" {
+		t.Fatalf("nvidia headers = %#v", origNvidia.Headers)
+	}
+	t.Cleanup(func() {
+		ClearOverlays()
+		RegisterProvider(origCodex)
+		RegisterProvider(origNvidia)
+		UnregisterProvider("hdr-prov")
+	})
+	RegisterProvider(ProviderSpec{
+		ID:         "hdr-prov",
+		DefaultAPI: "openai-completions",
+		Models: []Model{{
+			ID:      "m1",
+			Headers: map[string]string{"X-Catalog": "1", "X-Old": "old"},
+		}},
+	})
+	path := filepath.Join(t.TempDir(), "models.json")
+	body := `{
+  "providers": {
+    "openai-codex": {
+      "headers": {"originator": "from-provider", "User-Agent": "ua-provider"},
+      "models": [{"id": "gpt-6.1-sol", "headers": {"Originator": "from-model", "User-Agent": ""}}]
+    },
+    "hdr-prov": {
+      "headers": {"X-Provider": "p"},
+      "models": [{"id": "m1", "headers": {"X-Model": "2"}}]
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadUserJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := LookupProvider("openai-codex")
+	if !ok || len(spec.Headers) != 0 {
+		t.Fatalf("codex spec headers = %#v", spec.Headers)
+	}
+	nvidia, _ := LookupProvider("nvidia")
+	if nvidia.Headers["NVCF-POLL-SECONDS"] != "3600" {
+		t.Fatalf("nvidia headers = %#v", nvidia.Headers)
+	}
+	got, ok := UserJSONProviderByID("openai-codex")
+	if !ok || got.Headers["originator"] != "from-provider" || got.Headers["User-Agent"] != "ua-provider" {
+		t.Fatalf("provider headers = %#v ok=%v", got.Headers, ok)
+	}
+	m, ok := Lookup("openai-codex", "gpt-6.1-sol")
+	if !ok || m.Headers["Originator"] != "from-model" || len(m.Headers) != 2 || m.Headers["User-Agent"] != "" {
+		t.Fatalf("model headers = %#v ok=%v", m.Headers, ok)
+	}
+	replaced, ok := Lookup("hdr-prov", "m1")
+	if !ok || replaced.Headers["X-Model"] != "2" || len(replaced.Headers) != 1 {
+		t.Fatalf("replaced headers = %#v ok=%v", replaced.Headers, ok)
+	}
+	hdrSpec, _ := LookupProvider("hdr-prov")
+	if len(hdrSpec.Headers) != 0 {
+		t.Fatalf("hdr-prov spec headers = %#v", hdrSpec.Headers)
+	}
+	hdr, ok := UserJSONProviderByID("hdr-prov")
+	if !ok || hdr.Headers["X-Provider"] != "p" || len(hdr.Headers) != 1 {
+		t.Fatalf("hdr-prov headers = %#v ok=%v", hdr.Headers, ok)
+	}
+}
+
 func TestLoadUserJSONStripsBOM(t *testing.T) {
 	t.Cleanup(ClearOverlays)
 	path := filepath.Join(t.TempDir(), "models.json")

@@ -14,13 +14,14 @@ type userModelsFile struct {
 }
 
 type userProvider struct {
-	Name    string  `json:"name"`
-	BaseURL string  `json:"baseUrl"`
-	API     string  `json:"api"`
-	APIKey  string  `json:"apiKey"`
-	OAuth   string  `json:"oauth"`
-	Compat  *Compat `json:"compat"`
-	Models  []Model `json:"models"`
+	Name    string            `json:"name"`
+	BaseURL string            `json:"baseUrl"`
+	API     string            `json:"api"`
+	APIKey  string            `json:"apiKey"`
+	OAuth   string            `json:"oauth"`
+	Headers map[string]string `json:"headers"`
+	Compat  *Compat           `json:"compat"`
+	Models  []Model           `json:"models"`
 }
 
 // LoadUserJSON applies ~/.pigo/agent/models.json overlays (and registers unknown providers).
@@ -53,6 +54,7 @@ func LoadUserJSON(path string) error {
 			API:     p.API,
 			APIKey:  p.APIKey,
 			OAuth:   oauth,
+			Headers: cloneHeaders(p.Headers),
 		})
 		models := make([]Model, 0, len(p.Models))
 		for _, m := range p.Models {
@@ -121,4 +123,15 @@ func applyProviderFinishReason(provider, model *Compat) *Compat {
 	cloneCompatPointers(&copied, model)
 	copied.SupportsFinishReason = cloneBool(provider.SupportsFinishReason)
 	return &copied
+}
+
+func cloneHeaders(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

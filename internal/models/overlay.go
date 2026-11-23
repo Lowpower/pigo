@@ -26,6 +26,9 @@ type UserJSONProvider struct {
 	API     string
 	APIKey  string
 	OAuth   string
+	// Headers are models.json provider headers. They are not copied onto
+	// ProviderSpec.Headers, which stays the builtin default layer.
+	Headers map[string]string
 }
 
 var (
@@ -34,6 +37,14 @@ var (
 	userJSON      = map[string][]Model{}
 	userJSONSpecs = map[string]UserJSONProvider{}
 )
+
+// UserJSONProviderByID returns one provider last loaded from models.json.
+func UserJSONProviderByID(id string) (UserJSONProvider, bool) {
+	overlayMu.Lock()
+	defer overlayMu.Unlock()
+	p, ok := userJSONSpecs[id]
+	return p, ok
+}
 
 // UserJSONProviders returns providers last loaded from models.json.
 func UserJSONProviders() []UserJSONProvider {

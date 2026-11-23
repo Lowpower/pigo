@@ -371,6 +371,9 @@ func mergeOverlay(providerID string, base, extra []Model) []Model {
 			if len(m.SamplingParamsByThinkingLevel) > 0 {
 				out[i].SamplingParamsByThinkingLevel = mergeSamplingByLevel(out[i].SamplingParamsByThinkingLevel, m.SamplingParamsByThinkingLevel)
 			}
+			if len(m.Headers) > 0 {
+				out[i].Headers = cloneHeaders(m.Headers)
+			}
 			out[i] = fillOpus55ThinkingLevels(out[i])
 			continue
 		}
