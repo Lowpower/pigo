@@ -226,12 +226,71 @@ func TestRefreshRadiusOverlaysPublicCatalog(t *testing.T) {
 	if balanced.Reasoning == nil || *balanced.Reasoning {
 		t.Fatalf("reasoning = %v", balanced.Reasoning)
 	}
-	if _, ok := Lookup("radius", "cheap"); !ok {
-		t.Fatal("public id missing after overlay")
+	if _, ok := Lookup("radius", "cheap"); ok {
+		t.Fatal("public id kept after gateway catalog replaced the baseline")
 	}
 	gw, ok := Lookup("radius", "gw-only")
 	if !ok || gw.API != "pigo-messages" || gw.ContextWindow != 222 {
 		t.Fatalf("gw-only = %+v ok=%v", gw, ok)
+	}
+	entry, found, err := store.Read("radius")
+	if err != nil || !found || len(entry.Models) != 2 {
+		t.Fatalf("store = %+v found=%v err=%v", entry.Models, found, err)
+	}
+}
+
+func TestRefreshRadiusFailureKeepsPublicCatalog(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	t.Setenv("RADIUS_GATEWAY", srv.URL)
+	t.Setenv("RADIUS_API_KEY", "")
+	store := &MemoryStore{}
+	if err := refreshRadius(store); err == nil {
+		t.Fatal("expected gateway error")
+	}
+	if _, ok := Lookup("radius", "cheap"); !ok {
+		t.Fatal("public catalog missing after failed refresh with no snapshot")
+	}
+	if _, found, err := store.Read("radius"); err != nil || found {
+		t.Fatalf("failed refresh wrote store found=%v err=%v", found, err)
+	}
+}
+
+func TestRefreshRadiusFailureKeepsGatewaySnapshot(t *testing.T) {
+	t.Cleanup(ClearOverlays)
+	var fail atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if fail.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"baseUrl": "https://messages.example/v1",
+			"models": []map[string]any{
+				{"id": "balanced", "name": "Balanced Live"},
+				{"id": "gw-only", "name": "Gateway Only"},
+			},
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("RADIUS_GATEWAY", srv.URL)
+	t.Setenv("RADIUS_API_KEY", "")
+	store := &MemoryStore{}
+	if err := refreshRadius(store); err != nil {
+		t.Fatal(err)
+	}
+	fail.Store(true)
+	if err := refreshRadius(store); err == nil {
+		t.Fatal("expected gateway error")
+	}
+	if _, ok := Lookup("radius", "cheap"); ok {
+		t.Fatal("failed refresh restored a public id absent from the gateway snapshot")
+	}
+	if _, ok := Lookup("radius", "gw-only"); !ok {
+		t.Fatal("gateway id missing after failed refresh")
 	}
 	entry, found, err := store.Read("radius")
 	if err != nil || !found || len(entry.Models) != 2 {
