@@ -86,10 +86,12 @@ Remote overlays still win: `PIGO_CATALOG_BASE_URL` (empty by default) and
 
 `radius` ships a public model list, so `radius/balanced` and the other public
 ids can be selected before a gateway responds. `RADIUS_GATEWAY` /
-`PIGO_RADIUS_GATEWAY` has no default host. When one of those is set,
-`GET /v1/config` overlays the public list and the fetched models are cached in
-`models-store.json`. With no gateway and no cached `radius` entry, the public
-list itself is written there.
+`PIGO_RADIUS_GATEWAY` has no default host. When one of those is set and
+`GET /v1/config` succeeds, the gateway snapshot replaces the public list:
+ids the gateway omits are not selectable. The snapshot is cached in
+`models-store.json`. A later failed fetch keeps that snapshot. The public
+list is used only when no gateway snapshot has ever succeeded. With no
+gateway and no cached `radius` entry, the public list itself is written there.
 
 A `models.json` provider with `"oauth": "radius"` and `baseUrl` is a separate
 gateway. It does not inherit the public list, and `baseUrl` is required:

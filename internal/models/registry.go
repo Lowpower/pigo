@@ -313,9 +313,31 @@ func resolveOrSynthetic(provider, id string) Model {
 }
 
 func applyOverlays(providerID string, list []Model) []Model {
-	list = mergeOverlay(providerID, list, remoteOverlay(providerID))
+	remote := remoteOverlay(providerID)
+	// A non-empty Radius gateway snapshot replaces the public baseline.
+	// Models the organization disabled are not merged back in. An empty
+	// snapshot leaves the baseline in place.
+	if providerID == "radius" && len(remote) > 0 {
+		list = modelsInOverlay(list, remote)
+	}
+	list = mergeOverlay(providerID, list, remote)
 	list = mergeOverlay(providerID, list, userOverlay(providerID))
 	return list
+}
+
+// modelsInOverlay keeps baseline rows whose id is in overlay.
+func modelsInOverlay(list, overlay []Model) []Model {
+	keep := make(map[string]struct{}, len(overlay))
+	for _, m := range overlay {
+		keep[overlayKey(m)] = struct{}{}
+	}
+	out := make([]Model, 0, len(overlay))
+	for _, m := range list {
+		if _, ok := keep[overlayKey(m)]; ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func mergeOverlay(providerID string, base, extra []Model) []Model {
