@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -36,6 +37,11 @@ var (
 	remote        = map[string][]Model{}
 	userJSON      = map[string][]Model{}
 	userJSONSpecs = map[string]UserJSONProvider{}
+	// openRouterUserActive replaces openrouter chat models with openRouterUserModels.
+	// Inactive leaves the public snapshot in place, even if a list is on disk.
+	openRouterUserActive bool
+	openRouterUserModels []Model
+	openRouterKey        func(agentDir string) string
 )
 
 // UserJSONProviderByID returns one provider last loaded from models.json.
@@ -103,6 +109,45 @@ func SetUserOverlay(providerID string, models []Model) {
 	userJSON[providerID] = append([]Model(nil), models...)
 }
 
+// SetOpenRouterKey registers the bearer token used for GET /models/user.
+// auth installs the same lookup the request path uses. Nil means no key.
+func SetOpenRouterKey(fn func(agentDir string) string) {
+	overlayMu.Lock()
+	defer overlayMu.Unlock()
+	openRouterKey = fn
+}
+
+// OpenRouterKey returns the registered OpenRouter bearer token, or "".
+func OpenRouterKey(agentDir string) string {
+	overlayMu.Lock()
+	fn := openRouterKey
+	overlayMu.Unlock()
+	if fn == nil {
+		return ""
+	}
+	return strings.TrimSpace(fn(agentDir))
+}
+
+func setOpenRouterUserCatalog(models []Model, active bool) {
+	overlayMu.Lock()
+	defer overlayMu.Unlock()
+	openRouterUserActive = active
+	if !active {
+		openRouterUserModels = nil
+		return
+	}
+	openRouterUserModels = append([]Model(nil), models...)
+}
+
+func openRouterUserCatalog() ([]Model, bool) {
+	overlayMu.Lock()
+	defer overlayMu.Unlock()
+	if !openRouterUserActive {
+		return nil, false
+	}
+	return append([]Model(nil), openRouterUserModels...), true
+}
+
 // ClearOverlays drops remote and user overlays (tests).
 func ClearOverlays() {
 	overlayMu.Lock()
@@ -110,4 +155,6 @@ func ClearOverlays() {
 	remote = map[string][]Model{}
 	userJSON = map[string][]Model{}
 	userJSONSpecs = map[string]UserJSONProvider{}
+	openRouterUserActive = false
+	openRouterUserModels = nil
 }

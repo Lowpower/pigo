@@ -84,6 +84,17 @@ previous Anthropic shape do not reuse the prompt cache. See
 Remote overlays still win: `PIGO_CATALOG_BASE_URL` (empty by default) and
 `pigo update --models` (cache `models-store.json`).
 
+With an OpenRouter key (`OPENROUTER_API_KEY`, a stored api key, `--api-key`,
+or OpenRouter OAuth), startup requests `GET {baseUrl}/models/user` and keeps
+the chat models that key can use. Context length, max output, and price come
+from that response. A missing or zero limit keeps the snapshot value. A
+negative price counts as zero. The list is cached in `models-store.json`
+under `openrouter-user` and reused offline while the key is still configured.
+No key leaves the public snapshot in place, including when an older cache is
+still on disk. A `models.json` `baseUrl` for `openrouter` is the host for
+that request. `401`, `403`, and `404` leave the snapshot and the cache
+unchanged.
+
 `radius` ships a public model list, so `radius/balanced` and the other public
 ids can be selected before a gateway responds. `RADIUS_GATEWAY` /
 `PIGO_RADIUS_GATEWAY` has no default host. When one of those is set and
