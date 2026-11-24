@@ -1,6 +1,9 @@
 package runtime
 
 import (
+	"context"
+	"strings"
+
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/ext"
@@ -29,20 +32,25 @@ func (e *Engine) bindExtensionHooks() {
 // not registered are ignored. A purely additive change returns the newly
 // added names; a shrink or replace returns nil.
 func (e *Engine) SetActiveTools(names []string) []string {
+	return e.commitActive(names, false, true)
+}
+
+// commitActive replaces the provider-facing set.
+// force writes the session even when the in-memory set did not change, which
+// is how a resume drops a tool that never made it into memory.
+// hold keeps unresolved mcp names from names so the next prompt can retry them.
+func (e *Engine) commitActive(names []string, force, hold bool) []string {
 	e.mu.Lock()
-	for _, n := range names {
-		if e.exposureOf(n) == ext.ExposureDeferred {
-			if e.loadedDeferred == nil {
-				e.loadedDeferred = map[string]bool{}
-			}
-			e.loadedDeferred[n] = true
-		}
-	}
 	changed, added := e.applyActiveToolsLocked(names)
+	if hold {
+		e.notePendingLocked(names)
+	} else {
+		e.pendingTools = nil
+	}
 	snapshot := e.activeSnapshotLocked()
 	sess := e.Opts.Session
 	e.mu.Unlock()
-	if changed && sess != nil {
+	if (changed || force) && sess != nil {
 		_, _ = sess.AppendActiveToolsChange(snapshot)
 		e.syncToolsIfDeclared()
 	}
@@ -64,8 +72,10 @@ func (e *Engine) applyActiveToolsLocked(names []string) (changed bool, added []s
 			continue
 		}
 		switch e.exposureOf(n) {
-		case ext.ExposureHidden, ext.ExposureCodeMode:
+		case ext.ExposureHidden:
 			continue
+		case ext.ExposureDeferred, ext.ExposureCodeMode:
+			e.markLoadedLocked(n)
 		}
 		want[n] = true
 	}
@@ -99,6 +109,40 @@ func (e *Engine) restoreActiveTools(s *session.Manager) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.applyActiveToolsLocked(names)
+	e.notePendingLocked(names)
+}
+
+// notePendingLocked remembers mcp names that are not registered yet, or that
+// are deferred or codemode and have not been loaded. The caller holds e.mu.
+func (e *Engine) notePendingLocked(wanted []string) {
+	have := map[string]bool{}
+	for _, name := range e.activeSnapshotLocked() {
+		have[name] = true
+	}
+	var pending []string
+	seen := map[string]bool{}
+	for _, name := range wanted {
+		if name == "" || seen[name] || !strings.HasPrefix(name, "mcp__") {
+			continue
+		}
+		seen[name] = true
+		if e.mcpUnresolvedLocked(name, have[name]) {
+			pending = append(pending, name)
+		}
+	}
+	e.pendingTools = pending
+}
+
+func (e *Engine) mcpUnresolvedLocked(name string, active bool) bool {
+	if e.Tools == nil || !e.Tools.Has(name) {
+		return true
+	}
+	switch e.exposureOf(name) {
+	case ext.ExposureDeferred, ext.ExposureCodeMode:
+		return e.loadedDeferred == nil || !e.loadedDeferred[name]
+	default:
+		return !active
+	}
 }
 
 func (e *Engine) activeSnapshot() []string {
@@ -197,4 +241,52 @@ func addedNames(before, after []string) []string {
 		}
 	}
 	return out
+}
+
+// settleLoadedTools waits for servers that own pending mcp names, then keeps
+// the tools that came back and drops the rest.
+func (e *Engine) settleLoadedTools(ctx context.Context) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	pending := append([]string(nil), e.pendingTools...)
+	e.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+	if e.mcp != nil {
+		_ = e.mcp.WaitRefs(ctx, pending)
+	}
+	e.installMCPTools()
+
+	e.mu.Lock()
+	current := e.activeSnapshotLocked()
+	e.mu.Unlock()
+	drop := map[string]bool{}
+	var keep []string
+	for _, name := range pending {
+		if e.Tools != nil && e.Tools.Has(name) {
+			keep = append(keep, name)
+			continue
+		}
+		drop[name] = true
+	}
+	next := make([]string, 0, len(current)+len(keep))
+	seen := map[string]bool{}
+	for _, name := range current {
+		if drop[name] || seen[name] {
+			continue
+		}
+		seen[name] = true
+		next = append(next, name)
+	}
+	for _, name := range keep {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		next = append(next, name)
+	}
+	e.commitActive(next, len(drop) > 0, false)
 }

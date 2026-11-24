@@ -23,6 +23,10 @@ func TestSelectModelToolsKeepsDirectModelOnlyAndLoadedDeferred(t *testing.T) {
 	if fmt.Sprint(got) != "[direct model later plain]" {
 		t.Fatalf("loaded = %v", got)
 	}
+	got = selectModelTools(order, exp, map[string]bool{"later": true, "code": true}, nil, false, nil, false)
+	if fmt.Sprint(got) != "[direct model code later plain]" {
+		t.Fatalf("loaded codemode = %v", got)
+	}
 }
 
 func TestSelectModelToolsIntersectsActiveAndTurn(t *testing.T) {

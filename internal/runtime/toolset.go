@@ -135,7 +135,8 @@ func (e *Engine) modelVisible(name string) bool {
 }
 
 // installActiveTools sets the session whitelist without writing a session entry.
-// Unknown, hidden, and codemode names are dropped. An empty list enables nothing.
+// Unknown and hidden names are dropped. codemode and deferred names are loaded.
+// An empty list enables nothing.
 func (e *Engine) installActiveTools(names []string) {
 	if e == nil {
 		return
@@ -154,15 +155,23 @@ func (e *Engine) applySessionToolPolicy(s *session.Manager) {
 	}
 	_, hasChange := session.LastActiveToolNames(s.GetBranch(""))
 	st := session.ReplaySystem(s.GetBranch(""))
+	e.mu.Lock()
+	e.pendingTools = nil
+	e.mu.Unlock()
 	if e.explicitToolSelection() {
 		if st.Declared {
 			e.System = st.Prompt
 			e.sawPreamble = false
 		}
 		e.installActiveTools(e.selectedActiveNames())
+		e.mu.Lock()
+		e.pendingTools = nil
+		e.mu.Unlock()
 		return
 	}
+	var wanted []string
 	if hasChange {
+		wanted, _ = session.LastActiveToolNames(s.GetBranch(""))
 		e.restoreActiveTools(s)
 	}
 	if st.Declared {
@@ -172,14 +181,21 @@ func (e *Engine) applySessionToolPolicy(s *session.Manager) {
 		return
 	}
 	mods := config.ToolModifiers(e.Opts.ToolAllow)
-	if mods == nil && len(e.Opts.ToolDeny) == 0 {
-		return
+	if mods != nil || len(e.Opts.ToolDeny) > 0 {
+		if !hasChange {
+			wanted = e.activeSnapshot()
+		}
+		if mods != nil {
+			wanted = config.ApplyToolModifiers(wanted, mods)
+		}
+		wanted = config.RejectToolNames(wanted, e.Opts.ToolDeny)
+		e.installActiveTools(wanted)
 	}
-	names := e.activeSnapshot()
-	if mods != nil {
-		names = config.ApplyToolModifiers(names, mods)
+	if hasChange {
+		e.mu.Lock()
+		e.notePendingLocked(wanted)
+		e.mu.Unlock()
 	}
-	e.installActiveTools(config.RejectToolNames(names, e.Opts.ToolDeny))
 }
 
 // resetActiveToolsAfterReload keeps the current enabled set, then enables
@@ -189,8 +205,12 @@ func (e *Engine) applySessionToolPolicy(s *session.Manager) {
 // that were not registered before this reload are enabled when they are
 // model-visible.
 func (e *Engine) resetActiveToolsAfterReload(prevActive []string, prevRegistered, prevDefault map[string]bool) {
+	e.installMCPTools()
 	if e.explicitToolSelection() {
 		e.installActiveTools(e.selectedActiveNames())
+		e.mu.Lock()
+		e.pendingTools = nil
+		e.mu.Unlock()
 		return
 	}
 	var added []string
@@ -209,5 +229,9 @@ func (e *Engine) resetActiveToolsAfterReload(prevActive []string, prevRegistered
 			merged = append(merged, name)
 		}
 	}
-	e.installActiveTools(config.RejectToolNames(merged, e.Opts.ToolDeny))
+	merged = config.RejectToolNames(merged, e.Opts.ToolDeny)
+	e.installActiveTools(merged)
+	e.mu.Lock()
+	e.notePendingLocked(merged)
+	e.mu.Unlock()
 }

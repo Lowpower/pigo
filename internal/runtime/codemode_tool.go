@@ -9,7 +9,6 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/codescript"
-	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
 )
 
@@ -86,7 +85,7 @@ func (e *Engine) scriptEnv() codescript.Env {
 				Name:        tool.Name(),
 				Description: desc,
 				Schema:      tool.Schema(),
-				Exposure:    ext.ExposureDirect,
+				Exposure:    e.exposureOf(tool.Name()),
 			}
 			if info, ok := e.toolInfo(tool.Name()); ok {
 				item.Exposure = info.Exposure
