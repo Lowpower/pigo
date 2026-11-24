@@ -7,18 +7,26 @@ import "github.com/Lowpower/pigo/internal/models"
 // cache read and cache write. CacheWrite1h is not counted again. The chosen
 // rates apply to the whole request. CacheWrite1h is the one-hour subset of
 // CacheWrite and is priced at twice the selected input rate. The rest of
-// CacheWrite uses the five-minute cache-write rate. A nil catalog cost leaves
-// any existing dollar fields unchanged.
+// CacheWrite uses the five-minute cache-write rate. A negative rate is zero.
+// A nil catalog cost leaves any existing dollar fields unchanged.
 func calculateCost(cost *models.Cost, usage *Usage) {
 	if cost == nil || usage == nil {
 		return
 	}
-	input, output, cacheRead, cacheWrite := cost.Input, cost.Output, cost.CacheRead, cost.CacheWrite
+	// OpenRouter uses a negative placeholder (often -1e6 per million) when the
+	// price depends on the routed model. That is free, not a credit.
+	input := nonNegativeRate(cost.Input)
+	output := nonNegativeRate(cost.Output)
+	cacheRead := nonNegativeRate(cost.CacheRead)
+	cacheWrite := nonNegativeRate(cost.CacheWrite)
 	total := usage.Input + usage.CacheRead + usage.CacheWrite
 	matched := -1
 	for _, tier := range cost.Tiers {
 		if total > tier.InputTokensAbove && tier.InputTokensAbove > matched {
-			input, output, cacheRead, cacheWrite = tier.Input, tier.Output, tier.CacheRead, tier.CacheWrite
+			input = nonNegativeRate(tier.Input)
+			output = nonNegativeRate(tier.Output)
+			cacheRead = nonNegativeRate(tier.CacheRead)
+			cacheWrite = nonNegativeRate(tier.CacheWrite)
 			matched = tier.InputTokensAbove
 		}
 	}
@@ -33,6 +41,13 @@ func calculateCost(cost *models.Cost, usage *Usage) {
 
 func tokenPrice(tokens int, perMillion float64) float64 {
 	return float64(tokens) * perMillion / 1_000_000
+}
+
+func nonNegativeRate(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 // applyInclusivePromptUsage splits a prompt count that already includes cache

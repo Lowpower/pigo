@@ -129,12 +129,12 @@ func prepareCatalog(agentDir, catalogBaseURL string, offline, refreshLlama bool)
 	store := OpenFileStore(filepath.Join(agentDir, "models-store.json"))
 	RestoreOverlays(store)
 	refreshLocalProviders(store, offline, refreshLlama)
-	if offline || catalogBaseURL == "" {
-		return nil
+	if !offline && catalogBaseURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), remoteAttemptTimeout)
+		defer cancel()
+		refreshAll(ctx, store, catalogBaseURL, false, refreshLlama)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), remoteAttemptTimeout)
-	defer cancel()
-	refreshAll(ctx, store, catalogBaseURL, false, refreshLlama)
+	refreshOpenRouterUser(agentDir, store, offline)
 	return nil
 }
 

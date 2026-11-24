@@ -74,6 +74,21 @@ func TestCalculateCostOneHourWriteUsesSelectedTierInput(t *testing.T) {
 	assertUsageCost(t, usage.Cost, UsageCost{CacheWrite: wantWrite, Total: wantWrite})
 }
 
+func TestCalculateCostTreatsNegativeRatesAsZero(t *testing.T) {
+	base := &models.Cost{Input: -1_000_000, Output: -4, CacheRead: -1, CacheWrite: -2}
+	usage := Usage{Input: 1_000_000, Output: 1_000_000, CacheRead: 500_000, CacheWrite: 250_000}
+	calculateCost(base, &usage)
+	assertUsageCost(t, usage.Cost, UsageCost{})
+
+	tiered := &models.Cost{
+		Input: -1, Output: -1,
+		Tiers: []models.CostTier{{InputTokensAbove: 100, Input: 2, Output: 4}},
+	}
+	over := Usage{Input: 1_000_000, Output: 1_000_000}
+	calculateCost(tiered, &over)
+	assertUsageCost(t, over.Cost, UsageCost{Input: 2, Output: 4, Total: 6})
+}
+
 func TestCalculateCostDoesNotInheritMissingTierRates(t *testing.T) {
 	cost := &models.Cost{
 		Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75,
