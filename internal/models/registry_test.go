@@ -65,9 +65,21 @@ func TestBudgetTokensOverride(t *testing.T) {
 	if BudgetTokens("high") != 10000 {
 		t.Fatalf("default high = %d", BudgetTokens("high"))
 	}
+	if _, ok := ThinkingBudgetSetting("high"); ok {
+		t.Fatal("unset table should not report a setting")
+	}
 	SetThinkingBudgets(map[string]int{"high": 42})
 	if BudgetTokens("high") != 42 {
 		t.Fatalf("override high = %d", BudgetTokens("high"))
+	}
+	if got, ok := ThinkingBudgetSetting("high"); !ok || got != 42 {
+		t.Fatalf("setting high = %d ok=%v", got, ok)
+	}
+	if _, ok := ThinkingBudgetSetting("medium"); ok {
+		t.Fatal("missing key should stay unset")
+	}
+	if BudgetTokens("medium") != 5120 {
+		t.Fatalf("medium fell through to %d", BudgetTokens("medium"))
 	}
 	if BudgetTokens("off") != 0 {
 		t.Fatal("off should be 0")

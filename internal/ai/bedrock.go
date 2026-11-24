@@ -117,8 +117,9 @@ func (c *BedrockClient) StreamFn() StreamFn {
 			}
 			input.ToolConfig = &types.ToolConfiguration{Tools: tools}
 		}
-		input.InferenceConfig = bedrockInferenceConfig(recordedProvider(opts, "amazon-bedrock"), opts.Model, name, opts.MaxTokens)
-		if fields := bedrockThinkingFields(opts); fields != nil {
+		fields, limit := bedrockRequestThinking(opts)
+		input.InferenceConfig = bedrockInferenceConfig(recordedProvider(opts, "amazon-bedrock"), opts.Model, name, limit)
+		if fields != nil {
 			input.AdditionalModelRequestFields = document.NewLazyDocument(fields)
 		}
 
@@ -143,13 +144,55 @@ func (c *BedrockClient) StreamFn() StreamFn {
 	}
 }
 
+const bedrockInterleavedThinkingBeta = "interleaved-thinking-2025-05-14"
+
+// bedrockClaudeDefaultBudgets is the pi v1.3.0 Claude table. xhigh and max
+// share high. settings.thinkingBudgets overrides a level; the global table does not.
+var bedrockClaudeDefaultBudgets = map[string]int{
+	"minimal": 1024,
+	"low":     2048,
+	"medium":  8192,
+	"high":    16384,
+	"xhigh":   16384,
+	"max":     16384,
+}
+
+var bedrockAdaptiveNeedles = []string{
+	"opus-4-6", "opus-4-7", "opus-4-8", "opus-5",
+	"sonnet-4-6", "sonnet-5", "haiku-5", "fable-5",
+}
+
+// Opus 4.6 and Sonnet 4.6 reject block_binding. Later adaptive models accept it
+// and are the ones that send native xhigh.
+var bedrockNativeXhighNeedles = []string{
+	"opus-4-7", "opus-4-8", "opus-5", "sonnet-5", "haiku-5", "fable-5",
+}
+
 func bedrockThinkingFields(opts Options) map[string]any {
+	fields, _ := bedrockRequestThinking(opts)
+	return fields
+}
+
+// bedrockOutputLimit is the maxTokens passed to InferenceConfig.
+// Budget Claude may raise it so the answer keeps 1024 tokens. Every other
+// model returns the caller value, including zero.
+func bedrockOutputLimit(opts Options) int {
+	_, limit := bedrockRequestThinking(opts)
+	return limit
+}
+
+func bedrockRequestThinking(opts Options) (map[string]any, int) {
 	name := bedrockCatalogName(opts)
 	if !bedrockIsClaude(opts.Model, name) {
 		if fields, ok := bedrockOpenAIReasoningFields(opts, name); ok {
-			return fields
+			return fields, opts.MaxTokens
 		}
+		return bedrockLegacyThinkingFields(opts), opts.MaxTokens
 	}
+	return bedrockClaudeThinking(opts, name)
+}
+
+func bedrockLegacyThinkingFields(opts Options) map[string]any {
 	canonical, _ := resolvedThinking(opts)
 	if !thinkingOn(canonical) && opts.ThinkingBudget <= 0 {
 		return nil
@@ -162,6 +205,145 @@ func bedrockThinkingFields(opts Options) map[string]any {
 		return map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": budget}}
 	}
 	return map[string]any{"thinking": map[string]any{"type": "adaptive"}}
+}
+
+func bedrockClaudeThinking(opts Options, modelName string) (map[string]any, int) {
+	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	if !thinkingOn(level) || bedrockReasoningDisabled(opts) {
+		return nil, opts.MaxTokens
+	}
+	gov := bedrockGovCloud(opts.Model)
+	if bedrockMatches(opts.Model, modelName, bedrockAdaptiveNeedles...) {
+		thinking := map[string]any{"type": "adaptive"}
+		if display, ok := bedrockClaudeDisplay(opts, gov); ok {
+			thinking["display"] = display
+		}
+		fields := map[string]any{
+			"thinking":      thinking,
+			"output_config": map[string]any{"effort": bedrockClaudeEffort(opts, modelName, level)},
+		}
+		if !gov && bedrockMatches(opts.Model, modelName, bedrockNativeXhighNeedles...) {
+			thinking["block_binding"] = map[string]any{"prefix_mismatch_behavior": "drop_block"}
+			fields["anthropic_beta"] = []string{thinkingBindingControlsBeta}
+		}
+		return fields, opts.MaxTokens
+	}
+	budget, requestMax := bedrockClaudeBudget(opts, level)
+	thinking := map[string]any{
+		"type":          "enabled",
+		"budget_tokens": budget,
+	}
+	if display, ok := bedrockClaudeDisplay(opts, gov); ok {
+		thinking["display"] = display
+	}
+	return map[string]any{
+		"thinking":       thinking,
+		"anthropic_beta": []string{bedrockInterleavedThinkingBeta},
+	}, requestMax
+}
+
+func bedrockReasoningDisabled(opts Options) bool {
+	m, ok := models.Lookup(recordedProvider(opts, "amazon-bedrock"), opts.Model)
+	if !ok {
+		return false
+	}
+	return !m.SupportsReasoning()
+}
+
+func bedrockClaudeDisplay(opts Options, gov bool) (string, bool) {
+	if gov {
+		return "", false
+	}
+	return anthropicThinkingDisplay(opts), true
+}
+
+func bedrockClaudeEffort(opts Options, modelName, level string) string {
+	if level == "xhigh" && bedrockMatches(opts.Model, modelName, bedrockNativeXhighNeedles...) {
+		return "xhigh"
+	}
+	if m, ok := models.Lookup(recordedProvider(opts, "amazon-bedrock"), opts.Model); ok {
+		if mapped, present := m.ThinkingLevelMap[level]; present && mapped != nil {
+			if v := strings.TrimSpace(*mapped); v != "" {
+				return v
+			}
+		}
+	}
+	switch level {
+	case "minimal", "low":
+		return "low"
+	case "medium":
+		return "medium"
+	case "high":
+		return "high"
+	default:
+		return "high"
+	}
+}
+
+func bedrockClaudeBudget(opts Options, level string) (budget, requestMax int) {
+	budget = bedrockClaudeBudgetTokens(level)
+	modelMax := models.MaxTokens(recordedProvider(opts, "amazon-bedrock"), opts.Model)
+	if opts.MaxTokens <= 0 {
+		if modelMax > 0 {
+			budget = clipBedrockBudget(budget, modelMax)
+		}
+		return budget, modelMax
+	}
+	requestMax = opts.MaxTokens + budget
+	if modelMax > 0 && requestMax > modelMax {
+		requestMax = modelMax
+	}
+	return clipBedrockBudget(budget, requestMax), requestMax
+}
+
+func bedrockClaudeBudgetTokens(level string) int {
+	key := level
+	if level == "xhigh" || level == "max" {
+		key = "high"
+	}
+	if v, ok := models.ThinkingBudgetSetting(key); ok {
+		return v
+	}
+	if v, ok := bedrockClaudeDefaultBudgets[level]; ok {
+		return v
+	}
+	return bedrockClaudeDefaultBudgets["high"]
+}
+
+func clipBedrockBudget(budget, ceiling int) int {
+	room := ceiling - 1024
+	if room < 0 {
+		room = 0
+	}
+	if budget > room {
+		return room
+	}
+	return budget
+}
+
+func bedrockMatches(modelID, modelName string, needles ...string) bool {
+	for _, candidate := range bedrockMatchCandidates(modelID, modelName) {
+		for _, needle := range needles {
+			if strings.Contains(candidate, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func bedrockGovCloud(modelID string) bool {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	if strings.HasPrefix(id, "us-gov.") || strings.HasPrefix(id, "arn:aws-us-gov:") {
+		return true
+	}
+	for _, key := range []string{"AWS_REGION", "AWS_DEFAULT_REGION"} {
+		region := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		if strings.HasPrefix(region, "us-gov-") {
+			return true
+		}
+	}
+	return false
 }
 
 // bedrockGPTEffort is the nested reasoning.effort table for GPT models on

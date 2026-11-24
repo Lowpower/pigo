@@ -33,6 +33,18 @@ func SetThinkingBudgets(m map[string]int) {
 	}
 }
 
+// ThinkingBudgetSetting reports one settings.thinkingBudgets entry.
+// A missing table or key stays unset so a caller can keep its own default.
+func ThinkingBudgetSetting(level string) (int, bool) {
+	budgetMu.Lock()
+	defer budgetMu.Unlock()
+	if budgets == nil {
+		return 0, false
+	}
+	v, ok := budgets[level]
+	return v, ok
+}
+
 // BudgetTokens returns the token budget for a thinking level.
 func BudgetTokens(level string) int {
 	budgetMu.Lock()
