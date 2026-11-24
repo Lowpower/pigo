@@ -635,13 +635,241 @@ func TestBedrockOpenAIReasoningFields(t *testing.T) {
 
 	claude := bedrockThinkingFields(Options{Provider: provider, Model: "us.anthropic.claude-opus-4-6-v1", Thinking: "high"})
 	thinking, _ := claude["thinking"].(map[string]any)
-	if thinking["type"] != "enabled" {
+	if thinking["type"] != "adaptive" || thinking["display"] != "summarized" {
 		t.Fatalf("claude = %#v", claude)
+	}
+	if _, ok := thinking["budget_tokens"]; ok {
+		t.Fatalf("claude budget = %#v", claude)
+	}
+	effort, _ := claude["output_config"].(map[string]any)
+	if effort["effort"] != "high" {
+		t.Fatalf("claude effort = %#v", claude["output_config"])
 	}
 	if _, ok := claude["reasoning"]; ok {
 		t.Fatalf("claude sent reasoning: %#v", claude)
 	}
 	if _, ok := claude["reasoning_effort"]; ok {
 		t.Fatalf("claude sent reasoning_effort: %#v", claude)
+	}
+}
+
+func TestBedrockClaudeThinkingFields(t *testing.T) {
+	const provider = "amazon-bedrock"
+	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+	assertAdaptive := func(model, level, effort string, binding bool) {
+		t.Helper()
+		got := bedrockThinkingFields(Options{Provider: provider, Model: model, Thinking: level})
+		thinking, _ := got["thinking"].(map[string]any)
+		if thinking["type"] != "adaptive" || thinking["display"] != "summarized" {
+			t.Fatalf("%s %s thinking = %#v", model, level, thinking)
+		}
+		if _, ok := thinking["budget_tokens"]; ok {
+			t.Fatalf("%s %s budget = %#v", model, level, thinking)
+		}
+		oc, _ := got["output_config"].(map[string]any)
+		if oc["effort"] != effort {
+			t.Fatalf("%s %s effort = %#v", model, level, got["output_config"])
+		}
+		_, hasBind := thinking["block_binding"]
+		if hasBind != binding {
+			t.Fatalf("%s %s binding = %#v", model, level, thinking)
+		}
+		wantBeta := []string(nil)
+		if binding {
+			bind, _ := thinking["block_binding"].(map[string]any)
+			if bind["prefix_mismatch_behavior"] != "drop_block" {
+				t.Fatalf("%s binding = %#v", model, thinking["block_binding"])
+			}
+			wantBeta = []string{thinkingBindingControlsBeta}
+		}
+		if !sameStrings(bedrockBeta(got), wantBeta) {
+			t.Fatalf("%s beta = %#v", model, got["anthropic_beta"])
+		}
+	}
+
+	for _, model := range []string{
+		"us.anthropic.claude-opus-4-6-v1",
+		"us.anthropic.claude-sonnet-4-6",
+		"us.anthropic.claude-opus-4-8",
+		"us.anthropic.claude-opus-5",
+		"us.anthropic.claude-sonnet-5",
+		"us.anthropic.claude-fable-5",
+	} {
+		assertAdaptive(model, "high", "high", model != "us.anthropic.claude-opus-4-6-v1" && model != "us.anthropic.claude-sonnet-4-6")
+	}
+	assertAdaptive("us.anthropic.claude-opus-4-6-v1", "xhigh", "high", false)
+	assertAdaptive("us.anthropic.claude-opus-4-7", "xhigh", "xhigh", true)
+	assertAdaptive("us.anthropic.claude-opus-4-6-v1", "max", "max", false)
+	assertAdaptive("us.anthropic.claude-opus-4-6-v1", "minimal", "low", false)
+
+	if bedrockOutputLimit(Options{Provider: provider, Model: "us.anthropic.claude-opus-4-6-v1", Thinking: "high"}) != 0 {
+		t.Fatal("adaptive thinking should leave the caller max tokens alone")
+	}
+	if bedrockOutputLimit(Options{Provider: provider, Model: "us.anthropic.claude-opus-4-6-v1", Thinking: "high", MaxTokens: 50}) != 50 {
+		t.Fatal("adaptive explicit max tokens changed")
+	}
+
+	const mapped = "bedrock-claude-map"
+	mappedID := "custom.anthropic.claude-opus-4-7"
+	low := "low"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: mapped, DefaultAPI: "bedrock-converse-stream", DefaultID: mappedID,
+		Models: []models.Model{{
+			Provider: mapped, ID: mappedID, Name: "Claude Opus 4.7",
+			Reasoning: boolPtrAI(true),
+			ThinkingLevelMap: map[string]*string{
+				"xhigh": &low,
+			},
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(mapped) })
+	mappedFields := bedrockThinkingFields(Options{Provider: mapped, Model: mappedID, Thinking: "xhigh"})
+	mappedEffort, _ := mappedFields["output_config"].(map[string]any)
+	if mappedEffort["effort"] != "xhigh" {
+		t.Fatalf("native xhigh beats the map = %#v", mappedFields["output_config"])
+	}
+
+	const sonnet45 = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+	budgetOpts := Options{Provider: provider, Model: sonnet45, Thinking: "high", ThinkingBudget: 10000}
+	budget := bedrockThinkingFields(budgetOpts)
+	thinking, _ := budget["thinking"].(map[string]any)
+	if thinking["type"] != "enabled" || thinking["budget_tokens"] != 16384 || thinking["display"] != "summarized" {
+		t.Fatalf("sonnet 4.5 = %#v", thinking)
+	}
+	if _, ok := budget["output_config"]; ok {
+		t.Fatalf("budget output_config = %#v", budget["output_config"])
+	}
+	if !sameStrings(bedrockBeta(budget), []string{"interleaved-thinking-2025-05-14"}) {
+		t.Fatalf("interleaved beta = %#v", budget["anthropic_beta"])
+	}
+	if limit := bedrockOutputLimit(budgetOpts); limit != models.MaxTokens(provider, sonnet45) {
+		t.Fatalf("unset max tokens = %d", limit)
+	}
+
+	tight := Options{Provider: provider, Model: sonnet45, Thinking: "high", MaxTokens: 100}
+	tightFields := bedrockThinkingFields(tight)
+	tightThinking, _ := tightFields["thinking"].(map[string]any)
+	tightBudget, _ := tightThinking["budget_tokens"].(int)
+	tightLimit := bedrockOutputLimit(tight)
+	if tightLimit != 16484 || tightBudget != 15460 || tightLimit-tightBudget < 1024 {
+		t.Fatalf("tight limit=%d budget=%d fields=%#v", tightLimit, tightBudget, tightThinking)
+	}
+
+	xhighBudget := bedrockThinkingFields(Options{Provider: provider, Model: sonnet45, Thinking: "xhigh"})
+	xhighThinking, _ := xhighBudget["thinking"].(map[string]any)
+	if xhighThinking["budget_tokens"] != 16384 {
+		t.Fatalf("xhigh budget = %#v", xhighThinking)
+	}
+
+	t.Cleanup(func() { models.SetThinkingBudgets(nil) })
+	models.SetThinkingBudgets(map[string]int{"high": 20000})
+	over := bedrockThinkingFields(Options{Provider: provider, Model: sonnet45, Thinking: "xhigh", ThinkingBudget: 10000})
+	overThinking, _ := over["thinking"].(map[string]any)
+	if overThinking["budget_tokens"] != 20000 {
+		t.Fatalf("settings high = %#v", overThinking)
+	}
+	models.SetThinkingBudgets(map[string]int{"xhigh": 999})
+	ignored := bedrockThinkingFields(Options{Provider: provider, Model: sonnet45, Thinking: "xhigh"})
+	ignoredThinking, _ := ignored["thinking"].(map[string]any)
+	if ignoredThinking["budget_tokens"] != 16384 {
+		t.Fatalf("xhigh setting ignored = %#v", ignoredThinking)
+	}
+	models.SetThinkingBudgets(nil)
+
+	omitted := bedrockThinkingFields(Options{Provider: provider, Model: sonnet45, Thinking: "low", ThinkingDisplay: "omitted"})
+	omittedThinking, _ := omitted["thinking"].(map[string]any)
+	if omittedThinking["display"] != "omitted" || omittedThinking["budget_tokens"] != 2048 {
+		t.Fatalf("omitted = %#v", omittedThinking)
+	}
+
+	gov := bedrockThinkingFields(Options{Provider: provider, Model: "us-gov.anthropic.claude-opus-4-7", Thinking: "xhigh"})
+	govThinking, _ := gov["thinking"].(map[string]any)
+	if _, ok := govThinking["display"]; ok {
+		t.Fatalf("gov display = %#v", govThinking)
+	}
+	if _, ok := govThinking["block_binding"]; ok || gov["anthropic_beta"] != nil {
+		t.Fatalf("gov binding = %#v", gov)
+	}
+	govEffort, _ := gov["output_config"].(map[string]any)
+	if govEffort["effort"] != "xhigh" {
+		t.Fatalf("gov effort = %#v", gov["output_config"])
+	}
+	t.Setenv("AWS_REGION", "us-gov-west-1")
+	regionGov := bedrockThinkingFields(Options{Provider: provider, Model: "us.anthropic.claude-opus-4-7", Thinking: "high"})
+	regionThinking, _ := regionGov["thinking"].(map[string]any)
+	if _, ok := regionThinking["display"]; ok || regionThinking["block_binding"] != nil {
+		t.Fatalf("region gov = %#v", regionThinking)
+	}
+	t.Setenv("AWS_REGION", "us-east-1")
+
+	const named = "bedrock-claude-arn"
+	arn := "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/claude"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: named, DefaultAPI: "bedrock-converse-stream", DefaultID: arn,
+		Models: []models.Model{{
+			Provider: named, ID: arn, Name: "Claude Opus 4.6", Reasoning: boolPtrAI(true),
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(named) })
+	byName := bedrockThinkingFields(Options{Provider: named, Model: arn, Thinking: "high"})
+	byNameThinking, _ := byName["thinking"].(map[string]any)
+	if byNameThinking["type"] != "adaptive" {
+		t.Fatalf("arn name = %#v", byName)
+	}
+
+	if bedrockThinkingFields(Options{Provider: provider, Model: "us.anthropic.claude-opus-4-6-v1", Thinking: "off", ThinkingBudget: 10000}) != nil {
+		t.Fatal("thinking off should omit additional fields")
+	}
+	const quiet = "bedrock-claude-off"
+	quietID := "custom.anthropic.claude-sonnet-4-5"
+	noReason := false
+	models.RegisterProvider(models.ProviderSpec{
+		ID: quiet, DefaultAPI: "bedrock-converse-stream", DefaultID: quietID,
+		Models: []models.Model{{
+			Provider: quiet, ID: quietID, Name: "Claude Sonnet 4.5", Reasoning: &noReason,
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(quiet) })
+	if bedrockThinkingFields(Options{Provider: quiet, Model: quietID, Thinking: "high"}) != nil {
+		t.Fatal("reasoning false should omit additional fields")
+	}
+
+	const uncapped = "bedrock-claude-uncapped"
+	uncappedID := "custom.anthropic.claude-sonnet-4-5-budget"
+	models.RegisterProvider(models.ProviderSpec{
+		ID: uncapped, DefaultAPI: "bedrock-converse-stream", DefaultID: uncappedID,
+		Models: []models.Model{{
+			Provider: uncapped, ID: uncappedID, Name: "Claude Sonnet 4.5", Reasoning: boolPtrAI(true),
+		}},
+	})
+	t.Cleanup(func() { models.UnregisterProvider(uncapped) })
+	uncappedOpts := Options{Provider: uncapped, Model: uncappedID, Thinking: "high", MaxTokens: 100}
+	uncappedFields := bedrockThinkingFields(uncappedOpts)
+	uncappedThinking, _ := uncappedFields["thinking"].(map[string]any)
+	if uncappedThinking["budget_tokens"] != 15460 || bedrockOutputLimit(uncappedOpts) != 16484 {
+		t.Fatalf("no catalog cap = %#v limit %d", uncappedThinking, bedrockOutputLimit(uncappedOpts))
+	}
+	open := Options{Provider: uncapped, Model: uncappedID, Thinking: "high"}
+	openThinking, _ := bedrockThinkingFields(open)["thinking"].(map[string]any)
+	if openThinking["budget_tokens"] != 16384 || openThinking["display"] != "summarized" || bedrockOutputLimit(open) != 0 {
+		t.Fatalf("no ceiling = %#v limit %d", openThinking, bedrockOutputLimit(open))
+	}
+}
+
+func bedrockBeta(fields map[string]any) []string {
+	switch v := fields["anthropic_beta"].(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			s, _ := item.(string)
+			out = append(out, s)
+		}
+		return out
+	default:
+		return nil
 	}
 }
