@@ -313,9 +313,67 @@ func resolveOrSynthetic(provider, id string) Model {
 }
 
 func applyOverlays(providerID string, list []Model) []Model {
+	var saved []Model
+	replaceChat := false
+	if providerID == "openrouter" {
+		saved, replaceChat = openRouterUserCatalog()
+	}
+	if replaceChat {
+		// Drop the public chat list, then put the key's rows back. Classifiers stay.
+		list = withoutChat(list)
+		list = mergeOverlay(providerID, list, chatModels(saved))
+	}
 	list = mergeOverlay(providerID, list, remoteOverlay(providerID))
+	if replaceChat {
+		// A models.dev overlay must not resurrect chat models the key cannot use,
+		// and must not replace the key's context, max output, or price.
+		list = dropChatExcept(list, chatIDSet(saved))
+		list = mergeOverlay(providerID, list, chatModels(saved))
+	}
 	list = mergeOverlay(providerID, list, userOverlay(providerID))
 	return list
+}
+
+func withoutChat(list []Model) []Model {
+	out := make([]Model, 0, len(list))
+	for _, m := range list {
+		if m.ModelType() == "chat" {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func chatModels(list []Model) []Model {
+	out := make([]Model, 0, len(list))
+	for _, m := range list {
+		if m.ModelType() == "chat" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func chatIDSet(list []Model) map[string]bool {
+	allow := make(map[string]bool)
+	for _, m := range list {
+		if m.ModelType() == "chat" && m.ID != "" {
+			allow[m.ID] = true
+		}
+	}
+	return allow
+}
+
+func dropChatExcept(list []Model, allow map[string]bool) []Model {
+	out := make([]Model, 0, len(list))
+	for _, m := range list {
+		if m.ModelType() == "chat" && !allow[m.ID] {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func mergeOverlay(providerID string, base, extra []Model) []Model {

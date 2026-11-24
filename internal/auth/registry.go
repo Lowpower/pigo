@@ -123,6 +123,7 @@ func registerBuiltins() {
 	registerAzureAuth()
 	registerVertexAuth()
 	registerRadiusAuth()
+	models.SetOpenRouterKey(openRouterCatalogKey)
 }
 
 func registerProvider(p Provider) {
