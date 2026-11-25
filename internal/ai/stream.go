@@ -111,6 +111,10 @@ type Options struct {
 	MaxTokens      int
 	Thinking       string // off|minimal|low|medium|high|xhigh|max
 	ThinkingBudget int    // token budget resolved from thinkingBudgets
+	// requestedThinking is the level before StreamFor clamps Thinking.
+	// Bedrock Claude maps effort from this value. Empty means the caller
+	// invoked the adapter directly, so Thinking is the requested level.
+	requestedThinking string
 	// ThinkingDisplay is summarized or omitted. Empty and unknown values use summarized.
 	ThinkingDisplay string
 	SessionID       string // coding session id; Codex reuses a WebSocket per session

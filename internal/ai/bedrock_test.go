@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"math"
 	"strings"
 	"testing"
@@ -856,6 +857,47 @@ func TestBedrockClaudeThinkingFields(t *testing.T) {
 	if openThinking["budget_tokens"] != 16384 || openThinking["display"] != "summarized" || bedrockOutputLimit(open) != 0 {
 		t.Fatalf("no ceiling = %#v limit %d", openThinking, bedrockOutputLimit(open))
 	}
+}
+
+func TestBedrockClaudeEffortUsesRequestedLevel(t *testing.T) {
+	const provider = "bedrock-requested-level"
+	const api = "bedrock-requested-api"
+	var got Options
+	RegisterAPI(api, func(_ ClientConfig) StreamFn {
+		return func(ctx context.Context, reqCtx Context, opts Options) (*EventStream, error) {
+			got = opts
+			return ScriptedStreamFn("ok", 0)(ctx, reqCtx, opts)
+		}
+	})
+	t.Cleanup(func() { models.UnregisterProvider(provider) })
+
+	check := func(id, want string) {
+		t.Helper()
+		src, ok := models.Lookup("amazon-bedrock", id)
+		if !ok {
+			t.Fatalf("missing catalog model %s", id)
+		}
+		src.Provider = provider
+		src.API = api
+		models.RegisterProvider(models.ProviderSpec{
+			ID: provider, DefaultAPI: api, DefaultID: id,
+			Models: []models.Model{src},
+		})
+		t.Cleanup(func() { models.UnregisterProvider(provider) })
+		stream, err := StreamFor(provider, ClientConfig{})(context.Background(), Context{}, Options{Model: id, Thinking: "xhigh"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream.Collect()
+		fields := bedrockThinkingFields(got)
+		oc, _ := fields["output_config"].(map[string]any)
+		if oc["effort"] != want {
+			t.Fatalf("%s effort = %#v, clamped thinking %q", id, fields["output_config"], got.Thinking)
+		}
+	}
+	check("us.anthropic.claude-opus-4-6-v1", "high")
+	check("us.anthropic.claude-sonnet-4-6", "high")
+	check("us.anthropic.claude-opus-4-7", "xhigh")
 }
 
 func bedrockBeta(fields map[string]any) []string {
