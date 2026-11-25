@@ -57,7 +57,7 @@ func TestCodemodeScriptCallsBash(t *testing.T) {
 		t.Fatal("system prompt omitted the codemode description")
 	}
 	out, isErr := tool.Execute(ctx, map[string]any{
-		"code": `await tools.bash({command:"printf hi"})`,
+		"code": `const r = await tools.bash({command:"printf hi"}); return r.output`,
 	})
 	if isErr || !strings.HasPrefix(out, "hi") {
 		t.Fatalf("bash %q err %v", out, isErr)
@@ -157,6 +157,33 @@ func TestCodemodeInlineBudgetZeroSkipsDeclarations(t *testing.T) {
 	desc := findBuiltin(e, "codemode").Description()
 	if strings.Contains(desc, "await tools.bash") {
 		t.Fatalf("budget 0 listed bash:\n%s", desc)
+	}
+}
+
+func TestCodemodeBashStructuredResult(t *testing.T) {
+	ctx := context.Background()
+	e, err := New(ctx, Options{
+		Cwd:          t.TempDir(),
+		AgentDir:     t.TempDir(),
+		NoExtensions: true,
+		ToolAllow:    []string{"codemode", "bash"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	tool := findBuiltin(e, "codemode")
+	out, isErr := tool.Execute(ctx, map[string]any{
+		"code": `const r = await tools.bash({command:"true"}); return r.output.length + ":" + r.truncated + ":" + r.exit_code + ":" + ("full_output_path" in r)`,
+	})
+	if isErr || !strings.HasPrefix(out, "0:false:0:false") {
+		t.Fatalf("empty %q err %v", out, isErr)
+	}
+	out, isErr = tool.Execute(ctx, map[string]any{
+		"code": `const r = await tools.bash({command:"printf bye; exit 3"}); return r.exit_code + " " + r.output + " " + r.truncated`,
+	})
+	if isErr || !strings.HasPrefix(out, "3 bye false") {
+		t.Fatalf("exit %q err %v", out, isErr)
 	}
 }
 

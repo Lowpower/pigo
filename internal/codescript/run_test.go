@@ -133,6 +133,21 @@ func TestScriptCallsOverlap(t *testing.T) {
 	}
 }
 
+func TestScriptSchemaObjectResolves(t *testing.T) {
+	res, err := Run(context.Background(), `const r = await tools.typed({}); return r.exit_code`, Env{
+		Tools: []Tool{{Name: "typed", OutputSchema: map[string]any{"type": "object"}}},
+		Exec: func(context.Context, string, map[string]any) (string, bool) {
+			return `{"output":"bye","truncated":false,"exit_code":3,"wall_time_seconds":0.1}`, true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Value != "3" {
+		t.Fatalf("value %q", res.Value)
+	}
+}
+
 func TestScriptSchemaFailureResolves(t *testing.T) {
 	res, err := Run(context.Background(), `return await tools.typed({})`, Env{
 		Tools: []Tool{{Name: "typed", OutputSchema: map[string]any{"type": "object"}}},

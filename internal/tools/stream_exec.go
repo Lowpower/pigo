@@ -66,18 +66,26 @@ func runStreamed(ctx context.Context, cmd *exec.Cmd, timeoutSec int, tempPrefix 
 		mu.Unlock()
 		emit(false)
 	})
-	result := ToolBoundOutput(string(out), tempPrefix)
+	full := string(out)
+	result, path := modelShellText(full, tempPrefix)
 	emit(true)
+	elapsed := time.Since(started)
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return appendDuration(result+fmt.Sprintf("\n[timed out after %ds]", timeoutSec), time.Since(started)), true
+		return appendDuration(result+fmt.Sprintf("\n[timed out after %ds]", timeoutSec), elapsed), true
 	}
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return appendDuration(result+fmt.Sprintf("\n[exit code %d]", exitErr.ExitCode()), time.Since(started)), true
+			if ctx.Err() == nil {
+				storeShellStructured(ctx, full, path, tempPrefix, exitErr.ExitCode(), elapsed)
+			}
+			return appendDuration(result+fmt.Sprintf("\n[exit code %d]", exitErr.ExitCode()), elapsed), true
 		}
-		return appendDuration(result+"\n"+err.Error(), time.Since(started)), true
+		return appendDuration(result+"\n"+err.Error(), elapsed), true
 	}
-	return appendDuration(result, time.Since(started)), false
+	if ctx.Err() == nil {
+		storeShellStructured(ctx, full, path, tempPrefix, 0, elapsed)
+	}
+	return appendDuration(result, elapsed), false
 }

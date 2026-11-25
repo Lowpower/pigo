@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 )
 
 // DefaultMaxLines and DefaultMaxBytes cap bash/powershell output (last N lines or bytes).
@@ -250,15 +251,65 @@ func truncationFooter(tr Truncation, path string, orig string) string {
 	}
 }
 
-// ToolBoundOutput is the LLM-facing tool result: truncated tail plus a footer.
-func ToolBoundOutput(full, tempPrefix string) string {
+// structuredOutputMaxBytes is the cap for programmatic shell output.
+// Past this, the result keeps the first and last half and sets truncated.
+const structuredOutputMaxBytes = 1024 * 1024
+
+// structuredShellOutput is the programmatic view of a shell command.
+// Output up to 1 MiB is returned whole. Longer output keeps 512 KiB from
+// each end, with an omission marker between them. The marker is not part
+// of the 1 MiB budget.
+func structuredShellOutput(full string) (content string, truncated bool) {
+	b := []byte(full)
+	if len(b) <= structuredOutputMaxBytes {
+		return full, false
+	}
+	headBytes := structuredOutputMaxBytes / 2
+	tailBytes := structuredOutputMaxBytes - headBytes
+	head := trimIncompleteUTF8Tail(b[:headBytes])
+	tail := b[len(b)-tailBytes:]
+	tailStart := 0
+	for tailStart < len(tail) && tail[tailStart]&0xc0 == 0x80 {
+		tailStart++
+	}
+	omitted := len(b) - headBytes - tailBytes
+	content = string(head) + fmt.Sprintf("\n\n[... %d bytes omitted ...]\n\n", omitted) + string(tail[tailStart:])
+	return content, true
+}
+
+// trimIncompleteUTF8Tail drops a trailing partial rune. A streaming decoder
+// holds that sequence back instead of emitting it.
+func trimIncompleteUTF8Tail(b []byte) []byte {
+	n := len(b)
+	for i := 1; i <= utf8.UTFMax && i <= n; i++ {
+		if b[n-i]&0xc0 == 0x80 {
+			continue
+		}
+		r, size := utf8.DecodeRune(b[n-i:])
+		if r == utf8.RuneError && size == 1 {
+			return b[:n-i]
+		}
+		return b
+	}
+	return b
+}
+
+// modelShellText is the model-facing shell output: truncated tail, footer,
+// and the temp path when that tail was cut.
+func modelShellText(full, tempPrefix string) (text, path string) {
 	tr := TruncateTail(full, DefaultMaxLines, DefaultMaxBytes)
 	if !tr.Truncated {
-		return full
+		return full, ""
 	}
 	path, err := persistFullOutput(tempPrefix, full)
 	if err != nil {
-		return tr.Content
+		return tr.Content, ""
 	}
-	return tr.Content + truncationFooter(tr, path, full)
+	return tr.Content + truncationFooter(tr, path, full), path
+}
+
+// ToolBoundOutput is the LLM-facing tool result: truncated tail plus a footer.
+func ToolBoundOutput(full, tempPrefix string) string {
+	text, _ := modelShellText(full, tempPrefix)
+	return text
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/codescript"
 	"github.com/Lowpower/pigo/internal/models"
+	"github.com/Lowpower/pigo/internal/tools"
 )
 
 // codeTool runs one codemode script. It is registered with the built-ins and
@@ -99,6 +100,11 @@ func (e *Engine) scriptEnv() codescript.Env {
 					item.Schema = info.Schema
 				}
 			}
+			if item.OutputSchema == nil {
+				if s, ok := tool.(tools.OutputSchemer); ok {
+					item.OutputSchema = s.OutputSchema()
+				}
+			}
 			list = append(list, item)
 		}
 	}
@@ -110,6 +116,15 @@ func (e *Engine) scriptEnv() codescript.Env {
 		Exec: func(ctx context.Context, name string, args map[string]any) (string, bool) {
 			if name == "codemode" || e.Tools == nil {
 				return "unknown tool: " + name, true
+			}
+			if name == "bash" || name == "powershell" {
+				box := &ext.ToolResult{}
+				ctx = ext.WithOutcome(ctx, box)
+				text, isErr := e.Tools.Execute(ctx, name, args)
+				if len(box.Structured) > 0 {
+					return string(box.Structured), isErr
+				}
+				return text, isErr
 			}
 			return e.Tools.Execute(ctx, name, args)
 		},

@@ -29,7 +29,9 @@ func (powershellTool) Description() string {
 
 func (powershellTool) Schema() map[string]any { return schemaFor(&powershellParams{}) }
 
-func (powershellTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
+func (powershellTool) OutputSchema() map[string]any { return shellOutputSchema() }
+
+func (t powershellTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
 	var p powershellParams
 	if err := decodeArgs(args, &p); err != nil {
 		return "invalid arguments: " + err.Error(), true

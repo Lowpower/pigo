@@ -21,6 +21,13 @@ type Tool interface {
 	Execute(ctx context.Context, args map[string]any) (result string, isError bool)
 }
 
+// OutputSchemer is a tool that declares a result schema. The model still
+// receives Execute's text. Callers that understand the schema receive the
+// structured value.
+type OutputSchemer interface {
+	OutputSchema() map[string]any
+}
+
 // Registry holds a set of tools in a stable order.
 type Registry struct {
 	mu     sync.RWMutex
@@ -171,12 +178,16 @@ func (r *Registry) get(name string) (Tool, bool) {
 func defsOf(list []Tool) []ai.Tool {
 	out := make([]ai.Tool, 0, len(list))
 	for _, t := range list {
-		out = append(out, ai.Tool{
+		def := ai.Tool{
 			Name:                t.Name(),
 			Description:         t.Description(),
 			Parameters:          t.Schema(),
 			ConstrainedSampling: preferConstrainedSampling(t.Name()),
-		})
+		}
+		if s, ok := t.(OutputSchemer); ok {
+			def.OutputSchema = s.OutputSchema()
+		}
+		out = append(out, def)
 	}
 	return out
 }
