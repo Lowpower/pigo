@@ -208,7 +208,7 @@ func bedrockLegacyThinkingFields(opts Options) map[string]any {
 }
 
 func bedrockClaudeThinking(opts Options, modelName string) (map[string]any, int) {
-	level := strings.ToLower(strings.TrimSpace(opts.Thinking))
+	level := bedrockClaudeLevel(opts)
 	if !thinkingOn(level) || bedrockReasoningDisabled(opts) {
 		return nil, opts.MaxTokens
 	}
@@ -240,6 +240,14 @@ func bedrockClaudeThinking(opts Options, modelName string) (map[string]any, int)
 		"thinking":       thinking,
 		"anthropic_beta": []string{bedrockInterleavedThinkingBeta},
 	}, requestMax
+}
+
+func bedrockClaudeLevel(opts Options) string {
+	level := opts.requestedThinking
+	if strings.TrimSpace(level) == "" {
+		level = opts.Thinking
+	}
+	return strings.ToLower(strings.TrimSpace(level))
 }
 
 func bedrockReasoningDisabled(opts Options) bool {

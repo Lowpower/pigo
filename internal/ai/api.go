@@ -214,6 +214,7 @@ func StreamFor(provider string, cfg ClientConfig) StreamFn {
 		if opts.Provider == "" {
 			opts.Provider = provider
 		}
+		opts.requestedThinking = opts.Thinking
 		opts.Thinking, _ = resolvedThinking(opts)
 		opts.ThinkingBudget = models.BudgetTokens(opts.Thinking)
 		c := cfg
