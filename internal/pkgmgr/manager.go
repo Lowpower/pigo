@@ -571,30 +571,57 @@ func (m *Manager) resolve(ctx context.Context, trusted bool) ([]Resource, error)
 	}
 
 	addExplicit := func(paths []string, kind, scope, base string) {
-		var plain []string
-		for _, p := range paths {
-			if isOverridePattern(p) {
-				continue
-			}
-			plain = append(plain, p)
-		}
 		var files []string
-		for _, p := range plain {
-			fp := p
-			if !filepath.IsAbs(fp) {
-				fp = filepath.Join(base, p)
+		var filters []string
+		seen := map[string]bool{}
+		addFile := func(f string) {
+			if f == "" || seen[f] {
+				return
 			}
+			seen[f] = true
+			files = append(files, f)
+		}
+		collect := func(fp string) {
 			st, err := os.Stat(fp)
 			if err != nil {
-				continue
+				return
 			}
 			if st.IsDir() {
-				files = append(files, collectResourceFiles(fp, kind)...)
+				for _, f := range collectResourceFiles(fp, kind) {
+					addFile(f)
+				}
+				return
+			}
+			addFile(fp)
+		}
+		for _, p := range paths {
+			if isOverridePattern(p) {
+				filters = append(filters, p)
+				if p[0] != '+' {
+					continue
+				}
+				expanded, ok := expandLeadingTilde(p[1:])
+				if !ok {
+					continue
+				}
+				for _, f := range plusTildeCandidates(expanded) {
+					addFile(f)
+				}
 				continue
 			}
-			files = append(files, fp)
+			expanded, ok := expandLeadingTilde(p)
+			fp := p
+			if ok {
+				fp = expanded
+			} else {
+				filters = append(filters, p)
+				if !filepath.IsAbs(fp) {
+					fp = filepath.Join(base, p)
+				}
+			}
+			collect(fp)
 		}
-		enabledFor := applyPatterns(files, paths, base)
+		enabledFor := applyPatterns(files, filters, base)
 		for _, f := range files {
 			add(f, scope, "top-level", "local", kind, base, enabledFor[f])
 		}

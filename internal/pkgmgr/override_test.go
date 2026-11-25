@@ -33,6 +33,127 @@ func TestIsEnabledByOverrides(t *testing.T) {
 	}
 }
 
+func TestExpandLeadingTilde(t *testing.T) {
+	home := isolateHome(t)
+	got, ok := expandLeadingTilde("~/skills/pdf")
+	if !ok || got != filepath.Join(home, "skills", "pdf") {
+		t.Fatalf("~/ got %q ok=%v", got, ok)
+	}
+	got, ok = expandLeadingTilde("~")
+	if !ok || got != home {
+		t.Fatalf("~ got %q ok=%v", got, ok)
+	}
+	if _, ok = expandLeadingTilde("~user/skills"); ok {
+		t.Fatal("~user expanded")
+	}
+	if _, ok = expandLeadingTilde("$HOME/skills"); ok {
+		t.Fatal("$VAR expanded")
+	}
+	if _, ok = expandLeadingTilde("skills/pdf"); ok {
+		t.Fatal("relative path expanded")
+	}
+	if _, ok = expandLeadingTilde("~extensions/main.ts"); ok {
+		t.Fatal("tilde without a slash expanded")
+	}
+}
+
+func TestTildeOverrideMatchesHome(t *testing.T) {
+	home := isolateHome(t)
+	base := t.TempDir()
+	skill := filepath.Join(home, "skills", "pdf", "SKILL.md")
+	other := filepath.Join(home, "skills", "keep", "SKILL.md")
+	theme := filepath.Join(home, "themes", "x.json")
+	if IsEnabledByOverrides(skill, []string{"!~/skills/pdf"}, base) {
+		t.Fatal("tilde exclude should disable the home skill")
+	}
+	if !IsEnabledByOverrides(other, []string{"!~/skills/pdf"}, base) {
+		t.Fatal("other skill stays enabled")
+	}
+	if !IsEnabledByOverrides(theme, []string{"!*.json", "+~/themes/x.json"}, base) {
+		t.Fatal("+ tilde should force-include the theme")
+	}
+	if !IsEnabledByOverrides(skill, []string{"!~user/skills/pdf"}, base) {
+		t.Fatal("~user must stay literal")
+	}
+	if !IsEnabledByOverrides(skill, []string{"!$HOME/skills/pdf"}, base) {
+		t.Fatal("$VAR must stay literal")
+	}
+	if !IsEnabledByOverrides(skill, []string{"!~extensions/pdf"}, base) {
+		t.Fatal("tilde without a slash must stay literal")
+	}
+}
+
+func TestResolveTildeResourcePaths(t *testing.T) {
+	home := isolateHome(t)
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	pdf := writeSkillMD(t, filepath.Join(home, "skills", "pdf"), "# pdf\n")
+	keep := writeSkillMD(t, filepath.Join(home, "skills", "keep"), "# keep\n")
+	theme := filepath.Join(home, "themes", "x.json")
+	if err := os.MkdirAll(filepath.Dir(theme), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(theme, []byte(`{"name":"x"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Open(cwd, agent, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.AutoInstall = false
+	m.User.Skills = []string{"~/skills", "!~/skills/pdf"}
+	m.User.Themes = []string{"+~/themes/x.json"}
+	rs, err := m.Resolve(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdfRes, ok := findSkill(rs, pdf)
+	if !ok {
+		t.Fatalf("missing pdf skill: %+v", rs)
+	}
+	if pdfRes.Enabled {
+		t.Fatal("pdf skill should be excluded")
+	}
+	keepRes, ok := findSkill(rs, keep)
+	if !ok || !keepRes.Enabled {
+		t.Fatalf("keep skill: ok=%v res=%+v", ok, keepRes)
+	}
+	var themeRes Resource
+	for _, r := range rs {
+		if r.Type == KindThemes && r.Path == theme {
+			themeRes = r
+		}
+	}
+	if themeRes.Path == "" || !themeRes.Enabled {
+		t.Fatalf("theme: %+v", themeRes)
+	}
+}
+
+func TestResolvePlusTildeSkillDir(t *testing.T) {
+	home := isolateHome(t)
+	agent := t.TempDir()
+	cwd := t.TempDir()
+	pdf := writeSkillMD(t, filepath.Join(home, "skills", "pdf"), "# pdf\n")
+	keep := writeSkillMD(t, filepath.Join(home, "skills", "keep"), "# keep\n")
+	m, err := Open(cwd, agent, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.AutoInstall = false
+	m.User.Skills = []string{"+~/skills/pdf"}
+	rs, err := m.Resolve(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdfRes, ok := findSkill(rs, pdf)
+	if !ok || !pdfRes.Enabled {
+		t.Fatalf("pdf skill: ok=%v res=%+v", ok, pdfRes)
+	}
+	if _, ok := findSkill(rs, keep); ok {
+		t.Fatal("sibling skill should not be discovered")
+	}
+}
+
 func TestToggleGlobalDisablePersists(t *testing.T) {
 	agent := t.TempDir()
 	cwd := t.TempDir()

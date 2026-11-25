@@ -1,7 +1,9 @@
 package pkgmgr
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/gobwas/glob"
@@ -55,10 +57,48 @@ func isOverridePattern(pattern string) bool {
 	return strings.HasPrefix(pattern, "!") || strings.HasPrefix(pattern, "+") || strings.HasPrefix(pattern, "-")
 }
 
+// expandLeadingTilde expands a leading ~, ~/, or Windows ~\.
+// ~user and $VAR stay literal. ok is false when nothing was expanded.
+func expandLeadingTilde(p string) (string, bool) {
+	windowsSlash := runtime.GOOS == "windows" && strings.HasPrefix(p, `~\`)
+	if p != "~" && !strings.HasPrefix(p, "~/") && !windowsSlash {
+		return p, false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p, false
+	}
+	if p == "~" {
+		return home, true
+	}
+	return filepath.Join(home, p[2:]), true
+}
+
 func normalizeExactPattern(pattern string) string {
+	if expanded, ok := expandLeadingTilde(pattern); ok {
+		pattern = expanded
+	}
 	p := toPosix(pattern)
 	p = strings.TrimPrefix(p, "./")
 	return p
+}
+
+// plusTildeCandidates is the single file a tilde-expanded +path contributes.
+// A directory contributes only a SKILL.md sitting directly inside it.
+func plusTildeCandidates(expanded string) []string {
+	st, err := os.Stat(expanded)
+	if err != nil {
+		return nil
+	}
+	if !st.IsDir() {
+		return []string{expanded}
+	}
+	skill := filepath.Join(expanded, "SKILL.md")
+	info, err := os.Stat(skill)
+	if err != nil || info.IsDir() {
+		return nil
+	}
+	return []string{skill}
 }
 
 func matchesAnyExactPattern(filePath string, patterns []string, baseDir string) bool {
@@ -152,6 +192,9 @@ func matchesAnyPattern(filePath string, patterns []string, baseDir string) bool 
 		parentPosix = toPosix(parent)
 	}
 	for _, pattern := range patterns {
+		if expanded, ok := expandLeadingTilde(pattern); ok {
+			pattern = expanded
+		}
 		n := toPosix(pattern)
 		if globMatch(n, rel) || globMatch(n, name) || globMatch(n, filePosix) {
 			return true
