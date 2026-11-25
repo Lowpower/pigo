@@ -27,6 +27,8 @@ func (bashTool) Description() string {
 
 func (bashTool) Schema() map[string]any { return schemaFor(&bashParams{}) }
 
+func (bashTool) OutputSchema() map[string]any { return shellOutputSchema() }
+
 func (t bashTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
 	var p bashParams
 	if err := decodeArgs(args, &p); err != nil {

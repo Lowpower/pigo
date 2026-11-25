@@ -247,7 +247,20 @@ func (r *runner) callTool(ctx context.Context, body map[string]any) (string, err
 		}
 		return "", fmt.Errorf("%s", val)
 	}
+	if tool.OutputSchema != nil && jsonValue(val) {
+		return val, nil
+	}
 	return okJSON(val)
+}
+
+// jsonValue reports whether s is a JSON object or array. Schema tools resolve
+// to that value; other text stays a string.
+func jsonValue(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || (s[0] != '{' && s[0] != '[') {
+		return false
+	}
+	return json.Valid([]byte(s))
 }
 
 func (r *runner) lookup(name string) (Tool, bool) {

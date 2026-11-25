@@ -1243,9 +1243,13 @@ func (e *Engine) Executor() agent.ToolExecutor {
 		e.bindToolEmit(ctx)
 		e.openNested(ctx, c.ID)
 		box := &ext.ToolResult{}
-		callCtx := ext.WithOutcome(ext.WithToolCallID(ctx, c.ID), box)
+		sink := &tools.StructuredSink{}
+		callCtx := tools.WithStructuredSink(ext.WithOutcome(ext.WithToolCallID(ctx, c.ID), box), sink)
 		before := e.activeSnapshot()
 		result, isErr, duration := e.runRegisteredTool(callCtx, c.Name, c.Args)
+		if len(box.Structured) == 0 && len(sink.Raw) > 0 {
+			box.Structured = sink.Raw
+		}
 		snap := e.finishNested(c.ID)
 		usage := box.Usage
 		if snap.usage != nil {

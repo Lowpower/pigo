@@ -62,6 +62,63 @@ func TestToolBoundOutputWritesTempFile(t *testing.T) {
 	}
 }
 
+func TestStructuredShellOutputHeadAndTail(t *testing.T) {
+	const headMark = "HEAD"
+	const tailMark = "TAIL"
+	full := headMark + strings.Repeat("M", structuredOutputMaxBytes) + tailMark
+	got, truncated := structuredShellOutput(full)
+	if !truncated {
+		t.Fatal("expected truncation")
+	}
+	marker := "\n\n[... 8 bytes omitted ...]\n\n"
+	if !strings.HasPrefix(got, headMark) || !strings.HasSuffix(got, tailMark) || !strings.Contains(got, marker) {
+		t.Fatalf("structured = %q ... %q", got[:40], got[len(got)-40:])
+	}
+	headBytes := structuredOutputMaxBytes / 2
+	tailBytes := structuredOutputMaxBytes - headBytes
+	if !strings.HasPrefix(got, string([]byte(full)[:headBytes])) {
+		t.Fatal("head bytes were not kept")
+	}
+	if !strings.HasSuffix(got, string([]byte(full)[len(full)-tailBytes:])) {
+		t.Fatal("tail bytes were not kept")
+	}
+}
+
+func TestStructuredShellOutputKeepsShortAndEmpty(t *testing.T) {
+	if got, truncated := structuredShellOutput(""); truncated || got != "" {
+		t.Fatalf("empty = %q truncated %v", got, truncated)
+	}
+	exact := strings.Repeat("a", structuredOutputMaxBytes)
+	got, truncated := structuredShellOutput(exact)
+	if truncated || got != exact {
+		t.Fatalf("exact truncated=%v len=%d", truncated, len(got))
+	}
+}
+
+func TestStructuredShellOutputUTF8Boundary(t *testing.T) {
+	const rune3 = "中"
+	full := strings.Repeat(rune3, structuredOutputMaxBytes/len(rune3)+4)
+	got, truncated := structuredShellOutput(full)
+	if !truncated {
+		t.Fatal("expected truncation")
+	}
+	if !strings.Contains(got, "\n\n[... ") || !strings.Contains(got, " bytes omitted ...]\n\n") {
+		t.Fatalf("missing marker: %q", got[len(got)/2-20:len(got)/2+20])
+	}
+	parts := strings.Split(got, "\n\n[... ")
+	if len(parts) != 2 || !utf8Valid(parts[0]) {
+		t.Fatal("head is not valid UTF-8")
+	}
+	tail := parts[1]
+	if i := strings.Index(tail, "]\n\n"); i < 0 || !utf8Valid(tail[i+3:]) {
+		t.Fatal("tail is not valid UTF-8")
+	}
+}
+
+func utf8Valid(s string) bool {
+	return strings.ToValidUTF8(s, "") == s
+}
+
 func TestFormatSize(t *testing.T) {
 	if FormatSize(500) != "500B" {
 		t.Fatalf("500: %s", FormatSize(500))
