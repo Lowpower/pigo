@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/Lowpower/pigo/internal/ext"
 )
 
 func TestWallSecondsUsesTenths(t *testing.T) {
@@ -136,25 +134,25 @@ func TestBashStructuredTwoMiB(t *testing.T) {
 }
 
 func TestBashStructuredSkipsTimeoutAndCancel(t *testing.T) {
-	box := &ext.ToolResult{}
-	ctx := ext.WithOutcome(context.Background(), box)
+	sink := &StructuredSink{}
+	ctx := WithStructuredSink(context.Background(), sink)
 	out, isErr := bashTool{}.Execute(ctx, map[string]any{"command": "sleep 30", "timeout": 1})
 	if !isErr || !strings.Contains(out, "[timed out after 1s]") || !strings.Contains(out, "\nTook ") {
 		t.Fatalf("timeout = %q err %v", out, isErr)
 	}
-	if len(box.Structured) != 0 {
-		t.Fatalf("timeout stored structured %s", box.Structured)
+	if len(sink.Raw) != 0 {
+		t.Fatalf("timeout stored structured %s", sink.Raw)
 	}
 
-	box = &ext.ToolResult{}
-	cancelled, cancel := context.WithCancel(ext.WithOutcome(context.Background(), box))
+	sink = &StructuredSink{}
+	cancelled, cancel := context.WithCancel(WithStructuredSink(context.Background(), sink))
 	cancel()
 	out, isErr = bashTool{}.Execute(cancelled, map[string]any{"command": "sleep 30"})
 	if !isErr || !strings.Contains(out, "\nTook ") {
 		t.Fatalf("cancel = %q err %v", out, isErr)
 	}
-	if len(box.Structured) != 0 {
-		t.Fatalf("cancel stored structured %s", box.Structured)
+	if len(sink.Raw) != 0 {
+		t.Fatalf("cancel stored structured %s", sink.Raw)
 	}
 }
 
@@ -173,17 +171,17 @@ func runShell(t *testing.T, command string) shellRun {
 
 func runShellAt(t *testing.T, cwd, command string) shellRun {
 	t.Helper()
-	box := &ext.ToolResult{}
-	ctx := ext.WithOutcome(context.Background(), box)
+	sink := &StructuredSink{}
+	ctx := WithStructuredSink(context.Background(), sink)
 	out, isErr := bashTool{cwd: cwd}.Execute(ctx, map[string]any{"command": command})
-	got := shellRun{model: out, isErr: isErr, structured: append([]byte(nil), box.Structured...)}
-	if len(box.Structured) == 0 {
+	got := shellRun{model: out, isErr: isErr, structured: append([]byte(nil), sink.Raw...)}
+	if len(sink.Raw) == 0 {
 		t.Fatalf("missing structured result for %q model %q", command, tailOf(out))
 	}
-	if err := json.Unmarshal(box.Structured, &got.raw); err != nil {
+	if err := json.Unmarshal(sink.Raw, &got.raw); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(box.Structured, &got.body); err != nil {
+	if err := json.Unmarshal(sink.Raw, &got.body); err != nil {
 		t.Fatal(err)
 	}
 	return got

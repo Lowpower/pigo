@@ -9,7 +9,6 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/codescript"
-	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/tools"
 )
@@ -119,11 +118,11 @@ func (e *Engine) scriptEnv() codescript.Env {
 				return "unknown tool: " + name, true
 			}
 			if name == "bash" || name == "powershell" {
-				box := &ext.ToolResult{}
-				ctx = ext.WithOutcome(ctx, box)
+				sink := &tools.StructuredSink{}
+				ctx = tools.WithStructuredSink(ctx, sink)
 				text, isErr := e.Tools.Execute(ctx, name, args)
-				if len(box.Structured) > 0 {
-					return string(box.Structured), isErr
+				if len(sink.Raw) > 0 {
+					return string(sink.Raw), isErr
 				}
 				return text, isErr
 			}

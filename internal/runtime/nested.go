@@ -11,6 +11,7 @@ import (
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/ext"
+	"github.com/Lowpower/pigo/internal/tools"
 )
 
 // Limits match pi v1.3.0 nested-call records.
@@ -269,7 +270,11 @@ func (e *Engine) runNestedTool(ctx context.Context, id, name string, args map[st
 		return "unknown tool: " + name, true, nil, nil
 	}
 	box := &ext.ToolResult{}
-	callCtx := ext.WithOutcome(ext.WithToolCallID(ctx, id), box)
+	sink := &tools.StructuredSink{}
+	callCtx := tools.WithStructuredSink(ext.WithOutcome(ext.WithToolCallID(ctx, id), box), sink)
 	out, isErr := e.Tools.Execute(callCtx, name, args)
+	if len(box.Structured) == 0 && len(sink.Raw) > 0 {
+		box.Structured = sink.Raw
+	}
 	return out, isErr, box.Structured, box.Usage
 }

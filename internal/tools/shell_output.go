@@ -5,9 +5,34 @@ import (
 	"encoding/json"
 	"math"
 	"time"
-
-	"github.com/Lowpower/pigo/internal/ext"
 )
+
+// StructuredSink collects JSON a tool records beside its text result.
+// tools does not import ext: ext tests import agent, and agent imports tools.
+type StructuredSink struct {
+	Raw json.RawMessage
+}
+
+type structuredKey struct{}
+
+// WithStructuredSink returns ctx carrying sink. A nil sink leaves ctx unchanged.
+func WithStructuredSink(ctx context.Context, sink *StructuredSink) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if sink == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, structuredKey{}, sink)
+}
+
+func structuredSink(ctx context.Context) *StructuredSink {
+	if ctx == nil {
+		return nil
+	}
+	sink, _ := ctx.Value(structuredKey{}).(*StructuredSink)
+	return sink
+}
 
 // shellStructured is the pi v1.3.0 bash/powershell output schema.
 type shellStructured struct {
@@ -50,7 +75,7 @@ func wallSeconds(d time.Duration) float64 {
 // finished with an exit code. full_output_path is set only when that result
 // itself was cut at 1 MiB.
 func storeShellStructured(ctx context.Context, full, path, tempPrefix string, exitCode int, elapsed time.Duration) {
-	box := ext.OutcomeBox(ctx)
+	box := structuredSink(ctx)
 	if box == nil {
 		return
 	}
@@ -73,5 +98,5 @@ func storeShellStructured(ctx context.Context, full, path, tempPrefix string, ex
 	if err != nil {
 		return
 	}
-	box.Structured = raw
+	box.Raw = raw
 }
