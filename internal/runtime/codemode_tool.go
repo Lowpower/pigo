@@ -9,6 +9,7 @@ import (
 	"github.com/Lowpower/pigo/internal/ai"
 	"github.com/Lowpower/pigo/internal/auth"
 	"github.com/Lowpower/pigo/internal/codescript"
+	"github.com/Lowpower/pigo/internal/ext"
 	"github.com/Lowpower/pigo/internal/models"
 	"github.com/Lowpower/pigo/internal/tools"
 )
