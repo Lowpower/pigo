@@ -52,10 +52,13 @@ func intersectNames(order, allow []string) []string {
 
 func (e *Engine) exposureOf(name string) string {
 	info, ok := e.toolInfo(name)
-	if !ok {
-		return ext.ExposureDirect
+	if ok {
+		return ext.NormalizeExposure(info.Exposure)
 	}
-	return ext.NormalizeExposure(info.Exposure)
+	if name == "tool_search" {
+		return ext.ExposureModelOnly
+	}
+	return ext.ExposureDirect
 }
 
 func (e *Engine) toolInfo(name string) (ext.ToolInfo, bool) {
@@ -162,6 +165,10 @@ func (e *Engine) loadDeferredLocked(name string) {
 	if e.exposureOf(name) != ext.ExposureDeferred {
 		return
 	}
+	e.markLoadedLocked(name)
+}
+
+func (e *Engine) markLoadedLocked(name string) {
 	if e.loadedDeferred == nil {
 		e.loadedDeferred = map[string]bool{}
 	}

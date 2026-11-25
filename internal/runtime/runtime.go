@@ -122,13 +122,16 @@ type Engine struct {
 	// model-visible set, not every registered name.
 	activeToolNames []string
 	loadedDeferred  map[string]bool
-	turnNarrow      bool
-	turnNames       []string
-	turnGuidelines  string
-	nested          map[string]*nestedScope
-	resultMeta      map[string]agent.ResultMeta
-	toolEmit        func(agent.Event) bool
-	addedByCall     map[string][]string
+	// pendingTools are mcp names from the session that were not registered
+	// yet. The next prompt waits for their servers, then keeps or drops them.
+	pendingTools   []string
+	turnNarrow     bool
+	turnNames      []string
+	turnGuidelines string
+	nested         map[string]*nestedScope
+	resultMeta     map[string]agent.ResultMeta
+	toolEmit       func(agent.Event) bool
+	addedByCall    map[string][]string
 
 	onSessionEvent func(any)
 	uiHandler      uiHandlerFunc
@@ -632,7 +635,7 @@ func (e *Engine) builtinRegistry() *tools.Registry {
 		ImageCapable: func() bool { return e.currentModel().SupportsImage() },
 		Runner:       e.toolRunner,
 	})
-	return tools.NewRegistry(append(base.List(), codeTool{engine: e})...)
+	return tools.NewRegistry(append(base.List(), codeTool{engine: e}, searchTool{engine: e})...)
 }
 
 func (e *Engine) syncToolRunner() {
@@ -1418,6 +1421,7 @@ func (e *Engine) runPrompt(ctx context.Context, history []ai.Message, user strin
 		return agent.Finished(nil)
 	}
 	e.installMCPTools()
+	e.settleLoadedTools(ctx)
 
 	// Busy from preparation, including before_agent_start, so a second
 	// sendMessage steers into this run instead of starting another.
@@ -1586,6 +1590,9 @@ func (e *Engine) NewSession(parent string) bool {
 		}
 	}
 	e.persisted = 0
+	e.mu.Lock()
+	e.pendingTools = nil
+	e.mu.Unlock()
 	e.finishSessionChange()
 	return true
 }

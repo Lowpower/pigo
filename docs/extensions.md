@@ -14,7 +14,7 @@ they run in-process and are switched by name.
 - `~/.pigo/agent/extensions/` (executable, `.js`/`.ts`, or `index.js`/`index.ts`)
 - package manifests and `settings.extensions[]`
 
-Built-in extensions are in-process. They are not subprocesses and they have no filesystem path. The names are `builtin:llama.cpp`, `builtin:codemode`, `builtin:tool-search`, and `builtin:mcp`. All four are on by default. `llama.cpp` registers the llama.cpp provider. The other three are switches for features that land in their own issues; turning one on does not add tools until that feature exists.
+Built-in extensions are in-process. They are not subprocesses and they have no filesystem path. The names are `builtin:llama.cpp`, `builtin:codemode`, `builtin:tool-search`, and `builtin:mcp`. All four are on by default. `llama.cpp` registers the llama.cpp provider. `codemode` and `tool_search` are built-in tools and stay out of the session until `defaultTools` or `--tools` names them. `mcp` registers the `/mcp` command.
 
 `settings.json` `extensions` accepts the same override spellings as other resources: `-builtin:mcp` disables one, `+builtin:mcp` turns it back on, and `!builtin:*` matches the set. A project `.pigo/settings.json` entry overrides the user entry for that name. `pigo config` lists them under Built-in. Space writes `-builtin:<name>` or `+builtin:<name>`.
 

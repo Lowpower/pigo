@@ -150,7 +150,7 @@ func TestExtensionExposureFiltersModelTools(t *testing.T) {
 	if added != nil {
 		t.Fatalf("hidden replace added = %v", added)
 	}
-	if got := fmt.Sprint(toolNamesOf(e.providerTools())); got != "[direct]" {
+	if got := fmt.Sprint(toolNamesOf(e.providerTools())); got != "[direct code]" {
 		t.Fatalf("whitelist = %s", got)
 	}
 	e.SetActiveTools([]string{"later"})

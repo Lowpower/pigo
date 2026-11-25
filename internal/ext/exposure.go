@@ -31,13 +31,13 @@ func NormalizeExposure(s string) string {
 }
 
 // ModelVisible reports whether a tool belongs in the model tool list.
-// model-only is visible to the model; codemode and hidden are not.
-// deferred is visible only after it has been loaded.
+// model-only is visible to the model. hidden is not.
+// codemode and deferred are visible only after tool_search has loaded them.
 func ModelVisible(exposure string, loaded bool) bool {
 	switch NormalizeExposure(exposure) {
-	case ExposureDeferred:
+	case ExposureDeferred, ExposureCodeMode:
 		return loaded
-	case ExposureCodeMode, ExposureHidden:
+	case ExposureHidden:
 		return false
 	default:
 		return true

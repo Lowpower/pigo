@@ -291,6 +291,70 @@ func (m *Manager) WaitDirect(ctx context.Context) error {
 	return nil
 }
 
+// WaitEnabled waits until every enabled server has finished connecting.
+// A server that failed has still finished. Disabled servers are skipped.
+func (m *Manager) WaitEnabled(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	for _, srv := range m.snapshot() {
+		if !srv.spec.Config.Enabled {
+			continue
+		}
+		if err := srv.wait(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WaitRefs waits for the enabled servers named by tool names or server names.
+// Unknown names are skipped.
+func (m *Manager) WaitRefs(ctx context.Context, refs []string) error {
+	if m == nil {
+		return nil
+	}
+	want := map[*running]bool{}
+	for _, ref := range refs {
+		srv := m.serverForRef(ref)
+		if srv == nil || !srv.spec.Config.Enabled {
+			continue
+		}
+		want[srv] = true
+	}
+	for srv := range want {
+		if err := srv.wait(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ToolNamespace is the search text for the server that owns a tool name.
+type ToolNamespace struct {
+	Name         string
+	Description  string
+	Instructions string
+}
+
+// NamespaceText returns the server namespace for a tool or server name.
+func (m *Manager) NamespaceText(toolName string) (ToolNamespace, bool) {
+	if m == nil {
+		return ToolNamespace{}, false
+	}
+	srv := m.serverForRef(toolName)
+	if srv == nil {
+		return ToolNamespace{}, false
+	}
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	return ToolNamespace{
+		Name:         Namespace(srv.name),
+		Description:  srv.spec.Config.Description,
+		Instructions: srv.instructions,
+	}, true
+}
+
 // WaitFor waits for servers named by a tool call, by tool_search arguments,
 // or by reachesTools. A server that is not direct stays untouched until then.
 func (m *Manager) WaitFor(ctx context.Context, toolName string, args map[string]any, reaches []string) error {
