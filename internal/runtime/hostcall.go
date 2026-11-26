@@ -987,8 +987,9 @@ func samplingArg(v any) map[string]any {
 }
 
 func (e *Engine) contextUsageMap() map[string]any {
-	window := e.ContextWindow()
-	tokens := e.ContextTokens(e.History())
+	hist := e.History()
+	window := e.ContextWindowFor(hist)
+	tokens := e.ContextTokens(hist)
 	var pct any
 	if window > 0 && tokens > 0 {
 		pct = float64(tokens) * 100 / float64(window)

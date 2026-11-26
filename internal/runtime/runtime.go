@@ -798,19 +798,36 @@ func (e *Engine) pendingCount() int {
 }
 
 // ContextWindow is the effective window for the selected model.
-// An explicit Options or settings value wins, then the catalog value, then
-// config.DefaultContextWindow.
+// An explicit Options or settings value wins. A virtual selection then uses
+// the catalog window of the latest successful physical reply on the current
+// branch, then the virtual model's registered window, then the catalog value,
+// then config.DefaultContextWindow.
 func (e *Engine) ContextWindow() int {
+	return e.ContextWindowFor(nil)
+}
+
+// ContextWindowFor is ContextWindow with msgs searched ahead of the session
+// branch. Pass nil to read the branch only.
+func (e *Engine) ContextWindowFor(msgs []ai.Message) int {
 	if e.Opts.ContextWindow > 0 {
 		return e.Opts.ContextWindow
 	}
 	if e.Opts.Config.ContextWindow > 0 {
 		return e.Opts.Config.ContextWindow
 	}
-	if vm, ok := e.lookupVirtual(e.activeProvider(), e.Opts.Config.ResolvedModel()); ok && vm.ContextWindow > 0 {
-		return vm.ContextWindow
+	provider := e.activeProvider()
+	id := e.Opts.Config.ResolvedModel()
+	if vm, ok := e.lookupVirtual(provider, id); ok {
+		if msg, found := e.latestPhysicalReply(msgs); found {
+			if m, ok := models.Lookup(msg.Provider, msg.Model); ok && m.ContextWindow > 0 {
+				return m.ContextWindow
+			}
+		}
+		if vm.ContextWindow > 0 {
+			return vm.ContextWindow
+		}
 	}
-	if m, ok := models.Lookup(e.activeProvider(), e.Opts.Config.ResolvedModel()); ok && m.ContextWindow > 0 {
+	if m, ok := models.Lookup(provider, id); ok && m.ContextWindow > 0 {
 		return m.ContextWindow
 	}
 	return config.DefaultContextWindow
@@ -1330,7 +1347,7 @@ func (e *Engine) MaybeCompact(ctx context.Context, msgs []ai.Message) ([]ai.Mess
 	if !e.Opts.Config.CompactionEnabled() {
 		return msgs, "", nil
 	}
-	window := e.ContextWindow()
+	window := e.ContextWindowFor(msgs)
 	s := e.compactionSettings()
 	if !compaction.ShouldCompact(e.ContextTokens(msgs), window, s) {
 		return msgs, "", nil

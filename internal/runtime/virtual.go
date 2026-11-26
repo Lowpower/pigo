@@ -494,6 +494,65 @@ func previousDispatch(msgs []ai.Message) (ai.AssistantMessage, bool) {
 	return ai.AssistantMessage{}, false
 }
 
+// LastDispatch is the model id and thinking level of the latest successful
+// physical reply while the selected model is virtual. msgs are searched
+// first. When they contain no successful reply, the current session branch
+// is used. ok is false for a physical selection, or before any physical reply.
+func (e *Engine) LastDispatch(msgs []ai.Message) (modelID, thinking string, ok bool) {
+	if e == nil {
+		return "", "", false
+	}
+	if _, virt := e.lookupVirtual(e.activeProvider(), e.Opts.Config.ResolvedModel()); !virt {
+		return "", "", false
+	}
+	msg, found := e.latestPhysicalReply(msgs)
+	if !found {
+		return "", "", false
+	}
+	return msg.Model, dispatchedThinking(msg), true
+}
+
+// latestPhysicalReply is the newest successful assistant whose model is in
+// the catalog and is not virtual. A successful reply that fails that check
+// hides any older physical reply in the same transcript.
+func (e *Engine) latestPhysicalReply(msgs []ai.Message) (ai.AssistantMessage, bool) {
+	if e == nil {
+		return ai.AssistantMessage{}, false
+	}
+	if msg, ok, saw := e.physicalReply(msgs); saw {
+		return msg, ok
+	}
+	if e.Opts.Session == nil {
+		return ai.AssistantMessage{}, false
+	}
+	msg, ok, _ := e.physicalReply(session.ModelMessages(e.Opts.Session.GetBranch("")))
+	return msg, ok
+}
+
+func (e *Engine) physicalReply(msgs []ai.Message) (ai.AssistantMessage, bool, bool) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := msgs[i].Assistant
+		if msg == nil {
+			continue
+		}
+		switch msg.StopReason {
+		case ai.StopError, ai.StopAborted, ai.StopPending, "":
+			continue
+		}
+		if msg.Provider == "" || msg.Model == "" {
+			continue
+		}
+		if _, virt := e.lookupVirtual(msg.Provider, msg.Model); virt {
+			return ai.AssistantMessage{}, false, true
+		}
+		if _, found := models.Lookup(msg.Provider, msg.Model); !found {
+			return ai.AssistantMessage{}, false, true
+		}
+		return *msg, true, true
+	}
+	return ai.AssistantMessage{}, false, false
+}
+
 func dispatchedThinking(msg ai.AssistantMessage) string {
 	if msg.ThinkingLevel != "" {
 		return msg.ThinkingLevel

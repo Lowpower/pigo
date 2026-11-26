@@ -982,7 +982,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "session":
 		if m.engine != nil && m.engine.Opts.Session != nil {
-			stats := session.CollectStats(m.engine.Opts.Session, m.history, m.engine.ContextWindow(), m.engine.System, m.engine.PromptTools())
+			stats := session.CollectStats(m.engine.Opts.Session, m.history, m.engine.ContextWindowFor(m.history), m.engine.System, m.engine.PromptTools())
 			stats.CacheWarming = m.engine.CacheWarmingStatus()
 			return note(session.FormatInfo(stats, m.engine.Opts.Session.Name()))
 		}
