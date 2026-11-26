@@ -478,7 +478,7 @@ func clipboardCommands(goos string, getenv func(string) string) []clipCmd {
 }
 
 func remoteClipboard(getenv func(string) string) bool {
-	return getenv("SSH_CONNECTION") != "" || getenv("SSH_CLIENT") != "" || getenv("MOSH_CONNECTION") != "" || getenv("PI_CLIPBOARD_OSC52") == "1"
+	return getenv("SSH_CONNECTION") != "" || getenv("SSH_CLIENT") != "" || getenv("MOSH_CONNECTION") != "" || getenv("PIGO_CLIPBOARD_OSC52") == "1"
 }
 
 func osc52IfFits(text string) (string, bool) {

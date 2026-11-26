@@ -22,8 +22,12 @@ works if the Docker CLI can reach a daemon; see
 
 `pigo server` / `pigo client` use a Unix-domain socket (`unix://path`).
 
-Copy in the TUI emits OSC 52. On WSL it also writes the Windows clipboard
-with `powershell.exe Set-Clipboard`, reading UTF-8 from a temp file.
+Copy in the TUI emits OSC 52 for SSH and mosh sessions, and for a headless
+Linux terminal with no native clipboard. `PIGO_CLIPBOARD_OSC52=1` also emits
+it after a successful local write, when the session is remote but SSH and
+mosh are not detected. `PI_CLIPBOARD_OSC52` is not read. On WSL it also
+writes the Windows clipboard with `powershell.exe Set-Clipboard`, reading
+UTF-8 from a temp file.
 
 Interactive mode needs a real TTY (Windows Terminal, conhost, or similar).
 Mouse copy: `--tui-mode regular` (default) leaves selection to the terminal;
