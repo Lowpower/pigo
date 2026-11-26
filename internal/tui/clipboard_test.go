@@ -437,9 +437,13 @@ func TestCopyRemoteAppendsOSC52AfterNativeSuccess(t *testing.T) {
 	if err != nil || osc != osc52("remote") {
 		t.Fatalf("ssh osc=%q err=%v", osc, err)
 	}
-	osc, err = copyToClipboard("remote", "darwin", envGet(map[string]string{"PI_CLIPBOARD_OSC52": "1"}))
+	osc, err = copyToClipboard("remote", "darwin", envGet(map[string]string{"PIGO_CLIPBOARD_OSC52": "1"}))
 	if err != nil || osc != osc52("remote") {
 		t.Fatalf("flag osc=%q err=%v", osc, err)
+	}
+	osc, err = copyToClipboard("remote", "darwin", envGet(map[string]string{"PI_CLIPBOARD_OSC52": "1"}))
+	if err != nil || osc != "" {
+		t.Fatalf("legacy flag osc=%q err=%v", osc, err)
 	}
 	osc, err = copyToClipboard("remote", "darwin", envGet(map[string]string{"SSH_CLIENT": "1"}))
 	if err != nil || osc != osc52("remote") {
