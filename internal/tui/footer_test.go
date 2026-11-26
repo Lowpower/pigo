@@ -34,6 +34,51 @@ func TestFormatCwdForFooter(t *testing.T) {
 	}
 }
 
+func TestFooterRoutedModel(t *testing.T) {
+	prev := footerDispatch
+	t.Cleanup(func() { footerDispatch = prev })
+	footerDispatch = func(Model) (string, string, bool) {
+		return "gpt-5.6-luna", "medium", true
+	}
+	m := New(testCfg())
+	m.cfg.Model = "auto"
+	m.cfg.Thinking = "high"
+	got := m.footerText()
+	if !strings.Contains(got, "auto • high → gpt-5.6-luna • medium") {
+		t.Fatalf("footer = %q", got)
+	}
+}
+
+func TestFooterRoutedOffLevel(t *testing.T) {
+	prev := footerDispatch
+	t.Cleanup(func() { footerDispatch = prev })
+	footerDispatch = func(Model) (string, string, bool) {
+		return "small", "", true
+	}
+	m := New(testCfg())
+	m.cfg.Model = "auto"
+	m.cfg.Thinking = "off"
+	got := m.footerText()
+	if !strings.Contains(got, "auto • off → small • off") {
+		t.Fatalf("footer = %q", got)
+	}
+	if strings.Contains(got, "thinking off") {
+		t.Fatalf("routed footer kept the unrouted wording: %q", got)
+	}
+}
+
+func TestFooterUnroutedKeepsThinkingOff(t *testing.T) {
+	m := New(testCfg())
+	m.cfg.Thinking = "off"
+	got := m.footerText()
+	if !strings.Contains(got, "claude-sonnet-4 • thinking off") {
+		t.Fatalf("footer = %q", got)
+	}
+	if strings.Contains(got, "→") {
+		t.Fatalf("arrow without a route: %q", got)
+	}
+}
+
 func TestFooterShowsModelAndThinking(t *testing.T) {
 	m := New(testCfg())
 	m.cfg.Thinking = "low"

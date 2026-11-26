@@ -284,6 +284,44 @@ func TestCollectStatsContextUsesUsage(t *testing.T) {
 	}
 }
 
+func TestFormatInfoPhysicalModelCostsSum(t *testing.T) {
+	m := New(t.TempDir(), t.TempDir())
+	write := func(provider, model string, tokens int, cost float64) {
+		t.Helper()
+		if _, err := m.AppendMessage("assistant", &ai.AssistantMessage{
+			Role:     ai.RoleAssistant,
+			Provider: provider,
+			Model:    model,
+			Usage:    costUsage(tokens, cost),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("phys", "small", 100, 1.25)
+	write("phys", "large", 40, 0.75)
+	got := CollectStats(m, nil, 0, "", nil)
+	if got.Cost != 2 {
+		t.Fatalf("cost=%v, want 2", got.Cost)
+	}
+	var sum float64
+	for _, row := range got.CostBreakdown {
+		sum += row.Cost
+	}
+	if sum != got.Cost {
+		t.Fatalf("breakdown sum %v != total %v (%+v)", sum, got.Cost, got.CostBreakdown)
+	}
+	text := FormatInfo(got, "")
+	for _, want := range []string{
+		"Total: $2.000",
+		"phys/small: $1.250 (100 tokens)",
+		"phys/large: $0.750 (40 tokens)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+}
+
 func TestFormatInfoPerModelAndCacheRebilled(t *testing.T) {
 	s := Stats{
 		Cost: 2,

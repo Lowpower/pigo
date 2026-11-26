@@ -322,6 +322,27 @@ func (m Model) contextTokens() int {
 	return compaction.ContextTokens(m.history, "", nil)
 }
 
+// footerDispatch is the latest physical reply shown beside a virtual selection.
+// Tests replace it to check the routed label without an extension.
+var footerDispatch = func(m Model) (modelID, thinking string, ok bool) {
+	if m.engine == nil {
+		return "", "", false
+	}
+	return m.engine.LastDispatch(m.history)
+}
+
+func routedFooterModel(selected, selectedThinking, routedID, routedThinking string) string {
+	return selected + " • " + footerLevel(selectedThinking) + " → " + routedID + " • " + footerLevel(routedThinking)
+}
+
+func footerLevel(level string) string {
+	level = strings.TrimSpace(level)
+	if level == "" {
+		return "off"
+	}
+	return level
+}
+
 func (m Model) footerText() string {
 	if m.extFooterSet {
 		return strings.Join(m.extFooter, "\n")
@@ -362,7 +383,7 @@ func (m Model) footerText() string {
 	}
 	win := 0
 	if m.engine != nil {
-		win = m.engine.ContextWindow()
+		win = m.engine.ContextWindowFor(m.history)
 	} else if m.cfg.ContextWindow > 0 {
 		win = m.cfg.ContextWindow
 	}
@@ -379,7 +400,9 @@ func (m Model) footerText() string {
 		stats = append(stats, pct+"%/"+formatTokens(win)+auto)
 	}
 	right := m.cfg.ResolvedModel()
-	if th := strings.TrimSpace(m.cfg.Thinking); th != "" {
+	if id, thinking, ok := footerDispatch(m); ok {
+		right = routedFooterModel(m.cfg.ResolvedModel(), m.cfg.Thinking, id, thinking)
+	} else if th := strings.TrimSpace(m.cfg.Thinking); th != "" {
 		if th == "off" {
 			right += " • thinking off"
 		} else {
