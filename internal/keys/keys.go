@@ -65,9 +65,8 @@ func (m *Manager) Reload() {
 
 // Matches reports whether key (bubbletea KeyMsg.String()) fires action.
 func (m *Manager) Matches(key, action string) bool {
-	want := Normalize(key)
 	for _, k := range m.resolved[action] {
-		if Normalize(k) == want {
+		if Equal(k, key) {
 			return true
 		}
 	}
@@ -169,9 +168,8 @@ func (m *Manager) ClearExtensions() {
 
 // ExtensionKey reports whether key is an extension shortcut.
 func (m *Manager) ExtensionKey(key string) (desc string, ok bool) {
-	want := Normalize(key)
 	for _, s := range m.ext {
-		if s.Key == want {
+		if Equal(s.Key, key) {
 			return s.Description, true
 		}
 	}
@@ -181,7 +179,7 @@ func (m *Manager) ExtensionKey(key string) (desc string, ok bool) {
 func (m *Manager) keyRestricted(key string) bool {
 	for _, action := range reservedActions {
 		for _, k := range m.resolved[action] {
-			if Normalize(k) == key {
+			if Equal(k, key) {
 				return true
 			}
 		}
@@ -368,48 +366,151 @@ func parseKeys(v any) []string {
 	}
 }
 
-// Normalize canonicalizes a key id (ctrl+shift+p, esc, enter).
+// knownMods is the modifier order used in canonical key ids.
+var knownMods = []string{"ctrl", "alt", "shift", "super"}
+
+// shiftedToBase maps a US shifted symbol to the key that produces it with shift.
+// Letters are absent: shift+a stays shift+a.
+var shiftedToBase = map[string]string{
+	"~": "`",
+	"!": "1",
+	"@": "2",
+	"#": "3",
+	"$": "4",
+	"%": "5",
+	"^": "6",
+	"&": "7",
+	"*": "8",
+	"(": "9",
+	")": "0",
+	"_": "-",
+	"+": "=",
+	"|": `\`,
+	"{": "[",
+	"}": "]",
+	":": ";",
+	"<": ",",
+	">": ".",
+	"?": "/",
+}
+
+// Normalize canonicalizes a key id (ctrl+shift+p, esc, enter, ctrl++).
+// A shifted symbol stays written as that symbol. shift+= is not rewritten to +.
 func Normalize(s string) string {
+	mods, key := canonical(s)
+	if key == "" {
+		return strings.Join(mods, "+")
+	}
+	if len(mods) == 0 {
+		return key
+	}
+	return strings.Join(mods, "+") + "+" + key
+}
+
+// Equal reports whether two key ids are the same press.
+// A shifted symbol and that symbol's US base key plus shift are the same press.
+// Other modifiers must match. Letters, digits, and named keys do not fold shift away.
+func Equal(a, b string) bool {
+	aShift, aKey, aExtra := keyParts(a)
+	bShift, bKey, bExtra := keyParts(b)
+	if aKey == bKey && aShift == bShift && aExtra == bExtra {
+		return true
+	}
+	return logicalShift(aShift, aKey, aExtra, bShift, bKey, bExtra) ||
+		logicalShift(bShift, bKey, bExtra, aShift, aKey, aExtra)
+}
+
+func logicalShift(prodShift bool, prodKey, prodExtra string, physShift bool, physKey, physExtra string) bool {
+	base, ok := shiftedToBase[prodKey]
+	if !ok || prodShift || !physShift {
+		return false
+	}
+	return physKey == base && prodExtra == physExtra
+}
+
+func keyParts(s string) (shift bool, key, extra string) {
+	mods, key := canonical(s)
+	var rest []string
+	for _, m := range mods {
+		if m == "shift" {
+			shift = true
+			continue
+		}
+		rest = append(rest, m)
+	}
+	return shift, key, strings.Join(rest, "+")
+}
+
+func canonical(s string) (mods []string, key string) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	switch s {
+	case "escape":
+		return nil, "esc"
+	case "return":
+		return nil, "enter"
+	}
+	mods, key = splitKeyID(s)
+	return sortMods(mods), aliasKey(key)
+}
+
+// splitKeyID peels ctrl/alt/shift/super from the left so "+" survives as a key.
+// A remainder that still contains "+" is split the old way, keeping unknown modifiers.
+func splitKeyID(s string) (mods []string, key string) {
+	for {
+		peeled := false
+		for _, m := range knownMods {
+			prefix := m + "+"
+			if strings.HasPrefix(s, prefix) {
+				mods = append(mods, m)
+				s = s[len(prefix):]
+				peeled = true
+				break
+			}
+		}
+		if !peeled {
+			break
+		}
+	}
+	if s != "+" && strings.HasSuffix(s, "++") {
+		prefix := strings.TrimSuffix(s, "++")
+		if prefix != "" {
+			mods = append(mods, strings.Split(prefix, "+")...)
+		}
+		return mods, "+"
+	}
+	if strings.Contains(s, "+") && s != "+" {
+		parts := strings.Split(s, "+")
+		mods = append(mods, parts[:len(parts)-1]...)
+		return mods, parts[len(parts)-1]
+	}
+	return mods, s
+}
+
+func aliasKey(key string) string {
+	switch key {
 	case "escape":
 		return "esc"
 	case "return":
 		return "enter"
+	default:
+		return key
 	}
-	parts := strings.Split(s, "+")
-	if len(parts) == 1 {
-		if parts[0] == "escape" {
-			return "esc"
-		}
-		if parts[0] == "return" {
-			return "enter"
-		}
-		return parts[0]
-	}
-	key := parts[len(parts)-1]
-	if key == "escape" {
-		key = "esc"
-	}
-	if key == "return" {
-		key = "enter"
-	}
-	mods := parts[:len(parts)-1]
-	order := []string{"ctrl", "alt", "shift", "super"}
+}
+
+func sortMods(mods []string) []string {
 	var sorted []string
 	have := map[string]bool{}
 	for _, m := range mods {
 		have[m] = true
 	}
-	for _, m := range order {
+	for _, m := range knownMods {
 		if have[m] {
 			sorted = append(sorted, m)
 		}
 	}
-	// keep unknown modifiers
 	for _, m := range mods {
 		known := false
-		for _, o := range order {
+		for _, o := range knownMods {
 			if m == o {
 				known = true
 				break
@@ -419,10 +520,7 @@ func Normalize(s string) string {
 			sorted = append(sorted, m)
 		}
 	}
-	if key == "" {
-		return strings.Join(sorted, "+")
-	}
-	return strings.Join(append(sorted, key), "+")
+	return sorted
 }
 
 func contains(ss []string, v string) bool {
