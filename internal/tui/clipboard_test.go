@@ -19,6 +19,22 @@ func stubRunClip(t *testing.T, fn func(string, time.Duration, ...string) ([]byte
 	t.Cleanup(func() { runClip = old })
 }
 
+func stubClipCmd(t *testing.T, fn func(string, time.Duration, ...string) ([]byte, error)) *[]string {
+	t.Helper()
+	var cmds []string
+	old := runClipCmd
+	runClipCmd = func(name string, d time.Duration, args ...string) ([]byte, error) {
+		line := name
+		if len(args) > 0 {
+			line += " " + strings.Join(args, " ")
+		}
+		cmds = append(cmds, line)
+		return fn(name, d, args...)
+	}
+	t.Cleanup(func() { runClipCmd = old })
+	return &cmds
+}
+
 func clipArgs(name string, args []string) string {
 	return name + " " + strings.Join(args, " ")
 }
@@ -534,5 +550,160 @@ func TestFormatClipboardFilePaths(t *testing.T) {
 	}
 	if _, ok := formatClipboardFilePaths([]string{"/tmp/a\nb"}, true); ok {
 		t.Fatal("newline in a path should reject the whole paste")
+	}
+}
+
+func TestReadTermuxClipboardPrintsHello(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("termux clipboard read is linux-only")
+	}
+	stubRunClip(t, func(name string, _ time.Duration, args ...string) ([]byte, bool) {
+		t.Errorf("fell through to %s %v", name, args)
+		return []byte("from-helper"), true
+	})
+	cmds := stubClipCmd(t, func(name string, d time.Duration, args ...string) ([]byte, error) {
+		if d != clipReadTimeout {
+			t.Errorf("timeout = %s", d)
+		}
+		if name != "termux-clipboard-get" || len(args) != 0 {
+			t.Errorf("cmd = %s %v", name, args)
+		}
+		return []byte("hello"), nil
+	})
+	got, err := readClipboardTextEnv(envGet(map[string]string{
+		"TERMUX_VERSION":  "0.118",
+		"WAYLAND_DISPLAY": "wayland-0",
+	}))
+	if err != nil || got != "hello" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+	if len(*cmds) != 1 || (*cmds)[0] != "termux-clipboard-get" {
+		t.Fatalf("cmds = %#v", *cmds)
+	}
+}
+
+func TestReadTermuxClipboardMissingCommand(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("termux clipboard read is linux-only")
+	}
+	stubClipCmd(t, func(string, time.Duration, ...string) ([]byte, error) {
+		return nil, errors.New("executable file not found")
+	})
+	got, err := readClipboardTextEnv(envGet(map[string]string{"TERMUX_VERSION": "1"}))
+	if got != "" {
+		t.Fatalf("got %q", got)
+	}
+	if err == nil || !strings.Contains(err.Error(), "install the Termux:API app and termux-api package") || !strings.Contains(err.Error(), "executable file not found") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestReadTermuxClipboardEmptyIsSilent(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("termux clipboard read is linux-only")
+	}
+	cmds := stubClipCmd(t, func(string, time.Duration, ...string) ([]byte, error) {
+		return nil, nil
+	})
+	got, err := readClipboardTextEnv(envGet(map[string]string{"TERMUX_VERSION": "1"}))
+	if err != nil || got != "" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+	if len(*cmds) != 1 || (*cmds)[0] != "termux-clipboard-get" {
+		t.Fatalf("cmds = %#v", *cmds)
+	}
+}
+
+func TestReadClipboardTextSkipsTermuxCommand(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("termux clipboard read is linux-only")
+	}
+	cmds := stubClipCmd(t, func(string, time.Duration, ...string) ([]byte, error) {
+		return nil, errors.New("termux-clipboard-get should not run")
+	})
+	stubRunClip(t, func(string, time.Duration, ...string) ([]byte, bool) {
+		return nil, false
+	})
+	got, err := readClipboardTextEnv(envGet(map[string]string{
+		"WAYLAND_DISPLAY": "wayland-0",
+		"DISPLAY":         ":0",
+	}))
+	if err != nil || got != "" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+	if len(*cmds) != 0 {
+		t.Fatalf("cmds = %#v", *cmds)
+	}
+}
+
+func TestTermuxPasteInsertsHello(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("termux clipboard read is linux-only")
+	}
+	pinClipboard(t, "linux", envGet(map[string]string{"TERMUX_VERSION": "0.118"}))
+	stubClipCmd(t, func(name string, d time.Duration, args ...string) ([]byte, error) {
+		if d != clipReadTimeout {
+			t.Errorf("timeout = %s", d)
+		}
+		if name != "termux-clipboard-get" || len(args) != 0 {
+			t.Errorf("cmd = %s %v", name, args)
+		}
+		return []byte("hello"), nil
+	})
+	m := editorModel()
+	m.editor.readImage = func() *clipImage { return nil }
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "hello" {
+		t.Fatalf("value = %q", m.editor.Value())
+	}
+	if m.copyFlash != "" {
+		t.Fatalf("flash = %q", m.copyFlash)
+	}
+}
+
+func TestTermuxPasteMissingCommand(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("termux clipboard read is linux-only")
+	}
+	pinClipboard(t, "linux", envGet(map[string]string{"TERMUX_VERSION": "1"}))
+	stubClipCmd(t, func(string, time.Duration, ...string) ([]byte, error) {
+		return nil, errors.New("executable file not found")
+	})
+	m := editorModel()
+	m.editor.SetValue("keep")
+	m.editor.readImage = func() *clipImage { return nil }
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "keep" {
+		t.Fatalf("value = %q", m.editor.Value())
+	}
+	view := m.View()
+	if !strings.Contains(view, "install the Termux:API app and termux-api package") || !strings.Contains(view, "executable file not found") {
+		t.Fatalf("view:\n%s", view)
+	}
+	if m.copyFlash == "" {
+		t.Fatal("missing copy flash")
+	}
+}
+
+func TestTermuxPasteEmptyIsSilent(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("termux clipboard read is linux-only")
+	}
+	pinClipboard(t, "linux", envGet(map[string]string{"TERMUX_VERSION": "1"}))
+	cmds := stubClipCmd(t, func(string, time.Duration, ...string) ([]byte, error) {
+		return nil, nil
+	})
+	m := editorModel()
+	m.editor.SetValue("keep")
+	m.editor.readImage = func() *clipImage { return nil }
+	m = send(m, pasteImageKey())
+	if m.editor.Value() != "keep" || m.copyFlash != "" {
+		t.Fatalf("value = %q flash = %q", m.editor.Value(), m.copyFlash)
+	}
+	if len(m.editor.undo) != 0 {
+		t.Fatalf("undo = %#v", m.editor.undo)
+	}
+	if len(*cmds) != 1 || (*cmds)[0] != "termux-clipboard-get" {
+		t.Fatalf("cmds = %#v", *cmds)
 	}
 }

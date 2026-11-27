@@ -264,7 +264,7 @@ func (e *promptEditor) insertPaste(raw string) {
 	e.refreshPrompt()
 }
 
-func (e *promptEditor) pasteClipboard() {
+func (e *promptEditor) pasteClipboard() error {
 	readFiles := e.readFiles
 	if readFiles == nil {
 		readFiles = readClipboardFilePaths
@@ -272,11 +272,11 @@ func (e *promptEditor) pasteClipboard() {
 	if paths := readFiles(); len(paths) > 0 {
 		text, ok := formatClipboardFilePaths(paths, e.bashMode())
 		if !ok {
-			return
+			return nil
 		}
 		before, after, hasBefore, hasAfter := e.clipboardNeighbors()
 		e.insert(padClipboardPaths(text, before, after, hasBefore, hasAfter))
-		return
+		return nil
 	}
 	readImg := e.readImage
 	if readImg == nil {
@@ -287,15 +287,27 @@ func (e *promptEditor) pasteClipboard() {
 		if err == nil {
 			e.insert(path)
 		}
-		return
+		return nil
 	}
-	readTxt := e.readText
-	if readTxt == nil {
-		readTxt = readClipboardText
+	if e.readText != nil {
+		if t := e.readText(); t != "" {
+			e.insert(t)
+		}
+		return nil
 	}
-	if t := readTxt(); t != "" {
-		e.insert(t)
+	text, err := readClipboardText()
+	if err != nil {
+		return err
 	}
+	if text == "" {
+		return nil
+	}
+	if termuxClipboard(clipboardGetenv) {
+		e.insertPaste(text)
+		return nil
+	}
+	e.insert(text)
+	return nil
 }
 
 func (e *promptEditor) handle(msg tea.KeyMsg, kb *keys.Manager) bool {
