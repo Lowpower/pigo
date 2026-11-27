@@ -228,34 +228,49 @@ func readWindowsClipboardImage() *clipImage {
 	return supportedClipImage(data, "image/png")
 }
 
-func readClipboardText() string {
-	return readClipboardTextEnv(os.Getenv)
+func readClipboardText() (string, error) {
+	getenv := clipboardGetenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	return readClipboardTextEnv(getenv)
 }
 
-func readClipboardTextEnv(getenv func(string) string) string {
+func termuxClipboard(getenv func(string) string) bool {
+	return runtime.GOOS == "linux" && getenv != nil && getenv("TERMUX_VERSION") != ""
+}
+
+func readClipboardTextEnv(getenv func(string) string) (string, error) {
 	switch runtime.GOOS {
 	case "linux":
+		if termuxClipboard(getenv) {
+			out, err := runClipCmd("termux-clipboard-get", clipReadTimeout)
+			if err != nil {
+				return "", clipboardFailure(clipboardHint("linux", getenv), err)
+			}
+			return string(out), nil
+		}
 		if isWayland(getenv) {
 			if b, ok := runClip("wl-paste", clipReadTimeout, "--no-newline", "--type", "text"); ok {
-				return string(b)
+				return string(b), nil
 			}
 		}
 		if b, ok := runClip("xclip", clipReadTimeout, "-selection", "clipboard", "-o"); ok {
-			return string(b)
+			return string(b), nil
 		}
 		if b, ok := runClip("xsel", clipReadTimeout, "--clipboard", "--output"); ok {
-			return string(b)
+			return string(b), nil
 		}
 	case "darwin":
 		if b, ok := runClip("pbpaste", clipReadTimeout); ok {
-			return string(b)
+			return string(b), nil
 		}
 	case "windows":
 		if b, ok := runClip("powershell.exe", clipReadTimeout, "-NoProfile", "-Command", "Get-Clipboard"); ok {
-			return strings.TrimRight(string(b), "\r\n")
+			return strings.TrimRight(string(b), "\r\n"), nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func writeClipboardImage(img *clipImage) (string, error) {

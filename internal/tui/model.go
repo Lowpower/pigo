@@ -723,7 +723,9 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 			return m.openExternalEditor()
 		}
 		if m.keyIs(msg, "app.clipboard.pasteImage") {
-			m.editor.pasteClipboard()
+			if err := m.editor.pasteClipboard(); err != nil {
+				return m.showCopyFailure(err.Error(), false)
+			}
 			return m, nil
 		}
 		if m.editor.handle(msg, m.keys) {
