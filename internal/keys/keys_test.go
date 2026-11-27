@@ -17,6 +17,21 @@ func TestNormalizeModifiers(t *testing.T) {
 	if got := Normalize("RETURN"); got != "enter" {
 		t.Fatalf("got %q", got)
 	}
+	if got := Normalize("+"); got != "+" {
+		t.Fatalf("+ got %q", got)
+	}
+	if got := Normalize("ctrl++"); got != "ctrl++" {
+		t.Fatalf("ctrl++ got %q", got)
+	}
+	if got := Normalize("shift+ctrl++"); got != "ctrl+shift++" {
+		t.Fatalf("shift+ctrl++ got %q", got)
+	}
+	if got := Normalize("ctrl+shift+="); got != "ctrl+shift+=" {
+		t.Fatalf("physical spelling got %q", got)
+	}
+	if got := Normalize("ctrl+escape"); got != "ctrl+esc" {
+		t.Fatalf("ctrl+escape got %q", got)
+	}
 }
 
 func TestDefaultSelectModel(t *testing.T) {
@@ -184,6 +199,98 @@ func TestPasteImageDefaultKeys(t *testing.T) {
 	const want = "Paste files on macOS, images, or text from clipboard"
 	if unix.Description("app.clipboard.pasteImage") != want || win.Description("app.clipboard.pasteImage") != want {
 		t.Fatalf("description = %q", unix.Description("app.clipboard.pasteImage"))
+	}
+}
+
+func TestShiftedSymbolMatchesBasePlusShift(t *testing.T) {
+	if !Equal("ctrl++", "ctrl+shift+=") || !Equal("ctrl+shift+=", "ctrl++") {
+		t.Fatal("ctrl++ should match ctrl+shift+=")
+	}
+	if !Equal("?", "shift+/") || !Equal("ctrl+?", "ctrl+shift+/") {
+		t.Fatal("? should match shift+/")
+	}
+	if !Equal("ctrl+_", "ctrl+shift+-") {
+		t.Fatal("ctrl+_ should match ctrl+shift+-")
+	}
+	if Equal("ctrl+a", "ctrl+shift+a") || Equal("a", "shift+a") || Equal("shift+l", "l") {
+		t.Fatal("letters must keep shift")
+	}
+	if Equal("ctrl+-", "ctrl+_") || Equal("ctrl+-", "ctrl+shift+-") {
+		t.Fatal("ctrl+- is the unshifted key")
+	}
+	if Equal("shift++", "+") || Equal("shift++", "shift+=") {
+		t.Fatal("shift on an already shifted symbol is a different key")
+	}
+	if !Equal("shift+tab", "shift+tab") || Equal("tab", "shift+tab") {
+		t.Fatal("shift+tab stays a distinct binding")
+	}
+	if !Equal("ctrl+shift+A", "ctrl+shift+a") {
+		t.Fatal("letter case still folds")
+	}
+	shifted := map[string]string{
+		"~": "`", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6",
+		"&": "7", "*": "8", "(": "9", ")": "0", "_": "-", "+": "=", "|": `\`,
+		"{": "[", "}": "]", ":": ";", "<": ",", ">": ".", "?": "/",
+	}
+	for symbol, base := range shifted {
+		if !Equal(symbol, "shift+"+base) {
+			t.Fatalf("%s should match shift+%s", symbol, base)
+		}
+		if Equal(base, "shift+"+base) {
+			t.Fatalf("base %s should not match shift+%s", base, base)
+		}
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keybindings.json")
+	if err := os.WriteFile(path, []byte(`{"app.model.select":"ctrl++"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newManager(dir, false)
+	if !m.Matches("ctrl+shift+=", "app.model.select") {
+		t.Fatal("binding ctrl++ should fire on ctrl+shift+=")
+	}
+	if !m.Matches("ctrl++", "app.model.select") {
+		t.Fatal("binding ctrl++ should fire on ctrl++")
+	}
+	if m.Matches("ctrl+shift+a", "app.clear") || m.Matches("ctrl+shift+a", "app.model.select") {
+		t.Fatal("ctrl+a must not match ctrl+shift+a")
+	}
+	unix := newManager("", false)
+	if !unix.Matches("ctrl+a", "tui.editor.cursorLineStart") || unix.Matches("ctrl+shift+a", "tui.editor.cursorLineStart") {
+		t.Fatal("ctrl+a must not match ctrl+shift+a")
+	}
+	if !unix.Matches("ctrl+-", "tui.editor.undo") {
+		t.Fatal("undo stays ctrl+-")
+	}
+	if unix.Matches("ctrl+_", "tui.editor.undo") || unix.Matches("ctrl+shift+-", "tui.editor.undo") {
+		t.Fatal("undo must not take the shifted minus key")
+	}
+	if !unix.Matches("shift+tab", "app.thinking.cycle") || unix.Matches("tab", "app.thinking.cycle") {
+		t.Fatal("shift+tab binding changed")
+	}
+}
+
+func TestShiftedSymbolExtensionAndReserved(t *testing.T) {
+	m := newManager("", false)
+	if !m.BindExtension("ctrl++", "plus") {
+		t.Fatal("ctrl++ should bind")
+	}
+	if _, ok := m.ExtensionKey("ctrl+shift+="); !ok {
+		t.Fatal("extension ctrl++ should match ctrl+shift+=")
+	}
+	if _, ok := m.ExtensionKey("ctrl++"); !ok {
+		t.Fatal("extension ctrl++ should match itself")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keybindings.json")
+	if err := os.WriteFile(path, []byte(`{"app.clear":"ctrl+shift+="}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reserved := newManager(dir, false)
+	if reserved.BindExtension("ctrl++", "nope") {
+		t.Fatal("ctrl++ conflicts with reserved ctrl+shift+=")
 	}
 }
 
