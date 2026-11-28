@@ -156,6 +156,7 @@ type Model struct {
 	bashEvents  chan tea.Msg
 	bashLive    string
 	bashCommand string
+	bashExclude bool
 
 	// now is the clock for the shell elapsed line. Tests replace it.
 	now           func() time.Time
@@ -1858,8 +1859,7 @@ func (m Model) rawChatBody() (string, map[int]string) {
 		write("\n\n")
 	}
 	if m.bashRunning {
-		header := "$ " + m.bashCommand
-		write(m.toolStyle.Render(header))
+		write(m.renderBashHeader(m.bashCommand, m.bashExclude))
 		if out := strings.TrimRight(previewTail(m.bashLive, 20), "\n"); out != "" {
 			write("\n")
 			write(indent(out))

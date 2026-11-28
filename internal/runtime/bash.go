@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/Lowpower/pigo/internal/shell"
@@ -122,7 +123,25 @@ func runBash(ctx context.Context, r tools.Runner, cwd, command string, extra map
 	if cwd != "" && cmd.Dir == "" {
 		cmd.Dir = cwd
 	}
-	output, waitErr := shell.WaitStream(cmd, onChunk)
+	var strip shell.ANSIStripper
+	var stripped strings.Builder
+	_, waitErr := shell.WaitStream(cmd, func(chunk string) {
+		clean := strip.Write(chunk)
+		if clean == "" {
+			return
+		}
+		stripped.WriteString(clean)
+		if onChunk != nil {
+			onChunk(clean)
+		}
+	})
+	if tail := strip.Flush(); tail != "" {
+		stripped.WriteString(tail)
+		if onChunk != nil {
+			onChunk(tail)
+		}
+	}
+	output := []byte(stripped.String())
 	text, path, truncated := tools.BoundOutput(string(output), "pigo-bash")
 	cancelled := ctx.Err() != nil
 	if cancelled {

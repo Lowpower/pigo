@@ -128,6 +128,7 @@ func (m Model) startBash(command string, exclude bool) (tea.Model, tea.Cmd) {
 	m.bashCancel = cancel
 	m.bashRunning = true
 	m.bashCommand = command
+	m.bashExclude = exclude
 	m.bashLive = ""
 	ch := make(chan tea.Msg, 32)
 	m.bashEvents = ch
@@ -149,22 +150,26 @@ func (m Model) startBash(command string, exclude bool) (tea.Model, tea.Cmd) {
 	return m, waitBashEvent(ch)
 }
 
+func (m Model) renderBashHeader(command string, exclude bool) string {
+	if exclude {
+		return m.metaStyle.Render("!! " + command)
+	}
+	return m.toolStyle.Render("$ " + command)
+}
+
 func (m Model) handleBashDone(msg bashDoneMsg) (tea.Model, tea.Cmd) {
 	m.bashRunning = false
 	m.bashCancel = nil
 	m.bashEvents = nil
 	m.bashLive = ""
 	m.bashCommand = ""
+	m.bashExclude = false
 	if msg.result.Error != "" {
 		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.errStyle.Render(msg.result.Error)})
 		return m, nil
 	}
-	header := "$ " + msg.command
-	if msg.exclude {
-		header = "!! " + msg.command
-	}
 	body := strings.TrimRight(msg.result.Output, "\n")
-	rendered := m.toolStyle.Render(header)
+	rendered := m.renderBashHeader(msg.command, msg.exclude)
 	if body != "" {
 		rendered += "\n" + indent(body)
 	}
