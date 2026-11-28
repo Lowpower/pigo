@@ -101,6 +101,86 @@ func TestBangShowsLiveOutputWhileRunning(t *testing.T) {
 	}
 }
 
+func TestBangExcludeHeaderStaysDim(t *testing.T) {
+	m := editorModel()
+	m.editor.SetValue("!!printf secret")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil || !m.bashRunning {
+		t.Fatal("expected running bash")
+	}
+	want := m.metaStyle.Render("!! printf secret")
+	if !strings.Contains(m.View(), want) {
+		t.Fatalf("header before output is not dim:\n%s", m.View())
+	}
+	sawChunk := false
+	deadline := time.Now().Add(3 * time.Second)
+	for cmd != nil && time.Now().Before(deadline) {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		var nxt tea.Model
+		nxt, cmd = m.Update(msg)
+		m = nxt.(Model)
+		if _, ok := msg.(bashChunkMsg); ok && m.bashRunning {
+			sawChunk = true
+			if !strings.Contains(m.View(), want) {
+				t.Fatalf("header after output is not dim:\n%s", m.View())
+			}
+		}
+		if _, ok := msg.(bashDoneMsg); ok {
+			break
+		}
+	}
+	if !sawChunk {
+		t.Fatal("expected a chunk while !! was running")
+	}
+	if len(m.transcript) == 0 || !strings.Contains(m.transcript[0].rendered, want) {
+		t.Fatalf("finished header = %+v", m.transcript)
+	}
+}
+
+func TestBangHeaderUsesToolStyle(t *testing.T) {
+	m := editorModel()
+	m.editor.SetValue("!printf hello")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil || !m.bashRunning {
+		t.Fatal("expected running bash")
+	}
+	want := m.toolStyle.Render("$ printf hello")
+	if !strings.Contains(m.View(), want) {
+		t.Fatalf("header before output is not tool style:\n%s", m.View())
+	}
+	sawChunk := false
+	deadline := time.Now().Add(3 * time.Second)
+	for cmd != nil && time.Now().Before(deadline) {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		var nxt tea.Model
+		nxt, cmd = m.Update(msg)
+		m = nxt.(Model)
+		if _, ok := msg.(bashChunkMsg); ok && m.bashRunning {
+			sawChunk = true
+			if !strings.Contains(m.View(), want) {
+				t.Fatalf("header after output is not tool style:\n%s", m.View())
+			}
+		}
+		if _, ok := msg.(bashDoneMsg); ok {
+			break
+		}
+	}
+	if !sawChunk {
+		t.Fatal("expected a chunk while ! was running")
+	}
+	if len(m.transcript) == 0 || !strings.Contains(m.transcript[0].rendered, want) {
+		t.Fatalf("finished header = %+v", m.transcript)
+	}
+}
+
 func TestBangExcludeSkipsLLMHistory(t *testing.T) {
 	m := editorModel()
 	m.editor.SetValue("!!printf secret")

@@ -35,6 +35,22 @@ func TestPersistBashWritesSessionAndExcludeFlag(t *testing.T) {
 	}
 }
 
+func TestRunBashStripsANSI(t *testing.T) {
+	var got strings.Builder
+	res := RunBash(t.Context(), t.TempDir(), `printf '\033[31mred\033[0m'`, func(s string) {
+		got.WriteString(s)
+	})
+	if res.ExitCode == nil || *res.ExitCode != 0 {
+		t.Fatalf("exit=%v out=%q", res.ExitCode, res.Output)
+	}
+	if res.Output != "red" {
+		t.Fatalf("output %q", res.Output)
+	}
+	if got.String() != "red" {
+		t.Fatalf("chunks %q", got.String())
+	}
+}
+
 func TestRunBashTruncatesLongOutput(t *testing.T) {
 	res := RunBash(t.Context(), t.TempDir(), "seq 1 2100", nil)
 	if res.FullOutputPath != "" {
