@@ -29,7 +29,7 @@ type modelPicker struct {
 
 func (m Model) handleModelCommand(rest string) (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	rest = strings.TrimSpace(rest)
@@ -243,7 +243,7 @@ func (m Model) applyPickerModel(persist bool) (tea.Model, tea.Cmd) {
 	if persist {
 		msg = "Default model: " + m.cfg.DefaultProvider + "/" + m.cfg.DefaultModel
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg)})
+	m.appendMeta(msg)
 	m.maybeWarnAnthropicExtraUsage()
 	return m, nil
 }

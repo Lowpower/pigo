@@ -43,7 +43,7 @@ type treeOverlay struct {
 
 func (m Model) openTree() (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	if m.engine == nil || m.engine.Opts.Session == nil {
@@ -416,7 +416,7 @@ func (m Model) confirmTreeNav(summarize bool, custom string, replace bool) (tea.
 		}
 		m.pendingNav = &pendingNav{target: target, summarize: summarize, custom: custom, replace: replace}
 		m.overlay = overlayNone
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Stopping current response…")})
+		m.appendMeta("Stopping current response…")
 		return m, nil
 	}
 	return m.applyTreeNav(target, summarize, custom, replace)
@@ -459,7 +459,7 @@ func (m Model) applyTreeNavResult(target string, res session.NavigateResult, err
 	m.clearBorder(statusBranch)
 	if err != nil {
 		m.overlay = overlayNone
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(err.Error())})
+		m.appendMeta(err.Error())
 		return m, nil
 	}
 	if res.Aborted {
@@ -470,7 +470,7 @@ func (m Model) applyTreeNavResult(target string, res session.NavigateResult, err
 	}
 	if res.Cancelled {
 		m.overlay = overlayNone
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Navigation cancelled")})
+		m.appendMeta("Navigation cancelled")
 		return m, nil
 	}
 	m.overlay = overlayNone
@@ -478,7 +478,7 @@ func (m Model) applyTreeNavResult(target string, res session.NavigateResult, err
 	if res.EditorText != "" && strings.TrimSpace(m.editor.Value()) == "" {
 		m.editor.SetValue(res.EditorText)
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Navigated to selected point")})
+	m.appendMeta("Navigated to selected point")
 	return m, nil
 }
 
@@ -504,20 +504,15 @@ func transcriptFromMessages(m Model, msgs []ai.Message) []entry {
 				out = append(out, fe)
 				continue
 			}
-			out = append(out, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(msg.Text())})
+			out = append(out, m.makeUserEntry(msg.Text()))
 		case ai.RoleAssistant:
 			text := msg.Text()
 			if text != "" {
-				out = append(out, entry{role: "assistant", rendered: m.renderMarkdown(text)})
+				out = append(out, m.makeAssistantEntry(text, msg.Images))
 			}
 		default:
 			if msg.Text() != "" {
-				out = append(out, entry{
-					role:     "tool",
-					toolName: msg.ToolName,
-					toolOut:  msg.Text(),
-					rendered: m.toolStyle.Render(toolResultBodyLinesAt(msg.Text(), false, toolPreviewLines(msg.ToolName), m.toolPreviewWidth())),
-				})
+				out = append(out, m.makeToolPreviewEntry(msg.ToolName, msg.Text()))
 			}
 		}
 	}

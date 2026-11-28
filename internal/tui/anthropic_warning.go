@@ -22,5 +22,5 @@ func (m *Model) maybeWarnAnthropicExtraUsage() {
 		return
 	}
 	m.anthropicWarn = true
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(anthropicExtraUsageWarning)})
+	m.appendMeta(anthropicExtraUsageWarning)
 }

@@ -71,6 +71,6 @@ func (m Model) applyThinkingPicker(persist bool) (tea.Model, tea.Cmd) {
 	if persist {
 		msg = "Default thinking: " + it.ID
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg)})
+	m.appendMeta(msg)
 	return m, nil
 }

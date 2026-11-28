@@ -41,7 +41,7 @@ func (m Model) copyWithNotice(text, success string, notice copyNotice) (Model, t
 		return m.showCopyFlash(success, copyOKFlashDuration)
 	default:
 		m.dismissCopyFlash()
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(success)})
+		m.appendMeta(success)
 		return m, nil
 	}
 }
@@ -87,7 +87,7 @@ func (m Model) copySelectionOrAssistant() (tea.Model, tea.Cmd) {
 func (m Model) copyLastAssistant() (tea.Model, tea.Cmd) {
 	text := lastAssistant(m.history)
 	if text == "" {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("no assistant text to copy")})
+		m.appendMeta("no assistant text to copy")
 		return m, nil
 	}
 	return m.copyWithNotice(text, "copied last assistant message", copyNoticeTranscript)

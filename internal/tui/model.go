@@ -17,7 +17,6 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"golang.org/x/term"
 
 	"github.com/Lowpower/pigo/internal/agent"
 	"github.com/Lowpower/pigo/internal/ai"
@@ -45,6 +44,11 @@ const maxEditorWidth = 100
 // entry is one rendered line/block in the transcript.
 type entry struct {
 	role       string
+	kind       entryKind
+	raw        string
+	suffix     string
+	images     []ai.ImageContent
+	bang       *bangEntry
 	rendered   string
 	thinking   string // raw thinking block (Ctrl+T)
 	toolOut    string // raw tool result (Ctrl+O)
@@ -237,7 +241,6 @@ func New(cfg config.Config) Model {
 		complete:     completer{maxVisible: cfg.AutocompleteVisible()},
 		prog:         newProgramStatus(),
 	}
-	m.glam = newRenderer(80)
 	applyTrueColor(cfg)
 	m.applyTheme(theme.Load(cfg.Theme, "", ""))
 	m.refreshGit()
@@ -281,13 +284,15 @@ func (m *Model) loadTheme(name string) {
 func (m *Model) applyTheme(th theme.Theme) {
 	m.theme = th
 	m.titleStyle = styleFG(lipgloss.NewStyle().Bold(true), th.Accent)
-	m.metaStyle = lipgloss.NewStyle().Faint(true)
+	m.metaStyle = styleFG(lipgloss.NewStyle().Faint(true), th.Muted)
 	m.userStyle = styleFG(lipgloss.NewStyle().Bold(true), th.User)
 	m.toolStyle = styleFG(lipgloss.NewStyle(), th.Tool)
 	m.errStyle = styleFG(lipgloss.NewStyle(), th.Error)
 	m.streamStyle = styleFG(lipgloss.NewStyle(), th.Assistant)
 	m.footerStyle = styleFG(lipgloss.NewStyle().Faint(true), th.Muted)
 	m.editor.applyTheme(th)
+	m.glam = newThemeRenderer(m.markdownWidth(), th)
+	m.rerenderTranscript()
 }
 
 func (m Model) editorBorderColor() string {
@@ -350,10 +355,6 @@ func (m Model) themeOpts(name string) theme.LoadOptions {
 	return opt
 }
 
-func markdownStyle() string {
-	return markdownStyleFor(term.IsTerminal(int(os.Stdout.Fd())), lipgloss.HasDarkBackground())
-}
-
 func markdownStyleFor(isTTY, dark bool) string {
 	if !isTTY {
 		return "notty"
@@ -376,18 +377,6 @@ func isTermQueryLeak(msg tea.KeyMsg) bool {
 		return true
 	}
 	return strings.Contains(s, "[1;1R")
-}
-
-func newRenderer(width int) *glamour.TermRenderer {
-	wrap := width - 2
-	if wrap < 20 {
-		wrap = 20
-	}
-	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(markdownStyle()), glamour.WithWordWrap(wrap))
-	if err != nil {
-		return nil
-	}
-	return r
 }
 
 // Init implements tea.Model.
@@ -489,8 +478,8 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		}
 		m.editor.SetWidth(edW)
 		m.editor.syncHeight(msg.Height)
-		wrap := m.layoutWidth() - m.cfg.OutputPadN()
-		m.glam = newRenderer(wrap)
+		m.glam = newThemeRenderer(m.markdownWidth(), m.theme)
+		m.rerenderTranscript()
 		return m, tea.Batch(cmds...)
 
 	case tea.ResumeMsg:
@@ -697,7 +686,7 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 			if m.hideThinking {
 				state = "hidden"
 			}
-			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("thinking blocks: " + state)})
+			m.appendMeta("thinking blocks: " + state)
 			return m, nil
 		}
 		if m.keyIs(msg, "app.tools.expand") {
@@ -812,11 +801,11 @@ func (m Model) Update(msg tea.Msg) (out tea.Model, nextCmd tea.Cmd) {
 		return m.applyTreeNavResult(msg.target, msg.res, msg.err)
 
 	case shareDoneMsg:
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg.text)})
+		m.appendMeta(msg.text)
 		return m, nil
 
 	case llamaDoneMsg:
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(msg.text)})
+		m.appendMeta(msg.text)
 		return m, nil
 
 	case imageGenMsg:
@@ -865,13 +854,13 @@ func (m Model) queueFollowUp() (tea.Model, tea.Cmd) {
 	} else {
 		m.queued = append(m.queued, queuedPrompt{text: text, images: images})
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("follow-up: " + text)})
+	m.appendMeta("follow-up: " + text)
 	return m, nil
 }
 
 func (m Model) cycleModel(backward bool) (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	if m.engine == nil {
@@ -891,14 +880,14 @@ func (m Model) cycleThinking() (tea.Model, tea.Cmd) {
 		level, ok := m.engine.CycleThinkingOK()
 		m.cfg = m.engine.Opts.Config
 		if !ok {
-			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("model does not support thinking")})
+			m.appendMeta("model does not support thinking")
 			return m, nil
 		}
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("thinking = " + level)})
+		m.appendMeta("thinking = " + level)
 		return m, nil
 	}
 	m.cfg.Thinking = models.NextThinkingLevel(m.cfg.Thinking)
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("thinking = " + m.cfg.Thinking)})
+	m.appendMeta("thinking = " + m.cfg.Thinking)
 	return m, nil
 }
 
@@ -931,11 +920,11 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		// after the turn are follow-ups (drained on agentClosedMsg).
 		if m.engine != nil {
 			m.engine.PushSteerImages(text, images)
-			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("steering: " + text)})
+			m.appendMeta("steering: " + text)
 			return m, nil
 		}
 		m.queued = append(m.queued, queuedPrompt{text: text, images: images})
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("queued: " + text)})
+		m.appendMeta("queued: " + text)
 		return m, nil
 	}
 	return m.startTurn(text, images)
@@ -943,7 +932,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	if m.engine != nil && !m.engine.NewSession("") {
@@ -961,7 +950,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 	m.editor.Reset()
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	switch cmd.Name {
@@ -1225,7 +1214,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		if m.engine.Tools != nil {
 			opts.Tools = m.engine.Tools.AITools()
 		}
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Sharing session...")})
+		m.appendMeta("Sharing session...")
 		return m, func() tea.Msg {
 			res, err := session.Share(opts)
 			if err != nil {
@@ -1237,8 +1226,7 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 		return m.startBugReport(cmd.Rest)
 	case "changelog":
 		body := changelog.FullMarkdown()
-		rendered := m.renderMarkdown("What's New\n\n" + body)
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: rendered})
+		m.appendMarkdownMeta("What's New\n\n" + body)
 		return m, nil
 	case "skill":
 		if !m.cfg.SkillCommandsEnabled() {
@@ -1278,10 +1266,10 @@ func (m Model) handleSlash(cmd slash.Command) (tea.Model, tea.Cmd) {
 func (m Model) startImageGen(prompt string) (tea.Model, tea.Cmd) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("usage: /image <prompt>")})
+		m.appendMeta("usage: /image <prompt>")
 		return m, nil
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("generating image…")})
+	m.appendMeta("generating image…")
 	return m, func() tea.Msg {
 		imgs, err := ai.GenerateImages(context.Background(), prompt, "")
 		return imageGenMsg{prompt: prompt, images: imgs, err: err}
@@ -1290,7 +1278,7 @@ func (m Model) startImageGen(prompt string) (tea.Model, tea.Cmd) {
 
 func (m Model) handleImageGen(msg imageGenMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("image error: " + msg.err.Error())})
+		m.appendMeta("image error: " + msg.err.Error())
 		return m, nil
 	}
 	m.history = append(m.history,
@@ -1305,11 +1293,7 @@ func (m Model) handleImageGen(msg imageGenMsg) (tea.Model, tea.Cmd) {
 		}
 		_, _ = m.engine.Opts.Session.AppendMessage("assistant", map[string]any{"role": "assistant", "content": blocks})
 	}
-	rendered := m.renderMarkdown("generated image")
-	for _, img := range msg.images {
-		rendered += "\n" + m.renderInlineImage(img)
-	}
-	m.transcript = append(m.transcript, entry{role: "assistant", rendered: rendered})
+	m.appendAssistant("generated image", msg.images)
 	return m, nil
 }
 
@@ -1337,11 +1321,11 @@ func (m Model) bindRunCancel(ctx context.Context, cancel context.CancelFunc) Mod
 // startCustomTurn runs an extension triggerTurn without painting an empty user line.
 func (m Model) startCustomTurn() (tea.Model, tea.Cmd) {
 	if m.border.kind == statusBranch {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while a branch summary is in progress.")})
+		m.appendMeta("Cannot submit a prompt while a branch summary is in progress.")
 		return m, nil
 	}
 	if m.border.kind == statusCompact || (m.engine != nil && m.engine.Compacting()) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while compaction is in progress.")})
+		m.appendMeta("Cannot submit a prompt while compaction is in progress.")
 		return m, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1364,11 +1348,11 @@ func (m Model) startCustomTurn() (tea.Model, tea.Cmd) {
 
 func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.Cmd) {
 	if m.border.kind == statusBranch {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while a branch summary is in progress.")})
+		m.appendMeta("Cannot submit a prompt while a branch summary is in progress.")
 		return m, nil
 	}
 	if m.border.kind == statusCompact || (m.engine != nil && m.engine.Compacting()) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Cannot submit a prompt while compaction is in progress.")})
+		m.appendMeta("Cannot submit a prompt while compaction is in progress.")
 		return m, nil
 	}
 	m.editor.AddHistory(text)
@@ -1376,7 +1360,7 @@ func (m Model) startTurn(text string, images []ai.ImageContent) (tea.Model, tea.
 	if fe, ok := foldUserEntry(text); ok {
 		m.transcript = append(m.transcript, fe)
 	} else {
-		m.transcript = append(m.transcript, entry{role: "user", rendered: m.userStyle.Render("› you") + "\n" + indent(text)})
+		m.appendUser(text)
 	}
 	text, images = m.preparePromptImages(text, images)
 	m.history = append(m.history, ai.Message{Role: ai.RoleUser, Content: text, Images: images})
@@ -1457,15 +1441,11 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 			addUsage(&m.usage, ev.Assistant.Usage)
 			for _, c := range ev.Assistant.Content {
 				if c != nil && c.Type == ai.KindThinking && strings.TrimSpace(c.Thinking) != "" {
-					m.transcript = append(m.transcript, entry{
-						role:     "thinking",
-						thinking: c.Thinking,
-						rendered: m.metaStyle.Render(c.Thinking),
-					})
+					m.appendThinking(c.Thinking)
 				}
 			}
 			if text := ev.Assistant.Text(); text != "" {
-				m.transcript = append(m.transcript, entry{role: "assistant", rendered: m.renderMarkdown(text)})
+				m.appendAssistant(text, nil)
 				m.history = append(m.history, ai.Message{Role: ai.RoleAssistant, Content: text})
 			}
 			m.noteBugHint(ev.Assistant)
@@ -1481,7 +1461,8 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		if m.engine != nil {
 			if custom := m.engine.RenderTool("call", ev.ToolName, ev.Args, "", nil); custom != "" {
-				ent.rendered = m.toolStyle.Render(custom)
+				ent.kind = entryToolCustom
+				ent.raw = custom
 				ent.toolCustom = true
 			}
 		}
@@ -1489,7 +1470,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 			ent.startedAt = m.clock()
 			ent.shellLive = true
 		}
-		m.transcript = append(m.transcript, ent)
+		m.appendEntry(ent)
 
 	case agent.EventToolUpdate:
 		for i, e := range m.transcript {
@@ -1519,18 +1500,12 @@ func (m *Model) applyAgentEvent(ev agent.Event) tea.Cmd {
 		if clearedShell {
 			m.disarmShellTimer()
 		}
-		style := m.toolStyle
-		mark := "→"
-		if ev.IsError {
-			style = m.errStyle
-			mark = "✗"
-		}
-		m.transcript = append(m.transcript, entry{
+		m.appendEntry(entry{
 			role:     "tool",
+			kind:     entryToolResult,
 			toolName: ev.ToolName,
 			toolOut:  ev.Result,
 			isError:  ev.IsError,
-			rendered: style.Render(fmt.Sprintf("  %s %s", mark, firstLine(ev.Result))),
 		})
 
 	case agent.EventAgentEnd:
@@ -1620,7 +1595,7 @@ func (m Model) handleAfterAgentEnd(msg afterAgentEndMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	m.clearBorder(statusCompact)
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	if msg.err != nil {
@@ -1651,7 +1626,7 @@ func (m *Model) noteThinkingDrop(msg *ai.AssistantMessage) {
 		prev = lastBranchAssistant(m)
 	}
 	if note := ai.ThinkingDropNotice(msg, prev); note != "" {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(note)})
+		m.appendMeta(note)
 	}
 	m.prevDropAssistant = msg
 }
@@ -1683,7 +1658,7 @@ func (m *Model) appendCacheMissNotice() {
 	if note == "" {
 		return
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(note)})
+	m.appendMeta(note)
 }
 
 // View implements tea.Model.
@@ -2078,7 +2053,7 @@ func runEngine(cfg config.Config, eng *runtime.Engine, openResume bool) (err err
 		m.refreshGit()
 		m.attachExtensions()
 		if trust.HasProjectResources(eng.Opts.Cwd) && !eng.Opts.ProjectTrusted {
-			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(trust.UntrustedHint)})
+			m.appendMeta(trust.UntrustedHint)
 		}
 	}
 	m.noteCrash()
@@ -2194,7 +2169,7 @@ func (m *Model) applyStartupChangelog() {
 	if notice == "" {
 		return
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.renderMarkdown(notice)})
+	m.appendMarkdownMeta(notice)
 }
 
 func (m Model) keyIs(msg tea.KeyMsg, action string) bool {
@@ -2221,7 +2196,7 @@ func (m Model) handleClear() (tea.Model, tea.Cmd) {
 
 func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	args := strings.Fields(rest)
@@ -2230,7 +2205,7 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 			return note("usage: /llama search <query>")
 		}
 		query := strings.Join(args[1:], " ")
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("searching Hugging Face for " + query + "...")})
+		m.appendMeta("searching Hugging Face for " + query + "...")
 		return m, func() tea.Msg {
 			found, err := llama.SearchHuggingFace(context.Background(), query, llama.FindHuggingFaceToken(), "")
 			if err != nil {
@@ -2261,7 +2236,7 @@ func (m Model) handleLlama(rest string) (tea.Model, tea.Cmd) {
 		return note(err.Error())
 	}
 	run := func(pending, done string, fn func() error) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(pending)})
+		m.appendMeta(pending)
 		return m, func() tea.Msg {
 			if err := fn(); err != nil {
 				return llamaDoneMsg{text: err.Error()}

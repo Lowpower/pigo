@@ -87,7 +87,7 @@ func (m Model) startLogin(rest string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if len(matches) == 0 {
-			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("unknown provider " + rest)})
+			m.appendMeta("unknown provider " + rest)
 			return m, nil
 		}
 	}
@@ -298,7 +298,7 @@ func (m Model) cancelLogin() (tea.Model, tea.Cmd) {
 		m.login.reply <- ""
 	}
 	m.login = loginState{}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("login cancelled")})
+	m.appendMeta("login cancelled")
 	return m, nil
 }
 
@@ -345,7 +345,7 @@ func (m Model) handleLoginMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text = "login error: " + v.err.Error()
 		}
 		m.login = loginState{}
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(text)})
+		m.appendMeta(text)
 		if v.err == nil {
 			m.maybeWarnAnthropicExtraUsage()
 			m.maybeWarnRadiusCatalog(provider)
@@ -366,10 +366,7 @@ func (m *Model) maybeWarnRadiusCatalog(provider string) {
 	if _, ok := models.Lookup("radius", id); ok {
 		return
 	}
-	m.transcript = append(m.transcript, entry{
-		role:     "meta",
-		rendered: m.metaStyle.Render("Radius model catalog timed out; models may be unavailable until refresh."),
-	})
+	m.appendMeta("Radius model catalog timed out; models may be unavailable until refresh.")
 }
 
 func formatLoginEvent(ev auth.Event) string {
@@ -532,7 +529,7 @@ func providerMethodName(p auth.Provider, authType string) string {
 
 func (m Model) startLogout(rest string) (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	dir := configDir(m)
@@ -575,7 +572,7 @@ func (m Model) startLogout(rest string) (tea.Model, tea.Cmd) {
 
 func (m Model) confirmLogout() (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	if m.login.selected < 0 || m.login.selected >= len(m.login.options) {

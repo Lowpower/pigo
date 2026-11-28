@@ -467,7 +467,7 @@ func (m *Model) persistScopedModels() {
 	}
 	if m.engine != nil {
 		if err := m.engine.PersistEnabledModels(patterns); err != nil {
-			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Could not save model selection: " + err.Error())})
+			m.appendMeta("Could not save model selection: " + err.Error())
 			return
 		}
 	}
@@ -478,7 +478,7 @@ func (m *Model) persistScopedModels() {
 	}
 	p.dirty = false
 	p.rebuild()
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Model selection saved to settings")})
+	m.appendMeta("Model selection saved to settings")
 }
 
 func (m *Model) closeScopedModels() {

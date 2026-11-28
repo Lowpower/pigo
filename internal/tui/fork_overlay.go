@@ -20,7 +20,7 @@ type forkOverlay struct {
 
 func (m Model) openFork() (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	if m.engine == nil || m.engine.Opts.Session == nil {
@@ -61,7 +61,7 @@ func (m Model) handleForkKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) confirmFork() (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
 		m.overlay = overlayNone
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	if m.fork.cursor < 0 || m.fork.cursor >= len(m.fork.msgs) {

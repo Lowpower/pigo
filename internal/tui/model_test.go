@@ -118,7 +118,7 @@ func TestStreamingThenGlamourFinalize(t *testing.T) {
 	if len(m.transcript) == 0 || m.transcript[len(m.transcript)-1].role != "assistant" {
 		t.Fatalf("expected an assistant transcript entry, got %+v", m.transcript)
 	}
-	if !strings.Contains(m.View(), "Hello world") {
+	if !strings.Contains(stripANSI(m.View()), "Hello world") {
 		t.Error("finalized assistant text not shown in view")
 	}
 	// history carries the assistant turn for the next request

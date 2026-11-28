@@ -251,6 +251,28 @@ func ansi256RGB(index int) RGB {
 	return RGB{R: gray, G: gray, B: gray}
 }
 
+// Hex converts a resolved theme color (palette index or hex) to #rrggbb.
+// Empty or unrecognized values return "".
+func Hex(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	if strings.HasPrefix(v, "#") {
+		hex, err := normalizeHex(v)
+		if err != nil {
+			return ""
+		}
+		return hex
+	}
+	index, ok, err := normalizeIndex(v)
+	if !ok || err != nil {
+		return ""
+	}
+	n, _ := strconv.Atoi(index)
+	return formatHex(ansi256RGB(n))
+}
+
 func formatHex(c RGB) string {
 	ch := func(v int) int {
 		if v < 0 {

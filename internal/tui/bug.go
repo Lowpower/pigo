@@ -23,7 +23,7 @@ type bugSummaryMsg struct {
 
 func (m Model) startBugReport(rest string) (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	args, err := bugreport.ParseArgs(rest)
@@ -43,7 +43,7 @@ func (m Model) startBugReport(rest string) (tea.Model, tea.Cmd) {
 		ctx, cancel := context.WithCancel(context.Background())
 		m.cancel = cancel
 		m.running = true
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("writing bug report summary…")})
+		m.appendMeta("writing bug report summary…")
 		return m, func() tea.Msg {
 			summary, err := eng.SummarizeBugReport(ctx, msgs, hint)
 			return bugSummaryMsg{args: args, summary: summary, err: err}
@@ -56,11 +56,11 @@ func (m Model) finishBugSummary(msg bugSummaryMsg) (tea.Model, tea.Cmd) {
 	m.running = false
 	m.cancel = nil
 	if errors.Is(msg.err, bugreport.ErrCancelled) || errors.Is(msg.err, context.Canceled) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("Bug report cancelled")})
+		m.appendMeta("Bug report cancelled")
 		return m, nil
 	}
 	if msg.err != nil {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("bug report summary: " + msg.err.Error())})
+		m.appendMeta("bug report summary: " + msg.err.Error())
 		return m, nil
 	}
 	return m.finishBugReport(msg.args, msg.summary)
@@ -68,7 +68,7 @@ func (m Model) finishBugSummary(msg bugSummaryMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) finishBugReport(args bugreport.Args, summary string) (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	dir := m.engine.Opts.Cwd
@@ -89,7 +89,7 @@ func (m Model) finishBugReport(args bugreport.Args, summary string) (tea.Model, 
 	if m.cfg.HyperlinksEnabled(true) {
 		link = osc8(written.URL, written.URL)
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("bug report: "+written.Path) + "\n" + link})
+	m.appendBugReport("bug report: "+written.Path, link)
 	return m, nil
 }
 
@@ -99,9 +99,9 @@ func (m *Model) noteBugHint(msg *ai.AssistantMessage) {
 	}
 	m.bugHintShown = true
 	if msg.ErrorMessage != "" {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.errStyle.Render(msg.ErrorMessage)})
+		m.appendError(msg.ErrorMessage)
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("If this looks like a pigo bug, /bug writes a report you can attach to a GitHub issue.")})
+	m.appendMeta("If this looks like a pigo bug, /bug writes a report you can attach to a GitHub issue.")
 }
 
 func (m *Model) noteCrash() {
@@ -124,7 +124,7 @@ func (m *Model) noteCrash() {
 	if hint := bugreport.ExtensionHint(stack, m.engine.LoadedExtensions()); hint != "" {
 		text += "\n" + hint
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(text)})
+	m.appendMeta(text)
 }
 
 func recordTUIPanic(eng *runtime.Engine, rec any) {

@@ -118,7 +118,7 @@ func (m Model) llamaClient() (*llama.Client, error) {
 func (m Model) openLlamaManager() (tea.Model, tea.Cmd) {
 	c, err := m.llamaClient()
 	if err != nil {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(err.Error())})
+		m.appendMeta(err.Error())
 		return m, nil
 	}
 	debounce := m.llama.searchDebounce
@@ -612,7 +612,7 @@ func (m Model) cancelLlama() (tea.Model, tea.Cmd) {
 	default:
 		m.llama.active = false
 		if m.llama.notify != "" {
-			m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(m.llama.notify)})
+			m.appendMeta(m.llama.notify)
 		}
 		return m, nil
 	}
