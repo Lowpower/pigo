@@ -121,7 +121,7 @@ func waitBashEvent(ch <-chan tea.Msg) tea.Cmd {
 
 func (m Model) startBash(command string, exclude bool) (tea.Model, tea.Cmd) {
 	if m.bashRunning {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("a bash command is already running (Esc to cancel)")})
+		m.appendMeta("a bash command is already running (Esc to cancel)")
 		return m, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -156,7 +156,7 @@ func (m Model) handleBashDone(msg bashDoneMsg) (tea.Model, tea.Cmd) {
 	m.bashLive = ""
 	m.bashCommand = ""
 	if msg.result.Error != "" {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.errStyle.Render(msg.result.Error)})
+		m.appendError(msg.result.Error)
 		return m, nil
 	}
 	header := "$ " + msg.command
@@ -164,16 +164,13 @@ func (m Model) handleBashDone(msg bashDoneMsg) (tea.Model, tea.Cmd) {
 		header = "!! " + msg.command
 	}
 	body := strings.TrimRight(msg.result.Output, "\n")
-	rendered := m.toolStyle.Render(header)
-	if body != "" {
-		rendered += "\n" + indent(body)
-	}
+	status := ""
 	if msg.result.Cancelled {
-		rendered += "\n" + m.errStyle.Render("(cancelled)")
+		status = "(cancelled)"
 	} else if msg.result.ExitCode != nil && *msg.result.ExitCode != 0 {
-		rendered += "\n" + m.errStyle.Render(fmt.Sprintf("exit %d", *msg.result.ExitCode))
+		status = fmt.Sprintf("exit %d", *msg.result.ExitCode)
 	}
-	m.transcript = append(m.transcript, entry{role: "tool", rendered: rendered})
+	m.appendBang(header, body, status)
 	if m.engine != nil {
 		m.engine.PersistBash(msg.command, msg.result, msg.exclude)
 	}

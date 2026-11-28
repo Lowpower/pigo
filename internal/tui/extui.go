@@ -271,7 +271,7 @@ func (m Model) handleExtMsg(msg tea.Msg) (Model, bool) {
 		if x.level != "" && x.level != "info" {
 			text = x.level + ": " + text
 		}
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(text)})
+		m.appendMeta(text)
 		return m, true
 	case extStatusMsg:
 		if m.extStatus == nil {

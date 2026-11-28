@@ -163,3 +163,25 @@ func TestLoadRejectsBadColors(t *testing.T) {
 		}
 	}
 }
+
+func TestHex(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{"#abc", "#aabbcc"},
+		{"#12AB34", "#12ab34"},
+		{"0", "#000000"},
+		{"15", "#ffffff"},
+		{"178", "#d7af00"},
+		{"244", "#808080"},
+		{"256", ""},
+		{"invalid", ""},
+	}
+	for _, tc := range cases {
+		if got := Hex(tc.in); got != tc.want {
+			t.Errorf("Hex(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

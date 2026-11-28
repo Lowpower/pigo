@@ -52,7 +52,7 @@ func (m Model) openSessionPicker() (tea.Model, tea.Cmd) {
 	agentDir := configDir(m)
 	list, err := session.Summaries(cwd, agentDir)
 	if err != nil {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("resume error: " + err.Error())})
+		m.appendMeta("resume error: " + err.Error())
 		return m, nil
 	}
 	p := sessionPicker{
@@ -359,20 +359,20 @@ func (m Model) applyPickedSession() (tea.Model, tea.Cmd) {
 	}
 	opened, err := session.Open(it.ID)
 	if err != nil {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render("resume error: " + err.Error())})
+		m.appendMeta("resume error: " + err.Error())
 		return m, nil
 	}
 	if m.engine != nil {
 		m.engine.AdoptSession(opened)
 		m.reloadFromSession()
 	}
-	m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(resumedSessionNote(opened))})
+	m.appendMeta(resumedSessionNote(opened))
 	return m, nil
 }
 
 func (m Model) handleResumeCommand(rest string) (tea.Model, tea.Cmd) {
 	note := func(s string) (tea.Model, tea.Cmd) {
-		m.transcript = append(m.transcript, entry{role: "meta", rendered: m.metaStyle.Render(s)})
+		m.appendMeta(s)
 		return m, nil
 	}
 	if m.engine == nil {
